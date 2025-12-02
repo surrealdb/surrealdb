@@ -136,8 +136,8 @@ pub(super) static ROCKSDB_BLOB_GC_FORCE_THRESHOLD: LazyLock<f64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 0.5);
 
 /// Readahead size for blob compaction/GC (default: 0)
-pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE", usize, 0);
+pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE", u64, 0);
 
 // --------------------------------------------------
 // Memory manager options

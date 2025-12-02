@@ -115,28 +115,31 @@ impl Datastore {
 		// Additional blob file options
 		info!(target: TARGET, "Target blob file size: {}", *cnf::ROCKSDB_BLOB_FILE_SIZE);
 		opts.set_blob_file_size(*cnf::ROCKSDB_BLOB_FILE_SIZE);
+		// Set the blob compression type
 		if let Some(c) = cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.as_ref() {
 			info!(target: TARGET, "Blob compression type: {c}");
-			opts.set_blob_compression_type(match c.as_str() {
+			opts.set_blob_compression_type(match c.to_ascii_lowercase().as_str() {
 				"none" => DBCompressionType::None,
 				"snappy" => DBCompressionType::Snappy,
 				"lz4" => DBCompressionType::Lz4,
 				"zstd" => DBCompressionType::Zstd,
-				l => {
-					return Err(Error::Datastore(format!("Invalid compression type: {l}")));
+				c => {
+					return Err(Error::Datastore(format!("Invalid compression type: {c}")));
 				}
 			});
 		}
+		// Whether to enable blob garbage collection
 		info!(target: TARGET, "Enable blob garbage collection: {}", *cnf::ROCKSDB_ENABLE_BLOB_GC);
 		opts.set_enable_blob_gc(*cnf::ROCKSDB_ENABLE_BLOB_GC);
+		// Set the blob garbage collection age cutoff
 		info!(target: TARGET, "Blob GC age cutoff: {}", *cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
 		opts.set_blob_gc_age_cutoff(*cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
+		// Set the blob garbage collection force threshold
 		info!(target: TARGET, "Blob GC force threshold: {}", *cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
 		opts.set_blob_gc_force_threshold(*cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
+		// Set the blob compaction readahead size
 		info!(target: TARGET, "Blob compaction readahead size: {}", *cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE);
-		opts.set_blob_compaction_readahead_size(
-			(*cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE) as u64,
-		);
+		opts.set_blob_compaction_readahead_size(*cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE);
 		// Set the write-ahead-log size limit in MB
 		info!(target: TARGET, "Write-ahead-log file size limit: {}MB", *cnf::ROCKSDB_WAL_SIZE_LIMIT);
 		opts.set_wal_size_limit_mb(*cnf::ROCKSDB_WAL_SIZE_LIMIT);
@@ -268,13 +271,12 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		// When using commit coordinator, disable per-transaction sync
-		// The coordinator will do a single fsync for the entire batch
-		// Automatic transaction sync is disabled, because disk sync will be handled
-		// by the commit coordinator, or the background flush thread. If both the
-		// commit coordinator and background flush thread are disabled, then we leave
-		// it up to the operating system to flush the data to disk.
-		wo.set_sync(false);
+		// If the user has enabled synced transaction writes and disabled grouped commit,
+		// we enable per-transaction sync. This means that the transaction commits are written
+		// to WAL on commit, and are then flushed to disk before the transaction is considered
+		// completed. In the event of a system crash, data will not be lost after a transaction
+		// has been confirmed to be committed.
+		wo.set_sync(*cnf::SYNC_DATA && !*cnf::ROCKSDB_GROUPED_COMMIT);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
 		// SAFETY: The transaction lifetime is tied to the database through the db field.
@@ -414,17 +416,9 @@ impl Transactable for Transaction {
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Always commit the RocksDB transaction on the caller thread for parallel commits
 		inner.commit()?;
-		// If we don't need durability, we're done
-		if !*cnf::SYNC_DATA {
-			return Ok(());
-		}
 		// If we have a coordinator, wait for the grouped fsync
 		if let Some(coordinator) = &self.commit_coordinator {
-			// Wait for the WAL to be flushed as part of a batch
 			coordinator.wait_for_sync().await?;
-		} else {
-			// Perform an individual WAL flush for this transaction
-			self.db.flush_wal(true)?;
 		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {

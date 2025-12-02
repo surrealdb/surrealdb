@@ -46,9 +46,9 @@ impl BackgroundFlusher {
 	// Pre-configure the commit coordinator
 	pub(super) fn configure(opts: &mut Options) -> Result<bool> {
 		// If the user has enabled both synced transaction writes and background flushing,
-		// we return an error because the two features are incompatible. When sync is enabled,
-		// the transaction commits are always batched together, written to WAL, and then
-		// flushed to disk. This means that the background flushing is redundant.
+		// we return an error because the two features are incompatible. When background
+		// flushing is enabled, the transaction commits are written to WAL in memory, and then
+		// flushed to disk by the background thread.
 		if *cnf::SYNC_DATA && *cnf::ROCKSDB_BACKGROUND_FLUSH {
 			Err(Error::Datastore(
 				"Synced transaction writes and background flushing are incompatible".to_string(),
@@ -63,6 +63,8 @@ impl BackgroundFlusher {
 			info!(target: TARGET, "Background write-ahead-log flushing: enabled (interval={}ns)",
 				*cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL,
 			);
+			// Set incremental asynchronous bytes per sync to 1MiB
+			opts.set_bytes_per_sync(1024 * 1024);
 			// Enable manual WAL flush
 			opts.set_manual_wal_flush(true);
 			// Continue
