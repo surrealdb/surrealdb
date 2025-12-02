@@ -5,7 +5,21 @@ use parking_lot::RwLock;
 
 static MEMORY_REPORTERS: RwLock<Vec<MemoryReporterEntry>> = RwLock::new(Vec::new());
 
-pub(crate) fn memory_reporters_allocated_total() -> usize {
+struct MemoryReporterEntry {
+	/// The name of the reporter
+	pub name: String,
+	/// The weak reference to the reporter
+	pub reporter: Weak<dyn MemoryReporter>,
+}
+
+/// Trait for objects that can report their memory usage to the global allocator tracker
+pub trait MemoryReporter: Send + Sync {
+	/// Returns the amount of memory currently allocated by this object
+	fn memory_allocated(&self) -> usize;
+}
+
+/// Returns the total memory allocated by all separate memory reporters
+pub fn memory_reporters_allocated_total() -> usize {
 	// Acquire the read lock
 	let reporters = MEMORY_REPORTERS.read();
 	// Get the total memory allocated
@@ -16,7 +30,8 @@ pub(crate) fn memory_reporters_allocated_total() -> usize {
 		.sum()
 }
 
-pub(crate) fn memory_reporters_allocated_by_name() -> HashMap<String, usize> {
+/// Returns the memory allocated by each memory reporter by name
+pub fn memory_reporters_allocated_by_name() -> HashMap<String, usize> {
 	// Acquire the read lock
 	let reporters = MEMORY_REPORTERS.read();
 	// Create a new HashMap to store the memory allocated by name
@@ -32,19 +47,7 @@ pub(crate) fn memory_reporters_allocated_by_name() -> HashMap<String, usize> {
 	output
 }
 
-pub struct MemoryReporterEntry {
-	/// The name of the reporter
-	pub name: String,
-	/// The weak reference to the reporter
-	pub reporter: Weak<dyn MemoryReporter>,
-}
-
-/// Trait for objects that can report their memory usage to the global allocator tracker
-pub trait MemoryReporter: Send + Sync {
-	/// Returns the amount of memory currently allocated by this object
-	fn memory_allocated(&self) -> usize;
-}
-
+/// Registers a new memory reporter with the global allocator tracker
 pub fn register_memory_reporter(name: &str, reporter: Weak<dyn MemoryReporter>) {
 	// Convert the name to a string
 	let name = name.to_string();
@@ -59,6 +62,7 @@ pub fn register_memory_reporter(name: &str, reporter: Weak<dyn MemoryReporter>) 
 	});
 }
 
+/// Cleans up dead weak references from the memory reporters list
 pub fn cleanup_memory_reporters() {
 	// Acquire the write lock
 	let mut reporters = MEMORY_REPORTERS.write();

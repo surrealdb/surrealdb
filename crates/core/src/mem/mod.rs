@@ -3,7 +3,10 @@ mod notrack;
 mod registry;
 mod track;
 
-pub use registry::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
+pub use registry::{
+	MemoryReporter, cleanup_memory_reporters, memory_reporters_allocated_by_name,
+	memory_reporters_allocated_total, register_memory_reporter,
+};
 
 // --------------------------------------------------
 // No global allocator, or allocation tracking
