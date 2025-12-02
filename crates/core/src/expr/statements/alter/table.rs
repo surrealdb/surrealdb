@@ -22,6 +22,7 @@ pub(crate) struct AlterTableStatement {
 	pub permissions: Option<Permissions>,
 	pub(crate) changefeed: AlterKind<ChangeFeed>,
 	pub(crate) comment: AlterKind<String>,
+	pub(crate) compact: bool,
 	pub kind: Option<TableType>,
 }
 

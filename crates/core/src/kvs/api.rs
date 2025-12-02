@@ -1,9 +1,9 @@
 //! This module defines the API for a transaction in a key-value store.
 #![warn(clippy::missing_docs_in_private_items)]
 
-use std::ops::Range;
-
+use anyhow::bail;
 use chrono::{DateTime, Utc};
+use std::ops::Range;
 
 use super::err::{Error, Result};
 use super::util;
@@ -513,5 +513,9 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Convert a datetime to timestamp bytes for this storage engine
 	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
 		Ok(<u64 as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
+	}
+
+	async fn compact(&self, _range: Option<Range<Key>>) -> anyhow::Result<()> {
+		bail!(Error::CompactionNotSupported)
 	}
 }

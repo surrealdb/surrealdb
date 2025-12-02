@@ -744,6 +744,11 @@ impl Transaction {
 	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn compact(&self, range: Option<Range<Key>>) -> Result<()> {
+		self.tr.inner.compact(range).await
+	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]

@@ -14,6 +14,7 @@ pub struct AlterTableStatement {
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
+	pub compact: bool,
 }
 
 impl ToSql for AlterTableStatement {
@@ -89,6 +90,7 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }
@@ -103,6 +105,7 @@ impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableSta
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }

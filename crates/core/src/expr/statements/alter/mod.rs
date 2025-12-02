@@ -8,16 +8,21 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
+mod database;
 mod field;
 mod index;
+mod namespace;
 mod sequence;
+mod system;
 mod table;
 
+pub(crate) use database::AlterDatabaseStatement;
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
 pub(crate) use index::AlterIndexStatement;
+pub(crate) use namespace::AlterNamespaceStatement;
 pub(crate) use sequence::AlterSequenceStatement;
+pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum AlterKind<T> {
 	#[default]
@@ -78,6 +83,9 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AlterStatement {
+	System(AlterSystemStatement),
+	Namespace(AlterNamespaceStatement),
+	Database(AlterDatabaseStatement),
 	Table(AlterTableStatement),
 	Index(AlterIndexStatement),
 	Sequence(AlterSequenceStatement),
@@ -94,6 +102,9 @@ impl AlterStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
+			Self::System(v) => v.compute(ctx, opt).await,
+			Self::Namespace(v) => v.compute(ctx, opt).await,
+			Self::Database(v) => v.compute(ctx, opt).await,
 			Self::Table(v) => v.compute(ctx, opt).await,
 			Self::Index(v) => v.compute(ctx, opt).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
@@ -105,6 +116,9 @@ impl AlterStatement {
 impl ToSql for AlterStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
+			Self::System(v) => v.fmt_sql(f, fmt),
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
 			Self::Table(v) => v.fmt_sql(f, fmt),
 			Self::Index(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),

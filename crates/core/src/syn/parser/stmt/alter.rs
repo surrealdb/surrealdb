@@ -1,25 +1,86 @@
-use reblessive::Stk;
-
-use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{
-	AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
+	AlterDatabaseStatement, AlterFieldStatement, AlterIndexStatement, AlterKind,
+	AlterNamespaceStatement, AlterSequenceStatement, AlterSystemStatement,
 };
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
+use crate::sql::{TableType, Timeout};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
+use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_alter_stmt(&mut self, stk: &mut Stk) -> ParseResult<AlterStatement> {
 		let next = self.next();
 		match next.kind {
+			t!("SYSTEM") => self.parse_alter_system(stk).await.map(AlterStatement::System),
+			t!("NAMESPACE") => self.parse_alter_namespace().await.map(AlterStatement::Namespace),
+			t!("DATABASE") => self.parse_alter_database().await.map(AlterStatement::Database),
 			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
 			t!("INDEX") => self.parse_alter_index().await.map(AlterStatement::Index),
 			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
 			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
+	}
+
+	pub(crate) async fn parse_alter_system(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterSystemStatement> {
+		let mut res = AlterSystemStatement::default();
+
+		loop {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("QUERY_TIMEOUT") => {
+							self.pop_peek();
+							res.query_timeout = AlterKind::Drop;
+						}
+						_ => {
+							unexpected!(self, peek, "`QUERY_TIMEOUT`")
+						}
+					}
+				}
+				t!("QUERY_TIMEOUT") => {
+					self.pop_peek();
+					let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+					res.query_timeout = AlterKind::Set(Timeout(duration));
+				}
+				t!("COMPACT") => {
+					self.pop_peek();
+					res.compact = true;
+				}
+				_ => break,
+			}
+		}
+
+		if !res.compact && matches!(res.query_timeout, AlterKind::None) {
+			unexpected!(self, self.peek(), "`COMPACT`, `DROP` or `QUERY_TIMEOUT`")
+		}
+		Ok(res)
+	}
+
+	pub(crate) async fn parse_alter_namespace(&mut self) -> ParseResult<AlterNamespaceStatement> {
+		if !self.eat(t!("COMPACT")) {
+			unexpected!(self, self.peek(), "`COMPACT`")
+		}
+		Ok(AlterNamespaceStatement {
+			compact: true,
+		})
+	}
+
+	pub(crate) async fn parse_alter_database(&mut self) -> ParseResult<AlterDatabaseStatement> {
+		if !self.eat(t!("COMPACT")) {
+			unexpected!(self, self.peek(), "`COMPACT`")
+		}
+		Ok(AlterDatabaseStatement {
+			compact: true,
+		})
 	}
 
 	pub(crate) async fn parse_alter_table(
@@ -61,6 +122,10 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				t!("COMPACT") => {
+					self.pop_peek();
+					res.compact = true;
 				}
 				t!("TYPE") => {
 					self.pop_peek();

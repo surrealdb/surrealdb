@@ -12,8 +12,8 @@ use crate::expr::statements::access::{
 	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
 };
 use crate::expr::statements::alter::{
-	AlterDefault, AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
-	AlterTableStatement,
+	AlterDatabaseStatement, AlterDefault, AlterFieldStatement, AlterIndexStatement, AlterKind,
+	AlterNamespaceStatement, AlterSequenceStatement, AlterSystemStatement, AlterTableStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -337,11 +337,26 @@ implement_visitor! {
 
 	fn visit_alter(this, a: &AlterStatement){
 		match a {
+			AlterStatement::System(a)=>{ this.visit_alter_system(a)?; },
+			AlterStatement::Namespace(a)=>{ this.visit_alter_namespace(a)?; },
+			AlterStatement::Database(a)=>{ this.visit_alter_database(a)?; },
 			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
 			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 		}
+		Ok(())
+	}
+
+	fn visit_alter_system(this, a: &AlterSystemStatement){
+		Ok(())
+	}
+
+	fn visit_alter_namespace(this, a: &AlterNamespaceStatement){
+		Ok(())
+	}
+
+	fn visit_alter_database(this, a: &AlterDatabaseStatement){
 		Ok(())
 	}
 
@@ -1785,11 +1800,26 @@ implement_visitor_mut! {
 
 	fn visit_mut_alter(this, a: &mut AlterStatement){
 		match a {
+			AlterStatement::System(a)=>{ this.visit_mut_alter_system(a)?;},
+			AlterStatement::Namespace(a)=>{ this.visit_mut_alter_namespace(a)?;},
+			AlterStatement::Database(a)=>{ this.visit_mut_alter_database(a)?;},
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
 			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
 			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_system(this, a: &mut AlterSystemStatement){
+		Ok(())
+	}
+
+	fn visit_mut_alter_namespace(this, a: &mut AlterNamespaceStatement){
+		Ok(())
+	}
+
+	fn visit_mut_alter_database(this, a: &mut AlterDatabaseStatement){
 		Ok(())
 	}
 

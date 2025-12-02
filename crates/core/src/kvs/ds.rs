@@ -4,6 +4,7 @@ use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Poll, ready};
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use http::HeaderMap;
+use num_traits::ToPrimitive;
 use reblessive::TreeStack;
 use surrealdb_types::SurrealValue;
 #[cfg(feature = "jwks")]
@@ -99,7 +101,7 @@ pub struct Datastore {
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
-	query_timeout: Option<Duration>,
+	query_timeout: AtomicU64,
 	/// The slow log configuration determining when a query should be logged
 	slow_log: Option<SlowLog>,
 	/// The maximum duration timeout for running multiple statements in a
@@ -631,7 +633,7 @@ impl Datastore {
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: false,
-			query_timeout: None,
+			query_timeout: AtomicU64::new(0),
 			slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -690,9 +692,25 @@ impl Datastore {
 	}
 
 	/// Set a global query timeout for this Datastore
-	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
-		self.query_timeout = duration;
+	pub fn with_query_timeout(self, duration: Option<Duration>) -> Self {
+		self.set_query_timeout(duration);
 		self
+	}
+
+	/// Set a global query timeout for this Datastore
+	pub(crate) fn set_query_timeout(&self, duration: Option<Duration>) {
+		let val = match duration {
+			None => 0,
+			Some(d) => d.as_millis().to_u64().unwrap_or(u64::MAX),
+		};
+		self.query_timeout.store(val, Ordering::Relaxed);
+	}
+
+	pub(crate) fn get_query_timeout(&self) -> Option<Duration> {
+		match self.query_timeout.load(Ordering::Relaxed) {
+			0 => None,
+			d => Some(Duration::from_millis(d)),
+		}
 	}
 
 	/// Set a global slow log configuration
@@ -1962,7 +1980,7 @@ impl Datastore {
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
+		if let Some(timeout) = self.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
@@ -2110,7 +2128,7 @@ impl Datastore {
 
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
 		let mut ctx = MutableContext::from_ds(
-			self.query_timeout,
+			self.get_query_timeout(),
 			self.slow_log.clone(),
 			self.capabilities.clone(),
 			self.index_stores.clone(),
