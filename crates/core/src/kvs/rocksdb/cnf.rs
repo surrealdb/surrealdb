@@ -127,13 +127,13 @@ pub(super) static ROCKSDB_BLOB_COMPRESSION_TYPE: LazyLock<Option<String>> =
 pub(super) static ROCKSDB_ENABLE_BLOB_GC: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_GC", bool, true);
 
-/// Fractional age cutoff for blob GC eligibility in [0,1] (default: 0.25)
+/// Fractional age cutoff for blob GC eligibility between 0 and 1 (default: 0.5)
 pub(super) static ROCKSDB_BLOB_GC_AGE_CUTOFF: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_AGE_CUTOFF", f64, 0.25);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_AGE_CUTOFF", f64, 0.5);
 
-/// Discardable ratio threshold to force GC in [0,1] (default: 1.0)
+/// Discardable ratio threshold to force GC between 0 and 1 (default: 0.5)
 pub(super) static ROCKSDB_BLOB_GC_FORCE_THRESHOLD: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 1.0);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 0.5);
 
 /// Readahead size for blob compaction/GC (default: 0)
 pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
