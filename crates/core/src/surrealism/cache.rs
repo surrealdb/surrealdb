@@ -1,9 +1,9 @@
 use std::future::Future;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::{Error, Result};
 use quick_cache::{Equivalent, Weighter};
-use std::hash::Hash;
 use surrealism_runtime::controller::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
