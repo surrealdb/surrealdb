@@ -63,8 +63,8 @@ impl BackgroundFlusher {
 			info!(target: TARGET, "Background write-ahead-log flushing: enabled (interval={}ns)",
 				*cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL,
 			);
-			// Set incremental asynchronous bytes per sync to 1MiB
-			opts.set_bytes_per_sync(1024 * 1024);
+			// Set incremental asynchronous bytes per sync to 512KiB
+			opts.set_wal_bytes_per_sync(512 * 1024);
 			// Enable manual WAL flush
 			opts.set_manual_wal_flush(true);
 			// Continue

@@ -130,8 +130,8 @@ impl CommitCoordinator {
 				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
 				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
 			);
-			// Set incremental asynchronous bytes per sync to 1MiB
-			opts.set_bytes_per_sync(1024 * 1024);
+			// Set incremental asynchronous bytes per sync to 512KiB
+			opts.set_wal_bytes_per_sync(512 * 1024);
 			// Enable manual WAL flushing
 			opts.set_manual_wal_flush(true);
 			// Continue
@@ -198,16 +198,18 @@ impl CommitCoordinator {
 			channel: tx,
 		};
 		// Add to shared buffer and notify batcher
-		{
-			// Check if shutting down
-			if self.shared.shutdown.load(Ordering::Acquire) {
-				return Err(Error::Transaction("commit coordinator is shutting down".into()));
-			}
+		let should_notify = {
 			// Lock the buffer
 			let mut buffer = self.shared.buffer.lock();
+			// Check if buffer is currently empty
+			let was_empty = buffer.is_empty();
 			// Add the request to the buffer
 			buffer.push(request);
-			// Notify the batcher that work is available
+			// Only notify if the batcher was waiting
+			was_empty
+		};
+		// Notify the batcher that work is available
+		if should_notify {
 			self.shared.condvar.notify_one();
 		}
 		// Wait for the WAL flush to complete
@@ -218,7 +220,7 @@ impl CommitCoordinator {
 	/// Shutdown the commit coordinator
 	pub fn shutdown(&self) -> Result<()> {
 		// Signal shutdown
-		self.shared.shutdown.store(true, Ordering::Relaxed);
+		self.shared.shutdown.store(true, Ordering::Release);
 		// Notify the batcher
 		self.shared.condvar.notify_all();
 		// Wait for thread to finish
@@ -298,50 +300,45 @@ impl CommitBatcher {
 					if !buffer.is_empty() {
 						break;
 					}
-					// Check shutdown flag without holding buffer lock
+					// Wait for notification
+					self.shared.condvar.wait(&mut buffer);
+					// Check shutdown flag before continuing
 					if self.shared.shutdown.load(Ordering::Acquire) {
 						return;
 					}
-					// Wait for notification
-					self.shared.condvar.wait(&mut buffer);
 				}
 				// Initially drain up to max_batch_size items
 				let take = buffer.len().min(self.max_batch_size);
 				// Drain the buffer items into the batch
 				batch.extend(buffer.drain(..take));
 			}
-			// We wait if batched transactions is above threshold
-			let should_wait = batch.len() >= self.wait_threshold;
-			// We wait if batched transactions is below max batch size
-			let should_wait = should_wait && batch.len() < self.max_batch_size;
+			// We wait if batch is above threshold and below max size
+			let should_wait =
+				batch.len() >= self.wait_threshold && batch.len() < self.max_batch_size;
 			// If we should wait, collect more requests with timeout
 			if should_wait {
 				// Calculate the timeout deadline
 				let deadline = Instant::now() + self.timeout;
 				// Wait for more items until timeout
 				loop {
-					// Get the current instant
-					let now = Instant::now();
-					// Check if deadline is reached
-					if now >= deadline {
-						break;
-					}
-					// Calculate the remaining time
-					let wait = deadline - now;
 					// Wait on condvar with timeout
 					let mut buffer = self.shared.buffer.lock();
+					// Get the current instant
+					let now = Instant::now();
+					// Calculate the remaining time
+					let wait = deadline.saturating_duration_since(now);
+					// Check if deadline is reached
+					if wait.is_zero() {
+						break;
+					}
 					// Wait for items or timeout
 					if self.shared.condvar.wait_for(&mut buffer, wait).timed_out() {
 						break;
 					}
 					// Take available items up to the maximum batch size
 					if !buffer.is_empty() {
-						// Get the total transactions in the batch
-						let total = batch.len();
-						// Get the number of pending transactions
-						let extra = buffer.len();
 						// Calculate the number of transactions to take
-						let take = self.max_batch_size.saturating_sub(total).min(extra);
+						let take = (self.max_batch_size - batch.len()).min(buffer.len());
 						// Drain any pending items up to the maximum batch size
 						batch.extend(buffer.drain(..take));
 					}
@@ -351,42 +348,20 @@ impl CommitBatcher {
 					}
 				}
 			}
-			// Check if we have batch capacity remaining
-			if batch.len() < self.max_batch_size {
-				// Drain any pending items up to the maximum batch size
-				let mut buffer = self.shared.buffer.lock();
-				// Check if there are any pending items
-				if !buffer.is_empty() {
-					// Get the total transactions in the batch
-					let total = batch.len();
-					// Get the number of pending transactions
-					let extra = buffer.len();
-					// Calculate the number of transactions to take
-					let take = self.max_batch_size.saturating_sub(total).min(extra);
-					// Drain any pending items up to the maximum batch size
-					batch.extend(buffer.drain(..take));
-				}
-			}
-			// Perform a single WAL flush for all waiters
-			// Create a vector to store the channels
-			let mut channels = Vec::with_capacity(batch.len());
-			// Collect all channels from the batch
-			for request in batch.drain(..) {
-				channels.push(request.channel);
-			}
 			// Perform a single WAL flush and disk sync for all commits
 			let flush_result = self.db.flush_wal(true);
 			// Send the result to all waiters
 			if let Err(e) = flush_result {
-				// Convert error once to avoid cloning
-				let err_msg = e.to_string();
-				for channel in channels {
-					let _ = channel.send(Err(Error::Transaction(err_msg.clone())));
+				// Convert error to a string
+				let err = e.to_string();
+				// Send the error to all waiters
+				for request in batch.drain(..) {
+					let _ = request.channel.send(Err(Error::Transaction(err.clone())));
 				}
 			} else {
-				// Send Ok to all waiters
-				for channel in channels {
-					let _ = channel.send(Ok(()));
+				// Send success to all waiters
+				for request in batch.drain(..) {
+					let _ = request.channel.send(Ok(()));
 				}
 			}
 		}

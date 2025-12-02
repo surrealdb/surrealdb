@@ -250,30 +250,27 @@ pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
 /// single fsync operation, improving throughput. When disabled, each transaction is committed
 /// and synced individually, which may provide lower latency for single transactions at the cost
 /// of reduced throughput under high load.
-/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
 pub(super) static ROCKSDB_GROUPED_COMMIT: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT", bool, true);
 
-/// The maximum wait time in nanoseconds before forcing a grouped commit (default: 500µs)
-/// This timeout ensures that transactions don't wait indefinitely when there's low concurrency.
-/// The value balances between transaction latency and write throughput.
+/// The maximum wait time in nanoseconds before forcing a grouped commit (default: 5ms).
+/// This timeout ensures that transactions don't wait indefinitely under low concurrency and
+/// balances commit latency against write throughput.
 pub(super) static ROCKSDB_GROUPED_COMMIT_TIMEOUT: LazyLock<u64> =
 	lazy_env_parse!(duration, "SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT", u64, || {
-		Duration::from_micros(500).as_nanos() as u64
+		Duration::from_millis(5).as_nanos() as u64
 	});
 
-/// Threshold for deciding whether to wait for more transactions (default: 64)
-/// If we have fewer than this AND more transactions are pending, we'll wait up to
-/// ROCKSDB_GROUPED_COMMIT_TIMEOUT to collect a larger batch. This is NOT a hard requirement -
-/// under low load, smaller batches will be committed immediately to maintain low latency.
-/// Under high load, batches naturally form and can exceed this threshold.
-/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+/// Threshold for deciding whether to wait for more transactions (default: 12)
+/// If the current batch size is greater or equal to this threshold (and below
+/// ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE), then the coordinator will wait up to
+/// ROCKSDB_GROUPED_COMMIT_TIMEOUT to collect more transactions. Smaller batches are flushed
+/// immediately to preserve low latency.
 pub(super) static ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD", usize, 64);
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD", usize, 12);
 
-/// The maximum number of transactions in a single grouped commit batch (default: 2048)
+/// The maximum number of transactions in a single grouped commit batch (default: 4096)
 /// This prevents unbounded memory growth while still allowing large batches for efficiency.
-/// Larger batches improve throughput but increase memory usage and batch processing time.
-/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+/// Larger batches improve throughput but increase memory usage and commit latency.
 pub(super) static ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE", usize, 2048);
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE", usize, 4096);
