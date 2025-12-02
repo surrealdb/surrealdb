@@ -10,7 +10,6 @@ use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 #[repr(transparent)]

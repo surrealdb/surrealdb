@@ -487,9 +487,7 @@ implement_visitor! {
 				this.visit_expr(&f.0)?;
 			}
 		}
-		if let Some(v) = s.version.as_ref(){
-			this.visit_expr(v)?;
-		}
+		this.visit_expr(&s.version)?;
 
 		Ok(())
 	}
@@ -662,9 +660,7 @@ implement_visitor! {
 			this.visit_output(o)?;
 		}
 		this.visit_expr(&i.timeout)?;
-		if let Some(o) = i.version.as_ref(){
-			this.visit_expr(o)?;
-		}
+		this.visit_expr(&i.version)?;
 		Ok(())
 	}
 
@@ -1133,9 +1129,7 @@ implement_visitor! {
 
 		this.visit_expr(&c.timeout)?;
 
-		if let Some(v) = c.version.as_ref(){
-			this.visit_expr(v)?
-		}
+		this.visit_expr(&c.version)?;
 
 		Ok(())
 	}
@@ -1889,9 +1883,7 @@ implement_visitor_mut! {
 				this.visit_mut_expr(&mut f.0)?;
 			}
 		}
-		if let Some(v) = s.version.as_mut(){
-			this.visit_mut_expr(v)?;
-		}
+		this.visit_mut_expr(&mut s.version)?;
 
 		Ok(())
 	}
@@ -2064,9 +2056,7 @@ implement_visitor_mut! {
 			this.visit_mut_output(o)?;
 		}
 		this.visit_mut_expr(&mut i.timeout)?;
-		if let Some(o) = i.version.as_mut(){
-			this.visit_mut_expr(o)?;
-		}
+		this.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 
@@ -2532,9 +2522,7 @@ implement_visitor_mut! {
 
 		this.visit_mut_expr(&mut c.timeout)?;
 
-		if let Some(v) = c.version.as_mut(){
-			this.visit_mut_expr(v)?
-		}
+		this.visit_mut_expr(&mut c.version)?;
 
 		Ok(())
 	}

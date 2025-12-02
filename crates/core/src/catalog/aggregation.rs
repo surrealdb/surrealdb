@@ -686,9 +686,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(d) = &mut s.data {
 			ParentRewritor.visit_mut_data(d)?;
 		}
-		if let Some(v) = &mut s.version {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -699,9 +697,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(l) = s.limit.as_mut() {
 			self.visit_mut_expr(&mut l.0)?;
 		}
-		if let Some(v) = s.version.as_mut() {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 
 		ParentRewritor.visit_mut_fields(&mut s.expr)?;
 		for o in s.omit.iter_mut() {
@@ -780,9 +776,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			self.visit_mut_expr(v)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		if let Some(o) = i.version.as_mut() {
-			self.visit_mut_expr(o)?;
-		}
+		self.visit_mut_expr(&mut i.version)?;
 
 		ParentRewritor.visit_mut_data(&mut i.data)?;
 		if let Some(update) = i.update.as_mut() {
@@ -860,9 +854,7 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(e)?;
 		}
 		self.visit_mut_expr(&mut s.timeout)?;
-		if let Some(v) = &mut s.version {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -874,9 +866,7 @@ impl MutVisitor for ParentRewritor {
 		if let Some(l) = s.limit.as_mut() {
 			self.visit_mut_expr(&mut l.0)?;
 		}
-		if let Some(v) = s.version.as_mut() {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -911,9 +901,7 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(v)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		if let Some(o) = i.version.as_mut() {
-			self.visit_mut_expr(o)?;
-		}
+		self.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 

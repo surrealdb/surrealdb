@@ -14,7 +14,7 @@ pub struct InsertStatement {
 	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Expr>,
+	pub version: Expr,
 }
 
 impl Default for InsertStatement {
@@ -28,7 +28,7 @@ impl Default for InsertStatement {
 			timeout: Expr::Literal(Literal::None),
 			parallel: Default::default(),
 			relation: Default::default(),
-			version: Default::default(),
+			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -52,8 +52,8 @@ impl fmt::Display for InsertStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {}", CoverStmts(v))?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write!(f, "VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
@@ -76,7 +76,7 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(From::from),
+			version: v.version.into(),
 		}
 	}
 }
@@ -92,7 +92,7 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(From::from),
+			version: v.version.into(),
 		}
 	}
 }

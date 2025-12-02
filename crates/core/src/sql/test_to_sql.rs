@@ -125,9 +125,9 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: If
 #[case::expr_if(Expr::IfElse(Box::new(IfelseStatement { exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(1))]))))], close: None })), "IF true { 1 }", "IF true\n\t{ 1 }")]
 // Expression: Select
-#[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
+#[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: Expr::Literal(Literal::None), timeout: Expr::Literal(Literal::None), parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
 // Expression: Create
-#[case::expr_create(Expr::Create(Box::new(CreateStatement { only: false, what: vec![Expr::Table("user".to_string())], data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, version: None })), "CREATE user", "CREATE user")]
+#[case::expr_create(Expr::Create(Box::new(CreateStatement { only: false, what: vec![Expr::Table("user".to_string())], data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, version: Expr::Literal(Literal::None) })), "CREATE user", "CREATE user")]
 // Expression: Update
 #[case::expr_update(Expr::Update(Box::new(UpdateStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None })), "UPDATE user", "UPDATE user")]
 // Expression: Delete
@@ -135,7 +135,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Relate
 #[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), uniq: false, data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
 // Expression: Insert
-#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, relation: false, version: None })), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
+#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, relation: false, version: Expr::Literal(Literal::None)})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
 // Expression: Define
 #[case::expr_define(
 	Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement::default()))),
@@ -228,7 +228,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             limit: None,
             start: None,
             fetch: None,
-            version: None,
+            version: Expr::Literal(Literal::None),
             timeout: Expr::Literal(Literal::None),
             parallel: false,
             explain: None,
@@ -253,7 +253,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
                             output: None,
                             timeout: Expr::Literal(Literal::None),
                             parallel: false,
-                            version: None
+                            version: Expr::Literal(Literal::None)
                         }))
                     ])))
                 )],

@@ -25,7 +25,7 @@ pub(crate) struct InsertStatement {
 	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Expr>,
+	pub version: Expr,
 }
 
 impl Default for InsertStatement {
@@ -39,7 +39,7 @@ impl Default for InsertStatement {
 			timeout: Expr::Literal(Literal::None),
 			parallel: Default::default(),
 			relation: Default::default(),
-			version: Default::default(),
+			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -58,16 +58,13 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Propagate the version to the underlying datastore
-		let version = match &self.version {
-			Some(v) => Some(
-				stk.run(|stk| v.compute(stk, ctx, opt, doc))
-					.await
-					.catch_return()?
-					.cast_to::<Datetime>()?
-					.to_version_stamp()?,
-			),
-			_ => None,
-		};
+		let version = stk
+			.run(|stk| self.version.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Datetime>>()?
+			.map(|x| x.to_version_stamp())
+			.transpose()?;
 		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx_store;
@@ -183,8 +180,8 @@ impl fmt::Display for InsertStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.version {
-			write!(f, "VERSION {v}")?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write!(f, "VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;

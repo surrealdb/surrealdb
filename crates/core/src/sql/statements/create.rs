@@ -20,7 +20,7 @@ pub struct CreateStatement {
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Expr>,
+	pub version: Expr,
 }
 
 impl Default for CreateStatement {
@@ -32,7 +32,7 @@ impl Default for CreateStatement {
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
 			parallel: Default::default(),
-			version: Default::default(),
+			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -50,8 +50,8 @@ impl fmt::Display for CreateStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {}", CoverStmts(v))?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write!(f, "VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
@@ -72,7 +72,7 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
-			version: v.version.map(Into::into),
+			version: v.version.into(),
 		}
 	}
 }
@@ -86,7 +86,7 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
-			version: v.version.map(Into::into),
+			version: v.version.into(),
 		}
 	}
 }

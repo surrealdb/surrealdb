@@ -13,7 +13,6 @@ use crate::write_sql;
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct Bytes(pub(crate) ::bytes::Bytes);
 
@@ -123,5 +122,18 @@ impl<'de> Deserialize<'de> for Bytes {
 		}
 
 		deserializer.deserialize_byte_buf(RawBytesVisitor)
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use super::*;
+	use arbitrary::{Arbitrary, Unstructured};
+
+	impl<'a> Arbitrary<'a> for Bytes {
+		fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+			let b: &'a [u8] = u.arbitrary()?;
+			Ok(Self(::bytes::Bytes::copy_from_slice(b)))
+		}
 	}
 }

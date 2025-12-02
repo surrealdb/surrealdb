@@ -151,7 +151,7 @@ fn parse_create() {
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
 			parallel: true,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		})),
 	);
 }
@@ -1859,7 +1859,7 @@ pub fn parse_for() {
 					limit: None,
 					start: None,
 					fetch: None,
-					version: None,
+					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
 					parallel: false,
 					explain: None,
@@ -2058,9 +2058,7 @@ fn parse_select() {
 				value: Expr::Literal(Literal::Bool(true))
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
-				expected_datetime
-			)))),
+			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			tempfiles: false,
@@ -2261,7 +2259,7 @@ fn parse_insert() {
 				},
 			])),
 			output: Some(Output::After),
-			version: None,
+			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			relation: false,
@@ -2296,7 +2294,7 @@ fn parse_insert_select() {
 				limit: None,
 				start: None,
 				fetch: None,
-				version: None,
+				version: Expr::Literal(Literal::None),
 				timeout: Expr::Literal(Literal::None),
 				parallel: false,
 				explain: None,
@@ -2305,7 +2303,7 @@ fn parse_insert_select() {
 			ignore: true,
 			update: None,
 			output: None,
-			version: None,
+			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			relation: false,
@@ -2444,7 +2442,7 @@ fn parse_relate() {
 				output: None,
 				timeout: Expr::Literal(Literal::None),
 				parallel: false,
-				version: None,
+				version: Expr::Literal(Literal::None),
 			})),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {

@@ -22,7 +22,7 @@ pub struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Expr>,
+	pub version: Expr,
 	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
@@ -64,8 +64,8 @@ impl fmt::Display for SelectStatement {
 		if let Some(ref v) = self.fetch {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write!(f, "VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
@@ -95,7 +95,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			limit: v.limit.map(Into::into),
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
-			version: v.version.map(Into::into),
+			version: v.version.into(),
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
@@ -119,7 +119,7 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			limit: v.limit.map(Into::into),
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
-			version: v.version.map(Into::into),
+			version: v.version.into(),
 			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),

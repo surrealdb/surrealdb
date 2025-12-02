@@ -33,7 +33,7 @@ pub(crate) struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Expr>,
+	pub version: Expr,
 	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
@@ -55,7 +55,7 @@ impl Default for SelectStatement {
 			limit: None,
 			start: None,
 			fetch: None,
-			version: None,
+			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
@@ -88,16 +88,13 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
-		let version = match &self.version {
-			Some(v) => Some(
-				stk.run(|stk| v.compute(stk, ctx, opt, parent_doc))
-					.await
-					.catch_return()?
-					.cast_to::<Datetime>()?
-					.to_version_stamp()?,
-			),
-			_ => None,
-		};
+		let version = stk
+			.run(|stk| self.version.compute(stk, ctx, opt, parent_doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Datetime>>()?
+			.map(|x| x.to_version_stamp())
+			.transpose()?;
 		let opt = Arc::new(opt.clone().with_version(version));
 
 		// Extract the limits
@@ -185,8 +182,8 @@ impl fmt::Display for SelectStatement {
 		if let Some(ref v) = self.fetch {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write!(f, "VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;

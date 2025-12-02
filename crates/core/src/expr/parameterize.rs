@@ -104,6 +104,37 @@ pub async fn expr_to_ident(
 	.map_err(anyhow::Error::from)
 }
 
+pub async fn expr_to_optional_ident(
+	stk: &mut Stk,
+	ctx: &Context,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	expr: &Expr,
+	into: &str,
+) -> Result<Option<String>> {
+	if let Expr::Idiom(Idiom(x)) = expr
+		&& let [Part::Field(x)] = x.as_slice()
+	{
+		return Ok(Some(x.clone()));
+	}
+	match stk
+		.run(|stk| expr.compute(stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.coerce_to::<Option<String>>()
+	{
+		Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			..
+		}) => Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			into: into.to_string(),
+		}),
+		x => x,
+	}
+	.map_err(anyhow::Error::from)
+}
+
 pub async fn expr_to_idiom(
 	stk: &mut Stk,
 	ctx: &Context,

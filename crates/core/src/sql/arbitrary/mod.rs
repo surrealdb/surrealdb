@@ -12,6 +12,7 @@ pub(crate) use utils::*;
 
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::statements::SleepStatement;
+use crate::val::Bytes;
 
 impl<'a> Arbitrary<'a> for ChangeFeed {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
@@ -28,5 +29,11 @@ impl<'a> Arbitrary<'a> for SleepStatement {
 			// When fuzzing we don't want to sleep, that's slow... we want insomnia.
 			duration: Duration::from_std(time::Duration::new(0, 0)),
 		})
+	}
+}
+
+impl<'a> Arbitrary<'a> for Bytes {
+	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
 	}
 }

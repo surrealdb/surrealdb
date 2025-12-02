@@ -154,7 +154,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
 			parallel: true,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		}))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
@@ -422,7 +422,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					limit: None,
 					start: None,
 					fetch: None,
-					version: None,
+					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
 					parallel: false,
 					explain: None,
@@ -500,9 +500,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				value: Expr::Literal(Literal::Bool(true)),
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
-				expected_datetime,
-			)))),
+			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			tempfiles: false,
@@ -557,7 +555,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				},
 			])),
 			output: Some(Output::After),
-			version: None,
+			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			relation: false,
@@ -588,7 +586,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				output: None,
 				timeout: Expr::Literal(Literal::None),
 				parallel: false,
-				version: None,
+				version: Expr::Literal(Literal::None),
 			})),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {
