@@ -26,13 +26,13 @@ value = "[{ id: temperature:['London', d'2022-09-30T20:25:01.406828Z'], name: 'L
 value = "[{ id: test:715917898417176677 }]"
 
 [[test.results]]
-value = "[{ id: test:⟨715917898.417176677⟩ }]"
+value = "[{ id: test:`715917898.417176677` }]"
 
 [[test.results]]
-value = "[{ id: test:⟨9223372036854775808⟩ }]"
+value = "[{ id: test:`9223372036854775808` }]"
 
 [[test.results]]
-value = "[{ id: person:⟨8⟩, name: 'Tester' }]"
+value = "[{ id: person:`8`, name: 'Tester' }]"
 
 [[test.results]]
 error = "Found '' for the Record ID but this is not a valid id"
