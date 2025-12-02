@@ -127,8 +127,9 @@ impl<'de> Deserialize<'de> for Bytes {
 
 #[cfg(feature = "arbitrary")]
 mod arb {
-	use super::*;
 	use arbitrary::{Arbitrary, Unstructured};
+
+	use super::*;
 
 	impl<'a> Arbitrary<'a> for Bytes {
 		fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
