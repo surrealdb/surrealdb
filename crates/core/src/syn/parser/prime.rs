@@ -39,6 +39,7 @@ impl Parser<'_> {
 			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
+				self.last_span = value.span;
 				let v = match value.value {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
 					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),

@@ -1,10 +1,9 @@
 use std::fmt::{self, Display};
 
-use crate::fmt::{EscapeKwIdent, QuoteStr};
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
 use crate::sql::statements::alter::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterIndexStatement {
 	pub name: String,
 	pub table: String,
@@ -19,7 +18,7 @@ impl Display for AlterIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]))?;
+		write!(f, " {} ON {}", EscapeKwIdent(&self.name, &["IF"]), EscapeKwFreeIdent(&self.table))?;
 
 		if self.prepare_remove {
 			write!(f, " PREPARE REMOVE")?;

@@ -8,6 +8,7 @@ use rand::distributions::Alphanumeric;
 
 use super::Expr;
 use crate::err::Error;
+use crate::fmt::CoverStmts;
 use crate::sql::{Algorithm, Literal};
 
 pub(crate) fn random_key() -> String {
@@ -61,10 +62,10 @@ impl Display for AccessType {
 			AccessType::Record(ac) => {
 				f.write_str("RECORD")?;
 				if let Some(ref v) = ac.signup {
-					write!(f, " SIGNUP {v}")?
+					write!(f, " SIGNUP {}", CoverStmts(v))?
 				}
 				if let Some(ref v) = ac.signin {
-					write!(f, " SIGNIN {v}")?
+					write!(f, " SIGNIN {}", CoverStmts(v))?
 				}
 				if ac.bearer.is_some() {
 					write!(f, " WITH REFRESH")?
@@ -108,7 +109,6 @@ impl AccessType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,

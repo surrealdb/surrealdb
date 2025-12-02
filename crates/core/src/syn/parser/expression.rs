@@ -202,9 +202,7 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
 						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
 						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
@@ -240,13 +238,20 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
-						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
-						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
-						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+						Numeric::Float(f) => Expr::Literal(Literal::Float(-f)),
+						Numeric::Integer(i) => {
+							if let Some(x) = i.checked_neg() {
+								Expr::Literal(Literal::Integer(x))
+							} else {
+								Expr::Prefix {
+									op: PrefixOperator::Negate,
+									expr: Box::new(Expr::Literal(Literal::Integer(i))),
+								}
+							}
+						}
+						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(-d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
 							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(

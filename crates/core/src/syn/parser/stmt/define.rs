@@ -427,7 +427,6 @@ impl Parser<'_> {
 		};
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
-		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
@@ -513,7 +512,8 @@ impl Parser<'_> {
 								..Default::default()
 							};
 							expected!(self, t!("FOR"));
-							match self.peek_kind() {
+							let peek = self.peek();
+							match peek.kind {
 								t!("USER") => {
 									self.pop_peek();
 									ac.subject = access_type::BearerAccessSubject::User;
@@ -521,7 +521,9 @@ impl Parser<'_> {
 								t!("RECORD") => {
 									match &res.base {
 										Base::Db => (),
-										_ => unexpected!(self, peek, "USER"),
+										_ => {
+											unexpected!(self, peek, "USER", => "`RECORD` bearer can only be defined on a database")
+										}
 									}
 									self.pop_peek();
 									ac.subject = access_type::BearerAccessSubject::Record;

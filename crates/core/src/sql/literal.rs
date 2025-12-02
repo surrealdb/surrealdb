@@ -23,7 +23,10 @@ pub enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	Decimal(Decimal),
+	Decimal(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::arb_decimal))]
+		Decimal,
+	),
 	Duration(PublicDuration),
 
 	String(String),

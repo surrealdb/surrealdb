@@ -1,11 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use surrealdb_core::{
-	dbs::{Capabilities, capabilities::Targets},
-	sql::Ast,
-	syn::ParserSettings,
-};
+use surrealdb_core::sql::Ast;
+use surrealdb_core::syn::ParserSettings;
 
 fuzz_target!(|query: Ast| {
 	let format = query.to_string();

@@ -7,6 +7,7 @@ use std::time;
 use arbitrary::{Arbitrary, Result, Unstructured};
 pub(crate) use idiom::*;
 pub(crate) use parts::*;
+use rust_decimal::Decimal;
 use surrealdb_types::Duration;
 pub(crate) use utils::*;
 
@@ -36,4 +37,8 @@ impl<'a> Arbitrary<'a> for Bytes {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
 		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
 	}
+}
+
+pub fn arb_decimal<'a>(u: &mut Unstructured<'a>) -> Result<Decimal> {
+	Ok(Decimal::arbitrary(u)?.normalize())
 }

@@ -27,7 +27,10 @@ impl fmt::Display for Closure {
 		if let Some(returns) = &self.returns {
 			write!(f, " -> {returns}")?;
 		}
-		write!(f, " {}", CoverStmts(&self.body))
+		match &self.body {
+			Expr::Idiom(_) => write!(f, " ({})", &self.body),
+			x => write!(f, " {}", CoverStmts(x)),
+		}
 	}
 }
 

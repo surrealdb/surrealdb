@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::err::Error;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::{Algorithm, Expr, Literal};
+use crate::fmt::CoverStmts;
 
 /// The type of access methods available
 
@@ -35,10 +36,10 @@ impl Display for AccessType {
 			AccessType::Record(ac) => {
 				f.write_str("RECORD")?;
 				if let Some(ref v) = ac.signup {
-					write!(f, " SIGNUP {v}")?
+					write!(f, " SIGNUP {}", CoverStmts(v))?
 				}
 				if let Some(ref v) = ac.signin {
-					write!(f, " SIGNIN {v}")?
+					write!(f, " SIGNIN {}", CoverStmts(v))?
 				}
 				if ac.bearer.is_some() {
 					write!(f, " WITH REFRESH")?

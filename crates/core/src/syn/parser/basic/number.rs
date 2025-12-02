@@ -144,9 +144,13 @@ impl TokenValue for Numeric {
 					}
 				}
 			}
-			t!("+") | t!("-") | TokenKind::Digits => {
+			t!("+") | t!("-") => {
 				parser.pop_peek();
 				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+			}
+			TokenKind::Digits => {
+				parser.pop_peek();
+				Ok((parser.lexer.lex_compound(token, compound::numeric))?.value)
 			}
 			TokenKind::NaN => {
 				parser.pop_peek();

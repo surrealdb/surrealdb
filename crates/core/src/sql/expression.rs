@@ -165,6 +165,12 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Postfix {
+				op,
+				..
+			} => matches!(op, PostfixOperator::Range | PostfixOperator::RangeSkip),
+
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Idiom(_)
@@ -173,9 +179,6 @@ impl Expr {
 			| Expr::Block(_)
 			| Expr::Constant(_)
 			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
 				..
 			}
 			| Expr::Binary {
@@ -387,7 +390,8 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
+				if *op == PrefixOperator::Negate
+					|| expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 				{

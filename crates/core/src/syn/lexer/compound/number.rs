@@ -111,7 +111,7 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 					duration(lexer, start).map(Numeric::Duration)
 				}
 			}
-			Some(x) if !x.is_ascii() => duration(lexer, start).map(Numeric::Duration),
+			Some(0xC2) => duration(lexer, start).map(Numeric::Duration),
 			_ => number(lexer, start),
 		},
 		x => {
@@ -469,7 +469,7 @@ fn lex_duration_suffix(lexer: &mut Lexer) -> Result<DurationSuffix, SyntaxError>
 
 fn has_ident_after(lexer: &mut Lexer) -> bool {
 	match lexer.reader.peek() {
-		Some(x) => !x.is_ascii() || x.is_ascii_alphabetic(),
+		Some(x) => x.is_ascii_alphabetic(),
 		None => false,
 	}
 }

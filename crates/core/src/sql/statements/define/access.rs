@@ -29,7 +29,7 @@ impl Display for DefineAccessStatement {
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write!(f, " {} ON {} TYPE {}", CoverStmts(&self.name), self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
 			write!(f, " AUTHENTICATE {}", CoverStmts(v))?

@@ -1,9 +1,11 @@
 use arbitrary::Arbitrary;
 
+use crate::sql::access_type::{BearerAccess, BearerAccessSubject};
 use crate::sql::arbitrary::{
 	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
 use crate::sql::kind::KindLiteral;
+use crate::sql::statements::alter::{AlterIndexStatement, AlterKind};
 use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
 };
@@ -39,7 +41,14 @@ impl<'a> Arbitrary<'a> for DefineAccessStatement {
 		};
 		let comment = u.arbitrary()?;
 
-		let base = if matches!(access_type, AccessType::Record(_)) {
+		let base = if matches!(
+			access_type,
+			AccessType::Record(_)
+				| AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::Record,
+					..
+				})
+		) {
 			Base::Db
 		} else {
 			u.arbitrary()?
@@ -270,6 +279,25 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 			permissions: u.arbitrary()?,
 			comment: u.arbitrary()?,
 			reference: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterIndexStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		// Make sure there is atleast one modification.
+		let comment = u.arbitrary()?;
+		let prepare_remove = if let AlterKind::None = comment {
+			true
+		} else {
+			u.arbitrary()?
+		};
+		Ok(AlterIndexStatement {
+			name: u.arbitrary()?,
+			table: u.arbitrary()?,
+			if_exists: u.arbitrary()?,
+			comment,
+			prepare_remove,
 		})
 	}
 }
