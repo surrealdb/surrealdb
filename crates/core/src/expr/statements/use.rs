@@ -1,10 +1,13 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::expr::Expr;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum UseStatement {
-	Ns(String),
-	Db(String),
-	NsDb(String, String),
+	Ns(Expr),
+	Db(Expr),
+	NsDb(Expr, Expr),
+	Default,
 }
 
 impl ToSql for UseStatement {

@@ -13,13 +13,14 @@ use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::{OptionStatement, UseStatement};
@@ -116,45 +117,92 @@ impl Executor {
 		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
-				// Avoid moving in and out of the context via Arc::get_mut
-				let ctx = ctx_mut!();
+				let opt_ref = self.opt.clone();
 
-				match stmt {
+				let (use_ns, use_db) = match stmt {
+					UseStatement::Default => {
+						if let Some(x) = txn.get_default_config().await? {
+							(x.namespace.clone(), x.database.clone())
+						} else {
+							(None, None)
+						}
+					}
 					UseStatement::Ns(ns) => {
-						txn.get_or_add_ns(Some(ctx), &ns).await?;
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
 
-						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-						self.opt.set_ns(Some(ns.as_str().into()));
-						session.put(NS.as_ref(), ns.into());
-						ctx.add_value("session", session.into());
+						(Some(ns), None)
 					}
 					UseStatement::Db(db) => {
-						let Some(ns) = &self.opt.ns else {
-							return Err(ControlFlow::Err(anyhow::anyhow!(
-								"Cannot use database without namespace"
-							)));
-						};
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
 
-						txn.ensure_ns_db(Some(ctx), ns, &db).await?;
-
-						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-						self.opt.set_db(Some(db.as_str().into()));
-						session.put(DB.as_ref(), db.into());
-						ctx.add_value("session", session.into());
+						(None, Some(db))
 					}
 					UseStatement::NsDb(ns, db) => {
-						txn.ensure_ns_db(Some(ctx), &ns, &db).await?;
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
 
-						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-						self.opt.set_ns(Some(ns.as_str().into()));
-						self.opt.set_db(Some(db.as_str().into()));
-						session.put(NS.as_ref(), ns.into());
-						session.put(DB.as_ref(), db.into());
-						ctx.add_value("session", session.into());
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), Some(db))
 					}
+				};
+
+				let ctx = ctx_mut!();
+
+				// Apply new namespace
+				if let Some(ns) = use_ns {
+					txn.get_or_add_ns(Some(ctx), &ns).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_ns(Some(ns.as_str().into()));
+					session.put(NS.as_ref(), ns.into());
+					ctx.add_value("session", session.into());
 				}
 
-				Ok(Value::None)
+				// Apply new database
+				if let Some(db) = use_db {
+					let Some(ns) = &self.opt.ns else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Cannot use database without namespace"
+						)));
+					};
+
+					txn.ensure_ns_db(Some(ctx), ns, &db).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_db(Some(db.as_str().into()));
+					session.put(DB.as_ref(), db.into());
+					ctx.add_value("session", session.into());
+				}
+
+				// Return the current namespace and database
+				Ok(Value::from(map! {
+					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+					"database".to_string() => self.opt.db.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+				}))
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(

@@ -7,6 +7,7 @@ use crate::sql::base::Base;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
+use crate::sql::statements::define::config::defaults::DefaultConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
@@ -1435,6 +1436,7 @@ impl Parser<'_> {
 		let inner = match next.kind {
 			t!("API") => self.parse_api_config(stk).await.map(ConfigInner::Api)?,
 			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
+			t!("DEFAULT") => self.parse_default_config(stk).await.map(ConfigInner::Default)?,
 			_ => unexpected!(self, next, "a type of config"),
 		};
 
@@ -1442,6 +1444,33 @@ impl Parser<'_> {
 			inner,
 			kind,
 		})
+	}
+
+	pub(crate) async fn parse_default_config(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefaultConfig> {
+		let mut config = DefaultConfig::default();
+
+		let peek = self.peek();
+		if !matches!(peek.kind, t!("NAMESPACE") | t!("DATABASE")) {
+			unexpected!(self, peek, "a namespace or database name");
+		}
+
+		loop {
+			match self.peek_kind() {
+				t!("NAMESPACE") => {
+					self.pop_peek();
+					config.namespace = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				}
+				t!("DATABASE") => {
+					self.pop_peek();
+					config.database = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				}
+				_ => break,
+			}
+		}
+		Ok(config)
 	}
 
 	pub(crate) async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {

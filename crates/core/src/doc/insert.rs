@@ -130,7 +130,7 @@ impl Document {
 		// rolling back to the state before the failed insert attempt.
 		ctx.tx().rollback_to_save_point().await?;
 
-		if ctx.is_done(true).await? {
+		if ctx.is_done(None).await? {
 			// Don't process the document
 			return Err(IgnoreError::Ignore);
 		}

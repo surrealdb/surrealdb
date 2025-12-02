@@ -319,7 +319,7 @@ impl Iterator {
 				self.ingest(Iterable::Thing(v))
 			}
 			// Check if the context is finished
-			if ctx.ctx.is_done(count % 100 == 0).await? {
+			if ctx.ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -910,7 +910,7 @@ impl Iterator {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
