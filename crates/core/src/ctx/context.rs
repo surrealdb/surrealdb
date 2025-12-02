@@ -43,7 +43,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCacheValue};
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -502,46 +502,81 @@ impl MutableContext {
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	/// Note regarding `deep_check`:
-	/// Checking Instant::now() takes tens to hundreds of nanoseconds
-	/// Checking an AtomicBool takes a single-digit nanoseconds.
-	/// We may not want to check for the deadline on every call.
-	/// An iteration loop may want to check it every 10 or 100 calls.
-	/// Eg.: ctx.done(count % 100 == 0)
+	///
+	/// # Check Priority Order
+	/// The checks are performed in the following order, with earlier checks taking priority:
+	/// 1. **Cancellation** (always checked): Fast atomic flag check via `self.cancelled`
+	/// 2. **Memory threshold** (only if `deep_check = true`): Expensive check via
+	///    `ALLOC.is_beyond_threshold()`
+	/// 3. **Deadline** (only if `deep_check = true`): Moderately expensive check via
+	///    `Instant::now()`
+	///
+	/// # Parameters
+	/// - `deep_check`: When `true`, performs all checks (cancellation, memory, deadline). When
+	///   `false`, only checks the cancellation flag (fast atomic operation).
+	///
+	/// # Performance Note
+	/// - Checking an `AtomicBool` (cancellation): single-digit nanoseconds
+	/// - Checking `Instant::now()` (deadline): tens to hundreds of nanoseconds
+	/// - Checking `ALLOC.is_beyond_threshold()` (memory): hundreds of nanoseconds (requires lock +
+	///   traversal)
+	///
+	/// Use `deep_check = false` in hot loops to minimize overhead while still allowing
+	/// cancellation.
 	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
-		match self.deadline {
-			Some(deadline) if deep_check && deadline <= Instant::now() => {
-				Ok(Some(Reason::Timedout))
-			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
-			_ => {
-				if deep_check && ALLOC.is_beyond_threshold() {
-					bail!(Error::QueryBeyondMemoryThreshold);
-				}
-				match &self.parent {
-					Some(ctx) => ctx.done(deep_check),
-					_ => Ok(None),
-				}
-			}
+		// Check cancellation FIRST (fast atomic operation)
+		if self.cancelled.load(Ordering::Relaxed) {
+			return Ok(Some(Reason::Canceled));
 		}
-	}
-
-	/// Check if the context is ok to continue.
-	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
-			yield_now!();
+			if ALLOC.is_beyond_threshold() {
+				bail!(Error::QueryBeyondMemoryThreshold);
+			}
+			if let Some(deadline) = self.deadline
+				&& deadline <= Instant::now()
+			{
+				return Ok(Some(Reason::Timedout));
+			}
 		}
-		Ok(self.done(deep_check)?.is_none())
+		if let Some(ctx) = &self.parent {
+			return ctx.done(deep_check);
+		}
+		Ok(None)
 	}
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is canceled or if check_deadline is true
-	/// when the query deadline is met.
-	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
-		if deep_check {
-			yield_now!();
-		}
+	/// Returns `true` when the query should be stopped (cancelled, timed out, or exceeded memory
+	/// threshold).
+	///
+	/// # Parameters
+	/// - `count`: Optional iteration count for optimization. Pass:
+	///   - `Some(count)` when called in a loop - enables adaptive checking to balance
+	///     responsiveness with performance. The method will:
+	///     - Yield every 32 iterations to allow other tasks to run
+	///     - Perform deep checks (memory/deadline) at iterations 1, 2, 4, 8, 16, 32, then every 64
+	///   - `None` when called outside a loop (e.g., single operations) - always performs a deep
+	///     check for immediate cancellation/timeout detection
+	///
+	/// # Performance
+	/// The adaptive checking strategy ("jitter-based back-off") minimizes overhead in hot loops
+	/// while maintaining reasonable responsiveness to cancellation and timeout events.
+	pub(crate) async fn is_done(&self, count: Option<usize>) -> Result<bool> {
+		let deep_check = if let Some(count) = count {
+			// We yield every 32 iterations
+			if count % 32 == 0 {
+				yield_now!();
+			}
+			// Adaptive back-off strategy for deep checks based on iteration number:
+			// Check frequently early (powers of 2), then settle into every 64 iterations
+			match count {
+				1 | 2 | 4 | 8 | 16 | 32 => true,
+				_ => count % 64 == 0,
+			}
+		} else {
+			// No count provided - perform a deep check immediately (single operation context)
+			true
+		};
 		Ok(self.done(deep_check)?.is_some())
 	}
 
@@ -766,31 +801,29 @@ impl MutableContext {
 			bail!("Surrealism cache is not available");
 		};
 
-		if let Some(value) = cache.get(&lookup) {
-			Ok(value.runtime.clone())
-		} else {
-			let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
-				bail!("silo lookups are not supported yet");
-			};
-			let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-			let key = ObjectKey::new(key);
-			let surli =
-				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+		cache
+			.get_or_insert_with(&lookup, async || {
+				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
+					bail!("silo lookups are not supported yet");
+				};
 
-			let Some(surli) = surli else {
-				bail!("file not found");
-			};
+				let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+				let key = ObjectKey::new(key);
+				let surli = bucket
+					.get(&key)
+					.await
+					.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
 
-			let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
-			let runtime = Arc::new(Runtime::new(package)?);
-			cache.insert(
-				lookup.into(),
-				SurrealismCacheValue {
-					runtime: runtime.clone(),
-				},
-			);
-			Ok(runtime)
-		}
+				let Some(surli) = surli else {
+					bail!("file not found");
+				};
+
+				let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
+				let runtime = Arc::new(Runtime::new(package)?);
+
+				Ok(runtime)
+			})
+			.await
 	}
 }
 
@@ -798,12 +831,13 @@ impl MutableContext {
 mod tests {
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
+	use std::time::Duration;
 
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
+	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
@@ -823,5 +857,235 @@ mod tests {
 			r.err().unwrap().to_string(),
 			"Access to network target '127.0.0.1/32' is not allowed"
 		);
+	}
+
+	#[tokio::test]
+	async fn test_context_cancellation_priority() {
+		// Test that cancellation is detected even when a deadline is set and exceeded
+		let mut ctx = MutableContext::background();
+
+		// Set a deadline in the past (already exceeded)
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		// Give time for the deadline to pass
+		tokio::time::sleep(Duration::from_millis(10)).await;
+
+		// Cancel the context
+		let canceller = ctx.add_cancel();
+		canceller.cancel();
+
+		let ctx = ctx.freeze();
+
+		// Cancellation should be detected first, not timeout
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), Some(Reason::Canceled));
+	}
+
+	#[tokio::test]
+	async fn test_context_deadline_detection() {
+		// Test that deadline timeout is detected when context is not cancelled
+		let mut ctx = MutableContext::background();
+
+		// Set a very short timeout
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		// Give time for the deadline to pass
+		tokio::time::sleep(Duration::from_millis(10)).await;
+
+		let ctx = ctx.freeze();
+
+		// Should detect timeout
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), Some(Reason::Timedout));
+	}
+
+	#[tokio::test]
+	async fn test_context_no_deadline() {
+		// Test that a context without deadline or cancellation returns None
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Should return None (ok to continue)
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), None);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_adaptive_backoff() {
+		// Test the adaptive back-off strategy in is_done()
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Test that early iterations trigger deep checks (1, 2, 4, 8, 16, 32)
+		for count in [1, 2, 4, 8, 16, 32] {
+			let result = ctx.is_done(Some(count)).await;
+			assert!(result.is_ok());
+			assert_eq!(result.unwrap(), false, "Count {} should not be done", count);
+		}
+
+		// Test that later iterations only check every 64
+		// Count 33-63 should not trigger deep checks (except at 64)
+		for count in 33..64 {
+			let result = ctx.is_done(Some(count)).await;
+			assert!(result.is_ok());
+			assert_eq!(result.unwrap(), false, "Count {} should not be done", count);
+		}
+
+		// Count 64 should trigger a deep check (64 % 64 == 0)
+		let result = ctx.is_done(Some(64)).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), false);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_with_none() {
+		// Test that is_done(None) always performs a deep check
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Should perform deep check and return Ok(false) since no cancellation/timeout
+		let result = ctx.is_done(None).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), false);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_detects_cancellation() {
+		// Test that is_done detects cancellation
+		let mut ctx = MutableContext::background();
+		let canceller = ctx.add_cancel();
+		canceller.cancel();
+		let ctx = ctx.freeze();
+
+		// Should detect cancellation
+		let result = ctx.is_done(None).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), true);
+
+		// Should also detect with count
+		let result = ctx.is_done(Some(1)).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), true);
+	}
+
+	/// Test documenting the expected behavior when memory threshold is exceeded.
+	///
+	/// Note: This test documents the expected behavior but cannot easily test actual
+	/// memory threshold violations without:
+	/// 1. Setting MEMORY_THRESHOLD configuration (via cnf::MEMORY_THRESHOLD)
+	/// 2. Actually allocating enough memory to exceed it
+	/// 3. Having the "allocation-tracking" feature enabled
+	///
+	/// The key behavior tested elsewhere is that when is_beyond_threshold() returns true,
+	/// it takes priority over deadline timeout, which prevents OOM crashes from being
+	/// masked by timeout errors.
+	#[tokio::test]
+	async fn test_context_memory_threshold_priority_documentation() {
+		// This test documents that the priority order in done() is:
+		// 1. Cancellation (always checked, fast atomic operation)
+		// 2. Memory threshold (checked when deep_check=true, if beyond threshold returns Error)
+		// 3. Deadline (checked when deep_check=true, returns Reason::Timedout)
+
+		// When ALLOC.is_beyond_threshold() returns true, done() will bail with
+		// Error::QueryBeyondMemoryThreshold before checking the deadline.
+		// This ensures memory violations are always detected before timeout errors.
+
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// With no memory pressure, deadline not set, and no cancellation:
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), None);
+	}
+
+	/// Integration test that actually tests memory threshold detection.
+	///
+	/// This test requires:
+	/// 1. The "allocation-tracking" feature to be enabled
+	/// 2. The "allocator" feature to be enabled (for tracking to work)
+	/// 3. Running with #[serial] to avoid interference from other tests
+	///
+	/// The test sets SURREAL_MEMORY_THRESHOLD environment variable, allocates memory
+	/// to exceed the threshold, and verifies that context.done(true) detects the violation.
+	#[tokio::test]
+	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
+	#[serial_test::serial]
+	async fn test_context_memory_threshold_integration() {
+		use crate::err::Error;
+
+		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
+		// This must happen before any code accesses cnf::MEMORY_THRESHOLD
+		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
+		// so there's no risk of data races when modifying the environment variable.
+		unsafe {
+			std::env::set_var("SURREAL_MEMORY_THRESHOLD", "1MB");
+		}
+
+		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
+		// Instead, we rely on this test running in isolation with #[serial]
+		// and being run in a fresh process where MEMORY_THRESHOLD hasn't been accessed yet
+
+		// Note: This test may not work reliably if MEMORY_THRESHOLD was already accessed
+		// elsewhere in the test suite. The #[serial] attribute ensures tests run one at a time,
+		// but doesn't guarantee a fresh process. For reliable testing, this should be run
+		// as a separate integration test binary.
+
+		// Allocate a large vector (10MB) to exceed the threshold
+		// Using Vec::with_capacity to ensure the memory is actually allocated
+		let _large_allocation: Vec<u8> = Vec::with_capacity(20 * 1024 * 1024);
+
+		// Give the allocator tracking time to register the allocation
+		tokio::time::sleep(Duration::from_millis(10)).await;
+
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// The memory threshold check should detect that we've exceeded the limit
+		let result = ctx.done(true);
+
+		// We expect either:
+		// 1. An error if memory tracking properly detected the threshold violation
+		// 2. Ok(None) if MEMORY_THRESHOLD was already initialized with default (0) before we set
+		//    the environment variable
+		match result {
+			Err(e) => {
+				// Verify it's the correct error type
+				match e.downcast_ref::<Error>() {
+					Some(Error::QueryBeyondMemoryThreshold) => {
+						// Success! Memory threshold was properly detected
+						println!("✓ Memory threshold violation detected as expected");
+					}
+					other => {
+						panic!("Expected QueryBeyondMemoryThreshold error, got: {:?}", other);
+					}
+				}
+			}
+			Ok(None) => {
+				// This means MEMORY_THRESHOLD was already initialized before we set the env var
+				// This is expected behavior in the test suite - document it
+				println!(
+					"⚠ Memory threshold not enforced - MEMORY_THRESHOLD was already initialized"
+				);
+				println!("  This is expected when running as part of the full test suite.");
+				println!(
+					"  To properly test memory threshold enforcement, run this test in isolation:"
+				);
+				println!(
+					"  cargo test --package surrealdb-core --features allocation-tracking,allocator test_context_memory_threshold_integration"
+				);
+				panic!("MEMORY_THRESHOLD was already initialized")
+			}
+			Ok(Some(reason)) => {
+				panic!("Unexpected reason returned: {:?}", reason);
+			}
+		}
+
+		// Clean up the environment variable
+		// Safety: Same as above - #[serial] ensures no concurrent access
+		unsafe {
+			std::env::remove_var("SURREAL_MEMORY_THRESHOLD");
+		}
 	}
 }

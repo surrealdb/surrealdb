@@ -2138,7 +2138,7 @@ fn parse_use() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"USE NS foo".as_bytes(), async |parser, stk| {
@@ -2148,7 +2148,7 @@ fn parse_use() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"USE NS bar DB foo".as_bytes(), async |parser, stk| {
@@ -2159,7 +2159,10 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement::NsDb("bar".to_owned(), "foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::NsDb(
+		Expr::Idiom(Idiom::field("bar".to_owned())),
+		Expr::Idiom(Idiom::field("foo".to_owned())),
+	));
 	assert_eq!(res, expect);
 }
 
@@ -2172,7 +2175,7 @@ fn parse_use_lowercase() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::Ns(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"use db foo".as_bytes(), async |parser, stk| {
@@ -2183,7 +2186,7 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement::Db("foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::Db(Expr::Idiom(Idiom::field("foo".to_owned()))));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"use ns bar db foo".as_bytes(), async |parser, stk| {
@@ -2194,7 +2197,10 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement::NsDb("bar".to_owned(), "foo".to_owned()));
+	let expect = TopLevelExpr::Use(UseStatement::NsDb(
+		Expr::Idiom(Idiom::field("bar".to_owned())),
+		Expr::Idiom(Idiom::field("foo".to_owned())),
+	));
 	assert_eq!(res, expect);
 }
 

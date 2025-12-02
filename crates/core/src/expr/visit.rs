@@ -17,6 +17,7 @@ use crate::expr::statements::alter::{
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
+use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
 };
@@ -833,6 +834,9 @@ implement_visitor! {
 			ConfigInner::Api(api_config) => {
 				this.visit_api_config(api_config)?;
 			},
+			ConfigInner::Default(default_config) => {
+				this.visit_default_config(default_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -849,6 +853,12 @@ implement_visitor! {
 			}
 		}
 		this.visit_permission(&d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_default_config(this, d: &DefaultConfig) {
+		this.visit_expr(&d.namespace)?;
+		this.visit_expr(&d.database)?;
 		Ok(())
 	}
 
@@ -2228,6 +2238,9 @@ implement_visitor_mut! {
 			ConfigInner::Api(api_config) => {
 				this.visit_mut_api_config(api_config)?;
 			},
+			ConfigInner::Default(default_config) => {
+				this.visit_mut_default_config(default_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -2239,6 +2252,12 @@ implement_visitor_mut! {
 			}
 		}
 		this.visit_mut_permission(&mut d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_mut_default_config(this, d: &mut DefaultConfig) {
+		this.visit_mut_expr(&mut d.namespace)?;
+		this.visit_mut_expr(&mut d.database)?;
 		Ok(())
 	}
 

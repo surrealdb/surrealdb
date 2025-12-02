@@ -2,10 +2,11 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
+use surrealdb_types::object;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
@@ -200,40 +201,66 @@ pub trait RpcProtocol {
 		let guard = mutex.acquire().await;
 		// Clone the current session
 		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
-		// Update the selected namespace
-		match ns {
-			PublicValue::None => (),
-			PublicValue::Null => session.ns = None,
-			PublicValue::String(ns) => {
-				let kvs = self.kvs();
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(None, &ns).await?;
-				tx.commit().await?;
+		// Empty use call, apply the defaults
+		if ns.is_none() && db.is_none() {
+			let kvs = self.kvs();
+			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let (ns, db) = if let Some(x) = tx.get_default_config().await? {
+				(x.namespace.clone(), x.database.clone())
+			} else {
+				(None, None)
+			};
 
-				session.ns = Some(ns)
+			if let Some(ns) = ns {
+				tx.get_or_add_ns(None, &ns).await?;
+
+				if let Some(db) = db {
+					tx.ensure_ns_db(None, &ns, &db).await?;
+					session.db = Some(db);
+				}
+
+				session.ns = Some(ns);
 			}
-			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
-					"Expected ns to be string, got {unexpected:?}"
-				)));
+
+			tx.commit().await?;
+		} else {
+			// Update the selected namespace
+			match ns {
+				PublicValue::None => (),
+				PublicValue::Null => session.ns = None,
+				PublicValue::String(ns) => {
+					let kvs = self.kvs();
+					let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+					tx.get_or_add_ns(None, &ns).await?;
+					tx.commit().await?;
+
+					session.ns = Some(ns)
+				}
+				unexpected => {
+					return Err(RpcError::InvalidParams(format!(
+						"Expected ns to be string, got {unexpected:?}"
+					)));
+				}
 			}
-		}
-		// Update the selected database
-		match db {
-			PublicValue::None => (),
-			PublicValue::Null => session.db = None,
-			PublicValue::String(db) => {
-				let ns = session.ns.clone().expect("namespace should be set");
-				let tx =
-					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(None, &ns, &db).await?;
-				tx.commit().await?;
-				session.db = Some(db)
-			}
-			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
-					"Expected db to be string, got {unexpected:?}"
-				)));
+			// Update the selected database
+			match db {
+				PublicValue::None => (),
+				PublicValue::Null => session.db = None,
+				PublicValue::String(db) => {
+					let ns = session.ns.clone().expect("namespace should be set");
+					let tx = self
+						.kvs()
+						.transaction(TransactionType::Write, LockType::Optimistic)
+						.await?;
+					tx.ensure_ns_db(None, &ns, &db).await?;
+					tx.commit().await?;
+					session.db = Some(db)
+				}
+				unexpected => {
+					return Err(RpcError::InvalidParams(format!(
+						"Expected db to be string, got {unexpected:?}"
+					)));
+				}
 			}
 		}
 		// Clear any residual database
@@ -242,12 +269,16 @@ pub trait RpcProtocol {
 		{
 			session.db = None;
 		}
+		let value = PublicValue::from_t(object! {
+			namespace: session.ns.clone(),
+			database: session.db.clone(),
+		});
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Return nothing
-		Ok(DbResult::Other(PublicValue::None))
+		Ok(DbResult::Other(value))
 	}
 
 	async fn signup(

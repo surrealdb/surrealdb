@@ -238,3 +238,7 @@ workspace = true
 
 [lib]
 name = "surrealdb_core"
+
+[[bench]]
+name = "allocation_tracking"
+harness = false
