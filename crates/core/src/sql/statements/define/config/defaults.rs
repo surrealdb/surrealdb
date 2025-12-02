@@ -1,5 +1,6 @@
-use crate::sql::{Expr, Literal};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
