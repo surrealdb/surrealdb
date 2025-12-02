@@ -1,10 +1,9 @@
 use std::ops::{Deref, DerefMut};
 
 use common::ids::IdSet;
+use common::span::Span;
 use rust_decimal::Decimal;
 
-mod span;
-pub use span::Span;
 mod types;
 pub use types::Node;
 
@@ -35,6 +34,8 @@ library! {
 }
 
 pub type Ast = types::Ast<Library>;
+
+pub struct Query(pub Option<NodeListId<TopLevelExpr>>);
 
 pub struct Ident {
 	pub text: NodeId<String>,
@@ -249,8 +250,9 @@ pub enum Expr {
 impl Node for Expr {}
 
 pub struct Transaction {
-	statements: Option<NodeListId<TopLevelExpr>>,
-	span: Span,
+	pub statements: Option<NodeListId<TopLevelExpr>>,
+	pub commits: bool,
+	pub span: Span,
 }
 impl Node for Transaction {}
 
@@ -266,8 +268,17 @@ pub struct UseStatement {
 }
 impl Node for UseStatement {}
 
+pub struct OptionStatement {
+	pub name: NodeId<Ident>,
+	pub value: bool,
+	pub span: Span,
+}
+impl Node for OptionStatement {}
+
 pub enum TopLevelExpr {
 	Transaction(NodeId<Transaction>),
 	Use(NodeId<UseStatement>),
+	Option(NodeId<OptionStatement>),
 	Expr(NodeId<Expr>),
 }
+impl Node for TopLevelExpr {}

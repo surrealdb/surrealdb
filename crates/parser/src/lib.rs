@@ -3,5 +3,4 @@
 #[macro_use]
 pub mod lex;
 
-mod error;
-mod parse;
+pub mod parse;
