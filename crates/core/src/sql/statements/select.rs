@@ -65,7 +65,7 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write!(f, "VERSION {}", CoverStmts(&self.version))?;
+			write!(f, " VERSION {}", CoverStmts(&self.version))?;
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
