@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,9 +6,25 @@ pub(crate) struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
 
-impl fmt::Display for Reference {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ON DELETE {}", &self.on_delete)
+impl surrealdb_types::ToSql for Reference {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("ON DELETE ");
+		self.on_delete.fmt_sql(f, fmt);
+	}
+}
+
+impl surrealdb_types::ToSql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		match self {
+			ReferenceDeleteStrategy::Reject => f.push_str("REJECT"),
+			ReferenceDeleteStrategy::Ignore => f.push_str("IGNORE"),
+			ReferenceDeleteStrategy::Cascade => f.push_str("CASCADE"),
+			ReferenceDeleteStrategy::Unset => f.push_str("UNSET"),
+			ReferenceDeleteStrategy::Custom(v) => {
+				f.push_str("THEN ");
+				v.fmt_sql(f, fmt);
+			}
+		}
 	}
 }
 
@@ -37,18 +51,6 @@ pub(crate) enum ReferenceDeleteStrategy {
 	Cascade,
 	Unset,
 	Custom(Expr),
-}
-
-impl fmt::Display for ReferenceDeleteStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
-			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
-			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-			ReferenceDeleteStrategy::Unset => write!(f, "UNSET"),
-			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
-		}
-	}
 }
 
 impl From<ReferenceDeleteStrategy> for crate::expr::reference::ReferenceDeleteStrategy {

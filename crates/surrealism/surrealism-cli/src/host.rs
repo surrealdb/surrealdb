@@ -35,7 +35,7 @@ impl InvocationContext for DemoHost {
 	) -> Result<surrealdb_types::Value> {
 		println!("The module is running a SQL query:");
 		println!("SQL: {query}");
-		println!("Vars: {:#}", vars.to_sql());
+		println!("Vars: {}", vars.to_sql());
 		println!("Please enter the result:");
 
 		let stdin = std::io::stdin();

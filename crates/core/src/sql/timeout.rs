@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 use crate::types::PublicDuration;
@@ -13,9 +13,9 @@ impl Default for Timeout {
 	}
 }
 
-impl fmt::Display for Timeout {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "TIMEOUT {}", self.0)
+impl ToSql for Timeout {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "TIMEOUT {}", self.0)
 	}
 }
 

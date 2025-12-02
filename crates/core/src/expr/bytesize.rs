@@ -1,8 +1,10 @@
+use std::fmt::Display;
 use std::iter::Sum;
 use std::str::FromStr;
 use std::{fmt, ops};
 
 use anyhow::{Result, bail, ensure};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -106,8 +108,8 @@ impl Bytesize {
 	}
 }
 
-impl fmt::Display for Bytesize {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Bytesize {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		let b = self.0;
 		let pb = b / PIB;
 		let b = b % PIB;
@@ -121,24 +123,29 @@ impl fmt::Display for Bytesize {
 		let b = b % KIB;
 
 		if pb > 0 {
-			write!(f, "{pb}pb")?;
+			write_sql!(f, sql_fmt, "{pb}pb");
 		}
 		if tb > 0 {
-			write!(f, "{tb}tb")?;
+			write_sql!(f, sql_fmt, "{tb}tb");
 		}
 		if gb > 0 {
-			write!(f, "{gb}gb")?;
+			write_sql!(f, sql_fmt, "{gb}gb");
 		}
 		if mb > 0 {
-			write!(f, "{mb}mb")?;
+			write_sql!(f, sql_fmt, "{mb}mb");
 		}
 		if kb > 0 {
-			write!(f, "{kb}kb")?;
+			write_sql!(f, sql_fmt, "{kb}kb");
 		}
 		if b > 0 {
-			write!(f, "{b}b")?;
+			write_sql!(f, sql_fmt, "{b}b");
 		}
-		Ok(())
+	}
+}
+
+impl Display for Bytesize {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.to_sql())
 	}
 }
 

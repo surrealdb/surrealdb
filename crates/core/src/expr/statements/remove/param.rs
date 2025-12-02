@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 
 use crate::catalog::providers::DatabaseProvider;
@@ -7,7 +5,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -42,16 +39,5 @@ impl RemoveParamStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveParamStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " ${}", EscapeKwFreeIdent(&self.name))?;
-		Ok(())
 	}
 }

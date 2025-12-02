@@ -50,9 +50,9 @@ pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::table::Table;
 pub use self::uuid::Uuid;
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
-use crate::{Kind, SurrealValue, write_sql};
+use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
 ///
@@ -734,26 +734,28 @@ impl FromIterator<Value> for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Value::None => f.push_str("NONE"),
 			Value::Null => f.push_str("NULL"),
-			Value::Bool(v) => v.fmt_sql(f),
-			Value::Number(v) => v.fmt_sql(f),
-			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
-			Value::Duration(v) => v.fmt_sql(f),
-			Value::Datetime(v) => v.fmt_sql(f),
-			Value::Uuid(v) => v.fmt_sql(f),
-			Value::Array(v) => v.fmt_sql(f),
-			Value::Object(v) => v.fmt_sql(f),
-			Value::Geometry(v) => v.fmt_sql(f),
-			Value::Bytes(v) => v.fmt_sql(f),
-			Value::Table(v) => v.fmt_sql(f),
-			Value::RecordId(v) => v.fmt_sql(f),
-			Value::File(v) => v.fmt_sql(f),
-			Value::Range(v) => v.fmt_sql(f),
-			Value::Regex(v) => v.fmt_sql(f),
-			Value::Set(v) => v.fmt_sql(f),
+			Value::Bool(v) => v.fmt_sql(f, fmt),
+			Value::Number(v) => v.fmt_sql(f, fmt),
+			Value::String(v) => {
+				QuoteStr(v.as_str()).fmt_sql(f, fmt);
+			}
+			Value::Duration(v) => v.fmt_sql(f, fmt),
+			Value::Datetime(v) => v.fmt_sql(f, fmt),
+			Value::Uuid(v) => v.fmt_sql(f, fmt),
+			Value::Array(v) => v.fmt_sql(f, fmt),
+			Value::Object(v) => v.fmt_sql(f, fmt),
+			Value::Geometry(v) => v.fmt_sql(f, fmt),
+			Value::Bytes(v) => v.fmt_sql(f, fmt),
+			Value::Table(v) => v.fmt_sql(f, fmt),
+			Value::RecordId(v) => v.fmt_sql(f, fmt),
+			Value::File(v) => v.fmt_sql(f, fmt),
+			Value::Range(v) => v.fmt_sql(f, fmt),
+			Value::Regex(v) => v.fmt_sql(f, fmt),
+			Value::Set(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -2,10 +2,10 @@ use std::fmt::Display;
 use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
+use surrealdb_types_derive::write_sql;
 
-use crate::utils::escape::EscapeSqonIdent;
-use crate::{ToSql, write_sql};
-
+use crate as surrealdb_types;
+use crate::sql::{SqlFormat, ToSql};
 /// A value type referencing a specific table.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[repr(transparent)]
@@ -43,8 +43,9 @@ impl Display for Table {
 }
 
 impl ToSql for Table {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", EscapeSqonIdent(&self.0))
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate::utils::escape::EscapeSqonIdent;
+		write_sql!(f, fmt, "{}", EscapeSqonIdent(&self.0));
 	}
 }
 

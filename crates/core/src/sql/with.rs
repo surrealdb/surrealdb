@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Result};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
@@ -12,14 +12,19 @@ pub enum With {
 	),
 }
 
-impl Display for With {
-	fn fmt(&self, f: &mut Formatter) -> Result {
-		f.write_str("WITH")?;
+impl ToSql for With {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("WITH");
 		match self {
-			With::NoIndex => f.write_str(" NOINDEX"),
+			With::NoIndex => f.push_str(" NOINDEX"),
 			With::Index(i) => {
-				f.write_str(" INDEX ")?;
-				Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x))).fmt(f)
+				f.push_str(" INDEX ");
+				write_sql!(
+					f,
+					fmt,
+					"{}",
+					Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x)))
+				);
 			}
 		}
 	}

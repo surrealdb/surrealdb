@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 
@@ -20,14 +20,13 @@ impl Default for RemoveFieldStatement {
 	}
 }
 
-impl Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE FIELD")?;
+impl ToSql for RemoveFieldStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE FIELD");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
 	}
 }
 
