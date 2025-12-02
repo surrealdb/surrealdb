@@ -22,7 +22,7 @@ impl MemoryReporter for MemoryManager {
 impl MemoryManager {
 	/// Pre-configure the disk space manager
 	pub(super) fn configure(opts: &mut Options) -> Result<Self> {
-		//
+		// Get the configuration options
 		let block_cache_size = *cnf::ROCKSDB_BLOCK_CACHE_SIZE;
 		let write_buffer_size = *cnf::ROCKSDB_WRITE_BUFFER_SIZE;
 		let max_write_buffer_number = *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
@@ -75,7 +75,7 @@ impl MemoryManager {
 		// Downgrade the memory manager to a memory reporter
 		let reporter: Arc<dyn MemoryReporter> = self.clone();
 		// Register with the global allocator tracker
-		register_memory_reporter(Arc::downgrade(&reporter));
+		register_memory_reporter("rocksdb", Arc::downgrade(&reporter));
 	}
 
 	/// Shutdown the memory manager
