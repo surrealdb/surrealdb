@@ -1,5 +1,5 @@
-use ast::Span;
 use base::Joined;
+use common::span::Span;
 
 #[macro_use]
 mod base;

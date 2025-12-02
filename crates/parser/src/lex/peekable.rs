@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use ast::Span;
+use common::span::Span;
 use logos::{Lexer, Logos};
 
 use super::base::Joined;
