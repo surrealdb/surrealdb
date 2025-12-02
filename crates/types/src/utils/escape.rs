@@ -1,5 +1,6 @@
-use std::fmt;
 use std::str::Chars;
+
+use crate::{SqlFormat, ToSql};
 
 #[derive(Clone)]
 pub struct Escape<'a> {
@@ -34,18 +35,17 @@ impl Iterator for Escape<'_> {
 	}
 }
 
-impl fmt::Display for Escape<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for Escape<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		for x in self.clone() {
-			fmt::Write::write_char(f, x)?;
+			f.push(x);
 		}
-		Ok(())
 	}
 }
 
 pub struct QuoteStr<'a>(pub &'a str);
-impl fmt::Display for QuoteStr<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for QuoteStr<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let s = self.0;
 		let quote = if s.contains('\'') {
 			'\"'
@@ -53,55 +53,64 @@ impl fmt::Display for QuoteStr<'_> {
 			'\''
 		};
 
-		f.write_fmt(format_args!("{}{}{}", quote, Escape::escape_str(s, quote), quote))
+		f.push(quote);
+		Escape::escape_str(s, quote).fmt_sql(f, fmt);
+		f.push(quote);
 	}
 }
 
 /// Escapes identifiers for use in SQON (SQL Object Notation).
 pub struct EscapeSqonIdent<'a>(pub &'a str);
-impl fmt::Display for EscapeSqonIdent<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for EscapeSqonIdent<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let s = self.0;
 		// Not a keyword, any non 'normal' characters or does it start with a digit?
 		if s.is_empty()
 			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
-			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
+			f.push('`');
+			Escape::escape_str(s, '`').fmt_sql(f, fmt);
+			f.push('`');
+		} else {
+			f.push_str(s)
 		}
-		f.write_str(s)
 	}
 }
 
 pub struct EscapeKey<'a>(pub &'a str);
-impl fmt::Display for EscapeKey<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for EscapeKey<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or does the key start with a digit?
 		if s.is_empty()
 			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
-			return f.write_fmt(format_args!("\"{}\"", Escape::escape_str(s, '\"')));
+			f.push('\"');
+			Escape::escape_str(s, '\"').fmt_sql(f, fmt);
+			f.push('\"');
 		}
 
-		f.write_str(s)
+		f.push_str(s)
 	}
 }
 
 pub struct EscapeRid<'a>(pub &'a str);
-impl fmt::Display for EscapeRid<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for EscapeRid<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or are all character digits?
 		if s.is_empty()
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			// Always use brackets for display (not backticks)
-			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
+			// Always use backticks for display (not brackets)
+			f.push('`');
+			Escape::escape_str(s, '`').fmt_sql(f, fmt);
+			f.push('`');
+		} else {
+			f.push_str(s)
 		}
-
-		f.write_str(s)
 	}
 }

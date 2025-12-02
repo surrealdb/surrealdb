@@ -1,12 +1,11 @@
 pub mod api;
 pub mod defaults;
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
-
-use std::fmt::{self, Display};
 
 use api::ApiConfig;
 use defaults::DefaultConfig;
-use graphql::GraphQLConfig;
+pub(crate) use graphql::GraphQLConfig;
 
 use super::DefineKind;
 
@@ -43,30 +42,29 @@ pub(crate) enum ConfigInner {
 	Default(DefaultConfig),
 }
 
-impl Display for DefineConfigStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE CONFIG")?;
+impl ToSql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE CONFIG");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 
-		write!(f, " {}", self.inner)?;
-
-		Ok(())
+		f.push(' ');
+		self.inner.fmt_sql(f, fmt);
 	}
 }
 
-impl Display for ConfigInner {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for ConfigInner {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
-			ConfigInner::GraphQL(v) => Display::fmt(v, f),
-			ConfigInner::Default(v) => Display::fmt(v, f),
+			ConfigInner::GraphQL(v) => v.fmt_sql(f, fmt),
 			ConfigInner::Api(v) => {
-				write!(f, "API")?;
-				Display::fmt(v, f)
+				f.push_str("API");
+				v.fmt_sql(f, fmt);
 			}
+			ConfigInner::Default(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

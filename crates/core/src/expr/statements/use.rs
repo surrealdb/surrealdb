@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::Expr;
 
@@ -10,16 +10,9 @@ pub enum UseStatement {
 	Default,
 }
 
-impl fmt::Display for UseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("USE")?;
-
-		match self {
-			UseStatement::Ns(ns) => write!(f, " NS {ns}")?,
-			UseStatement::Db(db) => write!(f, " DB {db}")?,
-			UseStatement::NsDb(ns, db) => write!(f, " NS {ns} DB {db}")?,
-			UseStatement::Default => write!(f, " DEFAULT")?,
-		}
-		Ok(())
+impl ToSql for UseStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::r#use::UseStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

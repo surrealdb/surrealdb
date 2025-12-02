@@ -3198,10 +3198,20 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b762d27bdb312a92b2a1786e9dec700186f3c3e8a98b56b36c1b078e6bf2804a"
 dependencies = [
+ "revision-derive 0.14.0",
+]
+
+[[package]]
+name = "revision"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1afd502a7bd15659a0b81479de42a249afa2dd3bdcc689871d6da4b3d005018d"
+dependencies = [
+ "bytes",
  "chrono",
  "geo 0.31.0",
  "regex",
- "revision-derive",
+ "revision-derive 0.15.0",
  "roaring",
  "rust_decimal",
  "uuid",
@@ -3212,6 +3222,17 @@ name = "revision-derive"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e05651c26aaf33d5e642e380a43b1e5112f76668085aab9377130694160d5177"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "revision-derive"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "400e8b48caaca9faa40f590f643c5c155d6c8700378e700de1bd8f453e11578d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3787,19 +3808,20 @@ checksum = "d7beae5182595e9a8b683fa98c4317f956c9a2dec3b9716990d20023cc60c766"
 
 [[package]]
 name = "storekey"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79f0a20b9cc597130e6b3ae22f2bc0892095c0def0361b4b86e64a609ef222ef"
+checksum = "ac0a0c60667da4e707563b1f1616534926d4a2508d6a7cdb26414a9103f63e1c"
 dependencies = [
+ "bytes",
  "storekey-derive",
  "uuid",
 ]
 
 [[package]]
 name = "storekey-derive"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b17310dd353bab243079e8669927142cc4bde8e6b91bc966c65e347e78563a3"
+checksum = "7555a4e3498505187316766c9f4fc23d54ac1ee4455e6c931f87a6990efbb8ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3924,7 +3946,7 @@ dependencies = [
  "rayon",
  "reblessive",
  "regex",
- "revision",
+ "revision 0.15.0",
  "ring",
  "roaring",
  "rquickjs",
@@ -4138,7 +4160,7 @@ dependencies = [
  "clap",
  "futures",
  "reblessive",
- "revision",
+ "revision 0.14.0",
  "rust_decimal",
  "semver",
  "serde",

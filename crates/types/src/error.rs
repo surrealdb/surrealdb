@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{Kind, Value};
+use crate::{Kind, ToSql, Value};
 
 /// Errors that can occur when working with SurrealDB types
 #[derive(Debug, Clone)]
@@ -115,7 +115,7 @@ impl fmt::Display for TypeError {
 
 impl fmt::Display for ConversionError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Expected {}, got {}", self.expected, self.actual)?;
+		write!(f, "Expected {}, got {}", self.expected.to_sql(), self.actual.to_sql())?;
 		if let Some(context) = &self.context {
 			write!(f, " ({})", context)?;
 		}

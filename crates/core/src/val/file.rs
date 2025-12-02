@@ -1,8 +1,7 @@
-use std::fmt;
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
@@ -38,7 +37,7 @@ impl File {
 		types.is_empty() || types.contains(&self.bucket)
 	}
 
-	pub fn display_inner(&self) -> String {
+	pub(crate) fn display_inner(&self) -> String {
 		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
 	}
 }
@@ -58,12 +57,6 @@ impl From<File> for surrealdb_types::File {
 	}
 }
 
-impl fmt::Display for File {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "f\"{}\"", self.display_inner())
-	}
-}
-
 fn fmt_inner(v: &str, escape_slash: bool) -> String {
 	v.chars()
 		.flat_map(|c| {
@@ -77,4 +70,10 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+impl ToSql for File {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "f\"{}\"", self.display_inner())
+	}
 }

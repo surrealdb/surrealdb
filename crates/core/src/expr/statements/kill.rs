@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -40,7 +39,7 @@ impl KillStatement {
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				})
 			}
 			Ok(id) => id,
@@ -71,7 +70,7 @@ impl KillStatement {
 			}
 			None => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				});
 			}
 		}
@@ -87,11 +86,5 @@ impl KillStatement {
 		}
 		// Return the query id
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", self.id)
 	}
 }

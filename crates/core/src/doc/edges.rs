@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{RecordType, Relation, TableType};
@@ -42,14 +43,14 @@ impl Document {
 				ensure!(
 					txn.record_exists(ns, db, &l.table, &l.key).await?,
 					Error::IdNotFound {
-						rid: l.to_string(),
+						rid: l.to_sql(),
 					}
 				);
 				// Check that the `out` record exists
 				ensure!(
 					txn.record_exists(ns, db, &r.table, &r.key).await?,
 					Error::IdNotFound {
-						rid: r.to_string(),
+						rid: r.to_sql(),
 					}
 				);
 			}

@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::{SqlFormat, ToSql};
+
 /// Represents different types of geometric shapes in SurrealDB's type system
 ///
 /// This enum defines the various geometry types that can be used in type definitions
@@ -24,16 +26,22 @@ pub enum GeometryKind {
 	Collection,
 }
 
+impl ToSql for GeometryKind {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			GeometryKind::Point => f.push_str("point"),
+			GeometryKind::Line => f.push_str("line"),
+			GeometryKind::Polygon => f.push_str("polygon"),
+			GeometryKind::MultiPoint => f.push_str("multipoint"),
+			GeometryKind::MultiLine => f.push_str("multiline"),
+			GeometryKind::MultiPolygon => f.push_str("multipolygon"),
+			GeometryKind::Collection => f.push_str("collection"),
+		}
+	}
+}
+
 impl Display for GeometryKind {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			GeometryKind::Point => write!(f, "point"),
-			GeometryKind::Line => write!(f, "line"),
-			GeometryKind::Polygon => write!(f, "polygon"),
-			GeometryKind::MultiPoint => write!(f, "multipoint"),
-			GeometryKind::MultiLine => write!(f, "multiline"),
-			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
-			GeometryKind::Collection => write!(f, "collection"),
-		}
+		f.write_str(&self.to_sql())
 	}
 }

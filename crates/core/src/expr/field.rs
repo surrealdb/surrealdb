@@ -1,18 +1,16 @@
 use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter, Write};
 use std::slice::Iter;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
-use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
@@ -30,18 +28,10 @@ pub(crate) enum Fields {
 	Select(Vec<Field>),
 }
 
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Fields::Value(v) => write!(f, "VALUE {}", &v),
-			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
-		}
-	}
-}
-
-impl InfoStructure for Fields {
-	fn structure(self) -> Value {
-		self.to_string().into()
+impl ToSql for Fields {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let fields: crate::sql::field::Fields = self.clone().into();
+		fields.fmt_sql(f, fmt);
 	}
 }
 
@@ -364,11 +354,11 @@ impl Field {
 	}
 }
 
-impl Display for Field {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::All => f.write_char('*'),
-			Self::Single(s) => Display::fmt(s, f),
+			Self::All => f.push('*'),
+			Self::Single(s) => s.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -387,14 +377,12 @@ impl Selector {
 	}
 }
 
-impl Display for Selector {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.expr, f)?;
+impl ToSql for Selector {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.expr.fmt_sql(f, fmt);
 		if let Some(alias) = &self.alias {
-			f.write_str(" AS ")?;
-			Display::fmt(alias, f)
-		} else {
-			Ok(())
+			f.push_str(" AS ");
+			alias.fmt_sql(f, fmt);
 		}
 	}
 }
