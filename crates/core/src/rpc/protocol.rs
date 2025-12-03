@@ -219,6 +219,20 @@ pub trait RpcProtocol {
 	// Methods for authentication
 	// ------------------------------
 
+	/// Handles the USE RPC method for switching namespace and database context.
+	///
+	/// This method supports three usage patterns:
+	/// 1. **Explicit selection**: `USE ns "namespace" db "database"` - directly sets ns/db
+	/// 2. **Partial selection**: `USE ns "namespace"` - sets ns while preserving or clearing db
+	/// 3. **Default selection**: `USE` (empty call) - applies defaults from config or token
+	///
+	/// When called with no arguments (pattern 3), the behavior depends on session state:
+	/// - If the session already has ns/db from token authentication (JWT claims), those are
+	///   preserved
+	/// - Otherwise, defaults from the database configuration are applied if available
+	///
+	/// Returns an object with the resulting `namespace` and `database` values, allowing
+	/// clients (especially HTTP) to sync their local state with the server session.
 	async fn yuse(
 		&self,
 		session_id: Option<Uuid>,
@@ -243,12 +257,11 @@ pub trait RpcProtocol {
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get a write lock on the session to modify it
 		let mut session = session_lock.write().await;
-		// Empty use call, apply the defaults (only if session doesn't already have ns/db
-		// set from token authentication)
+		// Empty USE call: apply defaults only if session doesn't already have ns/db
 		if ns.is_none() && db.is_none() {
-			// Only apply defaults if the session doesn't already have a namespace set
-			// (e.g., from token authentication which extracts ns/db from JWT claims)
+			// Skip applying defaults if ns is already set (e.g., from token authentication)
 			if session.ns.is_none() {
+				// Fetch defaults from database configuration
 				let kvs = self.kvs();
 				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
 				let (ns, db) = if let Some(x) = tx.get_default_config().await? {

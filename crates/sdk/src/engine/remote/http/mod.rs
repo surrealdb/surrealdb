@@ -395,6 +395,16 @@ pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
 	Ok(())
 }
 
+/// Sends an RPC request to the SurrealDB server and returns the response.
+///
+/// # Arguments
+/// * `req` - The router request containing the RPC method and parameters
+/// * `base_url` - The base URL of the SurrealDB server
+/// * `client` - The HTTP client to use for the request
+/// * `headers` - HTTP headers including NS/DB for routing context
+/// * `auth` - Optional authentication credentials (token). Required for RPC calls where the server
+///   needs to identify the authenticated user and extract namespace/database from JWT claims (e.g.,
+///   after `authenticate()`)
 async fn send_request(
 	req: RouterRequest,
 	base_url: &Url,
@@ -409,9 +419,9 @@ async fn send_request(
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(crate::Error::UnserializableValue)?;
 
-	// Include auth header for the server to authenticate the request.
-	// This is necessary for token authentication, where the server extracts
-	// the namespace/database from the token claims.
+	// Include auth header so the server can authenticate the request and maintain
+	// session state. This is essential for token-based auth flows where the server
+	// extracts namespace/database from JWT claims during authenticate().
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
@@ -473,7 +483,7 @@ async fn router(
 			}
 			.into_router_request(None, Some(session_id))
 			.expect("USE command should convert to router request");
-			// process request to check permissions
+			// Send the USE request to the server to update the session state
 			let out = send_request(
 				req,
 				base_url,
@@ -484,10 +494,17 @@ async fn router(
 			.await?;
 			let mut headers = session_state.headers.write().await;
 
-			// Update headers based on the response from the server.
-			// The response contains the actual namespace/database from the session,
-			// which is important when use_defaults() is called to get the ns/db from
-			// token authentication claims.
+			// Synchronize local HTTP headers with the server's session state.
+			//
+			// This is critical for token-based authentication flows:
+			// 1. Client calls authenticate(token) - server extracts ns/db from JWT claims
+			// 2. Client calls use_defaults() (USE with no args) to sync local state
+			// 3. Server returns the session's ns/db (from token claims) in the response
+			// 4. Client updates local headers to match, ensuring subsequent requests are routed to
+			//    the correct namespace/database
+			//
+			// We use the server response rather than the original request parameters
+			// because the server may have resolved defaults or preserved token-derived values.
 			if let Some(result) = out.first()
 				&& let Ok(Value::Object(ref obj)) = result.clone().result
 			{
