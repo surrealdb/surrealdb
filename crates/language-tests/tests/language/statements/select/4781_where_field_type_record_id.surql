@@ -9,10 +9,10 @@ value = "'OK'"
 value = "[Color:yellow, Color:yellow, Color:blue, NONE]"
 
 [[test.results]]
-value = "[UserTag:⟨tag-1⟩, UserTag:⟨tag-2⟩, UserTag:⟨tag-3⟩]"
+value = "[UserTag:`tag-1`, UserTag:`tag-2`, UserTag:`tag-3`]"
 
 [[test.results]]
-value = "[UserTag:⟨tag-1⟩, UserTag:⟨tag-2⟩]"
+value = "[UserTag:`tag-1`, UserTag:`tag-2`]"
 
 */
 

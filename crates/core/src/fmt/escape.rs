@@ -143,11 +143,7 @@ impl ToSql for EscapeRidKey<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			if *crate::cnf::ACCESSIBLE_OUTPUT {
-				write_sql!(f, fmt, "`{}`", Escape::escape_str(s, '`'));
-			} else {
-				write_sql!(f, fmt, "⟨{}⟩", Escape::escape_str(s, '⟩'));
-			}
+			write_sql!(f, fmt, "`{}`", Escape::escape_str(s, '`'));
 		} else {
 			f.push_str(s)
 		}
