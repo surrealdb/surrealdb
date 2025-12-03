@@ -5,11 +5,13 @@ use std::collections::HashSet;
 use reqwest::ClientBuilder;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-#[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
+#[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
+#[allow(unused_imports, reason = "Used by the DB engines.")]
+use crate::ExtraFeatures;
 use crate::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::engine;
@@ -22,9 +24,7 @@ use crate::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-#[allow(unused_imports, reason = "Used by the DB engines.")]
-use crate::ExtraFeatures;
-use crate::{conn, Result, SessionClone, Surreal};
+use crate::{Result, SessionClone, Surreal, conn};
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
 	#[allow(

@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::TryStreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::RequestBuilder;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::Token as CoreToken;
@@ -30,12 +30,12 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Command, RequestData};
-use crate::engine::remote::RouterRequest;
 use crate::engine::SessionError;
+use crate::engine::remote::RouterRequest;
 use crate::err::Error;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
-use crate::opt::auth::{AccessToken, Token};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::{AccessToken, Token};
 use crate::types::{HashMap, SurrealValue, Value};
 use crate::{Connect, Result, Surreal};
 
@@ -421,7 +421,7 @@ async fn send_request(
 			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
 		}
 		DbResult::Live(notification) => Ok(vec![
-			QueryResultBuilder::started_now().finish_with_result(Ok(notification.into_value()))
+			QueryResultBuilder::started_now().finish_with_result(Ok(notification.into_value())),
 		]),
 	}
 }

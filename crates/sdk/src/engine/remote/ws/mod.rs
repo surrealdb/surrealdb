@@ -10,8 +10,8 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use async_channel::Sender;
@@ -23,8 +23,8 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::conn::{Command, RequestData, Route};
-use crate::engine::remote::RouterRequest;
 use crate::engine::SessionError;
+use crate::engine::remote::RouterRequest;
 use crate::err::Error;
 use crate::opt::IntoEndpoint;
 use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};
@@ -237,15 +237,14 @@ where
 	let message: M = serialize_request(router_request);
 
 	// Check message size
-	if let Some(max_size) = max_message_size {
-		if let Some(binary) = message.as_binary() {
-			if binary.len() > max_size {
-				if response.send(Err(Error::MessageTooLong(binary.len()).into())).await.is_err() {
-					trace!("Receiver dropped");
-				}
-				return HandleResult::Ok;
-			}
+	if let Some(max_size) = max_message_size
+		&& let Some(binary) = message.as_binary()
+		&& binary.len() > max_size
+	{
+		if response.send(Err(Error::MessageTooLong(binary.len()).into())).await.is_err() {
+			trace!("Receiver dropped");
 		}
+		return HandleResult::Ok;
 	}
 
 	// Send the message
@@ -407,38 +406,32 @@ where
 				token,
 				..
 			}) = pending.command
-			{
-				if let Token::WithRefresh {
+				&& let Token::WithRefresh {
 					..
-				} = &token
-				{
-					if error.to_string().contains("token has expired") {
-						// Attempt automatic refresh
-						let refresh_request = RouterRequest {
-							id: Some(id),
-							method: "authenticate",
-							params: Some(Value::Array(Array::from(vec![token.into_value()]))),
-							txn: None,
-							session_id: Some(session_id),
-						};
-						let message: M = serialize_request(refresh_request);
+				} = &token && error.to_string().contains("token has expired")
+			{
+				// Attempt automatic refresh
+				let refresh_request = RouterRequest {
+					id: Some(id),
+					method: "authenticate",
+					params: Some(Value::Array(Array::from(vec![token.into_value()]))),
+					txn: None,
+					session_id: Some(session_id),
+				};
+				let message: M = serialize_request(refresh_request);
 
-						match send_message(sink, message).await {
-							Err(send_error) => {
-								trace!(
-									"failed to send refresh query to the server; {send_error:?}"
-								);
-								pending.response_channel.send(Err(error)).await.ok();
-							}
-							Ok(..) => {
-								// Keep request pending for retry after refresh
-								pending.command = None;
-								session_state.pending_requests.insert(id, pending);
-							}
-						}
-						return HandleResult::Ok;
+				match send_message(sink, message).await {
+					Err(send_error) => {
+						trace!("failed to send refresh query to the server; {send_error:?}");
+						pending.response_channel.send(Err(error)).await.ok();
+					}
+					Ok(..) => {
+						// Keep request pending for retry after refresh
+						pending.command = None;
+						session_state.pending_requests.insert(id, pending);
 					}
 				}
+				return HandleResult::Ok;
 			}
 
 			// Return error to caller
@@ -464,16 +457,16 @@ where
 	if let Ok(DbResult::Live(notification)) = result {
 		let live_query_id = notification.id.0;
 
-		if let Some(sender) = session_state.live_queries.get(&live_query_id) {
-			if sender.send(Ok(notification)).await.is_err() {
-				// Receiver dropped, kill the live query
-				session_state.live_queries.remove(&live_query_id);
-				let kill: M = create_kill_message(live_query_id, session_id);
+		if let Some(sender) = session_state.live_queries.get(&live_query_id)
+			&& sender.send(Ok(notification)).await.is_err()
+		{
+			// Receiver dropped, kill the live query
+			session_state.live_queries.remove(&live_query_id);
+			let kill: M = create_kill_message(live_query_id, session_id);
 
-				if let Err(error) = send_message(sink, kill).await {
-					trace!("failed to send kill query to the server; {error:?}");
-					return HandleResult::Disconnected;
-				}
+			if let Err(error) = send_message(sink, kill).await {
+				trace!("failed to send kill query to the server; {error:?}");
+				return HandleResult::Disconnected;
 			}
 		}
 	}

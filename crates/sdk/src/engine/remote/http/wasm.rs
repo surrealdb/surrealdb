@@ -12,7 +12,7 @@ use crate::conn::{Route, Router};
 use crate::engine::SessionError;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{conn, Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {

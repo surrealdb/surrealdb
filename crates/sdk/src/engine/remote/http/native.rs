@@ -13,7 +13,7 @@ use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{conn, Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {

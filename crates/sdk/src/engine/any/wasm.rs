@@ -10,7 +10,7 @@ use crate::engine::any::Any;
 use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{conn, ExtraFeatures, Result, SessionClone, Surreal};
+use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {

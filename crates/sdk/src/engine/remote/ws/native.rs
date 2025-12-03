@@ -5,22 +5,22 @@ use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use tokio::time;
 use tokio::time::MissedTickBehavior;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::error::Error as WsError;
-use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 use super::{
-	create_ping_message, handle_response, handle_route, handle_session_clone, handle_session_drop,
-	handle_session_initial, replay_session, reset_sessions, HandleResult, SessionState, WsMessage,
-	PATH, PING_INTERVAL,
+	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,
+	handle_response, handle_route, handle_session_clone, handle_session_drop,
+	handle_session_initial, replay_session, reset_sessions,
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
@@ -348,9 +348,9 @@ mod tests {
 	use std::time::SystemTime;
 
 	use bincode::Options;
-	use flate2::write::GzEncoder;
 	use flate2::Compression;
-	use rand::{thread_rng, Rng};
+	use flate2::write::GzEncoder;
+	use rand::{Rng, thread_rng};
 	use surrealdb_core::rpc;
 
 	use crate::types::{Array, Value};

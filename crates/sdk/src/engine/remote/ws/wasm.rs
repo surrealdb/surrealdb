@@ -6,16 +6,16 @@ use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{
-	create_ping_message, handle_response, handle_route, handle_session_clone, handle_session_drop,
-	handle_session_initial, replay_session, reset_sessions, HandleResult, SessionState, WsMessage,
-	PATH, PING_INTERVAL,
+	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,
+	handle_response, handle_route, handle_session_clone, handle_session_drop,
+	handle_session_initial, replay_session, reset_sessions,
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
