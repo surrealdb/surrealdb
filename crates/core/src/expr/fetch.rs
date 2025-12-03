@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -11,7 +10,6 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Function, Idiom};
-use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::Value;
@@ -36,9 +34,10 @@ impl IntoIterator for Fetchs {
 	}
 }
 
-impl fmt::Display for Fetchs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FETCH {}", Fmt::comma_separated(&self.0))
+impl surrealdb_types::ToSql for Fetchs {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_fetchs: crate::sql::Fetchs = self.clone().into();
+		sql_fetchs.fmt_sql(f, fmt);
 	}
 }
 
@@ -138,14 +137,16 @@ impl Fetch {
 	}
 }
 
-impl Display for Fetch {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl surrealdb_types::ToSql for Fetch {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_fetch: crate::sql::Fetch = self.clone().into();
+		sql_fetch.fmt_sql(f, fmt);
 	}
 }
 
 impl InfoStructure for Fetch {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		use surrealdb_types::ToSql;
+		self.to_sql().into()
 	}
 }

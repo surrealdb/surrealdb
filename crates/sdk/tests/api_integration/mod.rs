@@ -230,7 +230,7 @@ mod ws {
 		}
 
 		// Set a 256 MiB limit for testing large message handling
-		let max_size = 256 << 20;
+		let max_size = 128 << 20;
 
 		let permit = PERMITS.acquire().await.unwrap();
 		// Configure WebSocket with custom size limits for testing

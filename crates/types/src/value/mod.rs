@@ -8,6 +8,7 @@ pub mod datetime;
 pub mod duration;
 /// File reference value types for SurrealDB
 pub mod file;
+mod format;
 /// Geometric value types for SurrealDB
 pub mod geometry;
 /// JSON value types for SurrealDB
@@ -49,9 +50,9 @@ pub use self::regex::Regex;
 pub use self::set::Set;
 pub use self::table::Table;
 pub use self::uuid::Uuid;
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
-use crate::{Kind, SurrealValue, write_sql};
+use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
 ///
@@ -60,6 +61,7 @@ use crate::{Kind, SurrealValue, write_sql};
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNone;
 
 /// Marker type for value conversions from Value::Null
@@ -69,6 +71,7 @@ pub struct SurrealNone;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNull;
 
 /// Represents a value in SurrealDB
@@ -77,6 +80,7 @@ pub struct SurrealNull;
 /// Each variant corresponds to a different data type supported by the database.
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Value {
 	/// Represents the absence of a value
 	#[default]
@@ -730,26 +734,28 @@ impl FromIterator<Value> for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Value::None => f.push_str("NONE"),
 			Value::Null => f.push_str("NULL"),
-			Value::Bool(v) => v.fmt_sql(f),
-			Value::Number(v) => v.fmt_sql(f),
-			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
-			Value::Duration(v) => v.fmt_sql(f),
-			Value::Datetime(v) => v.fmt_sql(f),
-			Value::Uuid(v) => v.fmt_sql(f),
-			Value::Array(v) => v.fmt_sql(f),
-			Value::Object(v) => v.fmt_sql(f),
-			Value::Geometry(v) => v.fmt_sql(f),
-			Value::Bytes(v) => v.fmt_sql(f),
-			Value::Table(v) => v.fmt_sql(f),
-			Value::RecordId(v) => v.fmt_sql(f),
-			Value::File(v) => v.fmt_sql(f),
-			Value::Range(v) => v.fmt_sql(f),
-			Value::Regex(v) => v.fmt_sql(f),
-			Value::Set(v) => v.fmt_sql(f),
+			Value::Bool(v) => v.fmt_sql(f, fmt),
+			Value::Number(v) => v.fmt_sql(f, fmt),
+			Value::String(v) => {
+				QuoteStr(v.as_str()).fmt_sql(f, fmt);
+			}
+			Value::Duration(v) => v.fmt_sql(f, fmt),
+			Value::Datetime(v) => v.fmt_sql(f, fmt),
+			Value::Uuid(v) => v.fmt_sql(f, fmt),
+			Value::Array(v) => v.fmt_sql(f, fmt),
+			Value::Object(v) => v.fmt_sql(f, fmt),
+			Value::Geometry(v) => v.fmt_sql(f, fmt),
+			Value::Bytes(v) => v.fmt_sql(f, fmt),
+			Value::Table(v) => v.fmt_sql(f, fmt),
+			Value::RecordId(v) => v.fmt_sql(f, fmt),
+			Value::File(v) => v.fmt_sql(f, fmt),
+			Value::Range(v) => v.fmt_sql(f, fmt),
+			Value::Regex(v) => v.fmt_sql(f, fmt),
+			Value::Set(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -769,7 +775,7 @@ mod tests {
 	#[case::string(Value::String("".to_string()), true)]
 	#[case::string(Value::String("hello".to_string()), false)]
 	#[case::bytes(Value::Bytes(Bytes::default()), true)]
-	#[case::bytes(Value::Bytes(Bytes::new(vec![1, 2, 3])), false)]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), false)]
 	#[case::object(Value::Object(Object::default()), true)]
 	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
 	#[case::array(Value::Array(Array::new()), true)]
@@ -1151,13 +1157,13 @@ mod tests {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
 	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0, 0)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1, 2)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45, 67.89)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0f, 0f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1f, 2f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"")]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![255_u8, 0, 128]))), "b\"FF0080\"")]
 	// Tables
 	#[case::table(Value::Table("test".into()), "test")]
 	#[case::table(Value::Table("escap'd".into()), "`escap'd`")]

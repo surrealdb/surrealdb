@@ -1,10 +1,11 @@
 pub mod api;
+pub mod defaults;
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
 
-use std::fmt::{self, Display};
-
 use api::ApiConfig;
-use graphql::GraphQLConfig;
+use defaults::DefaultConfig;
+pub(crate) use graphql::GraphQLConfig;
 
 use super::DefineKind;
 
@@ -38,31 +39,32 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
+	Default(DefaultConfig),
 }
 
-impl Display for DefineConfigStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE CONFIG")?;
+impl ToSql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE CONFIG");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 
-		write!(f, " {}", self.inner)?;
-
-		Ok(())
+		f.push(' ');
+		self.inner.fmt_sql(f, fmt);
 	}
 }
 
-impl Display for ConfigInner {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for ConfigInner {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
-			ConfigInner::GraphQL(v) => Display::fmt(v, f),
+			ConfigInner::GraphQL(v) => v.fmt_sql(f, fmt),
 			ConfigInner::Api(v) => {
-				write!(f, "API")?;
-				Display::fmt(v, f)
+				f.push_str("API");
+				v.fmt_sql(f, fmt);
 			}
+			ConfigInner::Default(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -72,6 +74,9 @@ impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner 
 		match v {
 			ConfigInner::GraphQL(v) => {
 				crate::expr::statements::define::config::ConfigInner::GraphQL(v.into())
+			}
+			ConfigInner::Default(v) => {
+				crate::expr::statements::define::config::ConfigInner::Default(v.into())
 			}
 			ConfigInner::Api(v) => {
 				crate::expr::statements::define::config::ConfigInner::Api(v.into())
@@ -85,6 +90,9 @@ impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner 
 		match v {
 			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => {
 				ConfigInner::GraphQL(v.into())
+			}
+			crate::expr::statements::define::config::ConfigInner::Default(v) => {
+				ConfigInner::Default(v.into())
 			}
 			crate::expr::statements::define::config::ConfigInner::Api(v) => {
 				ConfigInner::Api(v.into())

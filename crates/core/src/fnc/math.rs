@@ -1,6 +1,7 @@
 use core::f64;
 
 use anyhow::{Result, bail, ensure};
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::fnc::util;
@@ -19,7 +20,7 @@ use crate::val::{Number, TryPow, Value};
 
 pub fn abs((arg,): (Number,)) -> Result<Value> {
 	let Some(x) = arg.checked_abs() else {
-		bail!(Error::ArithmeticOverflow(format!("math::abs({arg})")));
+		bail!(Error::ArithmeticOverflow(format!("math::abs({})", arg.to_sql())));
 	};
 	Ok(x.into())
 }

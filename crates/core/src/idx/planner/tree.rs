@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
@@ -183,6 +184,9 @@ impl<'a> TreeBuilder<'a> {
 			let tx = self.ctx.ctx.tx();
 			let schema = self.lazy_load_schema_resolver(&tx, table).await?;
 			for (pos, ix) in schema.indexes.iter().enumerate() {
+				if ix.prepare_remove {
+					continue;
+				}
 				if let Index::Count(cond) = &ix.index
 					&& self.ctx.cond.eq(&cond.as_ref())
 				{
@@ -282,7 +286,7 @@ impl<'a> TreeBuilder<'a> {
 				Ok(Node::Computable)
 			}
 			Expr::Literal(Literal::Array(a)) => self.eval_array(stk, a).await,
-			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v))),
+			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v.to_sql()))),
 		}
 	}
 
@@ -290,7 +294,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(if n == Node::Computable {
 			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
 				Ok(v) => Node::Computed(v.into()),
-				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v)),
+				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v.to_sql())),
 			}
 		} else {
 			n
@@ -364,6 +368,9 @@ impl<'a> TreeBuilder<'a> {
 		}
 		let mut irs = Vec::new();
 		for (idx, ix) in schema.indexes.iter().enumerate() {
+			if ix.prepare_remove {
+				continue;
+			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allows the index to be used

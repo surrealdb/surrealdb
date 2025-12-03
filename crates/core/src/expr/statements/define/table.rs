@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -20,13 +19,13 @@ use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
+use crate::expr::field::Selector;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
@@ -127,7 +126,7 @@ impl DefineTableStatement {
 
 		// Record definition change
 		if self.changefeed.is_some() {
-			txn.lock().await.record_table_change(ns, db, &name, &tb_def);
+			txn.changefeed_buffer_table_change(ns, db, &name, &tb_def);
 		}
 
 		// Update the catalog
@@ -459,18 +458,18 @@ impl DefineTableStatement {
 		let mut groups = Vec::new();
 		for (idx, g) in analysis.group_expressions.iter().enumerate() {
 			let alias = format!("g{}", idx);
-			fields.push(Field::Single {
+			fields.push(Field::Single(Selector {
 				expr: g.clone(),
 				alias: Some(Idiom::field(alias.clone())),
-			});
+			}));
 			groups.push(Group(Idiom::field(alias)));
 		}
 
 		// calculated aggregations return in field 'a'
-		fields.push(Field::Single {
+		fields.push(Field::Single(Selector {
 			expr: Expr::Literal(Literal::Array(aggregate_value_expr)),
 			alias: Some(Idiom::field("a".to_string())),
-		});
+		}));
 
 		let stmt = SelectStatement {
 			// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..
@@ -738,76 +737,6 @@ impl DefineTableStatement {
 			// Refresh the table cache for the fields
 			tb.cache_fields_ts = Uuid::now_v7();
 		}
-		Ok(())
-	}
-}
-
-impl Display for DefineTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
-		match &self.table_type {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
-			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						EscapeIdent(k).fmt(f)?;
-					}
-				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						EscapeIdent(k).fmt(f)?;
-					}
-				}
-				if rel.enforced {
-					write!(f, " ENFORCED")?;
-				}
-			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
-		}
-		if self.drop {
-			f.write_str(" DROP")?;
-		}
-		f.write_str(if self.full {
-			" SCHEMAFULL"
-		} else {
-			" SCHEMALESS"
-		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		if let Some(ref v) = self.view {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "{}", self.permissions)?;
 		Ok(())
 	}
 }

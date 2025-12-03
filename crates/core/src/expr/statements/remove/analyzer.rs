@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -65,16 +63,5 @@ impl RemoveAnalyzerStatement {
 		// TODO Check that the analyzer is not used in any schema
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveAnalyzerStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE ANALYZER")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {}", self.name)?;
-		Ok(())
 	}
 }

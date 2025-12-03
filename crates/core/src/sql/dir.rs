@@ -1,7 +1,6 @@
-use std::fmt;
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::{SqlFormat, ToSql};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -16,9 +15,9 @@ pub enum Dir {
 	Both,
 }
 
-impl fmt::Display for Dir {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
+impl ToSql for Dir {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(match self {
 			Self::In => "<-",
 			Self::Out => "->",
 			Self::Both => "<->",

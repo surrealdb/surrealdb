@@ -1,7 +1,6 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -73,7 +72,7 @@ impl RemoveFieldStatement {
 		// Refresh the table cache for fields
 		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
 			return Err(Error::TbNotFound {
-				name: self.table_name.to_string(),
+				name: self.table_name.to_sql(),
 			}
 			.into());
 		};
@@ -95,16 +94,5 @@ impl RemoveFieldStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE FIELD")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
-		Ok(())
 	}
 }

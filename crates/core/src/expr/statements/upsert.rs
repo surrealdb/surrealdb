@@ -1,14 +1,12 @@
-use std::fmt;
-
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
-use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
@@ -94,34 +92,9 @@ impl UpsertStatement {
 	}
 }
 
-impl fmt::Display for UpsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPSERT")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
-		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
-		}
-		Ok(())
+impl ToSql for UpsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::upsert::UpsertStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

@@ -3,24 +3,18 @@ RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_
     "RUSTFLAGS",
 ] } }
 
-# Setup
-[tasks.cargo-upgrade]
-private = true
-command = "cargo"
-args = ["upgrade", "--pinned"]
-
-[tasks.cargo-update]
-private = true
-command = "cargo"
-args = ["update"]
-
-[tasks.setup]
+# Default
+[tasks.default]
 category = "LOCAL USAGE"
-dependencies = ["cargo-upgrade", "cargo-update"]
+description = "List all available tasks"
+clear = true
+command = "cargo"
+args = ["make", "--list-all-steps"]
 
 # Docs
 [tasks.docs]
 category = "LOCAL USAGE"
+description = "Generate and open the SurrealDB documentation"
 command = "cargo"
 args = [
     "doc",
@@ -32,103 +26,24 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
-# Test
-[tasks.test]
-category = "LOCAL USAGE"
-command = "cargo"
-args = ["test", "--profile", "make", "--workspace", "--no-fail-fast"]
-
 # Format
-[tasks.cargo-fmt]
+[tasks.format]
 category = "LOCAL USAGE"
-toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
-command = "cargo"
-args = ["fmt", "--all", "--check"]
-
-[tasks.fmt]
-category = "LOCAL USAGE"
+description = "Format the SurrealDB source code according to the project rules"
 toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all"]
 
 # Check
-[tasks.cargo-check]
-category = "LOCAL USAGE"
-command = "cargo"
-args = [
-    "check",
-    "--profile",
-    "make",
-    "--workspace",
-    "--all-targets",
-    "--features",
-    "${ALL_FEATURES}",
-]
-
-# Clippy
-[tasks.cargo-clippy]
-category = "LOCAL USAGE"
-command = "cargo"
-args = [
-    "clippy",
-    "--profile",
-    "make",
-    "--workspace",
-    "--all-targets",
-    "--features",
-    "${ALL_FEATURES}",
-    "--",
-    "-D",
-    "warnings",
-]
-
 [tasks.check]
 category = "LOCAL USAGE"
-dependencies = ["cargo-fmt", "cargo-check", "cargo-clippy"]
-
-[tasks.check-wasm]
-category = "LOCAL USAGE"
-dependencies = ["ci-check-wasm"]
-
-# Clean
-[tasks.clean]
-category = "LOCAL USAGE"
-command = "cargo"
-args = ["clean"]
-
-# Bench
-[tasks.bench]
-category = "LOCAL USAGE"
-command = "cargo"
-args = [
-    "bench",
-    "--package",
-    "surrealdb",
-    "--no-default-features",
-    "--features",
-    "kv-mem,http,scripting,jwks",
-    "--",
-    "${@}",
-]
-
-# Run
-[tasks.run]
-category = "LOCAL USAGE"
-command = "cargo"
-args = [
-    "run",
-    "--profile",
-    "make",
-    "--no-default-features",
-    "--features",
-    "${DEV_FEATURES}",
-    "--",
-    "${@}",
-]
+description = "Run the SurrealDB code quality checks"
+dependencies = ["ci-format", "ci-check", "ci-clippy"]
 
 # Serve
 [tasks.serve]
 category = "LOCAL USAGE"
+description = "Start the SurrealDB database server in debug mode"
 command = "cargo"
 args = [
     "run",
@@ -147,6 +62,7 @@ args = [
 # SQL
 [tasks.sql]
 category = "LOCAL USAGE"
+description = "Run the SurrealDB SQL shell with pretty printing"
 command = "cargo"
 env = { SURREAL_LOG = "error" }
 args = [
@@ -165,6 +81,7 @@ args = [
 # REPL
 [tasks.repl]
 category = "LOCAL USAGE"
+description = "Run the SurrealDB SQL REPL with a default namespace and database"
 command = "cargo"
 env = { SURREAL_LOG = "error" }
 args = [
@@ -180,26 +97,31 @@ args = [
     "--conn",
     "memory",
     "--ns",
-    "test",
+    "main",
     "--db",
-    "test",
+    "main",
     "${@}",
 ]
 
 # Build
 [tasks.build]
 category = "LOCAL USAGE"
+description = "Build the SurrealDB database server in debug mode"
 command = "cargo"
-args = ["build", "--profile", "make", "${@}"]
+args = [
+    "build",
+    "--profile",
+    "make",
+    "${@}",
+]
 
 # Release
 [tasks.release]
 category = "LOCAL USAGE"
+description = "Build the SurrealDB database server in release mode"
 command = "cargo"
-args = ["build", "--release", "${@}"]
-
-# Default
-[tasks.default]
-category = "LOCAL USAGE"
-clear = true
-dependencies = ["check", "test", "quick"]
+args = [
+    "build",
+    "--release",
+    "${@}",
+]

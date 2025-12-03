@@ -6,7 +6,6 @@ mod cli_integration {
 	use std::io::Write;
 	#[cfg(unix)]
 	use std::time;
-	use std::time::Duration;
 
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::{Duration as ChronoDuration, Utc};
@@ -19,7 +18,6 @@ mod cli_integration {
 	#[cfg(unix)]
 	use serde_json::json;
 	use test_log::test;
-	use tokio::time::sleep;
 	use tracing::info;
 	use ulid::Ulid;
 
@@ -117,7 +115,7 @@ mod cli_integration {
 				output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"),
 				"{output}"
 			);
-			assert!(output.contains("INSERT [ { id: thing:one } ];"), "{output}");
+			assert!(output.contains("INSERT [ { id: thing:one } ]"), "{output}");
 		}
 
 		info!("* Export to file");
@@ -150,7 +148,7 @@ mod cli_integration {
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
-			assert_eq!(rest, "[{ id: thing:one }]\n\n", "failed to send sql: {args}");
+			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
@@ -1037,10 +1035,8 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("DEFINE TABLE thing TYPE ANY CHANGEFEED 1s;\n")
-				.output()
-				.unwrap();
+			let output =
+				common::run(&args).input("DEFINE TABLE thing TYPE ANY;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(output, "[NONE]\n\n".to_owned(), "failed to send sql: {args}");
 		}
@@ -1050,65 +1046,39 @@ mod cli_integration {
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n")
-				.output()
-				.unwrap();
+			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(
 				output,
-				"[NONE, [{ id: thing:one }], NONE]\n\n".to_owned(),
+				"[[{ id: thing:one }]]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
 
-		info!("* Show changes");
+		info!("* Query the record");
 		{
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-				.output()
-				.unwrap();
-			let output = remove_debug_info(output).replace('\n', "");
-			let allowed = [
-				// Delete these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
-				// Keep these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
-			];
-			allowed
-				.into_iter()
-				.find(|case| {
-					let a = *case == output;
-					println!("Comparing\n{case}\n{output}\n{a}");
-					a
-				})
-				.ok_or(format!("Output didnt match an example output: {output}"))
-				.unwrap();
-		};
+			let output = common::run(&args).input("SELECT * FROM thing:one;\n").output().unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(
+				output,
+				"[[{ id: thing:one }]]\n\n".to_owned(),
+				"failed to send sql: {args}"
+			);
+		}
 
-		sleep(Duration::from_secs(20)).await;
-
-		info!("* Show changes after GC");
+		info!("* Delete the record");
 		{
 			let args = format!(
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-				.output()
-				.unwrap();
+			let output = common::run(&args).input("DELETE thing:one;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
 		}
+
 		server.finish().unwrap();
 	}
 

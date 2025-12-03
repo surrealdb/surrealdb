@@ -342,7 +342,7 @@ jobs:
   # ----------------------------------------
 
   test:
-    name: Test workspace + coverage
+    name: Test workspace
     runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Checkout sources
@@ -358,18 +358,8 @@ jobs:
         with:
           tools: cargo-nextest,cargo-llvm-cov,cargo-make
 
-      - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-          flags: workspace-tests
-          name: coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Test workspace
+        run: cargo make ci-workspace-test
 
   # ----------------------------------------
   # Storage engine tests
@@ -403,7 +393,7 @@ jobs:
           tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Test engine
-        run: cargo make ci-${{ matrix.engine }}-kvs
+        run: cargo make ci-kvs-${{ matrix.engine }}
 
   # ----------------------------------------
   # Rust SDK tests
@@ -488,7 +478,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        engine: [mem, surrealkv] # TODO(tobiemh): add 'rocksdb' and 'tikv' in KVS PR
+        engine: [mem, surrealkv, rocksdb, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

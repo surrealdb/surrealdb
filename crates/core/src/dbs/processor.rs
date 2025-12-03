@@ -539,7 +539,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		iterable: Iterable,
 	) -> Result<()> {
-		if ctx.is_ok(true).await? {
+		if !ctx.is_done(None).await? {
 			match iterable {
 				Iterable::Value(v) => {
 					if !v.is_nullish() {
@@ -611,7 +611,7 @@ pub(super) trait Collector {
 	async fn start_skip(
 		&mut self,
 		ctx: &Context,
-		txn: &Transaction,
+		opt: &Options,
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
@@ -620,7 +620,7 @@ pub(super) trait Collector {
 		//
 		// This method avoids fully materializing or processing records prior to the
 		// requested offset by streaming only keys from the underlying KV store. It
-		// updates the iterator’s internal skipped counter and returns a narrowed
+		// updates the iterator's internal skipped counter and returns a narrowed
 		// range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
@@ -628,12 +628,14 @@ pub(super) trait Collector {
 			// There is nothing to skip, we return the original range.
 			return Ok(Some(rng));
 		}
+		// Get the transaction
+		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), Some(skippable), sc);
+		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		while let Some(res) = stream.next().await {
-			if ctx.is_done(skipped % 100 == 0).await? {
+			if ctx.is_done(Some(skipped)).await? {
 				break;
 			}
 			last_key = res?;
@@ -651,7 +653,6 @@ pub(super) trait Collector {
 				last_key.push(0xFF);
 				rng.start = last_key;
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => {
 				rng.end = last_key;
 			}
@@ -678,19 +679,19 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(r) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			r
 		} else {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, sc);
 
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -722,7 +723,7 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -730,12 +731,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -811,7 +812,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -819,12 +820,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, None, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -852,7 +853,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -860,12 +861,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -951,12 +952,13 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end, None, None, ScanDirection::Forward);
+			let mut stream =
+				txn.stream_keys_vals(beg..end, opt.version, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				// Parse the key from the result
@@ -1013,16 +1015,16 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
-			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0).await? {
+			for (count, record) in records.into_iter().enumerate() {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
-				self.collect(Collected::IndexItemKey(r)).await?;
+				self.collect(Collected::IndexItemKey(record)).await?;
 			}
 		}
 		Ok(())
@@ -1035,16 +1037,16 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
-			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0).await? {
+			for (count, record) in records.into_iter().enumerate() {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
-				self.collect(Collected::IndexItem(r)).await?;
+				self.collect(Collected::IndexItem(record)).await?;
 			}
 		}
 		Ok(())
@@ -1058,7 +1060,7 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let mut total_count = 0;
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let count = iterator.next_count(ctx, txn, fetch_size).await?;
 			if count == 0 {
 				break;

@@ -1,8 +1,8 @@
-use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::fmt::{EscapeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -31,62 +30,10 @@ pub(crate) struct Lookup {
 	pub(crate) alias: Option<Idiom>,
 }
 
-impl Lookup {
-	/// Convert the graph edge to a raw String
-	pub fn to_raw(&self) -> String {
-		self.to_string()
-	}
-}
-
-impl Display for Lookup {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.len() <= 1
-			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
-			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
-			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
-			&& self.what.iter().all(|v| v.referencing_field().is_none())
-			&& self.cond.is_none()
-			&& self.alias.is_none()
-			&& self.expr.is_none()
-		{
-			Display::fmt(&self.kind, f)?;
-			if self.what.is_empty() {
-				f.write_char('?')
-			} else {
-				Fmt::comma_separated(self.what.iter()).fmt(f)
-			}
-		} else {
-			write!(f, "{}(", self.kind)?;
-			if let Some(ref expr) = self.expr {
-				write!(f, "SELECT {} FROM ", expr)?;
-			}
-			match self.what.len() {
-				0 => f.write_char('?'),
-				_ => Fmt::comma_separated(self.what.iter()).fmt(f),
-			}?;
-			if let Some(ref v) = self.cond {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.split {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.group {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.order {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.limit {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.start {
-				write!(f, " {v}")?
-			}
-			if let Some(ref v) = self.alias {
-				write!(f, " AS {v}")?
-			}
-			f.write_char(')')
-		}
+impl ToSql for Lookup {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::lookup::Lookup = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -103,11 +50,11 @@ impl Default for LookupKind {
 	}
 }
 
-impl Display for LookupKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for LookupKind {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Graph(dir) => Display::fmt(dir, f),
-			Self::Reference => f.write_str("<~"),
+			Self::Graph(dir) => dir.fmt_sql(f, fmt),
+			Self::Reference => f.push_str("<~"),
 		}
 	}
 }
@@ -124,21 +71,6 @@ pub(crate) enum LookupSubject {
 		range: RecordIdKeyRangeLit,
 		referencing_field: Option<String>,
 	},
-}
-
-impl LookupSubject {
-	pub(crate) fn referencing_field(&self) -> Option<&String> {
-		match self {
-			LookupSubject::Table {
-				referencing_field,
-				..
-			} => referencing_field.as_ref(),
-			LookupSubject::Range {
-				referencing_field,
-				..
-			} => referencing_field.as_ref(),
-		}
-	}
 }
 
 impl LookupSubject {
@@ -364,30 +296,9 @@ impl ComputedLookupSubject {
 	}
 }
 
-impl Display for LookupSubject {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Table {
-				table,
-				referencing_field,
-			} => {
-				EscapeIdent(table).fmt(f)?;
-				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
-				}
-				Ok(())
-			}
-			Self::Range {
-				table,
-				range,
-				referencing_field,
-			} => {
-				write!(f, "{}:{range}", EscapeIdent(table))?;
-				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
-				}
-				Ok(())
-			}
-		}
+impl ToSql for LookupSubject {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::lookup::LookupSubject = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

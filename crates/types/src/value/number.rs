@@ -6,8 +6,8 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::{Kind, write_sql};
+use crate::Kind;
+use crate::sql::{SqlFormat, ToSql};
 
 /// Represents a numeric value in SurrealDB
 ///
@@ -15,6 +15,7 @@ use crate::{Kind, write_sql};
 /// This enum provides type-safe representation for all numeric types.
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	/// A 64-bit signed integer
 	Int(i64),
@@ -75,8 +76,20 @@ impl Display for Number {
 }
 
 impl ToSql for Number {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Number::Int(v) => f.push_str(&v.to_string()),
+			Number::Float(v) => {
+				if v.is_finite() {
+					f.push_str(&v.to_string());
+					f.push('f');
+				} else {
+					// NaN, inf, -inf
+					f.push_str(&v.to_string());
+				}
+			}
+			Number::Decimal(v) => v.fmt_sql(f, fmt),
+		}
 	}
 }
 

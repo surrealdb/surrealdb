@@ -5,7 +5,7 @@ use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::kv::KVStore;
 
-use crate::ctx::Context;
+use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt, FunctionCall};
@@ -37,12 +37,20 @@ impl InvocationContext for Host {
 		&mut self,
 		_config: &SurrealismConfig,
 		query: String,
-		_vars: PublicObject,
+		vars: PublicObject,
 	) -> Result<PublicValue> {
+		let ctx = if vars.is_empty() {
+			self.ctx.clone()
+		} else {
+			let mut ctx = MutableContext::new(&self.ctx);
+			ctx.attach_public_variables(vars.into())?;
+			ctx.freeze()
+		};
+
 		let expr: Expr = syn::expr(&query)?.into();
 		let res = self
 			.stk
-			.enter(|stk| expr.compute(stk, &self.ctx, &self.opt, self.doc.as_ref()))
+			.enter(|stk| expr.compute(stk, &ctx, &self.opt, self.doc.as_ref()))
 			.finish()
 			.await
 			.catch_return()?;

@@ -1,12 +1,10 @@
-use std::fmt::{self, Display, Write};
-
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
-use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {
@@ -23,12 +21,7 @@ impl IfelseStatement {
 		self.exprs.iter().all(|x| x.0.read_only() && x.1.read_only())
 			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
-	/// Check if we require a writeable transaction
-	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
-			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, Expr::Block(_))))
-	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -50,99 +43,24 @@ impl IfelseStatement {
 	}
 }
 
-impl Display for IfelseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		if self.bracketed() {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond}")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			Ok(())
-		} else {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond} THEN")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} THEN {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			if is_pretty() {
-				f.write_str("END")?;
-			} else {
-				f.write_str(" END")?;
-			}
-			Ok(())
-		}
+impl ToSql for IfelseStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::ifelse::IfelseStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use super::*;
 	use crate::syn;
 
 	#[test]
 	fn format_pretty() {
 		let query = syn::expr("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
-		assert_eq!(format!("{}", query), "IF 1 { 1 } ELSE IF 2 { 2 }");
-		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }");
+		assert_eq!(query.to_sql(), "IF 1 { 1 } ELSE IF 2 { 2 }");
+		// Single-statement blocks stay inline even in pretty mode
+		assert_eq!(query.to_sql_pretty(), "IF 1 { 1 } ELSE IF 2 { 2 }");
 	}
 }

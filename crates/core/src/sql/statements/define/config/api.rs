@@ -1,6 +1,6 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -10,23 +10,26 @@ pub(crate) struct ApiConfig {
 	pub permissions: Permission,
 }
 
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
+			write_sql!(f, fmt, " MIDDLEWARE ");
+
+			for (idx, m) in self.middleware.iter().enumerate() {
+				if idx != 0 {
+					f.push_str(", ");
+				}
+				for (idx, s) in m.name.split("::").enumerate() {
+					if idx != 0 {
+						f.push_str("::");
+					}
+					EscapeKwFreeIdent(s).fmt_sql(f, fmt);
+				}
+				write_sql!(f, fmt, "({})", Fmt::pretty_comma_separated(m.args.iter()));
+			}
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 
@@ -48,7 +51,6 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,

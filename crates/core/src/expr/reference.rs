@@ -1,6 +1,5 @@
-use std::fmt;
-
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Value;
 use super::statements::info::InfoStructure;
@@ -12,9 +11,10 @@ pub(crate) struct Reference {
 	pub(crate) on_delete: ReferenceDeleteStrategy,
 }
 
-impl fmt::Display for Reference {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ON DELETE {}", &self.on_delete)
+impl ToSql for Reference {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_reference: crate::sql::reference::Reference = self.clone().into();
+		sql_reference.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -37,20 +37,16 @@ pub(crate) enum ReferenceDeleteStrategy {
 	Custom(Expr),
 }
 
-impl fmt::Display for ReferenceDeleteStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
-			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
-			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-			ReferenceDeleteStrategy::Unset => write!(f, "UNSET"),
-			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
-		}
+impl ToSql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_reference_delete_strategy: crate::sql::reference::ReferenceDeleteStrategy =
+			self.clone().into();
+		sql_reference_delete_strategy.fmt_sql(f, sql_fmt);
 	}
 }
 
 impl InfoStructure for ReferenceDeleteStrategy {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }

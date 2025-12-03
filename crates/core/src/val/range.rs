@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
-use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::value::CoerceErrorExt;
 use crate::expr;
@@ -67,20 +67,19 @@ impl Ord for Range {
 	}
 }
 
-impl fmt::Display for Range {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Range {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self.start {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "{x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}>")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "{x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}>"),
 		}
-		write!(f, "..")?;
+		write_sql!(f, sql_fmt, "..");
 		match self.end {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "={x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "={x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}"),
 		}
-		Ok(())
 	}
 }
 
@@ -103,21 +102,21 @@ impl Range {
 
 	pub fn coerce_to_typed<T: Coerce + HasKind>(self) -> Result<TypedRange<T>, CoerceError> {
 		let start = match self.start {
-			Bound::Included(x) => {
-				Bound::Included(T::coerce(x).with_element_of(|| format!("range<{}>", T::kind()))?)
-			}
-			Bound::Excluded(x) => {
-				Bound::Excluded(T::coerce(x).with_element_of(|| format!("range<{}>", T::kind()))?)
-			}
+			Bound::Included(x) => Bound::Included(
+				T::coerce(x).with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
+			),
+			Bound::Excluded(x) => Bound::Excluded(
+				T::coerce(x).with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
+			),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 		let end = match self.end {
-			Bound::Included(x) => {
-				Bound::Included(T::coerce(x).with_element_of(|| format!("range<{}>", T::kind()))?)
-			}
-			Bound::Excluded(x) => {
-				Bound::Excluded(T::coerce(x).with_element_of(|| format!("range<{}>", T::kind()))?)
-			}
+			Bound::Included(x) => Bound::Included(
+				T::coerce(x).with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
+			),
+			Bound::Excluded(x) => Bound::Excluded(
+				T::coerce(x).with_element_of(|| format!("range<{}>", T::kind().to_sql()))?,
+			),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 		Ok(TypedRange {
@@ -175,6 +174,7 @@ impl Range {
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,
 	pub end: Bound<T>,

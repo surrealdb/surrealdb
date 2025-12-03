@@ -19,7 +19,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-alpha.14"
+version = "3.0.0-alpha.16"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -34,24 +34,24 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0-alpha.14", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-alpha.14", path = "crates/core", default-features = false }
-surrealdb-macros = { version = "=3.0.0-alpha.14", path = "crates/macros" }
-surrealdb-server = { version = "=3.0.0-alpha.14", path = "crates/server", default-features = false }
-surrealdb-types = { version = "=3.0.0-alpha.14", path = "crates/types" }
-surrealdb-types-derive = { version = "=3.0.0-alpha.14", path = "crates/types-derive" }
-surrealism = { version = "=0.1.2", path = "crates/surrealism/surrealism" }
-surrealism-cli = { version = "=0.1.2", path = "crates/surrealism/surrealism-cli" }
-surrealism-macros = { version = "=0.1.2", path = "crates/surrealism/surrealism-macros", default-features = false }
-surrealism-runtime = { version = "=0.1.2", path = "crates/surrealism/surrealism-runtime" }
-surrealism-types = { version = "=0.1.2", path = "crates/surrealism/surrealism-types", default-features = false }
+surrealdb = { version = "=3.0.0-alpha.16", path = "crates/sdk" }
+surrealdb-core = { version = "=3.0.0-alpha.16", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0-alpha.16", path = "crates/macros" }
+surrealdb-server = { version = "=3.0.0-alpha.16", path = "crates/server", default-features = false }
+surrealdb-types = { version = "=3.0.0-alpha.16", path = "crates/types" }
+surrealdb-types-derive = { version = "=3.0.0-alpha.16", path = "crates/types-derive" }
+surrealism = { version = "=0.1.3", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=0.1.3", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=0.1.3", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "=0.1.3", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=0.1.3", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
-affinitypool = "0.3.1"
+affinitypool = "0.4.0"
 dmp = "0.2.3"
-indxdb = "0.6.0"
+indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.14.0", features = [
+revision = { version = "0.15.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -59,26 +59,27 @@ revision = { version = "0.14.0", features = [
     "rust_decimal",
     "uuid",
 ] }
-storekey = { version = "0.9.0", features = ["uuid"] }
-surrealkv = { version = "0.9.1" }
+storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
+surrealkv = "0.15.1"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
+surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
-js = { version = "0.9.0", package = "rquickjs" }
+js = { version = "0.9.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
 # External Kv stores
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 
 # Managed by surreal but mostly external code
-tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
+tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
-ahash = "0.8.11"
+ahash = "0.8.12"
 ammonia = "4.0.0"
 anyhow = "1.0.100"
 arbitrary = "1.3.2"
@@ -224,6 +225,7 @@ default = [
     "storage-mem",
     "storage-surrealkv",
     "storage-rocksdb",
+    "storage-tikv",
     "scripting",
     "http",
     "surrealism",
@@ -241,8 +243,6 @@ storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
-# Commercial features
-enterprise = ["surrealdb-server/enterprise"]
 
 [dependencies]
 # workspace internal dependencies

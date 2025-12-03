@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::write_sql;
+use crate::sql::{SqlFormat, ToSql};
 
 /// Represents a file reference in SurrealDB
 ///
@@ -47,8 +46,12 @@ impl File {
 }
 
 impl ToSql for crate::File {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false));
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str("f\"");
+		f.push_str(&fmt_inner(&self.bucket, true));
+		f.push(':');
+		f.push_str(&fmt_inner(&self.key, false));
+		f.push('"');
 	}
 }
 
@@ -65,4 +68,33 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use super::*;
+	impl<'a> arbitrary::Arbitrary<'a> for File {
+		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+			static CHAR: [u8; 56] = [
+				b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k', b'l', b'm', b'n',
+				b'o', b'p', b'q', b'r', b's', b't', b'u', b'v', b'w', b'x', b'y', b'z', b'A', b'B',
+				b'C', b'D', b'E', b'F', b'G', b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O', b'P',
+				b'Q', b'R', b'S', b'T', b'U', b'V', b'W', b'X', b'Y', b'Z', b'_', b'-', b'.', b'/',
+			];
+
+			let mut bucket = String::new();
+			bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+			for _ in 0..u.arbitrary_len::<u8>()? {
+				bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+			}
+			let mut key = "/".to_string();
+			for _ in 0..u.arbitrary_len::<u8>()? {
+				key.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+			}
+			Ok(File {
+				bucket,
+				key,
+			})
+		}
+	}
 }

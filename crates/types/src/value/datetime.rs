@@ -5,10 +5,10 @@ use std::str::FromStr;
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use surrealdb_types_derive::write_sql;
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
-use crate::write_sql;
 
 /// Represents a datetime value in SurrealDB
 ///
@@ -81,8 +81,9 @@ impl Display for Datetime {
 }
 
 impl ToSql for Datetime {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "d{}", QuoteStr(&self.to_string()))
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate as surrealdb_types;
+		write_sql!(f, fmt, "d{}", QuoteStr(&self.to_string()));
 	}
 }
 
@@ -107,5 +108,44 @@ impl Deref for Datetime {
 	type Target = DateTime<Utc>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use arbitrary::Arbitrary;
+	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset};
+
+	use super::*;
+
+	impl<'a> Arbitrary<'a> for Datetime {
+		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+			let date = u.arbitrary::<NaiveDate>()?;
+			let time = u.arbitrary::<NaiveTime>()?;
+
+			let offset = if u.arbitrary()? {
+				Utc.fix()
+			} else {
+				let hour = u.int_in_range(0..=23)?;
+				let minute = u.int_in_range(0..=59)?;
+				if u.arbitrary()? {
+					FixedOffset::west_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
+				} else {
+					FixedOffset::east_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
+				}
+			};
+
+			let datetime = NaiveDateTime::new(date, time);
+
+			Ok(Datetime(
+				offset
+					.from_local_datetime(&datetime)
+					.earliest()
+					.expect("earliest should not fail with fixed offest")
+					.with_timezone(&Utc),
+			))
+		}
 	}
 }

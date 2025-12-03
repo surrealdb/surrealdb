@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::{SurrealValue, Value};
 
 /// Represents an array of values in SurrealDB
@@ -11,6 +11,7 @@ use crate::{SurrealValue, Value};
 /// The underlying storage is a `Vec<Value>`.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Array(pub(crate) Vec<Value>);
 
 impl Array {
@@ -87,13 +88,13 @@ impl IntoIterator for Array {
 }
 
 impl ToSql for Array {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate::sql::fmt_sql_comma_separated;
+
 		f.push('[');
-		for (i, v) in self.iter().enumerate() {
-			v.fmt_sql(f);
-			if i < self.len() - 1 {
-				f.push_str(", ");
-			}
+		if !self.is_empty() {
+			let inner_fmt = fmt.increment();
+			fmt_sql_comma_separated(&self.0, f, inner_fmt);
 		}
 		f.push(']');
 	}

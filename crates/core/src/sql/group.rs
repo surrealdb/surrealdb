@@ -1,18 +1,20 @@
-use std::fmt::{self, Display, Formatter};
-
-use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Groups(pub Vec<Group>);
 
-impl Display for Groups {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Groups {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		if self.0.is_empty() {
-			write!(f, "GROUP ALL")
+			f.push_str("GROUP ALL");
 		} else {
-			write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
+			f.push_str("GROUP BY ");
+			for (i, item) in self.0.iter().enumerate() {
+				if i > 0 {
+					fmt.write_separator(f);
+				}
+				item.fmt_sql(f, fmt);
+			}
 		}
 	}
 }
@@ -33,9 +35,9 @@ impl From<crate::expr::Groups> for Groups {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Group(pub(crate) Idiom);
 
-impl Display for Group {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl surrealdb_types::ToSql for Group {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		self.0.fmt_sql(f, fmt);
 	}
 }
 

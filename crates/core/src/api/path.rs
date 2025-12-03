@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -71,8 +72,14 @@ impl IntoIterator for Path {
 
 impl Display for Path {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "/")?;
-		Display::fmt(&Fmt::new(self.iter(), fmt_separated_by("/")), f)
+		self.to_sql().fmt(f)
+	}
+}
+
+impl ToSql for Path {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('/');
+		Fmt::new(self.iter(), fmt_separated_by("/")).fmt_sql(f, fmt);
 	}
 }
 
@@ -296,19 +303,17 @@ impl Segment {
 	}
 }
 
-impl Display for Segment {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Segment {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Fixed(v) => write!(f, "{v}"),
+			Self::Fixed(v) => v.fmt_sql(f, fmt),
 			Self::Dynamic(v, k) => {
-				write!(f, ":{v}")?;
+				write_sql!(f, fmt, ":{v}");
 				if let Some(k) = k {
-					write!(f, "<{k}>")?;
+					write_sql!(f, fmt, "<{k}>");
 				}
-
-				Ok(())
 			}
-			Self::Rest(v) => write!(f, "*{v}"),
+			Self::Rest(v) => write_sql!(f, fmt, "*{v}"),
 		}
 	}
 }

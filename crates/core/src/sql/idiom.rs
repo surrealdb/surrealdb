@@ -1,5 +1,6 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
@@ -26,9 +27,9 @@ impl IntoIterator for Idioms {
 	}
 }
 
-impl Display for Idioms {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
+impl ToSql for Idioms {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -44,7 +45,6 @@ impl From<ExprIdioms> for Idioms {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
@@ -76,28 +76,27 @@ impl From<crate::expr::Idiom> for Idiom {
 	}
 }
 
-impl Display for Idiom {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Idiom {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
+			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
 			Some(Part::Start(x)) => match x {
 				Expr::Block(_)
 				| Expr::Literal(_)
 				| Expr::Table(_)
 				| Expr::Mock(_)
 				| Expr::Constant(_)
-				| Expr::Param(_) => x.fmt(f)?,
+				| Expr::Param(_) => x.fmt_sql(f, fmt),
 				_ => {
-					write!(f, "({x})")?;
+					write_sql!(f, fmt, "({x})");
 				}
 			},
-			Some(x) => x.fmt(f)?,
+			Some(x) => x.fmt_sql(f, fmt),
 			None => {}
 		};
 		for p in iter {
-			p.fmt(f)?;
+			p.fmt_sql(f, fmt);
 		}
-		Ok(())
 	}
 }

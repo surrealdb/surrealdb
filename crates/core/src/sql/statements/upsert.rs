@@ -1,12 +1,13 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct UpsertStatement {
 	pub only: bool,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub data: Option<Data>,
@@ -17,35 +18,34 @@ pub(crate) struct UpsertStatement {
 	pub explain: Option<Explain>,
 }
 
-impl fmt::Display for UpsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPSERT")?;
+impl ToSql for UpsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "UPSERT");
 		if self.only {
-			f.write_str(" ONLY")?
+			write_sql!(f, fmt, " ONLY");
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)));
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 
