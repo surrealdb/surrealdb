@@ -87,6 +87,9 @@ pub static COUNT_BATCH_SIZE: LazyLock<u32> =
 pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
+/// The maximum batch size for Scanner adaptive fetching (default: 10,000)
+pub static MAX_BATCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", u32, 5_000);
+
 /// The maximum size of the priority queue triggering usage of the priority
 /// queue for the result collector.
 pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =
@@ -166,11 +169,6 @@ pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
 /// Whether to enforce a global bucket for file data (default: false)
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
-
-/// Whether to output in a form readable for devices like screen and braille
-/// readers For example, by showing ⟨ and ⟩ as `
-pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
 
 /// Specify the USER-AGENT string used by HTTP requests
 pub static SURREALDB_USER_AGENT: LazyLock<String> =

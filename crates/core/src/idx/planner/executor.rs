@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
@@ -22,13 +23,10 @@ use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
-	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
-	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
-};
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-use crate::idx::planner::iterators::{
-	IndexRangeReverseThingIterator, UniqueRangeReverseThingIterator,
+	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
+	IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult, MatchesThingIterator,
+	ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	UniqueRangeReverseThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
@@ -306,11 +304,11 @@ impl QueryExecutor {
 				self.0.exp_entries.get(exp)
 			{
 				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
-				if let Ok(v) = v.coerce_to() {
-					if let Ok(dist) = dist.compute(&v, val.as_ref()) {
-						p.add(dist, thg).await;
-						return Ok(Value::Bool(true));
-					}
+				if let Ok(v) = v.coerce_to()
+					&& let Ok(dist) = dist.compute(&v, val.as_ref())
+				{
+					p.add(dist, thg).await;
+					return Ok(Value::Bool(true));
 				}
 			}
 			Ok(Value::Bool(false))
@@ -453,14 +451,9 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-					{
-						Some(ThingIterator::IndexRangeReverse(
-							IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
-						))
-					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-					None
+					Some(ThingIterator::IndexRangeReverse(
+						IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
+					))
 				} else {
 					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
 						ir, ns, db, ix,
@@ -526,7 +519,6 @@ impl QueryExecutor {
 			ScanDirection::Forward => {
 				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::IndexRangeReverse(
 				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
@@ -546,7 +538,6 @@ impl QueryExecutor {
 			ScanDirection::Forward => {
 				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => ThingIterator::UniqueRangeReverse(
 				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
@@ -588,19 +579,14 @@ impl QueryExecutor {
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-					{
-						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(
-								irf,
-								ns,
-								db,
-								io.index_reference(),
-							)?,
-						))
-					}
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-					None
+					Some(ThingIterator::UniqueRangeReverse(
+						UniqueRangeReverseThingIterator::full_range(
+							irf,
+							ns,
+							db,
+							io.index_reference(),
+						)?,
+					))
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
 						irf,
@@ -646,35 +632,31 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
-		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Matches(
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir)
+			&& let Matches(
 				_,
 				MatchesOperator {
 					operator,
 					..
 				},
 			) = io.op()
-			{
-				if let Some(PerIndexReferenceIndex::FullText(fti)) =
-					self.0.ir_map.get(io.index_reference())
-				{
-					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-						let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
-						let it = MatchesThingIterator::new(ir, hits);
-						return Ok(Some(ThingIterator::FullTextMatches(it)));
-					}
-				}
-			}
+			&& let Some(PerIndexReferenceIndex::FullText(fti)) =
+				self.0.ir_map.get(io.index_reference())
+			&& let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp)
+		{
+			let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
+			let it = MatchesThingIterator::new(ir, hits);
+			return Ok(Some(ThingIterator::FullTextMatches(it)));
 		}
 		Ok(None)
 	}
 
 	fn new_hnsw_index_ann_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp) {
-				let it = KnnIterator::new(ir, he.res.clone());
-				return Some(ThingIterator::Knn(it));
-			}
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir)
+			&& let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp)
+		{
+			let it = KnnIterator::new(ir, he.res.clone());
+			return Some(ThingIterator::Knn(it));
 		}
 		None
 	}
@@ -718,7 +700,7 @@ impl QueryExecutor {
 
 		// If no previous case were successful, we end up with a user error
 		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
-			exp: exp.to_string(),
+			exp: exp.to_sql(),
 		}))
 	}
 
@@ -733,10 +715,10 @@ impl QueryExecutor {
 			return Ok(false);
 		}
 		let tx = ctx.tx();
-		if let Some(doc_id) = fti.get_doc_id(&tx, thg).await? {
-			if fte.0.qt.contains_doc(doc_id) {
-				return Ok(true);
-			}
+		if let Some(doc_id) = fti.get_doc_id(&tx, thg).await?
+			&& fte.0.qt.contains_doc(doc_id)
+		{
+			return Ok(true);
 		}
 		Ok(false)
 	}
@@ -791,14 +773,13 @@ impl QueryExecutor {
 		hlp: HighlightParams,
 		doc: &Value,
 	) -> Result<Value> {
-		if let Some(PerMatchRefEntry::FullText(fte)) = self.get_match_ref_entry(hlp.match_ref()) {
-			if let Some(fti) = self.get_fulltext_index(fte) {
-				if let Some(id) = fte.0.io.idiom_ref() {
-					let tx = ctx.tx();
-					let res = fti.highlight(&tx, thg, &fte.0.qt, hlp, id, doc).await;
-					return res;
-				}
-			}
+		if let Some(PerMatchRefEntry::FullText(fte)) = self.get_match_ref_entry(hlp.match_ref())
+			&& let Some(fti) = self.get_fulltext_index(fte)
+			&& let Some(id) = fte.0.io.idiom_ref()
+		{
+			let tx = ctx.tx();
+			let res = fti.highlight(&tx, thg, &fte.0.qt, hlp, id, doc).await;
+			return res;
 		}
 		Ok(Value::None)
 	}
@@ -839,16 +820,16 @@ impl QueryExecutor {
 			};
 			match mre {
 				PerMatchRefEntry::FullText(fte) => {
-					if let Some(scorer) = &fte.0.scorer {
-						if let Some(fti) = self.get_fulltext_index(fte) {
-							let tx = ctx.tx();
-							if doc_id.is_none() {
-								doc_id = fti.get_doc_id(&tx, rid).await?;
-							}
-							if let Some(doc_id) = doc_id {
-								let score = scorer.score(fti, &tx, &fte.0.qt, doc_id).await?;
-								return Ok(Value::from(score));
-							}
+					if let Some(scorer) = &fte.0.scorer
+						&& let Some(fti) = self.get_fulltext_index(fte)
+					{
+						let tx = ctx.tx();
+						if doc_id.is_none() {
+							doc_id = fti.get_doc_id(&tx, rid).await?;
+						}
+						if let Some(doc_id) = doc_id {
+							let score = scorer.score(fti, &tx, &fte.0.qt, doc_id).await?;
+							return Ok(Value::from(score));
 						}
 					}
 				}

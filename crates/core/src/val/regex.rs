@@ -11,6 +11,7 @@ use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
@@ -49,11 +50,7 @@ impl FromStr for Regex {
 	type Err = <regex::Regex as FromStr>::Err;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if s.contains('\0') {
-			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
-		} else {
-			regex_new(&s.replace("\\/", "/")).map(Self)
-		}
+		regex_new(&s.replace("\\/", "/")).map(Self)
 	}
 }
 
@@ -93,8 +90,14 @@ impl Debug for Regex {
 
 impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		std::fmt::Display::fmt(&self.0, f)
+	}
+}
+
+impl ToSql for Regex {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		let t = self.0.to_string().replace('/', "\\/");
-		write!(f, "/{}/", &t)
+		write_sql!(f, sql_fmt, "/{}/", &t)
 	}
 }
 

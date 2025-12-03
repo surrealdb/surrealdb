@@ -370,42 +370,6 @@ pub struct IndxDb;
 #[derive(Debug)]
 pub struct TiKv;
 
-/// FoundationDB database
-///
-/// # Examples
-///
-/// Instantiating a FoundationDB-backed instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::FDb;
-///
-/// let db = Surreal::new::<FDb>("path/to/fdb.cluster").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a FoundationDB-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::FDb;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<FDb>(("path/to/fdb.cluster", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
-#[cfg(feature = "kv-fdb")]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
-#[derive(Debug)]
-pub struct FDb;
-
 /// SurrealKV database
 ///
 /// # Examples
@@ -1020,10 +984,7 @@ async fn router(
 				Err(error) => {
 					return Err(crate::Error::FileRead {
 						path,
-						error: io::Error::new(
-							io::ErrorKind::InvalidData,
-							error.message.to_string(),
-						),
+						error: io::Error::new(io::ErrorKind::InvalidData, error.message.clone()),
 					});
 				}
 			};

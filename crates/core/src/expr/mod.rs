@@ -76,7 +76,7 @@ pub(crate) use self::field::{Field, Fields};
 pub(crate) use self::filter::Filter;
 pub(crate) use self::function::{Function, FunctionCall};
 pub(crate) use self::group::{Group, Groups};
-pub(crate) use self::idiom::{Idiom, Idioms};
+pub(crate) use self::idiom::Idiom;
 pub(crate) use self::kind::{Kind, KindLiteral};
 pub(crate) use self::limit::Limit;
 pub(crate) use self::literal::{Literal, ObjectEntry};

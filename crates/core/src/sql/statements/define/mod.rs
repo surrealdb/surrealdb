@@ -16,8 +16,6 @@ mod sequence;
 mod table;
 pub mod user;
 
-use std::fmt::{self, Display};
-
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 pub(crate) use api::{ApiAction, DefineApiStatement};
@@ -33,6 +31,7 @@ pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 pub(crate) use sequence::DefineSequenceStatement;
+use surrealdb_types::{SqlFormat, ToSql};
 pub(crate) use table::DefineTableStatement;
 pub(crate) use user::DefineUserStatement;
 
@@ -78,35 +77,37 @@ pub(crate) enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(DefineModelStatement),
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Module(DefineModuleStatement),
 }
 
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for DefineStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Config(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Module(v) => Display::fmt(v, f),
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::Model(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

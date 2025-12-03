@@ -52,7 +52,6 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 		| "https"
 		| "ws"
 		| "wss"
-		| "fdb"
 		| "mem"
 		| "rocksdb"
 		| "surrealkv"

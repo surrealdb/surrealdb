@@ -4,8 +4,9 @@ use std::hash::{Hash, Hasher};
 use anyhow::Result;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
@@ -58,6 +59,10 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
+	/// Whether this index has been marked for removal.
+	/// Decommissioned indexes are excluded from query planning and document indexing,
+	/// and any concurrent index builds are cancelled.
+	pub(crate) prepare_remove: bool,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
@@ -77,6 +82,24 @@ impl IndexDefinition {
 			concurrently: false,
 		}
 	}
+
+	/// Checks if this index is decommissioned and returns an error if it is.
+	///
+	/// This method is used during concurrent index building to detect when an index
+	/// has been decommissioned, allowing the build process to be cancelled gracefully.
+	///
+	/// # Errors
+	///
+	/// Returns `Error::IndexingBuildingCancelled` if the index is decommissioned.
+	pub(crate) fn expect_not_prepare_remove(&self) -> Result<()> {
+		if self.prepare_remove {
+			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
+				reason: "Prepare remove.".to_string(),
+			}))
+		} else {
+			Ok(())
+		}
+	}
 }
 
 impl InfoStructure for IndexDefinition {
@@ -87,13 +110,14 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"prepare_remove".to_string(), if self.prepare_remove => self.prepare_remove.into()
 		})
 	}
 }
 
 impl ToSql for IndexDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -132,8 +156,8 @@ impl InfoStructure for Index {
 }
 
 impl ToSql for Index {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -269,17 +293,17 @@ impl Distance {
 	}
 }
 
-impl Display for Distance {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl ToSql for Distance {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Chebyshev => f.write_str("CHEBYSHEV"),
-			Self::Cosine => f.write_str("COSINE"),
-			Self::Euclidean => f.write_str("EUCLIDEAN"),
-			Self::Hamming => f.write_str("HAMMING"),
-			Self::Jaccard => f.write_str("JACCARD"),
-			Self::Manhattan => f.write_str("MANHATTAN"),
-			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
-			Self::Pearson => f.write_str("PEARSON"),
+			Self::Chebyshev => f.push_str("CHEBYSHEV"),
+			Self::Cosine => f.push_str("COSINE"),
+			Self::Euclidean => f.push_str("EUCLIDEAN"),
+			Self::Hamming => f.push_str("HAMMING"),
+			Self::Jaccard => f.push_str("JACCARD"),
+			Self::Manhattan => f.push_str("MANHATTAN"),
+			Self::Minkowski(order) => write_sql!(f, fmt, "MINKOWSKI {}", order),
+			Self::Pearson => f.push_str("PEARSON"),
 		}
 	}
 }
@@ -289,9 +313,9 @@ impl Display for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
 	/// 64-bit floating point.
-	#[default]
 	F64,
 	/// 32-bit floating point.
+	#[default]
 	F32,
 	/// 64-bit signed integer.
 	I64,

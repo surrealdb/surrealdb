@@ -1,4 +1,3 @@
-use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -7,7 +6,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
-	NodeProvider, TableProvider, UserProvider,
+	NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -55,6 +54,9 @@ impl InfoStatement {
 				if *structured {
 					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?),
+						"defaults".to_string() => txn.get_default_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
@@ -70,6 +72,9 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"defaults".to_string() => txn.get_default_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
@@ -199,7 +204,7 @@ impl InfoStatement {
 						"buckets".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_buckets(ns, db).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -248,7 +253,7 @@ impl InfoStatement {
 						"configs".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
-								out.insert(v.name(), v.to_string().into());
+								out.insert(v.name(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -407,49 +412,6 @@ impl InfoStatement {
 		}
 	}
 }
-
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Root(false) => f.write_str("INFO FOR ROOT"),
-			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
-			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db(false, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
-				None => f.write_str("INFO FOR DATABASE"),
-			},
-			Self::Db(true, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
-				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			},
-			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
-				None => write!(f, "INFO FOR TABLE {}", t),
-			},
-
-			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
-				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
-			},
-			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
-				None => write!(f, "INFO FOR USER {}", u),
-			},
-			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
-				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
-			},
-			Self::Index(i, t, false) => {
-				write!(f, "INFO FOR INDEX {} ON {}", i, t)
-			}
-			Self::Index(i, t, true) => {
-				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
-			}
-		}
-	}
-}
-
 pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
@@ -470,6 +432,5 @@ async fn system() -> Value {
 		"memory_usage".to_string() => info.memory_usage.into(),
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),
-		"threads".to_string() => info.threads.into(),
 	})
 }

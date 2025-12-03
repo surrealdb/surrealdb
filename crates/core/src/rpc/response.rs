@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types::{ToSql, kind, object};
 use thiserror::Error;
 
-use crate::dbs::QueryResult;
+use crate::dbs::{QueryResult, QueryType};
 use crate::rpc::RpcError;
 use crate::types::{
 	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
@@ -21,11 +21,17 @@ pub struct DbResultStats {
 	///
 	/// Note: This comes from the `time` field of the [`crate::dbs::Response`] struct.
 	pub execution_time: Option<Duration>,
+	pub query_type: Option<QueryType>,
 }
 
 impl DbResultStats {
 	pub fn with_execution_time(mut self, execution_time: Duration) -> Self {
 		self.execution_time = Some(execution_time);
+		self
+	}
+
+	pub fn with_query_type(mut self, query_type: QueryType) -> Self {
+		self.query_type = Some(query_type);
 		self
 	}
 }
@@ -252,7 +258,7 @@ impl SurrealValue for DbResultError {
 				let message = obj.remove("message").context("Missing message")?;
 				Ok(DbResultError::from_code(code.into_int()?, message.into_string()?))
 			}
-			PublicValue::String(s) => Ok(DbResultError::Thrown(s.to_string())),
+			PublicValue::String(s) => Ok(DbResultError::Thrown(s.clone())),
 			other => anyhow::bail!("Expected object for DbResultError, got {}", other.to_sql()),
 		}
 	}

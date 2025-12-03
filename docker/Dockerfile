@@ -8,7 +8,7 @@ FROM docker.io/rockylinux/rockylinux:9 AS builder
 RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.88.0
+ARG RUST_VERSION=1.91.1
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"

@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use radix_trie::Trie;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
+use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -118,14 +120,12 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 pub(crate) enum ThingIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
 	IndexCount(IndexCountThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
@@ -149,10 +149,8 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			Self::UniqueRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::IndexUnion(i) => i.next_batch(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_batch(ctx, txn, size).await,
@@ -180,10 +178,8 @@ impl ThingIterator {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueRange(i) => i.next_count(txn, size).await,
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			Self::UniqueRangeReverse(i) => i.next_count(txn, size).await,
 			Self::IndexUnion(i) => i.next_count(ctx, txn, size).await,
 			Self::UniqueUnion(i) => i.next_count(ctx, txn, size).await,
@@ -397,7 +393,6 @@ impl RangeScan {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 struct ReverseRangeScan {
 	r: RangeScan,
 	/// True if the beginning key should be included
@@ -406,7 +401,6 @@ struct ReverseRangeScan {
 	end_incl: bool,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl ReverseRangeScan {
 	fn new(r: RangeScan) -> Self {
 		// Capture whether the original forward range considered the endpoints inclusive.
@@ -488,7 +482,10 @@ impl IndexRangeThingIterator {
 				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
 				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
 				_ => {
-					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
+					bail!(Error::Unreachable(format!(
+						"Invalid operator for range extraction {}",
+						op.to_sql()
+					)))
 				}
 			}
 		}
@@ -750,13 +747,11 @@ impl IndexRangeThingIterator {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) struct IndexRangeReverseThingIterator {
 	irf: IteratorRef,
 	r: ReverseRangeScan,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl IndexRangeReverseThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
@@ -925,7 +920,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<B> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done(true).await? {
+			if ctx.is_done(None).await? {
 				break;
 			}
 			let records: B =
@@ -941,7 +936,7 @@ impl IndexUnionThingIterator {
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done(true).await? {
+			if ctx.is_done(None).await? {
 				break;
 			}
 			let res = IndexEqualThingIterator::next_scan(tx, &mut r.0, &r.1, limit).await?;
@@ -992,7 +987,7 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool> {
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
 				if !self.current_remote_batch.is_empty() {
@@ -1017,10 +1012,10 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator>,
 	{
-		while !ctx.is_done(true).await? {
-			let mut count = 0;
+		let mut count = 0;
+		while !ctx.is_done(None).await? {
 			while let Some(r) = self.current_remote_batch.pop_front() {
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				let record = r.record_id();
@@ -1049,7 +1044,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
 				let records: B = current_local.next_batch(ctx, tx, limit).await?;
 				if !records.is_empty() {
@@ -1073,7 +1068,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
 				let count = current_local.next_count(ctx, tx, limit).await?;
 				if count > 0 {
@@ -1146,21 +1141,21 @@ impl UniqueEqualThingIterator {
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
-		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(&key, None).await? {
-				let rid: RecordId = revision::from_slice(&val)?;
-				let record = IndexItemRecord::new_key(rid, self.irf.into());
-				return Ok(B::from_one(record));
-			}
+		if let Some(key) = self.key.take()
+			&& let Some(val) = tx.get(&key, None).await?
+		{
+			let rid: RecordId = revision::from_slice(&val)?;
+			let record = IndexItemRecord::new_key(rid, self.irf.into());
+			return Ok(B::from_one(record));
 		}
 		Ok(B::empty())
 	}
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
-		if let Some(key) = self.key.take() {
-			if tx.exists(&key, None).await? {
-				return Ok(1);
-			}
+		if let Some(key) = self.key.take()
+			&& tx.exists(&key, None).await?
+		{
+			return Ok(1);
 		}
 		Ok(0)
 	}
@@ -1276,11 +1271,11 @@ impl UniqueRangeThingIterator {
 			}
 		}
 
-		if self.r.matches_end() {
-			if let Some(v) = tx.get(&self.r.end, None).await? {
-				let rid: RecordId = revision::from_slice(&v)?;
-				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-			}
+		if self.r.matches_end()
+			&& let Some(v) = tx.get(&self.r.end, None).await?
+		{
+			let rid: RecordId = revision::from_slice(&v)?;
+			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 		}
 		self.done = true;
 		Ok(records)
@@ -1311,14 +1306,12 @@ impl UniqueRangeThingIterator {
 	}
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) struct UniqueRangeReverseThingIterator {
 	irf: IteratorRef,
 	r: ReverseRangeScan,
 	done: bool,
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl UniqueRangeReverseThingIterator {
 	pub(super) fn new(
 		irf: IteratorRef,
@@ -1469,7 +1462,7 @@ impl UniqueUnionThingIterator {
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if let Some(val) = tx.get(&key, None).await? {
@@ -1488,7 +1481,7 @@ impl UniqueUnionThingIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if tx.exists(&key, None).await? {
@@ -1574,9 +1567,10 @@ where
 	) -> Result<B> {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
+			let mut count = 0;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
 			while limit > records.len() {
-				if ctx.is_done(self.hits_left % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
@@ -1590,6 +1584,7 @@ where
 				} else {
 					break;
 				}
+				count += 1;
 			}
 			Ok(records)
 		} else {
@@ -1602,7 +1597,7 @@ where
 			let limit = limit as usize;
 			let mut count = 0;
 			while limit > count {
-				if ctx.is_done(self.hits_left % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				if let Some((_, _)) = hits.next(tx).await? {
@@ -1635,9 +1630,10 @@ impl KnnIterator {
 	}
 	async fn next_batch<B: IteratorBatch>(&mut self, ctx: &Context, limit: u32) -> Result<B> {
 		let limit = limit as usize;
+		let mut count = 0;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
 		while limit > records.len() {
-			if ctx.is_done(records.len() % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if let Some((thing, dist, val)) = self.res.pop_front() {
@@ -1650,6 +1646,7 @@ impl KnnIterator {
 			} else {
 				break;
 			}
+			count += 1;
 		}
 		Ok(records)
 	}
@@ -1658,7 +1655,7 @@ impl KnnIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while limit > count {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if self.res.pop_front().is_some() {
@@ -1685,14 +1682,22 @@ impl IndexCountThingIterator {
 	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
 		if let Some(range) = self.0.take() {
 			let mut count: i64 = 0;
-			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
-				ctx.is_done(i % 1000 == 0).await?;
-				let iu = IndexCountKey::decode_key(&key)?;
-				if iu.pos {
-					count += iu.count as i64;
-				} else {
-					count -= iu.count as i64;
+			let mut loops = 0;
+			let mut current_range = Some(range);
+			while let Some(range) = current_range {
+				let batch = txn.batch_keys(range, *COUNT_BATCH_SIZE, None).await?;
+				for key in batch.result.iter() {
+					loops += 1;
+					ctx.is_done(Some(loops)).await?;
+					let iu = IndexCountKey::decode_key(key)?;
+					if iu.pos {
+						count += iu.count as i64;
+					} else {
+						count -= iu.count as i64;
+					}
 				}
+				current_range = batch.next;
+				ctx.is_done(None).await?;
 			}
 			Ok(count as usize)
 		} else {
@@ -1709,16 +1714,23 @@ impl IndexCountThingIterator {
 			return Ok(());
 		};
 		let mut count: i64 = 0;
-		for (i, key) in txn.keys(range.clone(), u32::MAX, None).await?.into_iter().enumerate() {
-			if i % 1000 == 0 {
-				yield_now!()
+		let mut loops = 0;
+		let mut current_range = Some(range.clone());
+		while let Some(r) = current_range {
+			let batch = txn.batch_keys(r, *COUNT_BATCH_SIZE, None).await?;
+			for key in batch.result.iter() {
+				loops += 1;
+				if loops % 1000 == 0 {
+					yield_now!()
+				}
+				let iu = IndexCountKey::decode_key(key)?;
+				if iu.pos {
+					count += iu.count as i64;
+				} else {
+					count -= iu.count as i64;
+				}
 			}
-			let iu = IndexCountKey::decode_key(&key)?;
-			if iu.pos {
-				count += iu.count as i64;
-			} else {
-				count -= iu.count as i64;
-			}
+			current_range = batch.next;
 		}
 		txn.delr(range).await?;
 		let pos = count.is_positive();

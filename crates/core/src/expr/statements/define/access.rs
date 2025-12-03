@@ -1,10 +1,8 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -268,7 +266,7 @@ impl DefineAccessStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -295,7 +293,7 @@ impl DefineAccessStatement {
 							if !opt.import {
 								bail!(Error::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -324,7 +322,7 @@ impl DefineAccessStatement {
 								bail!(Error::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -346,10 +344,10 @@ impl DefineAccessStatement {
 	/// Remove information from the access definition which should not be displayed.
 	pub fn redact(mut self) -> Self {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
-			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
-				if v.alg.is_symmetric() {
-					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				}
+			if let JwtAccessVerify::Key(ref mut v) = acc.verify
+				&& v.alg.is_symmetric()
+			{
+				v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 			if let Some(ref mut s) = acc.issue {
 				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
@@ -374,61 +372,9 @@ impl DefineAccessStatement {
 	}
 }
 
-impl Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS",)?;
-		match self.kind {
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::Default => {}
-		}
-		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
-		// The additional authentication clause
-		if let Some(ref v) = self.authenticate {
-			write!(f, " AUTHENTICATE {v}")?
-		}
-		// Always print relevant durations so defaults can be changed in the future
-		// If default values were not printed, exports would not be forward compatible
-		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		if self.access_type.can_issue_grants() {
-			write!(
-				f,
-				" FOR GRANT {},",
-				match self.duration.grant {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		if self.access_type.can_issue_tokens() {
-			write!(
-				f,
-				" FOR TOKEN {},",
-				match self.duration.token {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineAccessStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

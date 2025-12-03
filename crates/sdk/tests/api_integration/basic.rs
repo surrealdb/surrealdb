@@ -89,8 +89,8 @@ pub async fn signup_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: namespace.to_string(),
-		database: database.to_string(),
+		namespace: namespace.clone(),
+		database: database.clone(),
 		access: access.to_string(),
 		params: AuthParams {
 			email: "john.doe@example.com".to_string(),
@@ -113,7 +113,7 @@ pub async fn signin_ns(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Namespace {
-		namespace: namespace.to_string(),
+		namespace: namespace.clone(),
 		username: user,
 		password: pass,
 	})
@@ -134,8 +134,8 @@ pub async fn signin_db(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Database {
-		namespace: namespace.to_string(),
-		database: database.to_string(),
+		namespace: namespace.clone(),
+		database: database.clone(),
 		username: user,
 		password: pass.to_string(),
 	})
@@ -164,8 +164,8 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: namespace.to_string(),
-		database: database.to_string(),
+		namespace: namespace.clone(),
+		database: database.clone(),
 		access: access.to_string(),
 		params: AuthParams {
 			pass: pass.to_string(),
@@ -175,8 +175,8 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	.await
 	.unwrap();
 	db.signin(RecordAccess {
-		namespace: namespace.to_string(),
-		database: database.to_string(),
+		namespace: namespace.clone(),
+		database: database.clone(),
 		access: access.to_string(),
 		params: AuthParams {
 			pass: pass.to_string(),
@@ -210,9 +210,9 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: namespace.to_string(),
-			database: database.to_string(),
-			access: access.to_string(),
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
 				pass: pass.to_string(),
 				email: email.clone(),
@@ -238,9 +238,9 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: namespace.to_string(),
-			database: database.to_string(),
-			access: access.to_string(),
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
 				pass: pass.to_string(),
 				email: email.clone(),
@@ -288,9 +288,9 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: namespace.to_string(),
-			database: database.to_string(),
-			access: access.to_string(),
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
 				pass: pass.to_string(),
 				email: email.clone(),
@@ -318,9 +318,9 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: namespace.to_string(),
-			database: database.to_string(),
-			access: access.to_string(),
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.clone(),
 			params: AuthParams {
 				pass: pass.to_string(),
 				email: email.clone(),
@@ -360,7 +360,7 @@ pub async fn authenticate(new_db: impl CreateDb) {
 	response.check().unwrap();
 	let token = db
 		.signin(Namespace {
-			namespace: namespace.to_string(),
+			namespace: namespace.clone(),
 			username: user,
 			password: pass.to_string(),
 		})

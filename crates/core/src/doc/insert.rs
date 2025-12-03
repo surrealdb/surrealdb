@@ -35,7 +35,7 @@ impl Document {
 		// it is retryable so generate a save point we can roll back to.
 		// always create a save point even if not retryable, as we have to rollback to original
 		// state.
-		ctx.tx().lock().await.new_save_point();
+		ctx.tx().new_save_point().await?;
 
 		// First try to create the value and if that is not possible due to an existing
 		// value fall back to update instead.
@@ -56,7 +56,7 @@ impl Document {
 					// or if the statement contained a specific record id, we
 					// don't retry to
 					if !retryable || self.is_specific_record_id() {
-						ctx.tx().lock().await.rollback_to_save_point().await?;
+						ctx.tx().rollback_to_save_point().await?;
 
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
@@ -85,7 +85,7 @@ impl Document {
 				}) => {
 					// if not retryable return the error.
 					if !retryable {
-						ctx.tx().lock().await.rollback_to_save_point().await?;
+						ctx.tx().rollback_to_save_point().await?;
 
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
@@ -107,19 +107,19 @@ impl Document {
 				_ => {
 					// we have to rollback to the save point, even though retryable is false.
 					// this is because we have to guarantee atomicity of the insert.
-					ctx.tx().lock().await.rollback_to_save_point().await?;
+					ctx.tx().rollback_to_save_point().await?;
 
 					return Err(IgnoreError::Error(e));
 				}
 			},
 			Err(IgnoreError::Ignore) => {
 				// if the error is ignored, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().release_last_save_point().await?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
 				// if the transaction is successful, we can release the save point.
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().release_last_save_point().await?;
 				return Ok(x);
 			}
 		};
@@ -128,9 +128,9 @@ impl Document {
 		// Always rollback to save point here, regardless of retryable flag.
 		// This ensures we can properly handle ON DUPLICATE KEY UPDATE by
 		// rolling back to the state before the failed insert attempt.
-		ctx.tx().lock().await.rollback_to_save_point().await?;
+		ctx.tx().rollback_to_save_point().await?;
 
-		if ctx.is_done(true).await? {
+		if ctx.is_done(None).await? {
 			// Don't process the document
 			return Err(IgnoreError::Ignore);
 		}

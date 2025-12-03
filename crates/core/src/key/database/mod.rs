@@ -13,6 +13,4 @@ pub mod sq;
 pub mod tb;
 pub mod th;
 pub mod ti;
-pub mod ts;
 pub mod us;
-pub mod vs;

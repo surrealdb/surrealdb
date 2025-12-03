@@ -417,7 +417,7 @@ pub async fn db_access(
 									// If the SIGNIN clause failed due to an unexpected error, be
 									// more specific This allows clients to handle these
 									// errors, which may be retryable
-									Some(Error::Tx(_) | Error::TxRetryable(_)) => {
+									Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);
@@ -832,13 +832,13 @@ pub async fn signin_bearer(
 		jti: Some(Uuid::new_v4().to_string()),
 		ns: ns.map(|ns| ns.name.clone()),
 		db: db.map(|db| db.name.clone()),
-		ac: Some(av.name.to_string()),
+		ac: Some(av.name.clone()),
 		id: match &gr.subject {
 			catalog::Subject::User(user) => Some(user.clone()),
-			catalog::Subject::Record(rid) => Some(rid.to_string()),
+			catalog::Subject::Record(rid) => Some(rid.to_sql()),
 		},
 		roles: match &gr.subject {
-			catalog::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			catalog::Subject::User(_) => Some(roles.clone()),
 			catalog::Subject::Record(_) => Default::default(),
 		},
 		..Claims::default()
@@ -920,12 +920,12 @@ pub async fn signin_bearer(
 	);
 	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
 	session.db.clone_from(&db.map(|db| db.name.clone()));
-	session.ac = Some(av.name.to_string());
+	session.ac = Some(av.name.clone());
 	session.exp = expiration(av.session_duration)?;
 	match &gr.subject {
 		catalog::Subject::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
-				user.to_string(),
+				user.clone(),
 				roles
 					.iter()
 					.map(|e| Role::from_str(e))
@@ -941,10 +941,10 @@ pub async fn signin_bearer(
 		}
 		catalog::Subject::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
 				if let (Some(ns), Some(db)) = (ns, db) {
-					Level::Record(ns.name.clone(), db.name.clone(), rid.to_string())
+					Level::Record(ns.name.clone(), db.name.clone(), rid.to_sql())
 				} else {
 					debug!(
 						"Invalid attempt to authenticate as a record without a namespace and database"

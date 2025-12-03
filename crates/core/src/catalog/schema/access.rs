@@ -2,7 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
@@ -115,7 +115,7 @@ impl InfoStructure for JwtAccess {
 		Value::from(map! {
 			"verify".to_string() => match self.verify {
 				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"url".to_string() => v.url.to_string().into(),
+					"url".to_string() => v.url.clone().into(),
 				}),
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){
@@ -212,8 +212,8 @@ impl fmt::Display for Algorithm {
 }
 
 impl ToSql for Algorithm {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, sql_fmt)
 	}
 }
 
@@ -350,8 +350,8 @@ impl InfoStructure for AccessDefinition {
 }
 
 impl ToSql for AccessDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt)
 	}
 }
 
@@ -449,7 +449,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 			alg: v.alg.into(),
 			key: match v.key {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.key.to_string(),
+				_ => v.key.to_sql(),
 			},
 		}
 	}
@@ -468,7 +468,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 		Self {
 			url: match v.url {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.url.to_string(),
+				_ => v.url.to_sql(),
 			},
 		}
 	}
@@ -489,7 +489,7 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 			alg: v.alg.into(),
 			key: match v.key {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.key.to_string(),
+				_ => v.key.to_sql(),
 			},
 		}
 	}

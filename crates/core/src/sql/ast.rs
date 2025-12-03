@@ -1,9 +1,9 @@
-use std::fmt::{self, Display};
+use std::fmt::{self};
 
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr;
-use crate::fmt::{Fmt, Pretty};
+use crate::fmt::Fmt;
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
@@ -27,24 +27,6 @@ impl Ast {
 		self.expressions.len()
 	}
 
-	pub fn get_used_namespace(&self) -> Option<String> {
-		for expr in &self.expressions {
-			if let TopLevelExpr::Use(stmt) = expr {
-				return stmt.ns.clone();
-			}
-		}
-		None
-	}
-
-	pub fn get_used_database(&self) -> Option<String> {
-		for expr in &self.expressions {
-			if let TopLevelExpr::Use(stmt) = expr {
-				return stmt.db.clone();
-			}
-		}
-		None
-	}
-
 	pub fn get_let_statements(&self) -> Vec<String> {
 		let mut let_var_names = Vec::new();
 		for expr in &self.expressions {
@@ -60,22 +42,18 @@ impl Ast {
 	}
 }
 
-impl Display for Ast {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		write!(
-			Pretty::from(f),
+impl ToSql for Ast {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(
+			f,
+			fmt,
 			"{}",
 			&Fmt::one_line_separated(
-				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
+				self.expressions
+					.iter()
+					.map(|v| Fmt::new(v, |v, f, fmt| write_sql!(f, fmt, "{v};"))),
 			),
 		)
-	}
-}
-
-impl ToSql for Ast {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
 	}
 }
 
@@ -169,17 +147,27 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 
 impl fmt::Display for TopLevelExpr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if f.alternate() {
+			write!(f, "{}", self.to_sql_pretty())
+		} else {
+			write!(f, "{}", self.to_sql())
+		}
+	}
+}
+
+impl ToSql for TopLevelExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			TopLevelExpr::Begin => write!(f, "BEGIN"),
-			TopLevelExpr::Cancel => write!(f, "CANCEL"),
-			TopLevelExpr::Commit => write!(f, "COMMIT"),
-			TopLevelExpr::Access(s) => s.fmt(f),
-			TopLevelExpr::Kill(s) => s.fmt(f),
-			TopLevelExpr::Live(s) => s.fmt(f),
-			TopLevelExpr::Option(s) => s.fmt(f),
-			TopLevelExpr::Use(s) => s.fmt(f),
-			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Expr(e) => e.fmt(f),
+			TopLevelExpr::Begin => f.push_str("BEGIN"),
+			TopLevelExpr::Cancel => f.push_str("CANCEL"),
+			TopLevelExpr::Commit => f.push_str("COMMIT"),
+			TopLevelExpr::Access(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Kill(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Live(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Option(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Use(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Expr(e) => e.fmt_sql(f, fmt),
 		}
 	}
 }

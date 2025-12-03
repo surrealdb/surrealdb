@@ -32,6 +32,7 @@ pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
@@ -50,7 +51,9 @@ use crate::ntw::RouterFactory;
 ///   - `TransactionBuilderFactory` (selects/validates the datastore backend)
 ///   - `RouterFactory` (constructs the HTTP router)
 ///   - `ConfigCheck` (validates configuration before initialization)
-pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer: C) -> ExitCode {
+pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider>(
+	composer: C,
+) -> ExitCode {
 	with_enough_stack(cli::init::<C>(composer))
 }
 
@@ -59,21 +62,26 @@ pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer
 /// runtime with a larger stack size configured via `cnf::RUNTIME_STACK_SIZE`.
 fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
 	// Start a Tokio runtime with custom configuration
-	let mut b = tokio::runtime::Builder::new_multi_thread();
-	b.enable_all()
+	let runtime = tokio::runtime::Builder::new_multi_thread()
+		.enable_all()
 		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
 		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
-		.thread_name("surrealdb-worker");
-	#[cfg(feature = "allocation-tracking")]
-	b.on_thread_stop(|| core::mem::ALLOC.stop_tracking());
-	// Build the runtime and execute the future.
-	// If runtime creation fails (e.g., insufficient system resources), log the error
-	// and return FAILURE to indicate the application cannot start.
-	match b.build() {
-		Ok(b) => b.block_on(fut),
+		.thread_name("surrealdb-worker")
+		// When a thread is parked, ensure that local memory
+		// tracking is flushed to the global tracking counter.
+		.on_thread_park(|| core::mem::ALLOC.flush_local_allocations())
+		// When a thread is shutdown, ensure that local memory
+		// tracking is flushed to the global tracking counter.
+		.on_thread_stop(|| core::mem::ALLOC.flush_local_allocations())
+		// Build the runtime
+		.build();
+	// Check the success of the runtime creation
+	match runtime {
+		Ok(r) => r.block_on(fut),
 		Err(e) => {
-			error!("Failed to build runtime: {}", e);
+			// The runtime creation failed (e.g. insufficient system resources)
+			error!("Failed to build runtime: {e}");
 			ExitCode::FAILURE
 		}
 	}

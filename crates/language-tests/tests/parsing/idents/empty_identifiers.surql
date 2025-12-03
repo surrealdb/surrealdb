@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: '', namespace: '' }"
 
 [[test.results]]
 value = "NONE"
@@ -32,10 +32,10 @@ value = "[{ ``: { ``: 1 }, id: ``:1 }]"
 value = "[{ ``: { ``: 2 }, id: ``:2 }]"
 
 [[test.results]]
-value = "[{ ``: { ``: 3 }, id: ``:⟨⟩ }]"
+value = "[{ ``: { ``: 3 }, id: ``:`` }]"
 
 [[test.results]]
-value = "[{ ``: { ``: 1 }, id: ``:1 }, { ``: { ``: 2 }, id: ``:2 }, { ``: { ``: 3 }, id: ``:⟨⟩ }]"
+value = "[{ ``: { ``: 1 }, id: ``:1 }, { ``: { ``: 2 }, id: ``:2 }, { ``: { ``: 3 }, id: ``:`` }]"
 
 */
 

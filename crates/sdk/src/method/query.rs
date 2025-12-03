@@ -114,7 +114,9 @@ where
 			let mut indexed_results = IndexedResults::new();
 
 			for (index, result) in results.into_iter().enumerate() {
-				let stats = DbResultStats::default().with_execution_time(result.time);
+				let stats = DbResultStats::default()
+					.with_execution_time(result.time)
+					.with_query_type(result.query_type);
 
 				match result.query_type {
 					QueryType::Other => {
@@ -245,8 +247,8 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
+	pub results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
+	pub live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -454,10 +456,10 @@ impl IndexedResults {
 				break;
 			}
 		}
-		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				return Err(error);
-			}
+		if let Some(key) = first_error
+			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
+		{
+			return Err(error);
 		}
 		Ok(self)
 	}

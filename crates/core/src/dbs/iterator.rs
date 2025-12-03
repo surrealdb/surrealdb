@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
@@ -318,7 +319,7 @@ impl Iterator {
 				self.ingest(Iterable::Thing(v))
 			}
 			// Check if the context is finished
-			if ctx.ctx.is_done(count % 100 == 0).await? {
+			if ctx.ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -346,7 +347,7 @@ impl Iterator {
 					..Default::default()
 				}),
 			])
-			.to_string();
+			.to_sql();
 			bail!(Error::InvalidStatementTarget {
 				value,
 			})
@@ -378,12 +379,12 @@ impl Iterator {
 		ensure!(
 			!ctx.stm.is_create(),
 			Error::InvalidStatementTarget {
-				value: v.to_string(),
+				value: v.to_sql(),
 			}
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction(ctx.ctx.tx().has_reverse_scan());
+		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
 		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
@@ -417,7 +418,7 @@ impl Iterator {
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 						v => {
 							bail!(Error::InvalidStatementTarget {
-								value: v.to_string(),
+								value: v.to_sql(),
 							})
 						}
 					}
@@ -426,7 +427,7 @@ impl Iterator {
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		}
@@ -515,7 +516,7 @@ impl Iterator {
 		rs: RecordStrategy,
 	) -> Result<Value> {
 		// Log the statement
-		trace!(target: TARGET, statement = %stm, "Iterating statement");
+		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
@@ -627,10 +628,10 @@ impl Iterator {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
-		if self.limit.is_none() {
-			if let Some(v) = stm.limit() {
-				self.limit = Some(v.process(stk, ctx, opt, None).await?);
-			}
+		if self.limit.is_none()
+			&& let Some(v) = stm.limit()
+		{
+			self.limit = Some(v.process(stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -706,12 +707,11 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
-		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
-			if let Some(qp) = ctx.get_query_planner() {
-				if qp.is_order(irf) {
-					return true;
-				}
-			}
+		if let Some(Iterable::Index(_, irf, _)) = self.entries.first()
+			&& let Some(qp) = ctx.get_query_planner()
+			&& qp.is_order(irf)
+		{
+			return true;
 		}
 		false
 	}
@@ -742,14 +742,12 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
-		if self.entries.len() == 1 {
-			if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
-				if let Some(qp) = ctx.get_query_planner() {
-					if qp.is_order(irf) {
-						return true;
-					}
-				}
-			}
+		if self.entries.len() == 1
+			&& let Some(Iterable::Index(_, irf, _)) = self.entries.first()
+			&& let Some(qp) = ctx.get_query_planner()
+			&& qp.is_order(irf)
+		{
+			return true;
 		}
 		false
 	}
@@ -775,19 +773,19 @@ impl Iterator {
 		// counter is decremented during scanning, the fact that the initial START
 		// was applied at the storage level does not change — therefore the threshold
 		// does not need to be recomputed per result.
-		if self.can_cancel_on_limit(ctx, stm) {
-			if let Some(l) = self.limit {
-				self.cancel_on_limit = Some(l);
-				if self.start_skip.is_some() {
-					// START is applied by the storage iterator. We are only collecting
-					// post-START results, so we can cancel as soon as we accepted `limit`.
-					self.cancel_threshold = Some(l as usize)
-				} else {
-					// START cannot be applied by the storage iterator. We must accumulate
-					// enough accepted results to later drop `start` of them during
-					// post-processing and still return `limit` items. Hence `start + limit`.
-					self.cancel_threshold = Some((l + self.start.unwrap_or(0)) as usize);
-				}
+		if self.can_cancel_on_limit(ctx, stm)
+			&& let Some(l) = self.limit
+		{
+			self.cancel_on_limit = Some(l);
+			if self.start_skip.is_some() {
+				// START is applied by the storage iterator. We are only collecting
+				// post-START results, so we can cancel as soon as we accepted `limit`.
+				self.cancel_threshold = Some(l as usize)
+			} else {
+				// START cannot be applied by the storage iterator. We must accumulate
+				// enough accepted results to later drop `start` of them during
+				// post-processing and still return `limit` items. Hence `start + limit`.
+				self.cancel_threshold = Some((l + self.start.unwrap_or(0)) as usize);
 			}
 		}
 	}
@@ -897,10 +895,10 @@ impl Iterator {
 	) -> Result<()> {
 		// Compute iteration limits
 		self.compute_start_limit(ctx, stm, is_specific_permission);
-		if let Some(e) = exp {
-			if self.start_skip.is_some() || self.cancel_on_limit.is_some() {
-				e.add_start_limit(self.start_skip, self.cancel_on_limit);
-			}
+		if let Some(e) = exp
+			&& (self.start_skip.is_some() || self.cancel_on_limit.is_some())
+		{
+			e.add_start_limit(self.start_skip, self.cancel_on_limit);
 		}
 		// Prevent deep recursion
 		let opt = opt.dive(4)?;
@@ -912,7 +910,7 @@ impl Iterator {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -992,10 +990,10 @@ impl Iterator {
 		// We use equality here because results are appended one-by-one; once the
 		// threshold is reached, further work would be wasted as START/LIMIT
 		// post-processing (if any) already has enough input to produce the final output.
-		if let Some(l) = self.cancel_threshold {
-			if self.results.len() == l {
-				self.run.cancel()
-			}
+		if let Some(l) = self.cancel_threshold
+			&& self.results.len() == l
+		{
+			self.run.cancel()
 		}
 	}
 }

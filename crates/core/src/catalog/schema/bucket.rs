@@ -1,6 +1,6 @@
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
@@ -49,7 +49,7 @@ impl InfoStructure for BucketDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend.to_string()),
+			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend.clone()),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})
@@ -57,7 +57,7 @@ impl InfoStructure for BucketDefinition {
 }
 
 impl ToSql for BucketDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }

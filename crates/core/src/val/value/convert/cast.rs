@@ -4,6 +4,7 @@ use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
+use surrealdb_types::ToSql;
 
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::Kind;
@@ -47,7 +48,7 @@ impl fmt::Display for CastError {
 				from,
 				into,
 			} => {
-				write!(f, "Could not cast into `{into}` using input `{from}`")
+				write!(f, "Could not cast into `{into}` using input `{from}`", from = from.to_sql())
 			}
 			CastError::ElementOf {
 				inner,
@@ -67,7 +68,8 @@ impl fmt::Display for CastError {
 			} => {
 				write!(
 					f,
-					"Casting range `{value}` to an array would create an array larger then the max allocation limit."
+					"Casting range `{value}` to an array would create an array larger then the max allocation limit.",
+					value = value.to_sql()
 				)
 			}
 		}
@@ -343,10 +345,10 @@ impl Cast for String {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Bytes(b) => match String::from_utf8(b.0) {
+			Value::Bytes(b) => match String::from_utf8(b.0.to_vec()) {
 				Ok(x) => Ok(x),
 				Err(e) => Err(CastError::InvalidKind {
-					from: Value::Bytes(Bytes(e.into_bytes())),
+					from: Value::Bytes(Bytes::from(e.into_bytes())),
 					into: "string".to_owned(),
 				}),
 			},
@@ -355,9 +357,9 @@ impl Cast for String {
 			Value::None => Ok("NONE".into()),
 			Value::String(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw()),
-			Value::Datetime(x) => Ok(x.to_raw_string()),
+			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
-			x => Ok(x.to_string()),
+			x => Ok(x.to_sql()),
 		}
 	}
 }
@@ -452,7 +454,7 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::String(s) => Ok(Bytes(s.into_bytes())),
+			Value::String(s) => Ok(Bytes::from(s.into_bytes())),
 			Value::Array(x) => {
 				// Optimization to check first if the conversion can succeed to avoid possibly
 				// cloning large values.
@@ -472,7 +474,7 @@ impl Cast for Bytes {
 					res.push(x as u8);
 				}
 
-				Ok(Bytes(res))
+				Ok(Bytes::from(res))
 			}
 			_ => Err(CastError::InvalidKind {
 				from: v,
@@ -725,11 +727,11 @@ macro_rules! impl_direct {
 	};
 
 	(@kindof $inner:ty = $kind:ident) => {
-		<$kind as HasKind>::kind().to_string()
+		<$kind as HasKind>::kind().to_sql()
 	};
 
 	(@kindof $inner:ty) => {
-		<$inner as HasKind>::kind().to_string()
+		<$inner as HasKind>::kind().to_sql()
 	};
 }
 
@@ -896,7 +898,7 @@ impl Value {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
 					return Err(CastError::InvalidKind {
 						from: self,
-						into: kind.to_string(),
+						into: kind.to_sql(),
 					});
 				};
 
@@ -923,7 +925,7 @@ impl Value {
 		} else {
 			Err(CastError::InvalidKind {
 				from: self,
-				into: literal.to_string(),
+				into: literal.to_sql(),
 			})
 		}
 	}
@@ -1034,7 +1036,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{kind}>"))
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to convert this value to ab `Array` of a certain type and length
@@ -1044,7 +1046,7 @@ impl Value {
 		if (array.len() as u64) != len {
 			return Err(CastError::InvalidLength {
 				len: array.len(),
-				into: format!("array<{kind},{len}>"),
+				into: format!("array<{},{}>", kind.to_sql(), len),
 			});
 		}
 
@@ -1052,7 +1054,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{kind}>"))
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to convert this value to an `Array` of a certain type, unique values
@@ -1063,7 +1065,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{kind}>"))?
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
 			.uniq();
 
 		Ok(array)
@@ -1078,13 +1080,13 @@ impl Value {
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{kind}>"))?
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
 			.uniq();
 
 		if (array.len() as u64) != len {
 			return Err(CastError::InvalidLength {
 				len: array.len(),
-				into: format!("set<{kind},{len}>"),
+				into: format!("set<{},{}>", kind.to_sql(), len),
 			});
 		}
 

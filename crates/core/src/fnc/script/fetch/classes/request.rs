@@ -336,13 +336,13 @@ impl<'js> FromJs<'js> for RequestInit<'js> {
 			object.get::<_, Option<Coerced<bool>>>("keep_alive")?.map(|x| x.0).unwrap_or_default();
 
 		// duplex can only be `half`
-		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex")? {
-			if x != "half" {
-				return Err(Exception::throw_type(
-					ctx,
-					&format!("unexpected request duplex `{}` expected `half`", x),
-				));
-			}
+		if let Some(Coerced(x)) = object.get::<_, Option<Coerced<String>>>("duplex")?
+			&& x != "half"
+		{
+			return Err(Exception::throw_type(
+				ctx,
+				&format!("unexpected request duplex `{}` expected `half`", x),
+			));
 		}
 
 		let headers = if let Some(hdrs) = object.get::<_, Option<Object>>("headers")? {

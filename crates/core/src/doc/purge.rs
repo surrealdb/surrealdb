@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::{Context, MutableContext};
@@ -64,15 +65,13 @@ impl Document {
 			// Get the in record id
 			let l = self.initial.doc.as_ref().pick(&*IN);
 			let Value::RecordId(ref l) = l else {
-				fail!("Expected a record id for the `in` field, found {l}");
+				fail!("Expected a record id for the `in` field, found {}", l.to_sql());
 			};
 			// Get the out record id
 			let r = self.initial.doc.as_ref().pick(&*OUT);
 			let Value::RecordId(ref r) = r else {
-				fail!("Expected a record id for the `out` field, found {r}");
+				fail!("Expected a record id for the `out` field, found {}", r.to_sql());
 			};
-			// Lock the transaction
-			let mut txn = txn.lock().await;
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Purge the left pointer edge
@@ -128,7 +127,7 @@ impl Document {
 		let range = prefix..suffix;
 
 		// Obtain a stream of keys
-		let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
+		let mut stream = txn.stream_keys(range.clone(), None, None, ScanDirection::Forward);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			yield_now!();
@@ -156,10 +155,7 @@ impl Document {
 							key: ref_key.fk.into_owned(),
 						};
 
-						bail!(Error::DeleteRejectedByReference(
-							rid.to_string(),
-							record.to_string(),
-						));
+						bail!(Error::DeleteRejectedByReference(rid.to_sql(), record.to_sql(),));
 					}
 					// Delete the remote record which referenced this record
 					ReferenceDeleteStrategy::Cascade => {
@@ -177,9 +173,7 @@ impl Document {
 						stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
 							.await
 							// Wrap any error in an error explaining what went wrong
-							.map_err(|e| {
-								Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-							})?;
+							.map_err(|e| Error::RefsUpdateFailure(rid.to_sql(), e.to_string()))?;
 					}
 					// Delete only the reference on the remote record
 					ReferenceDeleteStrategy::Unset => {
@@ -209,7 +203,8 @@ impl Document {
 								Value::None => None,
 								v => {
 									fail!(
-										"Expected either a record id, array, set or none, found {v}"
+										"Expected either a record id, array, set or none, found {}",
+										v.to_sql()
 									)
 								}
 							};
@@ -229,7 +224,7 @@ impl Document {
 									.await
 									// Wrap any error in an error explaining what went wrong
 									.map_err(|e| {
-										Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+										Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
 									})?;
 							}
 						}
@@ -264,9 +259,7 @@ impl Document {
 							.await
 							.catch_return()
 							// Wrap any error in an error explaining what went wrong
-							.map_err(|e| {
-								Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-							})?;
+							.map_err(|e| Error::RefsUpdateFailure(rid.to_sql(), e.to_string()))?;
 					}
 				}
 			}

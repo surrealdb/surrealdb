@@ -1,8 +1,8 @@
-use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -18,7 +18,6 @@ use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -148,7 +147,7 @@ impl DefineFieldStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FdAlreadyExists {
-							name: fd.name.to_string(),
+							name: fd.name.to_sql(),
 						});
 					}
 				}
@@ -281,7 +280,7 @@ impl DefineFieldStatement {
 				// Add a new subtype
 				name.0.push(Part::All);
 				// Get the field name
-				let fd = name.to_string();
+				let fd = name.to_sql();
 				// Set the subtype `DEFINE FIELD` definition
 				let key = crate::key::table::fd::new(ns, db, &definition.what, &fd);
 				let val = if let Some(existing) =
@@ -294,7 +293,7 @@ impl DefineFieldStatement {
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: definition.what.to_string(),
+						what: definition.what.clone(),
 						field_kind: Some(cur_kind),
 						..Default::default()
 					}
@@ -328,7 +327,7 @@ impl DefineFieldStatement {
 			// Ensure the field is top-level
 			ensure!(
 				definition.name.len() == 1,
-				Error::ComputedNestedField(definition.name.to_string())
+				Error::ComputedNestedField(definition.name.to_sql())
 			);
 
 			// Ensure there are no conflicting clauses
@@ -345,8 +344,8 @@ impl DefineFieldStatement {
 			for field in fields.iter() {
 				if field.name.starts_with(&definition.name) && field.name != definition.name {
 					bail!(Error::ComputedNestedFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -358,8 +357,8 @@ impl DefineFieldStatement {
 					&& field.name != definition.name
 				{
 					bail!(Error::ComputedParentFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -376,7 +375,7 @@ impl DefineFieldStatement {
 		if self.reference.is_some() {
 			ensure!(
 				definition.name.len() == 1,
-				Error::ReferenceNestedField(definition.name.to_string())
+				Error::ReferenceNestedField(definition.name.to_sql())
 			);
 
 			fn valid(kind: &Kind, outer: bool) -> bool {
@@ -407,7 +406,7 @@ impl DefineFieldStatement {
 			ensure!(
 				is_record_id,
 				Error::ReferenceTypeConflict(
-					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
 				)
 			);
 		}
@@ -426,17 +425,18 @@ impl DefineFieldStatement {
 
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
-				if definition.name.starts_with(&fd.name) && definition.name != fd.name {
-					if let Some(fd_kind) = &fd.field_kind {
-						let path = definition.name[fd.name.len()..].to_vec();
-						if !fd_kind.allows_nested_kind(&path, self_kind) {
-							bail!(Error::MismatchedFieldTypes {
-								name: definition.name.to_string(),
-								kind: self_kind.to_string(),
-								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_string(),
-							});
-						}
+				if definition.name.starts_with(&fd.name)
+					&& definition.name != fd.name
+					&& let Some(fd_kind) = &fd.field_kind
+				{
+					let path = definition.name[fd.name.len()..].to_vec();
+					if !fd_kind.allows_nested_kind(&path, self_kind) {
+						bail!(Error::MismatchedFieldTypes {
+							name: definition.name.to_sql(),
+							kind: self_kind.to_sql(),
+							existing_name: fd.name.to_sql(),
+							existing_kind: fd_kind.to_sql(),
+						});
 					}
 				}
 			}
@@ -469,7 +469,7 @@ impl DefineFieldStatement {
 			if let Some(ref kind) = self.field_kind {
 				ensure!(
 					RecordIdKeyLit::kind_supported(kind),
-					Error::IdFieldUnsupportedKind(kind.to_string())
+					Error::IdFieldUnsupportedKind(kind.to_sql())
 				);
 			}
 		}
@@ -489,7 +489,7 @@ impl DefineFieldStatement {
 			let txn = ctx.tx();
 			let Some(tb) = txn.get_tb(ns, db, &definition.what).await? else {
 				bail!(Error::TbNotFound {
-					name: definition.what.to_string(),
+					name: definition.what.clone(),
 				});
 			};
 
@@ -500,59 +500,6 @@ impl DefineFieldStatement {
 			);
 		}
 
-		Ok(())
-	}
-}
-
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?;
-			if self.flexible {
-				write!(f, " FLEXIBLE")?;
-			}
-		}
-		match self.default {
-			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
-		}
-		if self.readonly {
-			write!(f, " READONLY")?
-		}
-		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
-		}
-		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
-		}
-		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
-		}
-		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
-		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
 }

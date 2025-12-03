@@ -58,15 +58,17 @@ impl Visitor for ParamVisitor<'_> {
 		if !self.slow_log.is_param_allowed(param) {
 			return Ok(());
 		}
-		if let Some(value) = self.ctx.value(param) {
-			if !value.is_none() && !value.is_null() {
-				let value = value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-				if !self.params.is_empty() {
-					self.params.push_str(", ");
-				}
-				write!(&mut self.params, "{}={}", param, value)
-					.expect("Writing into a string cannot fail");
+		if let Some(value) = self.ctx.value(param)
+			&& !value.is_none()
+			&& !value.is_null()
+		{
+			if !self.params.is_empty() {
+				self.params.push_str(", ");
 			}
+
+			let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+			write!(&mut self.params, "{}={}", param.to_sql(), value)
+				.expect("Writing into a string cannot fail");
 		}
 		Ok(())
 	}

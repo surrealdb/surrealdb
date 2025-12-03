@@ -207,7 +207,7 @@ pub async fn rrf(
 						}
 					}
 				}
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				count += 1;
@@ -230,7 +230,7 @@ pub async fn rrf(
 				scored_docs.push(RrfDoc(score, id, objects)); // Add the new higher scoring document
 			}
 		}
-		if ctx.is_done(count % 100 == 0).await? {
+		if ctx.is_done(Some(count)).await? {
 			break;
 		}
 		count += 1;
@@ -253,7 +253,7 @@ pub async fn rrf(
 		obj.insert("id".to_string(), doc.1);
 		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
-		if ctx.is_done(count % 100 == 0).await? {
+		if ctx.is_done(Some(count)).await? {
 			break;
 		}
 		count += 1;
@@ -415,7 +415,7 @@ pub async fn linear(
 						}
 					}
 				}
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				count += 1;
@@ -499,13 +499,13 @@ pub async fn linear(
 
 		if scored_docs.len() < limit {
 			scored_docs.push(RrfDoc(combined_score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
-			if combined_score > *min_score {
-				scored_docs.pop();
-				scored_docs.push(RrfDoc(combined_score, id, objects));
-			}
+		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek()
+			&& combined_score > *min_score
+		{
+			scored_docs.pop();
+			scored_docs.push(RrfDoc(combined_score, id, objects));
 		}
-		if ctx.is_done(count % 100 == 0).await? {
+		if ctx.is_done(Some(count)).await? {
 			break;
 		}
 		count += 1;
@@ -523,7 +523,7 @@ pub async fn linear(
 		obj.insert("id".to_string(), doc.1);
 		obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
-		if ctx.is_done(count % 100 == 0).await? {
+		if ctx.is_done(Some(count)).await? {
 			break;
 		}
 		count += 1;

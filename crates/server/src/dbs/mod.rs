@@ -6,8 +6,10 @@ use anyhow::Result;
 use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use tokio::time::{Instant, sleep, timeout};
+use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
 use crate::core::dbs::Session;
@@ -65,6 +67,16 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_deny: Vec<String>,
+	#[arg(help = "The default namespace for a new instance")]
+	#[arg(env = "SURREAL_DEFAULT_NAMESPACE", long = "default-namespace")]
+	default_namespace: Option<String>,
+	#[arg(help = "The default database for a new instance")]
+	#[arg(env = "SURREAL_DEFAULT_DATABASE", long = "default-database")]
+	default_database: Option<String>,
+	#[arg(help = "Whether to disable default namespace and database creation")]
+	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
+	#[arg(default_value_t = false)]
+	no_defaults: bool,
 }
 
 #[derive(Args, Debug)]
@@ -294,10 +306,10 @@ impl DbsCapabilities {
 		// If there was a general deny for functions, we allow if there are specific
 		// allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
-			if let Some(targets) = &self.allow_funcs {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = &self.allow_funcs
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -334,10 +346,10 @@ impl DbsCapabilities {
 		// If there was a general deny for networks, we allow if there are specific
 		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
-			if let Some(targets) = &self.allow_net {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = &self.allow_net
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -374,10 +386,10 @@ impl DbsCapabilities {
 		// If there was a general deny for RPC, we allow if there are specific allows
 		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
-			if let Some(targets) = self.allow_rpc.as_ref() {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = self.allow_rpc.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -413,10 +425,10 @@ impl DbsCapabilities {
 		// If there was a general deny for HTTP, we allow if there are specific allows
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
-			if let Some(targets) = self.allow_http.as_ref() {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = self.allow_http.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -479,10 +491,10 @@ impl DbsCapabilities {
 		// Allowed functions already consider a global deny and a general deny for
 		// functions On top of what is explicitly allowed, we deny what is
 		// specifically denied
-		if let Some(targets) = &self.deny_funcs {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_funcs
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -491,10 +503,10 @@ impl DbsCapabilities {
 		// Allowed networks already consider a global deny and a general deny for
 		// networks On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		if let Some(targets) = &self.deny_net {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_net
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -506,10 +518,10 @@ impl DbsCapabilities {
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
-		if let Some(targets) = &self.deny_rpc {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_rpc
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -518,10 +530,10 @@ impl DbsCapabilities {
 		// Allowed HTTP routes already consider a global deny and a general deny for
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		if let Some(targets) = self.deny_http.as_ref() {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = self.deny_http.as_ref()
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -657,12 +669,14 @@ where
 /// # Parameters
 /// - `factory`: Transaction builder factory for datastore backend selection
 /// - `opt`: Server configuration including database path and authentication
+/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-pub async fn init<F: TransactionBuilderFactory>(
-	factory: &F,
+pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
+	composer: C,
 	opt: &Config,
+	canceller: CancellationToken,
 	StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
@@ -674,6 +688,9 @@ pub async fn init<F: TransactionBuilderFactory>(
 		slow_log_threshold,
 		slow_log_param_allow,
 		slow_log_param_deny,
+		default_namespace,
+		default_database,
+		no_defaults,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
@@ -716,7 +733,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<F>(factory, &opt.path)
+	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
 		.await?
 		.with_notifications()
 		.with_query_timeout(query_timeout)
@@ -726,7 +743,18 @@ pub async fn init<F: TransactionBuilderFactory>(
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
-	retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	let (_, is_new) =
+		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	// Create default namespace and database if not disabled
+	if is_new && !no_defaults {
+		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
+		let default_database = default_database.unwrap_or_else(|| "main".to_string());
+		// Initialise defaults
+		retry_with_timeout("initialise_defaults", || async {
+			dbs.initialise_defaults(&default_namespace, &default_database).await
+		})
+		.await?;
+	}
 	// Import file at start, if provided
 	if let Some(file) = import_file {
 		// Log the startup import path
@@ -748,7 +776,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 		.await?;
 	}
 	// Bootstrap the datastore
-	retry_with_timeout("Insert node", || async { dbs.insert_node(dbs.id()).await }).await?;
+	retry_with_timeout("Insert node", || async { dbs.insert_node().await }).await?;
 	retry_with_timeout("Expire nodes", || async { dbs.expire_nodes().await }).await?;
 	retry_with_timeout("Remove nodes", || async { dbs.remove_nodes().await }).await?;
 	// All ok

@@ -1,7 +1,7 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{Block, Expr, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,37 +16,36 @@ pub(crate) struct DefineFunctionStatement {
 	pub returns: Option<Kind>,
 }
 
-impl fmt::Display for DefineFunctionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION")?;
+impl ToSql for DefineFunctionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE FUNCTION");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " fn::{}(", &self.name)?;
+		write_sql!(f, fmt, " fn");
+		for s in self.name.split("::") {
+			write_sql!(f, fmt, "::");
+			EscapeKwFreeIdent(s).fmt_sql(f, fmt);
+		}
+		write_sql!(f, fmt, "(");
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
-				f.write_str(", ")?;
+				f.push_str(", ");
 			}
-			write!(f, "${}: {kind}", EscapeIdent(name))?;
+			write_sql!(f, fmt, "${}: {kind}", EscapeKwFreeIdent(name));
 		}
-		f.write_str(") ")?;
+		f.push_str(") ");
 		if let Some(ref v) = self.returns {
-			write!(f, "-> {v} ")?;
+			write_sql!(f, fmt, "-> {v} ");
 		}
-		Display::fmt(&self.block, f)?;
+		self.block.fmt_sql(f, fmt);
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, fmt, " COMMENT {}", v);
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		let fmt = fmt.increment();
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

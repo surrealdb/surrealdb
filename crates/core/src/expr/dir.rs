@@ -1,10 +1,19 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(
-	Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash, Encode, BorrowDecode,
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	Serialize,
+	PartialOrd,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
 )]
 pub enum Dir {
 	/// `<-`
@@ -12,21 +21,13 @@ pub enum Dir {
 	/// `->`
 	Out,
 	/// `<->`
+	#[default]
 	Both,
 }
 
-impl Default for Dir {
-	fn default() -> Self {
-		Self::Both
-	}
-}
-
-impl fmt::Display for Dir {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
-			Self::In => "<-",
-			Self::Out => "->",
-			Self::Both => "<->",
-		})
+impl ToSql for Dir {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let dir: crate::sql::Dir = self.clone().into();
+		dir.fmt_sql(f, sql_fmt);
 	}
 }

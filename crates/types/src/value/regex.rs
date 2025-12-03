@@ -7,8 +7,7 @@ use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::sql::ToSql;
-use crate::write_sql;
+use crate::sql::{SqlFormat, ToSql};
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 
@@ -84,8 +83,10 @@ impl Display for Regex {
 }
 
 impl ToSql for Regex {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push('/');
+		f.push_str(&self.0.to_string().replace('/', "\\/"));
+		f.push('/');
 	}
 }
 
@@ -140,5 +141,25 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use ::arbitrary::Arbitrary;
+
+	use super::*;
+
+	impl<'a> Arbitrary<'a> for Regex {
+		fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+			let ast = regex_syntax::ast::Ast::arbitrary(u)?;
+			let src = &ast.to_string();
+			if src.is_empty() {
+				return Err(::arbitrary::Error::IncorrectFormat);
+			}
+			let regex =
+				RegexBuilder::new(src).build().map_err(|_| ::arbitrary::Error::IncorrectFormat)?;
+			Ok(Regex(regex))
+		}
 	}
 }

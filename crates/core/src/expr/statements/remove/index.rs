@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
@@ -68,15 +66,7 @@ impl RemoveIndexStatement {
 		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &tb, &ix).await?;
 		// Delete the index data.
 		txn.del_tb_index(ns, db, &what, &name).await?;
-
 		// Refresh the table cache for indexes
-		let Some(tb) = txn.get_tb(ns, db, &what).await? else {
-			return Err(Error::TbNotFound {
-				name: what,
-			}
-			.into());
-		};
-
 		txn.put_tb(
 			ns_name,
 			db_name,
@@ -94,16 +84,5 @@ impl RemoveIndexStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE INDEX")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		Ok(())
 	}
 }

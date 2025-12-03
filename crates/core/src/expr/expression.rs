@@ -1,9 +1,8 @@
-use std::fmt;
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{RecordId, ToSql, write_sql};
+use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -12,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::closure::ClosureExpr;
-use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -24,7 +22,6 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
 use crate::types::PublicValue;
 use crate::val::{Array, Range, Table, Value};
@@ -322,10 +319,10 @@ impl Expr {
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
-				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
-				x => Idiom::field(x.to_string()),
+				Literal::Datetime(d) => Idiom::field(d.to_string()),
+				x => Idiom::field(x.to_sql()),
 			},
-			x => Idiom::field(x.to_string()),
+			x => Idiom::field(x.to_sql()),
 		}
 	}
 
@@ -502,10 +499,10 @@ impl Expr {
 					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 
-				if let Value::Object(ref x) = res {
-					if let Some(Value::Closure(x)) = x.get(name.as_str()) {
-						return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
-					}
+				if let Value::Object(ref x) = res
+					&& let Some(Value::Closure(x)) = x.get(name.as_str())
+				{
+					return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
 				};
 				fnc::idiom(stk, ctx, opt, doc, res, name, args).await.map_err(ControlFlow::Err)
 			}
@@ -716,13 +713,14 @@ impl Expr {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
 			Expr::Table(ident) => ident.clone(),
-			_ => self.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
 	// NOTE: Changes to this function also likely require changes to
 	// crate::sql::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
+	#[allow(dead_code)]
 	fn needs_parentheses(&self) -> bool {
 		match self {
 			Expr::Literal(_)
@@ -767,124 +765,16 @@ impl Expr {
 	}
 }
 
-impl fmt::Display for Expr {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		let mut f = Pretty::from(f);
-		match self {
-			Expr::Literal(literal) => write!(f, "{literal}"),
-			Expr::Param(param) => write!(f, "{param}"),
-			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write!(f, "{mock}"),
-			Expr::Block(block) => write!(f, "{block}"),
-			Expr::Constant(constant) => write!(f, "{constant}"),
-			Expr::Prefix {
-				op,
-				expr,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "{op}({expr})")
-				} else {
-					write!(f, "{op}{expr}")
-				}
-			}
-			Expr::Postfix {
-				expr,
-				op,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "({expr}){op}")
-				} else {
-					write!(f, "{expr}{op}")
-				}
-			}
-			Expr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				let op_bp = BindingPower::for_binary_operator(op);
-				let left_bp = BindingPower::for_expr(left);
-				let right_bp = BindingPower::for_expr(right);
-
-				if left.needs_parentheses()
-					|| left_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({left})")?;
-				} else {
-					write!(f, "{left}")?;
-				}
-
-				if matches!(
-					op,
-					BinaryOperator::Range
-						| BinaryOperator::RangeSkip
-						| BinaryOperator::RangeInclusive
-						| BinaryOperator::RangeSkipInclusive
-				) {
-					write!(f, "{op}")?;
-				} else {
-					write!(f, " {op} ")?;
-				}
-
-				if right.needs_parentheses()
-					|| right_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({right})")
-				} else {
-					write!(f, "{right}")
-				}
-			}
-			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
-			Expr::Closure(closure) => write!(f, "{closure}"),
-			Expr::Break => write!(f, "BREAK"),
-			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::IfElse(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
-		}
-	}
-}
-
 impl ToSql for Expr {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_expr: crate::sql::Expr = self.clone().into();
+		sql_expr.fmt_sql(f, fmt);
 	}
 }
 
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -899,7 +789,7 @@ impl SerializeRevisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
+		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }
 

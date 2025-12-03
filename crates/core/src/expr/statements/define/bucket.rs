@@ -1,10 +1,7 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::{CursorDoc, DefineKind};
-use crate::buc::{self, BucketConnectionKey};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
@@ -59,7 +56,7 @@ impl DefineBucketStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::BuAlreadyExists {
-							value: bucket.name.to_string(),
+							value: bucket.name.clone(),
 						});
 					}
 				}
@@ -81,17 +78,11 @@ impl DefineBucketStatement {
 			None
 		};
 
-		// Validate the store
-		let store = if let Some(ref backend) = backend {
-			buc::connect(backend, false, self.readonly).await?
-		} else {
-			buc::connect_global(ns, db, &name).await?
-		};
-
-		// Persist the store to cache
+		// Create and cache a new backend
 		if let Some(buckets) = ctx.get_buckets() {
-			let key = BucketConnectionKey::new(ns, db, &name);
-			buckets.insert(key, store);
+			buckets.new_backend(ns, db, &name, self.readonly, backend.as_deref()).await?;
+		} else {
+			bail!(Error::BucketUnavailable(name));
 		}
 
 		// Process the statement
@@ -109,33 +100,5 @@ impl DefineBucketStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE BUCKET")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-
-		if self.readonly {
-			write!(f, " READONLY")?;
-		}
-
-		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {backend}")?;
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
-		}
-
-		Ok(())
 	}
 }

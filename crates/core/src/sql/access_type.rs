@@ -1,10 +1,9 @@
-use std::fmt;
-use std::fmt::Display;
 use std::str::FromStr;
 
 use anyhow::Result;
 use rand::Rng;
 use rand::distributions::Alphanumeric;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Expr;
 use crate::err::Error;
@@ -52,40 +51,40 @@ impl From<crate::expr::AccessType> for AccessType {
 	}
 }
 
-impl Display for AccessType {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for AccessType {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			AccessType::Jwt(ac) => {
-				write!(f, "JWT {}", ac)?;
+				write_sql!(f, sql_fmt, "JWT {}", ac);
 			}
 			AccessType::Record(ac) => {
-				f.write_str("RECORD")?;
+				write_sql!(f, sql_fmt, "RECORD");
 				if let Some(ref v) = ac.signup {
-					write!(f, " SIGNUP {v}")?
+					write_sql!(f, sql_fmt, " SIGNUP {v}")
 				}
 				if let Some(ref v) = ac.signin {
-					write!(f, " SIGNIN {v}")?
+					write_sql!(f, sql_fmt, " SIGNIN {v}")
 				}
 				if ac.bearer.is_some() {
-					write!(f, " WITH REFRESH")?
+					write_sql!(f, sql_fmt, " WITH REFRESH")
 				}
-				write!(f, " WITH JWT {}", ac.jwt)?;
+				write_sql!(f, sql_fmt, " WITH JWT {}", ac.jwt);
 			}
 			AccessType::Bearer(ac) => {
-				write!(f, "BEARER")?;
+				write_sql!(f, sql_fmt, "BEARER");
 				match ac.subject {
-					BearerAccessSubject::User => write!(f, " FOR USER")?,
-					BearerAccessSubject::Record => write!(f, " FOR RECORD")?,
+					BearerAccessSubject::User => write_sql!(f, sql_fmt, " FOR USER"),
+					BearerAccessSubject::Record => write_sql!(f, sql_fmt, " FOR RECORD"),
 				}
 			}
 		}
-		Ok(())
 	}
 }
 
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
 			// The JWT access method cannot issue stateful grants.
@@ -98,6 +97,7 @@ impl AccessType {
 	}
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_tokens(&self) -> bool {
 		match self {
 			// The JWT access method can only issue tokens if an issuer is set
@@ -137,20 +137,19 @@ impl Default for JwtAccess {
 	}
 }
 
-impl Display for JwtAccess {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for JwtAccess {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match &self.verify {
 			JwtAccessVerify::Key(v) => {
-				write!(f, "ALGORITHM {} KEY {}", v.alg, v.key)?;
+				write_sql!(f, sql_fmt, "ALGORITHM {} KEY {}", v.alg, v.key);
 			}
 			JwtAccessVerify::Jwks(v) => {
-				write!(f, "URL {}", v.url,)?;
+				write_sql!(f, sql_fmt, "URL {}", v.url);
 			}
 		}
 		if let Some(iss) = &self.issue {
-			write!(f, " WITH ISSUER KEY {}", iss.key)?;
+			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", iss.key);
 		}
-		Ok(())
 	}
 }
 

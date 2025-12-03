@@ -42,10 +42,10 @@ impl RestClient {
 		let start = SystemTime::now();
 		while start.elapsed().unwrap().le(time_out) {
 			sleep(Duration::from_secs(2)).await;
-			if let Some(r) = self.query("INFO FOR ROOT").await {
-				if r.status() == StatusCode::OK {
-					return Some(self);
-				}
+			if let Some(r) = self.query("INFO FOR ROOT").await
+				&& r.status() == StatusCode::OK
+			{
+				return Some(self);
 			}
 			warn!("DB not yet responding");
 			sleep(Duration::from_secs(2)).await;

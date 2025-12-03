@@ -1,8 +1,8 @@
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
-use std::fmt;
 
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -36,9 +36,10 @@ pub(crate) struct Model {
 	pub version: String,
 }
 
-impl fmt::Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>", self.name, self.version)
+impl ToSql for Model {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let stmt: crate::sql::model::Model = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -126,13 +127,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await
@@ -158,13 +159,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await
@@ -192,13 +193,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await

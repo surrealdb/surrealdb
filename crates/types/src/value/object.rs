@@ -2,9 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::utils::escape::EscapeKey;
-use crate::{SurrealValue, Value, write_sql};
+use crate::sql::{SqlFormat, ToSql};
+use crate::{SurrealValue, Value};
 
 /// Represents an object with key-value pairs in SurrealDB
 ///
@@ -12,6 +11,7 @@ use crate::{SurrealValue, Value, write_sql};
 /// type. The underlying storage is a `BTreeMap<String, Value>` which maintains sorted keys.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl Object {
@@ -82,23 +82,29 @@ impl Object {
 }
 
 impl ToSql for Object {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate::sql::fmt_sql_key_value;
+
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}
 
-		f.push_str("{ ");
-
-		for (i, (k, v)) in self.iter().enumerate() {
-			write_sql!(f, "{}: ", EscapeKey(k));
-			v.fmt_sql(f);
-
-			if i < self.len() - 1 {
-				f.push_str(", ");
-			}
+		if fmt.is_pretty() {
+			f.push('{');
+		} else {
+			f.push_str("{ ");
 		}
 
-		f.push_str(" }")
+		if !self.is_empty() {
+			let inner_fmt = fmt.increment();
+			fmt_sql_key_value(self.iter(), f, inner_fmt);
+		}
+
+		if fmt.is_pretty() {
+			f.push('}');
+		} else {
+			f.push_str(" }");
+		}
 	}
 }
 

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -15,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
-use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -74,7 +72,7 @@ impl DefineIndexStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::IxAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.to_sql(),
 						});
 					}
 				}
@@ -125,11 +123,11 @@ impl DefineIndexStatement {
 			cols: cols.clone(),
 			index: self.index.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			prepare_remove: false,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
 		// Refresh the table cache
-
 		txn.put_tb(
 			ns,
 			db,
@@ -153,32 +151,6 @@ impl DefineIndexStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
-		}
-		if Index::Idx != self.index {
-			write!(f, " {}", self.index.to_sql())?;
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
-	}
-}
-
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &Context,
 	opt: &Options,
@@ -192,7 +164,9 @@ pub(in crate::expr::statements) async fn run_indexing(
 		.build(ctx, opt.clone(), tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
-		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+		rcv.await.map_err(|_| Error::IndexingBuildingCancelled {
+			reason: "Channel shutdown".to_string(),
+		})?
 	} else {
 		Ok(())
 	}

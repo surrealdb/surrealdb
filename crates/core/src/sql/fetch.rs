@@ -1,12 +1,16 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) struct Fetchs(pub(crate) Vec<Fetch>);
+pub(crate) struct Fetchs(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub(crate) Vec<Fetch>,
+);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -15,9 +19,9 @@ impl Deref for Fetchs {
 	}
 }
 
-impl fmt::Display for Fetchs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FETCH {}", Fmt::comma_separated(&self.0))
+impl ToSql for Fetchs {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "FETCH {}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -33,12 +37,11 @@ impl From<crate::expr::Fetchs> for Fetchs {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Fetch(pub(crate) Expr);
 
-impl Display for Fetch {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl ToSql for Fetch {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
 	}
 }
 

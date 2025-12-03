@@ -26,14 +26,37 @@ LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition 
     "LLVM_PROFILE_FILE",
 ] } }
 
+# --------------------------------------------------
+# Quality checks
+# --------------------------------------------------
+
+[tasks.ci-docs]
+category = "CI - CHECK"
+description = "Check documentation generation"
+command = "cargo"
+args = [
+    "doc",
+    "--no-deps",
+    "--package",
+    "surrealdb",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
+]
+
 [tasks.ci-format]
 category = "CI - CHECK"
+description = "Run code formatting checks"
 toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
-args = ["fmt", "--all", "--check"]
+args = [
+    "fmt",
+    "--all",
+    "--check",
+]
 
 [tasks.ci-check]
 category = "CI - CHECK"
+description = "Run code quality checks"
 command = "cargo"
 args = [
     "check",
@@ -47,6 +70,7 @@ args = [
 
 [tasks.ci-check-release]
 category = "CI - CHECK"
+description = "Run code quality checks (release)"
 command = "cargo"
 args = [
     "check",
@@ -60,6 +84,7 @@ args = [
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
+description = "Run code quality linting"
 command = "cargo"
 args = [
     "clippy",
@@ -77,6 +102,7 @@ args = [
 
 [tasks.ci-clippy-release]
 category = "CI - CHECK"
+description = "Run code quality linting (release)"
 command = "cargo"
 args = [
     "clippy",
@@ -100,6 +126,7 @@ args = [
 # 1. Install LLVM from Homebrew: `brew install llvm`
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
+description = "Run code quality checks (WASM)"
 command = "cargo"
 env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
 args = [
@@ -113,24 +140,13 @@ args = [
     "wasm32-unknown-unknown",
 ]
 
-[tasks.ci-docs]
-category = "CI - CHECK"
-command = "cargo"
-args = [
-    "doc",
-    "--no-deps",
-    "--package",
-    "surrealdb",
-    "--features",
-    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
-]
-
-#
+# --------------------------------------------------
 # Integration Tests
-#
+# --------------------------------------------------
 
 [tasks.ci-cli-integration]
 category = "CI - INTEGRATION TESTS"
+description = "Run CLI integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration=debug", condition = { env_not_set = [
     "RUST_LOG",
@@ -150,6 +166,7 @@ args = [
 
 [tasks.ci-http-integration]
 category = "CI - INTEGRATION TESTS"
+description = "Run HTTP integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "http_integration=debug", condition = { env_not_set = [
     "RUST_LOG",
@@ -168,7 +185,8 @@ args = [
 ]
 
 [tasks.ci-ws-integration]
-category = "WS - INTEGRATION TESTS"
+category = "CI - INTEGRATION TESTS"
+description = "Run WebSocket integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "ws_integration=debug", condition = { env_not_set = [
     "RUST_LOG",
@@ -187,7 +205,8 @@ args = [
 ]
 
 [tasks.ci-ml-integration]
-category = "ML - INTEGRATION TESTS"
+category = "CI - INTEGRATION TESTS"
+description = "Run ML integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
     "RUST_LOG",
@@ -206,7 +225,8 @@ args = [
 ]
 
 [tasks.ci-graphql-integration]
-category = "GRAPHQL - INTEGRATION TESTS"
+category = "CI - INTEGRATION TESTS"
+description = "Run GraphQL integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
     "RUST_LOG",
@@ -224,105 +244,9 @@ args = [
     "--nocapture",
 ]
 
-[tasks.ci-test-workspace]
-category = "CI - INTEGRATION TESTS"
-command = "cargo"
-args = [
-    "nextest",
-    "run",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
-    "--workspace",
-    "--",
-    "--skip",
-    "cli_integration",
-]
-
-[tasks.ci-workspace-coverage]
-category = "CI - INTEGRATION TESTS"
-command = "cargo"
-env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
-args = [
-    "llvm-cov",
-    "--lcov",
-    "--output-path",
-    "lcov.info",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
-    "--workspace",
-    # Exclude surrealism packages due to wasmtime complexity and stdin loops
-    "--exclude", "surrealism-cli",
-    "--exclude", "surrealism-runtime",
-    "--exclude", "surrealism",
-    "--exclude", "surrealism-macros",
-    "--exclude", "surrealism-types",
-    "--exclude", "demo",
-    "--no-fail-fast",
-    "--",
-    "--skip",
-    "api_integration",
-    "--skip",
-    "cli_integration",
-    "--skip",
-    "http_integration",
-    "--skip",
-    "ws_integration",
-    "--skip",
-    "ml_integration",
-    "--skip",
-    "graphql_integration",
-    "--skip",
-    "database_upgrade",
-]
-
-[tasks.test-workspace-coverage-complete]
-category = "CI - INTEGRATION TESTS"
-command = "cargo"
-env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
-args = [
-    "llvm-cov",
-    "--html",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "protocol-ws,protocol-http,kv-mem,kv-rocksdb",
-    "--workspace",
-]
-
-[tasks.ci-workspace-coverage-complete]
-env = { _START_SURREALDB_PATH = "memory" }
-category = "CI - INTEGRATION TESTS"
-run_task = { name = [
-    "start-surrealdb",
-    "test-workspace-coverage-complete",
-    "stop-surrealdb",
-], fork = true }
-
-#
-# Tests private tasks
-#
-
-[tasks.test-kvs]
-private = true
-command = "cargo"
-env = { RUST_BACKTRACE = 1 }
-args = [
-    "nextest",
-    "run",
-    "--locked",
-    "--package",
-    "surrealdb-core",
-    "--no-default-features",
-    "--features",
-    "${_TEST_FEATURES}",
-    "--lib",
-    "--",
-    "kvs::tests",
-]
+# --------------------------------------------------
+# API tests
+# --------------------------------------------------
 
 [tasks.test-api-integration]
 private = true
@@ -351,65 +275,6 @@ run_task = { name = [
     "stop-surrealdb",
 ], fork = true }
 
-#
-# Integration tests with background services
-#
-
-[tasks.ci-api-integration-http]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "http", _TEST_FEATURES = "protocol-http" }
-run_task = "ci-api-integration"
-
-[tasks.ci-api-integration-ws]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456 }
-run_task = "ci-api-integration"
-
-[tasks.ci-api-integration-any]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "any", _TEST_FEATURES = "protocol-http" }
-run_task = "ci-api-integration"
-
-#
-# Integration tests without background services
-#
-[tasks.ci-api-integration-mem]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
-[tasks.ci-api-integration-rocksdb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
-[tasks.ci-api-integration-surrealkv]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = false }
-
-[tasks.ci-api-integration-tikv]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-api-integration",
-    "stop-tikv",
-], fork = true, parallel = false }
-
-[tasks.ci-api-integration-fdb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = false }
-
 [tasks.ci-api-integration-all]
 category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
@@ -418,37 +283,120 @@ dependencies = [
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",
-    "ci-api-integration-fdb",
     "ci-api-integration-http",
     "ci-api-integration-ws",
+    "ci-api-integration-any",
 ]
 
 #
-# KVS tests
+# API tests with networked services
 #
-[tasks.ci-mem-kvs]
+
+[tasks.ci-api-integration-any]
 category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with Any engine"
+env = { _TEST_API_ENGINE = "any", _TEST_FEATURES = "protocol-http" }
+run_task = "ci-api-integration"
+
+[tasks.ci-api-integration-http]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the HTTP engine"
+env = { _TEST_API_ENGINE = "http", _TEST_FEATURES = "protocol-http" }
+run_task = "ci-api-integration"
+
+[tasks.ci-api-integration-ws]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the WebSocket engine"
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
+run_task = "ci-api-integration"
+
+#
+# API tests with embedded services
+#
+
+[tasks.ci-api-integration-mem]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the in-memory engine"
+env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
+run_task = { name = [
+    "test-api-integration",
+], fork = true, parallel = true }
+
+[tasks.ci-api-integration-rocksdb]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the RocksDB engine"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
+run_task = { name = [
+    "test-api-integration",
+], fork = true, parallel = true }
+
+[tasks.ci-api-integration-surrealkv]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the SurrealKV engine"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+run_task = { name = [
+    "test-api-integration",
+], fork = true, parallel = false }
+
+[tasks.ci-api-integration-tikv]
+category = "CI - INTEGRATION TESTS"
+description = "Run API integration tests with the TiKV engine"
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-api-integration",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+# --------------------------------------------------
+# KVS tests
+# --------------------------------------------------
+
+[tasks.test-kvs]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-core",
+    "--no-default-features",
+    "--features",
+    "${_TEST_FEATURES}",
+    "--lib",
+    "--",
+    "kvs::tests",
+]
+
+[tasks.ci-kvs-mem]
+category = "CI - INTEGRATION TESTS"
+description = "Run KVS integration tests with the in-memory engine"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = true }
 
-[tasks.ci-rocksdb-kvs]
+[tasks.ci-kvs-rocksdb]
 category = "CI - INTEGRATION TESTS"
+description = "Run KVS integration tests with the RocksDB engine"
 env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = true }
 
-[tasks.ci-surrealkv-kvs]
+[tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
+description = "Run KVS integration tests with the SurrealKV engine"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = false }
 
-[tasks.ci-tikv-kvs]
+[tasks.ci-kvs-tikv]
 category = "CI - INTEGRATION TESTS"
+description = "Run KVS integration tests with the TiKV engine"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
 run_task = { name = [
     "start-tikv",
@@ -456,17 +404,12 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-fdb-kvs]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
-run_task = { name = [
-    "test-kvs",
-], fork = true, parallel = false }
-
-#
+# --------------------------------------------------
 # Language tests
-#
+# --------------------------------------------------
+
 [tasks.test-lang]
+private = true
 category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with specified engine"
 script = """
@@ -477,49 +420,12 @@ script = """
     else
         cargo build
     fi
-    if [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
-        ./target/debug/surrealql-test --color always run --no-wip -j 1 --backend ${_TEST_API_ENGINE}
+    if [ "${_TEST_API_ENGINE}" = "surrealkv" ] || [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
+        ./target/debug/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
     else
-        ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+        ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend ${_TEST_API_ENGINE}
     fi
 """
-
-[tasks.ci-lang-test-mem]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = true }
-
-[tasks.ci-lang-test-rocksdb]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = true }
-
-[tasks.ci-lang-test-surrealkv]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = false }
-
-[tasks.ci-lang-test-tikv]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
-run_task = { name = [
-    "start-tikv",
-    "test-lang",
-    "stop-tikv",
-], fork = true, parallel = false }
-
-[tasks.ci-lang-test-fdb]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "foundation", _TEST_LANG_FEATURES = "backend-foundation" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = false }
 
 [tasks.ci-lang-test-all]
 category = "CI - LANGUAGE TESTS"
@@ -529,18 +435,157 @@ dependencies = [
     "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
     "ci-lang-test-tikv",
-    "ci-lang-test-fdb",
 ]
 
-#
+[tasks.ci-lang-test-mem]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with the in-memory engine"
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with the RocksDB engine"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with the SurrealKV engine"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-tikv]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with the TiKV engine"
+env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-lang",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+# --------------------------------------------------
+# Workspace tests
+# --------------------------------------------------
+
+[tasks.ci-workspace-test]
+category = "CI - WORKSPACE TESTS"
+description = "Run workspace library tests"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "--workspace",
+    "--",
+    "--skip", "api_integration",
+    "--skip", "cli_integration",
+    "--skip", "http_integration",
+    "--skip", "ws_integration",
+    "--skip", "ml_integration",
+    "--skip", "graphql_integration",
+    "--skip", "database_upgrade",
+]
+
+# --------------------------------------------------
+# Workspace tests
+# --------------------------------------------------
+
+[tasks.ci-workspace-full]
+category = "CI - WORKSPACE TESTS"
+description = "Run full workspace tests"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "--workspace",
+]
+
+[tasks.ci-workspace-full-with-server]
+env = { _START_SURREALDB_PATH = "memory" }
+category = "CI - WORKSPACE TESTS"
+description = "Run full workspace tests, with a local SurrealDB server"
+run_task = { name = [
+    "start-surrealdb",
+    "ci-workspace-full",
+    "stop-surrealdb",
+], fork = true }
+
+# --------------------------------------------------
+# Coverage checks
+# --------------------------------------------------
+
+[tasks.ci-workspace-coverage]
+category = "CI - WORKSPACE TESTS"
+description = "Run full workspace tests with code coverage"
+command = "cargo"
+env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
+args = [
+    "llvm-cov",
+    "nextest",
+    "--lcov",
+    "--output-path",
+    "lcov.info",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "--workspace",
+    # Exclude surrealism packages due to wasmtime complexity and stdin loops
+    "--exclude", "surrealism-cli",
+    "--exclude", "surrealism-runtime",
+    "--exclude", "surrealism",
+    "--exclude", "surrealism-macros",
+    "--exclude", "surrealism-types",
+    "--exclude", "demo",
+]
+
+[tasks.ci-workspace-coverage-with-server]
+env = { _START_SURREALDB_PATH = "memory" }
+category = "CI - WORKSPACE TESTS"
+description = "Run full workspace tests with code coverage, and a local SurrealDB server"
+run_task = { name = [
+    "start-surrealdb",
+    "ci-workspace-coverage",
+    "stop-surrealdb",
+], fork = true }
+
+# --------------------------------------------------
 # Services
-#
+# --------------------------------------------------
+
+[tasks.build-surrealdb]
+category = "CI - BUILD"
+private = true
+command = "cargo"
+args = [
+    "build",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "storage-mem",
+]
+
 [tasks.start-surrealdb]
 category = "CI - SERVICES"
+description = "Start a local SurrealDB server"
 dependencies = ["build-surrealdb"]
 script = """
     #!/bin/bash -ex
-
 
     target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
@@ -560,7 +605,9 @@ script = """
 
 [tasks.stop-surrealdb]
 category = "CI - SERVICES"
+description = "Stop the local SurrealDB server"
 script = """
+    #!/bin/bash -ex
     kill $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
     sleep 5
     kill -9 $(cat /tmp/surreal-${_TEST_API_ENGINE}.pid) || true
@@ -568,6 +615,7 @@ script = """
 
 [tasks.start-tikv]
 category = "CI - SERVICES"
+description = "Start a local TiKV playground"
 script = """
     #!/bin/bash -ex
 
@@ -603,6 +651,7 @@ script = """
 
 [tasks.stop-tikv]
 category = "CI - SERVICES"
+description = "Stop the local TiKV playground"
 script = """
     #!/bin/bash -ex
 
@@ -630,39 +679,13 @@ script = """
     exit 1
 """
 
-[tasks.clear-fdb]
-category = "CI - SERVICES"
-command = "fdbcli"
-args = [
-    "-C",
-    "/etc/foundationdb/fdb.cluster",
-    "--exec",
-    "writemode on; clearrange \"\" \\xFF",
-    "--timeout",
-    "20",
-]
-
-#
-# Builds
-#
-
-[tasks.build-surrealdb]
-category = "CI - BUILD"
-command = "cargo"
-args = [
-    "build",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "storage-mem",
-]
-
-#
-# Benchmarks - Common
-#
+# --------------------------------------------------
+# Benchmarks
+# --------------------------------------------------
 
 [tasks.ci-bench]
 category = "CI - BENCHMARK"
+description = "Run SurrealDB benchmarks"
 command = "cargo"
 args = [
     "bench",
@@ -675,13 +698,9 @@ args = [
     "${@}",
 ]
 
-#
-# Benchmarks - SDB - Per Target
-#
-
 [tasks.bench-target]
 private = true
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
 command = "cargo"
 args = [
     "bench",
@@ -696,54 +715,50 @@ args = [
 ]
 
 [tasks.bench-lib-mem]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run library benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "lib-mem" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-lib-rocksdb]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run library benchmarks with the RocksDB engine"
 env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-lib-surrealkv]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run library benchmarks with the SurrealKV engine"
 env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-mem]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run SDK benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-rocksdb]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run SDK benchmarks with the RocksDB engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-surrealkv]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run SDK benchmarks with the SurrealKV engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
 run_task = { name = ["bench-target"] }
 
 [tasks.bench-sdk-ws]
-category = "CI - BENCHMARK - SurrealDB Target"
+category = "CI - BENCHMARK"
+description = "Run SDK benchmarks with the WebSocket engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
 run_task = { name = ["bench-target"] }
 
-#
-# Comprehensive CI check - runs all required checks for PR merge
-#
-
-[tasks.ci-sdk-tests]
-category = "CI - INTEGRATION TESTS"
-dependencies = [
-    "ci-api-integration-mem",
-    "ci-api-integration-any",
-    "ci-api-integration-http",
-    "ci-api-integration-ws",
-]
-
-
+# --------------------------------------------------
+# Run all required checks for PR merge
+# --------------------------------------------------
 
 [tasks.ci-sdk-build]
 category = "CI - INTEGRATION TESTS"
@@ -761,50 +776,36 @@ script = """
 
 [tasks.ci-all-required]
 category = "CI - ALL REQUIRED CHECKS"
-description = "Run all required CI checks that must pass for PR merge (excludes tikv/fdb which require external services)"
+description = "Run almost all required CI checks that must pass for PR merge"
 dependencies = [
     # Code quality checks
     "ci-format",
     "ci-clippy",
-    "ci-clippy-release",
     "ci-check",
-    "ci-check-release",
     "ci-check-wasm",
     "ci-docs",
+    # Workspace tests
+    "ci-workspace-test",
     # Integration tests
     "ci-cli-integration",
     "ci-http-integration",
     "ci-ws-integration",
     "ci-ml-integration",
-    # Workspace tests (use ci-test-workspace instead of ci-workspace-coverage to skip coverage overhead)
-    "ci-test-workspace",
-    # KVS tests (local engines only - tikv/fdb require external services)
-    "ci-mem-kvs",
-    "ci-rocksdb-kvs",
-    "ci-surrealkv-kvs",
+    # KVS tests
+    "ci-kvs-mem",
+    "ci-kvs-rocksdb",
+    "ci-kvs-surrealkv",
     # SDK build tests
     "ci-sdk-build",
-    # SDK tests (local engines only - tikv/fdb require external services)
+    # SDK tests
     "ci-api-integration-mem",
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-http",
     "ci-api-integration-ws",
     "ci-api-integration-any",
+    # Language tests
+    "ci-lang-test-mem",
+    "ci-lang-test-rocksdb",
+    "ci-lang-test-surrealkv",
 ]
-
-[tasks.ci-all-required-with-lang]
-category = "CI - ALL REQUIRED CHECKS"
-description = "Run all required CI checks including SurrealQL language tests"
-script = """
-    #!/bin/bash -e
-
-    # Run all standard required checks
-    cargo make ci-all-required
-
-    # Run SurrealQL language tests
-    echo "Running SurrealQL language tests..."
-    cd crates/language-tests
-    cargo build
-    ./target/debug/surrealql-test --color always run --no-wip -j 3
-"""

@@ -8,6 +8,7 @@ use crate::sql::access_type::{
 };
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
+use crate::sql::field::Selector;
 use crate::sql::filter::Filter;
 use crate::sql::index::FullTextParams;
 use crate::sql::language::Language;
@@ -147,7 +148,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					value: Expr::Literal(Literal::Integer(4)),
 				},
 			])),
-			output: Some(Output::Fields(Fields::Value(Box::new(Field::Single {
+			output: Some(Output::Fields(Fields::Value(Box::new(Selector {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
@@ -265,10 +266,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
-				expr: Fields::Select(vec![Field::Single {
+				expr: Fields::Select(vec![Field::Single(Selector {
 					expr: ident_field("foo"),
 					alias: None,
-				}]),
+				})]),
 				what: vec!["bar".to_owned()],
 				cond: None,
 				group: Some(Groups(vec![Group(Idiom(vec![Part::Field("foo".to_owned())]))])),
@@ -412,10 +413,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
-					expr: Fields::Select(vec![Field::Single {
+					expr: Fields::Select(vec![Field::Single(Selector {
 						expr: ident_field("foo"),
 						alias: None,
-					}]),
+					})]),
 					what: vec![Expr::Table("bar".to_string())],
 					omit: vec![],
 					only: false,
@@ -438,14 +439,14 @@ fn statements() -> Vec<TopLevelExpr> {
 			},
 			block: Block(vec![Expr::Break]),
 		}))),
-		TopLevelExpr::Expr(Expr::If(Box::new(IfelseStatement {
+		TopLevelExpr::Expr(Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![
 				(ident_field("foo"), ident_field("bar")),
 				(ident_field("faz"), ident_field("baz")),
 			],
 			close: Some(ident_field("baq")),
 		}))),
-		TopLevelExpr::Expr(Expr::If(Box::new(IfelseStatement {
+		TopLevelExpr::Expr(Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![
 				(ident_field("foo"), Expr::Block(Box::new(Block(vec![ident_field("bar")])))),
 				(ident_field("faz"), Expr::Block(Box::new(Block(vec![ident_field("baz")])))),
@@ -461,21 +462,21 @@ fn statements() -> Vec<TopLevelExpr> {
 		)))),
 		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![
-				Field::Single {
+				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
-				},
-				Field::Single {
+				}),
+				Field::Single(Selector {
 					expr: Expr::Literal(Literal::Array(vec![
 						Expr::Literal(Literal::Integer(1)),
 						Expr::Literal(Literal::Integer(2)),
 					])),
 					alias: None,
-				},
-				Field::Single {
+				}),
+				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: None,
-				},
+				}),
 			]),
 			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
 			only: true,

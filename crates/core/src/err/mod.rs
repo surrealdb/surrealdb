@@ -14,6 +14,7 @@ use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use storekey::DecodeError;
+use surrealdb_types::ToSql;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
@@ -23,9 +24,9 @@ use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, RecordId, Value};
-use crate::vs::VersionStampError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
@@ -40,42 +41,9 @@ pub(crate) enum Error {
 	#[error("An error occurred: {0}")]
 	Thrown(String),
 
-	/// There was a problem with the underlying datastore
-	#[error("There was a problem with the underlying datastore: {0}")]
-	Ds(String),
-
-	/// There was a problem with a datastore transaction
-	#[error("There was a problem with a datastore transaction: {0}")]
-	Tx(String),
-
-	/// The transaction was already cancelled or committed
-	#[error("Couldn't update a finished transaction")]
-	TxFinished,
-
-	/// The current transaction was created as read-only
-	#[error("Couldn't write to a read only transaction")]
-	TxReadonly,
-
-	#[cfg(feature = "kv-rocksdb")]
-	/// The datastore is read-and-deletion-only due to disk saturation
-	#[error(
-		"The datastore is in read-and-deletion-only mode due to disk space limitations. Only read and delete operations are allowed. Deleting data will free up space and automatically restore normal operations when usage drops below the threshold"
-	)]
-	DbReadAndDeleteOnly,
-
-	/// The conditional value in the request was not equal
-	#[error("Value being checked was not correct")]
-	TxConditionNotMet,
-
-	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists")]
-	TxKeyAlreadyExists,
-
-	/// There was a transaction error that can be retried
-	#[error(
-		"Failed to commit transaction due to a read or write conflict ({0}). This transaction can be retried"
-	)]
-	TxRetryable(String),
+	/// An error originating from the KVS (Key-Value Store) layer
+	#[error("There was a problem with the key-value store: {0}")]
+	Kvs(#[from] KvsError),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -90,13 +58,13 @@ pub(crate) enum Error {
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a CONTENT clause")]
+	#[error("Cannot use {} in a CONTENT clause", value.to_sql())]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a MERGE clause")]
+	#[error("Cannot use {} in a MERGE clause", value.to_sql())]
 	InvalidMerge {
 		value: Value,
 	},
@@ -131,7 +99,7 @@ pub(crate) enum Error {
 	},
 
 	/// The FETCH clause accepts idioms, strings and fields.
-	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	#[error("Found {} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields", value.to_sql())]
 	InvalidFetch {
 		value: Expr,
 	},
@@ -502,13 +470,13 @@ pub(crate) enum Error {
 	},
 
 	/// A database entry for the specified record already exists
-	#[error("Database record `{record}` already exists")]
+	#[error("Database record `{record}` already exists", record = record.to_sql())]
 	RecordExists {
 		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`", record = record.to_sql())]
 	IndexExists {
 		record: RecordId,
 		index: String,
@@ -525,7 +493,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}",
+		field = field.to_sql()
 	)]
 	FieldValue {
 		record: String,
@@ -558,7 +527,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly",
+		field = field.to_sql()
 	)]
 	FieldReadonly {
 		record: String,
@@ -566,7 +536,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
-	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	#[error("Found field '{field}', but no such field exists for table '{table}'", field = field.to_sql())]
 	FieldUndefined {
 		table: String,
 		field: Idiom,
@@ -717,9 +687,6 @@ pub(crate) enum Error {
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
-
-	#[error("Versionstamp in key is corrupted: {0}")]
-	CorruptedVersionstampInKey(#[from] VersionStampError),
 
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
@@ -912,9 +879,11 @@ pub(crate) enum Error {
 		name: String,
 	},
 
-	/// A database index entry for the specified table is already building
-	#[error("Index building has been cancelled")]
-	IndexingBuildingCancelled,
+	/// A the index building has been cancelled
+	#[error("Index building has been cancelled: {reason}")]
+	IndexingBuildingCancelled {
+		reason: String,
+	},
 
 	/// The token has expired
 	#[error("The token has expired")]
@@ -924,7 +893,7 @@ pub(crate) enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
-	/// The supplied type could not be serialiazed into `expr::Value`
+	/// The supplied type could not be serialized into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
@@ -1049,10 +1018,6 @@ pub(crate) enum Error {
 	#[doc(hidden)]
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
-
-	#[doc(hidden)]
-	#[error("The underlying datastore does not support reversed scans")]
-	UnsupportedReversedScans,
 
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]
@@ -1258,87 +1223,6 @@ impl From<InvalidHeaderValue> for Error {
 impl From<ToStrError> for Error {
 	fn from(error: ToStrError) -> Self {
 		Error::Unreachable(error.to_string())
-	}
-}
-
-#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		let s = e.to_string();
-		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable(s),
-			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable(s),
-			_ => Error::Tx(s),
-		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		let s = e.to_string();
-		match e.kind() {
-			rocksdb::ErrorKind::Busy => Error::TxRetryable(s),
-			rocksdb::ErrorKind::TryAgain => Error::TxRetryable(s),
-			_ => Error::Tx(s),
-		}
-	}
-}
-
-#[cfg(feature = "kv-indxdb")]
-impl From<indxdb::err::Error> for Error {
-	fn from(e: indxdb::err::Error) -> Error {
-		match e {
-			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
-	}
-}
-
-#[cfg(feature = "kv-tikv")]
-impl From<tikv::Error> for Error {
-	fn from(e: tikv::Error) -> Error {
-		let s = e.to_string();
-		match e {
-			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable(s),
-			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => {
-				Error::Tx("Transaction key too large".to_string())
-			}
-			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => {
-				Error::Tx("Transaction too large".to_string())
-			}
-			_ => Error::Tx(s),
-		}
-	}
-}
-
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::FdbError> for Error {
-	fn from(e: foundationdb::FdbError) -> Error {
-		let s = e.to_string();
-		if e.is_retryable() {
-			return Error::TxRetryable(s);
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable(s);
-		}
-		Error::Ds(s)
-	}
-}
-
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::TransactionCommitError> for Error {
-	fn from(e: foundationdb::TransactionCommitError) -> Error {
-		let s = e.to_string();
-		if e.is_retryable() {
-			return Error::TxRetryable(s);
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable(s);
-		}
-		Error::Tx(s)
 	}
 }
 

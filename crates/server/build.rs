@@ -5,7 +5,6 @@ fn main() {
 	}
 	if cfg!(any(
 		feature = "storage-mem",
-		feature = "storage-fdb",
 		feature = "storage-tikv",
 		feature = "storage-rocksdb",
 		feature = "storage-surrealkv",

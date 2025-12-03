@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupSubject;
@@ -80,7 +81,7 @@ impl Parser<'_> {
 					if token.kind == t!("$param") {
 						let param = self.next_token_value::<Param>()?;
 						bail!("Unexpected token `$param` expected a record-id key",
-							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident,param);
+							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident, param.to_sql());
 					}
 
 					// we haven't matched anything so far so we still want any type of id.
@@ -168,14 +169,6 @@ impl Parser<'_> {
 		} else {
 			Ok(None)
 		}
-	}
-
-	pub(crate) async fn parse_record_id_with_range(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<RecordIdLit> {
-		let ident = self.parse_ident()?;
-		self.parse_record_id_or_range(stk, ident).await
 	}
 
 	pub(crate) async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
@@ -369,7 +362,7 @@ mod tests {
 		let sql = "test:id";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -384,7 +377,7 @@ mod tests {
 		let sql = "test:001";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -459,7 +452,7 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -473,7 +466,7 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -488,7 +481,7 @@ mod tests {
 		let sql = "`test`:`id`";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -503,7 +496,7 @@ mod tests {
 		let sql = "⟨test⟩:⟨id⟩";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -518,7 +511,7 @@ mod tests {
 		let sql = "test:{ location: 'GBR', year: 2022 }";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -542,7 +535,7 @@ mod tests {
 		let sql = "test:['GBR', 2022]";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {

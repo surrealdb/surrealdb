@@ -13,25 +13,25 @@ use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
-use crate::expr::statements::OptionStatement;
+use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
-use crate::sql::{self, Ast};
 use crate::types::PublicNotification;
 use crate::val::{Value, convert_value_to_public_value};
-use crate::{err, expr};
+use crate::{err, expr, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -117,10 +117,63 @@ impl Executor {
 		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
-				// Avoid moving in and out of the context via Arc::get_mut
+				let opt_ref = self.opt.clone();
+
+				let (use_ns, use_db) = match stmt {
+					UseStatement::Default => {
+						if let Some(x) = txn.get_default_config().await? {
+							(x.namespace.clone(), x.database.clone())
+						} else {
+							(None, None)
+						}
+					}
+					UseStatement::Ns(ns) => {
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), None)
+					}
+					UseStatement::Db(db) => {
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
+
+						(None, Some(db))
+					}
+					UseStatement::NsDb(ns, db) => {
+						let ns = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
+							})
+							.finish()
+							.await?;
+
+						let db = self
+							.stack
+							.enter(|stk| {
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), Some(db))
+					}
+				};
+
 				let ctx = ctx_mut!();
 
-				if let Some(ns) = stmt.ns {
+				// Apply new namespace
+				if let Some(ns) = use_ns {
 					txn.get_or_add_ns(Some(ctx), &ns).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
@@ -128,7 +181,9 @@ impl Executor {
 					session.put(NS.as_ref(), ns.into());
 					ctx.add_value("session", session.into());
 				}
-				if let Some(db) = stmt.db {
+
+				// Apply new database
+				if let Some(db) = use_db {
 					let Some(ns) = &self.opt.ns else {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"Cannot use database without namespace"
@@ -142,7 +197,12 @@ impl Executor {
 					session.put(DB.as_ref(), db.into());
 					ctx.add_value("session", session.into());
 				}
-				Ok(Value::None)
+
+				// Return the current namespace and database
+				Ok(Value::from(map! {
+					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+					"database".to_string() => self.opt.db.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+				}))
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -166,7 +226,7 @@ impl Executor {
 					Some(kind) => res
 						.coerce_to_kind(kind)
 						.map_err(|e| Error::SetCoerce {
-							name: stm.name.to_string(),
+							name: stm.name.clone(),
 							error: Box::new(e),
 						})
 						.map_err(anyhow::Error::new)?,
@@ -294,25 +354,15 @@ impl Executor {
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
-				let mut lock = txn.lock().await;
-
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
 				if let TransactionType::Read = transaction_type {
-					let _ = lock.cancel().await;
+					let _ = txn.cancel().await;
 					return Ok(value);
 				}
 
-				if let Err(e) = lock.complete_changes(false).await {
-					let _ = lock.cancel().await;
-
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
-				}
-
-				if let Err(e) = lock.commit().await {
+				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -436,7 +486,7 @@ impl Executor {
 				continue;
 			}
 
-			trace!(target: TARGET, statement = %stmt, "Executing statement");
+			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
 
 			let query_type = match stmt {
 				TopLevelExpr::Live(_) => QueryType::Live,
@@ -452,9 +502,10 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(
-							"The query was not executed due to a failed transaction".to_string(),
-						));
+						res.result = Err(DbResultError::QueryNotExecuted(format!(
+							"The query was not executed due to a failed transaction: {}",
+							stmt.to_sql()
+						)));
 					}
 
 					self.results.push(QueryResult {
@@ -477,10 +528,10 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(
-								"The query was not executed due to a failed transaction"
-									.to_string(),
-							)),
+							result: Err(DbResultError::QueryNotExecuted(format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt.to_sql()
+							))),
 							query_type: QueryType::Other,
 						});
 					}
@@ -509,14 +560,9 @@ impl Executor {
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
-					let mut lock = txn.lock().await;
-
-					// complete_changes and then commit.
-					// If either error undo results.
-					let e = if let Err(e) = lock.complete_changes(false).await {
-						let _ = lock.cancel().await;
-						e
-					} else if let Err(e) = lock.commit().await {
+					// Commit the transaction.
+					// If error undo results.
+					let e = if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.
@@ -611,12 +657,12 @@ impl Executor {
 									}
 
 									self.results.push(QueryResult {
-									time: Duration::ZERO,
-									result: Err(DbResultError::QueryNotExecuted(
-										"The query was not executed due to a cancelled transaction".to_string(),
-									)),
-									query_type: QueryType::Other,
-								});
+										time: Duration::ZERO,
+										result: Err(DbResultError::QueryNotExecuted(
+												"The query was not executed due to a cancelled transaction".to_string(),
+										)),
+										query_type: QueryType::Other,
+									});
 								}
 
 								// ran out of statements before the transaction ended.
@@ -654,18 +700,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute(
-		kvs: &Datastore,
-		ctx: Context,
-		opt: Options,
-		qry: Ast,
-	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
-		Self::execute_stream(kvs, ctx, opt, false, stream).await
-	}
-
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_plan(
+	pub(crate) async fn execute_plan(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
@@ -677,7 +712,7 @@ impl Executor {
 
 	/// Execute a logical plan with an existing transaction
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_plan_with_transaction(
+	pub(crate) async fn execute_plan_with_transaction(
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,
@@ -718,7 +753,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_stream<S>(
+	pub(crate) async fn execute_stream<S>(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
@@ -739,7 +774,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_expr_stream<S>(
+	pub(crate) async fn execute_expr_stream<S>(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,

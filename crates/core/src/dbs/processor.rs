@@ -59,12 +59,11 @@ impl Iterable {
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
 			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _) => {
-				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
-					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(tb) {
-							return exe.has_bruteforce_knn();
-						}
-					}
+				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage()
+					&& let Some(qp) = ctx.get_query_planner()
+					&& let Some(exe) = qp.get_query_executor(tb)
+				{
+					return exe.has_bruteforce_knn();
 				}
 			}
 			_ => {}
@@ -518,18 +517,18 @@ pub(super) trait Collector {
 	fn iterator(&mut self) -> &mut Iterator;
 
 	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
-		if let Some(qp) = ctx.get_query_planner() {
-			if let Some(exe) = qp.get_query_executor(table) {
-				// Optimize executor lookup:
-				// - Attach the table-specific QueryExecutor to the Context once, so subsequent
-				//   per-record processing doesn’t need to search the QueryPlanner’s internal map on
-				//   every document.
-				// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
-				//   tight iteration loops.
-				let mut ctx = MutableContext::new(ctx);
-				ctx.set_query_executor(exe.clone());
-				return Cow::Owned(ctx.freeze());
-			}
+		if let Some(qp) = ctx.get_query_planner()
+			&& let Some(exe) = qp.get_query_executor(table)
+		{
+			// Optimize executor lookup:
+			// - Attach the table-specific QueryExecutor to the Context once, so subsequent
+			//   per-record processing doesn’t need to search the QueryPlanner’s internal map on
+			//   every document.
+			// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
+			//   tight iteration loops.
+			let mut ctx = MutableContext::new(ctx);
+			ctx.set_query_executor(exe.clone());
+			return Cow::Owned(ctx.freeze());
 		}
 		Cow::Borrowed(ctx)
 	}
@@ -540,7 +539,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		iterable: Iterable,
 	) -> Result<()> {
-		if ctx.is_ok(true).await? {
+		if !ctx.is_done(None).await? {
 			match iterable {
 				Iterable::Value(v) => {
 					if !v.is_nullish() {
@@ -579,16 +578,16 @@ pub(super) trait Collector {
 					}
 				}
 				Iterable::Index(v, irf, rs) => {
-					if let Some(qp) = ctx.get_query_planner() {
-						if let Some(exe) = qp.get_query_executor(v.as_str()) {
-							// Attach the table-specific QueryExecutor to the Context to avoid
-							// per-record lookups in the QueryPlanner during index scans.
-							// This significantly reduces overhead inside tight iterator loops.
-							let mut ctx = MutableContext::new(ctx);
-							ctx.set_query_executor(exe.clone());
-							let ctx = ctx.freeze();
-							return self.collect_index_items(&ctx, opt, irf, rs).await;
-						}
+					if let Some(qp) = ctx.get_query_planner()
+						&& let Some(exe) = qp.get_query_executor(v.as_str())
+					{
+						// Attach the table-specific QueryExecutor to the Context to avoid
+						// per-record lookups in the QueryPlanner during index scans.
+						// This significantly reduces overhead inside tight iterator loops.
+						let mut ctx = MutableContext::new(ctx);
+						ctx.set_query_executor(exe.clone());
+						let ctx = ctx.freeze();
+						return self.collect_index_items(&ctx, opt, irf, rs).await;
 					}
 					self.collect_index_items(ctx, opt, irf, rs).await?
 				}
@@ -612,7 +611,7 @@ pub(super) trait Collector {
 	async fn start_skip(
 		&mut self,
 		ctx: &Context,
-		txn: &Transaction,
+		opt: &Options,
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
@@ -621,7 +620,7 @@ pub(super) trait Collector {
 		//
 		// This method avoids fully materializing or processing records prior to the
 		// requested offset by streaming only keys from the underlying KV store. It
-		// updates the iterator’s internal skipped counter and returns a narrowed
+		// updates the iterator's internal skipped counter and returns a narrowed
 		// range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
@@ -629,12 +628,14 @@ pub(super) trait Collector {
 			// There is nothing to skip, we return the original range.
 			return Ok(Some(rng));
 		}
+		// Get the transaction
+		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), Some(skippable), sc);
+		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		while let Some(res) = stream.next().await {
-			if ctx.is_done(skipped % 100 == 0).await? {
+			if ctx.is_done(Some(skipped)).await? {
 				break;
 			}
 			last_key = res?;
@@ -652,7 +653,6 @@ pub(super) trait Collector {
 				last_key.push(0xFF);
 				rng.start = last_key;
 			}
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => {
 				rng.end = last_key;
 			}
@@ -679,19 +679,19 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(r) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			r
 		} else {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, sc);
 
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -723,7 +723,7 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -731,12 +731,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -812,7 +812,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -820,12 +820,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, None, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -853,7 +853,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -861,12 +861,12 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			// Parse the data from the store
@@ -952,12 +952,13 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end, None, None, ScanDirection::Forward);
+			let mut stream =
+				txn.stream_keys_vals(beg..end, opt.version, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
 				// Check if the context is finished
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				// Parse the key from the result
@@ -1014,16 +1015,16 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
-			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0).await? {
+			for (count, record) in records.into_iter().enumerate() {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
-				self.collect(Collected::IndexItemKey(r)).await?;
+				self.collect(Collected::IndexItemKey(record)).await?;
 			}
 		}
 		Ok(())
@@ -1036,16 +1037,16 @@ pub(super) trait Collector {
 		mut iterator: ThingIterator,
 	) -> Result<()> {
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
 				break;
 			}
-			for (c, r) in records.into_iter().enumerate() {
-				if ctx.is_done(c % 100 == 0).await? {
+			for (count, record) in records.into_iter().enumerate() {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
-				self.collect(Collected::IndexItem(r)).await?;
+				self.collect(Collected::IndexItem(record)).await?;
 			}
 		}
 		Ok(())
@@ -1059,7 +1060,7 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let mut total_count = 0;
 		let fetch_size = self.max_fetch_size();
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			let count = iterator.next_count(ctx, txn, fetch_size).await?;
 			if count == 0 {
 				break;

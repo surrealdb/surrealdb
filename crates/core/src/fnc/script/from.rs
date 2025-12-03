@@ -4,15 +4,7 @@ use js::{Coerced, Ctx, Error, Exception, FromAtom, FromJs};
 use rust_decimal::Decimal;
 
 use super::classes;
-use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
-
-fn check_nul(s: &str) -> Result<(), Error> {
-	if s.contains('\0') {
-		Err(Error::InvalidString(std::ffi::CString::new(s).expect_err("string contains nul")))
-	} else {
-		Ok(())
-	}
-}
+use crate::val::{Array, Bytes, Datetime, Geometry, Object, Value};
 
 impl<'js> FromJs<'js> for Value {
 	fn from_js(ctx: &Ctx<'js>, val: js::Value<'js>) -> Result<Self, Error> {
@@ -59,10 +51,6 @@ impl<'js> FromJs<'js> for Value {
 				if let Some(v) = v.as_class::<classes::record::Record>() {
 					let borrow = v.borrow();
 					let v: &classes::record::Record = &borrow;
-					check_nul(&v.value.table)?;
-					if let RecordIdKey::String(s) = &v.value.key {
-						check_nul(s)?;
-					}
 					return Ok(v.value.clone().into());
 				}
 				// Check to see if this object is a duration
@@ -99,7 +87,7 @@ impl<'js> FromJs<'js> for Value {
 						));
 					};
 
-					return Ok(Value::Bytes(Bytes(data.to_vec())));
+					return Ok(Value::Bytes(Bytes::from(data.to_vec())));
 				}
 
 				// Check to see if this object is a date
@@ -134,7 +122,6 @@ impl<'js> FromJs<'js> for Value {
 				for i in v.props() {
 					let (k, v) = i?;
 					let k = String::from_atom(k)?;
-					check_nul(&k)?;
 					let v = Value::from_js(ctx, v)?;
 					x.insert(k, v);
 				}

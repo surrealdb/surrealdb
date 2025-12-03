@@ -2,6 +2,7 @@ use std::collections::btree_map::Entry;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -45,9 +46,9 @@ impl Value {
 			}
 
 			match p {
-				Part::Lookup(g) => {
+				Part::Lookup(lookup) => {
 					match place {
-						Value::Object(obj) => match obj.entry(g.to_raw()) {
+						Value::Object(obj) => match obj.entry(lookup.to_sql()) {
 							Entry::Vacant(x) => {
 								let v = x.insert(Value::None);
 								return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
@@ -102,7 +103,7 @@ impl Value {
 						Value::Object(obj) => {
 							let v = match v {
 								Value::String(x) => x.as_str().to_owned(),
-								x => x.to_string(),
+								x => x.to_sql(),
 							};
 
 							match obj.entry(v) {
@@ -253,15 +254,15 @@ impl Value {
 	) -> Result<()> {
 		for p in path.iter().rev() {
 			let name = match p {
-				Part::Lookup(x) => x.to_raw(),
+				Part::Lookup(x) => x.to_sql(),
 				Part::Field(f) => f.as_str().to_owned(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::String(x) => x,
-						Value::RecordId(x) => x.to_string(),
-						Value::Number(x) => x.to_string(),
-						Value::Range(x) => x.to_string(),
+						Value::RecordId(x) => x.to_sql(),
+						Value::Number(x) => x.to_sql(),
+						Value::Range(x) => x.to_sql(),
 						_ => return Ok(()),
 					}
 				}

@@ -3,7 +3,7 @@ use std::fmt;
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Algorithm {
 	EdDSA,
 	Es256,
@@ -11,6 +11,7 @@ pub enum Algorithm {
 	Es512,
 	Hs256,
 	Hs384,
+	#[default]
 	Hs512,
 	Ps256,
 	Ps384,
@@ -44,12 +45,6 @@ impl From<Algorithm> for jsonwebtoken::Algorithm {
 			Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
 			Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
 		}
-	}
-}
-
-impl Default for Algorithm {
-	fn default() -> Self {
-		Self::Hs512
 	}
 }
 

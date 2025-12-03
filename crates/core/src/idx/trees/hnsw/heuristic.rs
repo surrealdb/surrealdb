@@ -136,10 +136,11 @@ impl Heuristic {
 		for (_, e_id) in c.to_vec().into_iter() {
 			if let Some(e_conn) = layer.get_edges(&e_id) {
 				for &e_adj in e_conn.iter() {
-					if e_adj != q_id && ex.insert(e_adj) {
-						if let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await? {
-							ext.push((d, e_adj));
-						}
+					if e_adj != q_id
+						&& ex.insert(e_adj)
+						&& let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await?
+					{
+						ext.push((d, e_adj));
 					}
 				}
 			} else {
@@ -201,10 +202,10 @@ impl Heuristic {
 	{
 		if let Some(current_vec) = elements.get_vector(tx, &e_id).await? {
 			for r_id in r.iter() {
-				if let Some(r_dist) = elements.get_distance(tx, &current_vec, r_id).await? {
-					if e_dist > r_dist {
-						return Ok(false);
-					}
+				if let Some(r_dist) = elements.get_distance(tx, &current_vec, r_id).await?
+					&& e_dist > r_dist
+				{
+					return Ok(false);
 				}
 			}
 			r.insert(e_id);

@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -63,13 +62,13 @@ impl RelateStatement {
 								Some(v) => out.push(v),
 								_ => {
 									bail!(Error::RelateStatementIn {
-										value: v.to_string(),
+										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
 								bail!(Error::RelateStatementIn {
-									value: v.to_string(),
+									value: v.to_sql(),
 								})
 							}
 						}
@@ -79,13 +78,13 @@ impl RelateStatement {
 					Some(v) => out.push(v),
 					None => {
 						bail!(Error::RelateStatementIn {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
 					bail!(Error::RelateStatementIn {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			};
@@ -105,13 +104,13 @@ impl RelateStatement {
 								Some(v) => out.push(v),
 								None => {
 									bail!(Error::RelateStatementId {
-										value: v.to_string(),
+										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
 								bail!(Error::RelateStatementId {
-									value: v.to_string(),
+									value: v.to_sql(),
 								})
 							}
 						}
@@ -121,13 +120,13 @@ impl RelateStatement {
 					Some(v) => out.push(v),
 					None => {
 						bail!(Error::RelateStatementId {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
 					bail!(Error::RelateStatementId {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			};
@@ -171,32 +170,6 @@ impl RelateStatement {
 	}
 }
 
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
-		if self.uniq {
-			f.write_str(" UNIQUE")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RelateThrough {
 	RecordId(RecordId),
@@ -220,7 +193,7 @@ impl TryFrom<Value> for RelateThrough {
 			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
 			Value::Table(table) => Ok(RelateThrough::Table(table.into_string())),
 			_ => bail!(Error::RelateStatementOut {
-				value: value.to_string()
+				value: value.to_sql()
 			}),
 		}
 	}

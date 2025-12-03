@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use revision::revisioned;
-use surrealdb_types::{SurrealValue, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
@@ -41,14 +41,14 @@ impl ApiDefinition {
 		let mut specificity = 0;
 		let mut res = None;
 		for api in definitions.iter() {
-			if let Some(params) = api.path.fit(segments.as_slice()) {
-				if api.fallback.is_some() || api.actions.iter().any(|x| x.methods.contains(&method))
-				{
-					let s = api.path.specificity();
-					if s > specificity {
-						specificity = s;
-						res = Some((api, params));
-					}
+			if let Some(params) = api.path.fit(segments.as_slice())
+				&& (api.fallback.is_some()
+					|| api.actions.iter().any(|x| x.methods.contains(&method)))
+			{
+				let s = api.path.specificity();
+				if s > specificity {
+					specificity = s;
+					res = Some((api, params));
 				}
 			}
 		}
@@ -72,8 +72,8 @@ impl ApiDefinition {
 }
 
 impl ToSql for ApiDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -122,6 +122,12 @@ impl Display for ApiMethod {
 	}
 }
 
+impl ToSql for ApiMethod {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, fmt)
+	}
+}
+
 impl InfoStructure for ApiMethod {
 	fn structure(self) -> Value {
 		Value::from(self.to_string())
@@ -152,7 +158,7 @@ impl InfoStructure for ApiActionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
-			"action" => Value::from(self.action.to_string()),
+			"action" => Value::from(self.action.to_sql()),
 			"config" => self.config.structure(),
 		))
 	}
@@ -189,7 +195,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::String(x.to_string()))
+								.map(|x| Value::String(x.to_sql()))
 								.collect();
 
 							(m.name.clone(), Value::Array(Array(value)))
@@ -201,25 +207,23 @@ impl InfoStructure for ApiConfigDefinition {
 	}
 }
 
-impl Display for ApiConfigDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "API")?;
-
+impl ToSql for ApiConfigDefinition {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("API");
 		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
+			write_sql!(f, fmt, " MIDDLEWARE ");
+			write_sql!(
 				f,
+				fmt,
 				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
+				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| {
+					let args = Fmt::pretty_comma_separated(m.args.iter()).to_sql();
+					format!("{}({})", m.name, args)
+				}))
+			);
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

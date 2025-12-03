@@ -1,11 +1,11 @@
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
 use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -13,12 +13,13 @@ use crate::doc::CursorDoc;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, FlowResult, Part, Value};
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
+use crate::expr::{FlowResult, Part, Value};
+use crate::fmt::EscapeKwFreeIdent;
 
 pub mod recursion;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[allow(dead_code)]
 pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -33,18 +34,6 @@ impl IntoIterator for Idioms {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
-	}
-}
-
-impl Display for Idioms {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
-	}
-}
-
-impl InfoStructure for Idioms {
-	fn structure(self) -> Value {
-		self.to_string().into()
 	}
 }
 
@@ -106,7 +95,7 @@ impl Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => {
-				write!(&mut s, "{}", EscapeKwFreeIdent(v)).expect("writing to string")
+				write!(&mut s, "{}", EscapeKwFreeIdent(v).to_sql()).expect("writing to string")
 			}
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
@@ -177,29 +166,10 @@ impl From<Vec<Part>> for Idiom {
 	}
 }
 
-impl Display for Idiom {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut iter = self.0.iter();
-		match iter.next() {
-			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
-			Some(Part::Start(x)) => match x {
-				Expr::Block(_)
-				| Expr::Literal(_)
-				| Expr::Table(_)
-				| Expr::Mock(_)
-				| Expr::Constant(_)
-				| Expr::Param(_) => x.fmt(f)?,
-				_ => {
-					write!(f, "({x})")?;
-				}
-			},
-			Some(x) => x.fmt(f)?,
-			None => {}
-		};
-		for p in iter {
-			p.fmt(f)?;
-		}
-		Ok(())
+impl ToSql for Idiom {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_idiom: crate::sql::Idiom = self.clone().into();
+		sql_idiom.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -247,7 +217,7 @@ impl DeserializeRevisioned for Idiom {
 
 impl InfoStructure for Idiom {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -339,7 +309,7 @@ mod tests {
 	#[case(Idiom::from(vec![Part::Field("nested".to_string()), Part::Field("nested".to_string()), Part::Field("value".to_string())]), "nested.nested.value")]
 	#[case(Idiom::from(vec![Part::Field("value".to_string())]), "`value`")]
 	fn test_idiom_to_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
-		assert_eq!(idiom.to_string(), expected.to_string());
+		assert_eq!(idiom.to_sql(), expected.to_string());
 	}
 
 	#[rstest]

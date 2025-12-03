@@ -1,0 +1,41 @@
+use arbitrary::{Arbitrary, Unstructured};
+
+pub fn atleast_one<'a, T: Arbitrary<'a>>(
+	u: &mut arbitrary::Unstructured<'a>,
+) -> arbitrary::Result<Vec<T>> {
+	let mut res = vec![u.arbitrary()?];
+
+	res.reserve_exact(u.arbitrary_len::<T>()?);
+	for _ in 1..res.capacity() {
+		res.push(u.arbitrary()?)
+	}
+	Ok(res)
+}
+
+pub fn arb_vec1<'a, R, F>(
+	u: &mut arbitrary::Unstructured<'a>,
+	mut f: F,
+) -> arbitrary::Result<Vec<R>>
+where
+	R: Arbitrary<'a>,
+	F: FnMut(&mut Unstructured<'a>) -> arbitrary::Result<R>,
+{
+	let mut res = vec![f(u)?];
+	res.reserve_exact(u.arbitrary_len::<R>()?);
+	for _ in 1..res.capacity() {
+		res.push(f(u)?);
+	}
+	Ok(res)
+}
+
+pub fn arb_opt<'a, R, F>(u: &mut arbitrary::Unstructured<'a>, f: F) -> arbitrary::Result<Option<R>>
+where
+	R: Arbitrary<'a>,
+	F: FnOnce(&mut Unstructured<'a>) -> arbitrary::Result<R>,
+{
+	if u.arbitrary()? {
+		Ok(Some(f(u)?))
+	} else {
+		Ok(None)
+	}
+}

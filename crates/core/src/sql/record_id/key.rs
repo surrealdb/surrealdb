@@ -1,7 +1,8 @@
-use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::{EscapeKey, EscapeRid, Fmt};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -101,7 +102,7 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.clone()),
 			crate::expr::RecordIdKeyLit::Uuid(uuid) => {
 				RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0))
 			}
@@ -117,53 +118,56 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	}
 }
 
-impl Display for RecordIdKeyLit {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for RecordIdKeyLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(v) => Display::fmt(v, f),
+			Self::Number(v) => f.push_str(&v.to_string()),
+			Self::String(v) => write_sql!(f, fmt, "{}", EscapeRid(v)),
+			Self::Uuid(v) => v.fmt_sql(f, fmt),
 			Self::Array(v) => {
-				let mut f = Pretty::from(f);
-				f.write_char('[')?;
+				f.push('[');
 				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(v.iter()))?;
-					drop(indent);
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v.iter()));
 				}
-				f.write_char(']')
+				f.push(']');
 			}
 			Self::Object(v) => {
-				let mut f = Pretty::from(f);
-				if is_pretty() {
-					f.write_char('{')?;
+				if fmt.is_pretty() {
+					f.push('{');
 				} else {
-					f.write_str("{ ")?;
+					f.push_str("{ ");
 				}
 				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(
+					let fmt = fmt.increment();
+					write_sql!(
 						f,
+						fmt,
 						"{}",
 						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
 							args,
-							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), &entry.value)
+							|entry, f, fmt| write_sql!(
+								f,
+								fmt,
+								"{}: {}",
+								EscapeKey(&entry.key),
+								&entry.value
+							)
 						)),)
-					)?;
-					drop(indent);
+					);
 				}
-				if is_pretty() {
-					f.write_char('}')
+				if fmt.is_pretty() {
+					f.push('}');
 				} else {
-					f.write_str(" }")
+					f.push_str(" }");
 				}
 			}
 			Self::Generate(v) => match v {
-				RecordIdKeyGen::Rand => Display::fmt("rand()", f),
-				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
-				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
+				RecordIdKeyGen::Rand => f.push_str("rand()"),
+				RecordIdKeyGen::Ulid => f.push_str("ulid()"),
+				RecordIdKeyGen::Uuid => f.push_str("uuid()"),
 			},
-			Self::Range(v) => Display::fmt(v, f),
+			Self::Range(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

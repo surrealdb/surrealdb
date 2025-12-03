@@ -1,8 +1,8 @@
-use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
@@ -10,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
@@ -55,7 +54,7 @@ impl AlterSequenceStatement {
 				sq.timeout = Some(timeout);
 			}
 		}
-		// Set the table definition
+		// Set the sequence definition
 		let key = Sq::new(ns, db, &self.name);
 		txn.set(&key, &sq, None).await?;
 		// Clear the cache
@@ -65,22 +64,9 @@ impl AlterSequenceStatement {
 	}
 }
 
-impl Display for AlterSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER SEQUENCE")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
-		if let Some(ref timeout) = self.timeout {
-			write!(f, " TIMEOUT {timeout}")?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		Ok(())
+impl ToSql for AlterSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::alter::AlterSequenceStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

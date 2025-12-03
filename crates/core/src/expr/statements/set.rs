@@ -1,7 +1,5 @@
-use std::fmt;
-
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -9,7 +7,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
-use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SetStatement {
@@ -63,7 +60,7 @@ impl SetStatement {
 			Some(kind) => result
 				.coerce_to_kind(kind)
 				.map_err(|e| Error::SetCoerce {
-					name: self.name.to_string(),
+					name: self.name.clone(),
 					error: Box::new(e),
 				})
 				.map_err(anyhow::Error::new)?,
@@ -77,33 +74,25 @@ impl SetStatement {
 	}
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
-		if let Some(ref kind) = self.kind {
-			write!(f, ": {}", kind)?;
-		}
-		write!(f, " = {}", self.what)?;
-		Ok(())
-	}
-}
-
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::SetStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use crate::syn;
 
 	#[test]
 	fn check_type() {
 		let query = syn::expr("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5");
+		assert_eq!(query.to_sql(), "LET $param = 5");
 
 		let query = syn::expr("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5");
+		assert_eq!(query.to_sql(), "LET $param: number = 5");
 	}
 }
