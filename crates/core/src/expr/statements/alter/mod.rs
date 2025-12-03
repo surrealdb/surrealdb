@@ -102,7 +102,7 @@ impl AlterStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::System(v) => v.compute(ctx, opt).await,
+			Self::System(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Namespace(v) => v.compute(ctx, opt).await,
 			Self::Database(v) => v.compute(ctx, opt).await,
 			Self::Table(v) => v.compute(ctx, opt).await,

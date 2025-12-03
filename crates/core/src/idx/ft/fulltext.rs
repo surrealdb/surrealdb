@@ -947,6 +947,7 @@ mod tests {
 
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
+	use crate::cnf::dynamic::DynamicConfiguration;
 	use crate::ctx::{Context, MutableContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -984,7 +985,7 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::default();
+			let opts = Options::new(DynamicConfiguration::default());
 			let stk_ctx = ctx.clone();
 			let az = stack
 				.enter(|stk| async move {
@@ -1031,7 +1032,7 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
-			let opt = Options::default()
+			let opt = Options::new(DynamicConfiguration::default())
 				.with_id(nid)
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));

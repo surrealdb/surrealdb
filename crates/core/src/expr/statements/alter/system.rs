@@ -1,7 +1,9 @@
+use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Timeout};
 use crate::iam::{Action, ResourceKind};
@@ -15,12 +17,28 @@ pub(crate) struct AlterSystemStatement {
 }
 
 impl AlterSystemStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> anyhow::Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> anyhow::Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Any, &Base::Root)?;
 		// Are we doing compaction?
 		if self.compact {
 			ctx.tx().compact::<Key>(None).await?;
+		}
+		match &self.query_timeout {
+			AlterKind::None => {}
+			AlterKind::Set(timeout) => {
+				let timeout = timeout.compute(stk, ctx, opt, doc).await?.0;
+				opt.dynamic_configuration().set_query_timeout(Some(timeout));
+			}
+			AlterKind::Drop => {
+				opt.dynamic_configuration().set_query_timeout(None);
+			}
 		}
 		Ok(Value::None)
 	}
