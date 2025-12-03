@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use revision::revisioned;
 
 use crate::catalog::TableDefinition;
+use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -44,8 +45,52 @@ pub struct TableMutations(pub String, pub Vec<TableMutation>);
 impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
+	/// Create a new table mutations
 	pub fn new(tb: String) -> Self {
 		Self(tb, Vec::new())
+	}
+	/// Push a table change to the table mutations
+	pub fn push_table_change(&mut self, dt: TableDefinition) {
+		// Push the table change to the entry
+		self.1.push(TableMutation::Def(dt));
+	}
+
+	/// Push a mutation to the table mutations (record change)
+	pub fn push_record_change(
+		&mut self,
+		id: RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
+		store_difference: bool,
+	) {
+		// Check if this is a delete operation
+		if current.as_ref().is_nullish() {
+			// Push the delete mutation to the entry
+			self.1.push(match store_difference {
+				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+				false => TableMutation::Del(id),
+			});
+		} else {
+			// Push the set mutation to the entry
+			self.1.push(match store_difference {
+				true => {
+					if previous.as_ref().is_none() {
+						TableMutation::Set(id, current.into_owned())
+					} else {
+						// We intentionally record the patches in reverse (current -> previous)
+						// because we cannot otherwise resolve operations such as "replace" and
+						// "remove".
+						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
+						TableMutation::SetWithDiff(
+							id,
+							current.into_owned(),
+							patches_to_create_previous,
+						)
+					}
+				}
+				false => TableMutation::Set(id, current.into_owned()),
+			});
+		}
 	}
 }
 

@@ -2,7 +2,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::cf::{TableMutation, TableMutations};
+use crate::cf::TableMutations;
 use crate::doc::CursorRecord;
 use crate::kvs::KVValue;
 use crate::val::RecordId;
@@ -50,8 +50,8 @@ impl Writer {
 				tb: tb.to_string(),
 			})
 			.or_insert_with(|| TableMutations::new(tb.to_string()));
-		// Push the define table mutation to the entry
-		entry.1.push(TableMutation::Def(dt.to_owned()));
+		// Push the table change to the entry
+		entry.push_table_change(dt.to_owned());
 	}
 
 	/// Record a record modification or deletion
@@ -75,34 +75,8 @@ impl Writer {
 				tb: tb.to_string(),
 			})
 			.or_insert_with(|| TableMutations::new(tb.to_string()));
-		// Check if this is a delete operation
-		if current.as_ref().is_nullish() {
-			// Push the delete mutation to the entry
-			entry.1.push(match store_difference {
-				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
-				false => TableMutation::Del(id),
-			});
-		} else {
-			// Push the set mutation to the entry
-			entry.1.push(match store_difference {
-				true => {
-					if previous.as_ref().is_none() {
-						TableMutation::Set(id, current.into_owned())
-					} else {
-						// We intentionally record the patches in reverse (current -> previous)
-						// because we cannot otherwise resolve operations such as "replace" and
-						// "remove".
-						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
-						TableMutation::SetWithDiff(
-							id,
-							current.into_owned(),
-							patches_to_create_previous,
-						)
-					}
-				}
-				false => TableMutation::Set(id, current.into_owned()),
-			});
-		}
+		// Push the record change to the entry
+		entry.push_record_change(id, previous, current, store_difference);
 	}
 
 	// get returns all the mutations buffered for this transaction.
