@@ -1,19 +1,23 @@
 #![cfg(feature = "kv-rocksdb")]
 
+mod background_flusher;
 mod cnf;
-mod dsm;
+mod commit_coordinator;
+mod disk_space_manager;
+mod memory_manager;
 
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::thread;
-use std::time::Duration;
 
-use dsm::{DiskSpaceManager, DiskSpaceState, TransactionState};
+use background_flusher::BackgroundFlusher;
+use commit_coordinator::CommitCoordinator;
+use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
+use memory_manager::MemoryManager;
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
+	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use tokio::sync::Mutex;
 
@@ -27,8 +31,14 @@ const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Memory manager for managing memory usage
+	memory_manager: Arc<MemoryManager>,
 	/// Disk space manager for monitoring space usage and enforcing space limits
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
+	/// Commit coordinator for batching transaction commits when sync is enabled
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Background flusher for periodically flushing WAL to disk
+	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
 
 pub struct Transaction {
@@ -43,7 +53,9 @@ pub struct Transaction {
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
+	/// Commit coordinator for batching transaction commits when sync writes are enabled
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
@@ -62,6 +74,10 @@ impl Datastore {
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
+		// Default to WAL flush on every commit
+		opts.set_manual_wal_flush(false);
+		// Set incremental asynchronous bytes per sync to 2MiB
+		opts.set_wal_bytes_per_sync(2 * 1024 * 1024);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
@@ -74,21 +90,12 @@ impl Datastore {
 		// Set the number of log files to keep
 		info!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
-		// Set the maximum number of write buffers
-		info!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
-		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
-		// Set the amount of data to build up in memory
-		info!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
-		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the target file size for compaction
 		info!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Set the levelled target file size multipler
 		info!(target: TARGET, "Target file size compaction multiplier: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
 		opts.set_target_file_size_multiplier(*cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
-		// Set minimum number of write buffers to merge
-		info!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
-		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		// Delay compaction until the minimum number of files accumulate
 		info!(target: TARGET, "Number of files to trigger compaction: {}", *cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
 		opts.set_level_zero_file_num_compaction_trigger(*cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
@@ -110,28 +117,31 @@ impl Datastore {
 		// Additional blob file options
 		info!(target: TARGET, "Target blob file size: {}", *cnf::ROCKSDB_BLOB_FILE_SIZE);
 		opts.set_blob_file_size(*cnf::ROCKSDB_BLOB_FILE_SIZE);
+		// Set the blob compression type
 		if let Some(c) = cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.as_ref() {
 			info!(target: TARGET, "Blob compression type: {c}");
-			opts.set_blob_compression_type(match c.as_str() {
+			opts.set_blob_compression_type(match c.to_ascii_lowercase().as_str() {
 				"none" => DBCompressionType::None,
 				"snappy" => DBCompressionType::Snappy,
 				"lz4" => DBCompressionType::Lz4,
 				"zstd" => DBCompressionType::Zstd,
-				l => {
-					return Err(Error::Datastore(format!("Invalid compression type: {l}")));
+				c => {
+					return Err(Error::Datastore(format!("Invalid compression type: {c}")));
 				}
 			});
 		}
+		// Whether to enable blob garbage collection
 		info!(target: TARGET, "Enable blob garbage collection: {}", *cnf::ROCKSDB_ENABLE_BLOB_GC);
 		opts.set_enable_blob_gc(*cnf::ROCKSDB_ENABLE_BLOB_GC);
+		// Set the blob garbage collection age cutoff
 		info!(target: TARGET, "Blob GC age cutoff: {}", *cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
 		opts.set_blob_gc_age_cutoff(*cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
+		// Set the blob garbage collection force threshold
 		info!(target: TARGET, "Blob GC force threshold: {}", *cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
 		opts.set_blob_gc_force_threshold(*cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
+		// Set the blob compaction readahead size
 		info!(target: TARGET, "Blob compaction readahead size: {}", *cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE);
-		opts.set_blob_compaction_readahead_size(
-			(*cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE) as u64,
-		);
+		opts.set_blob_compaction_readahead_size(*cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE);
 		// Set the write-ahead-log size limit in MB
 		info!(target: TARGET, "Write-ahead-log file size limit: {}MB", *cnf::ROCKSDB_WAL_SIZE_LIMIT);
 		opts.set_wal_size_limit_mb(*cnf::ROCKSDB_WAL_SIZE_LIMIT);
@@ -146,27 +156,6 @@ impl Datastore {
 		opts.set_enable_write_thread_adaptive_yield(true);
 		// Log if writes should be synced
 		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
-		// Set the block cache size in bytes
-		info!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		// Configure the in-memory cache options
-		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		// Configure the block based file options
-		let mut block_opts = BlockBasedOptions::default();
-		block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
-		block_opts.set_pin_top_level_index_and_filter(true);
-		block_opts.set_bloom_filter(10.0, false);
-		block_opts.set_block_size(*cnf::ROCKSDB_BLOCK_SIZE);
-		block_opts.set_block_cache(&cache);
-		// Configure the database with the cache
-		opts.set_block_based_table_factory(&block_opts);
-		opts.set_blob_cache(&cache);
-		opts.set_row_cache(&cache);
-		// Configure memory-mapped reads
-		info!(target: TARGET, "Enable memory-mapped reads: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
-		opts.set_allow_mmap_reads(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
-		// Configure memory-mapped writes
-		info!(target: TARGET, "Enable memory-mapped writes: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
-		opts.set_allow_mmap_writes(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -209,67 +198,56 @@ impl Datastore {
 				)));
 			}
 		});
-		// Configure SST file manager for disk space monitoring and management.
-		// The SST file manager tracks SST file sizes in real-time. When the configured
-		// space limit is reached, the application transitions to read-and-deletion-only mode.
-		let disk_space_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-			Some(DiskSpaceManager::new(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
+		// Configure and create the memory manager
+		let memory_manager = Arc::new(MemoryManager::configure(&mut opts)?);
+		// Pre-configure the disk space manager
+		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
+		// Pre-configure the background flusher
+		let should_create_background_flusher = BackgroundFlusher::configure(&mut opts)?;
+		// Pre-configure the commit coordinator
+		let should_create_commit_coordinator = CommitCoordinator::configure(&mut opts)?;
+		// Create the disk space manager if enabled
+		let disk_space_manager = if should_create_disk_space_manager {
+			Some(Arc::new(DiskSpaceManager::new(&mut opts)?))
 		} else {
 			None
 		};
 		// Open the database
-		let db = Self::open(opts.clone(), path).await?;
+		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
+		// Create the background flusher if enabled
+		let background_flusher = if should_create_background_flusher {
+			Some(Arc::new(BackgroundFlusher::new(db.clone())?))
+		} else {
+			None
+		};
+		// Create the commit coordinator if enabled
+		let commit_coordinator = if should_create_commit_coordinator {
+			Some(Arc::new(CommitCoordinator::new(db.clone())?))
+		} else {
+			None
+		};
+		// Register the memory manager with the global allocator tracker
+		memory_manager.register_with_allocator_tracker();
 		// Return the datastore
 		Ok(Datastore {
 			db,
+			memory_manager,
 			disk_space_manager,
+			background_flusher,
+			commit_coordinator,
 		})
-	}
-
-	/// Open database with normal configuration
-	async fn open(mut opts: Options, path: &str) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
-		if !*cnf::ROCKSDB_BACKGROUND_FLUSH {
-			// Background flush is disabled which
-			// means that the WAL will be flushed
-			// whenever a transaction is committed.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: disabled");
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(false);
-			// Create the optimistic datastore
-			Ok(Arc::pin(OptimisticTransactionDB::open(&opts, path)?))
-		} else {
-			// Background flush is enabled so we
-			// spawn a background worker thread to
-			// flush the WAL to disk periodically.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(true);
-			// Create the optimistic datastore
-			let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-			// Clone the database reference
-			let dbc = db.clone();
-			// Create a new background thread
-			thread::spawn(move || {
-				loop {
-					// Get the specified flush interval
-					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-					// Wait for the specified interval
-					thread::sleep(Duration::from_millis(wait));
-					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
-						error!("Failed to flush WAL: {err}");
-					}
-				}
-			});
-			// Return the datastore
-			Ok(db)
-		}
 	}
 
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
+		// Wait for the background flusher to finish
+		if let Some(background_flusher) = &self.background_flusher {
+			background_flusher.shutdown()?;
+		}
+		// Wait for the commit coordinator to finish
+		if let Some(commit_coordinator) = &self.commit_coordinator {
+			commit_coordinator.shutdown()?;
+		}
 		// Create new flush options
 		let mut opts = FlushOptions::default();
 		// Wait for the sync to finish
@@ -282,6 +260,8 @@ impl Datastore {
 		if let Err(e) = self.db.flush_opt(&opts) {
 			error!("An error occurred flushing memtables to SST files: {e}");
 		}
+		// Shutdown the memory manager
+		self.memory_manager.shutdown()?;
 		// All good
 		Ok(())
 	}
@@ -293,13 +273,18 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		wo.set_sync(*cnf::SYNC_DATA);
+		// If the user has enabled synced transaction writes and disabled grouped commit,
+		// we enable per-transaction sync. This means that the transaction commits are written
+		// to WAL on commit, and are then flushed to disk before the transaction is considered
+		// completed. In the event of a system crash, data will not be lost after a transaction
+		// has been confirmed to be committed.
+		wo.set_sync(*cnf::SYNC_DATA && !*cnf::ROCKSDB_GROUPED_COMMIT);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
-		// SAFETY: The transaction lifetime is tied to the database through the _db field.
+		// SAFETY: The transaction lifetime is tied to the database through the db field.
 		// The database is guaranteed to outlive the transaction because:
 		// 1. The transaction holds a Pin<Arc<OptimisticTransactionDB>> reference
-		// 2. The transaction struct ensures _db is dropped after inner
+		// 2. The transaction struct ensures db is dropped after inner
 		// 3. The Pin ensures the database isn't moved or dropped while referenced
 		let inner = unsafe {
 			std::mem::transmute::<
@@ -320,6 +305,7 @@ impl Datastore {
 			read_options: ro,
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
+			commit_coordinator: self.commit_coordinator.clone(),
 			db: self.db.clone(),
 		}))
 	}
@@ -430,8 +416,12 @@ impl Transactable for Transaction {
 			.await
 			.take()
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-		// Commit this transaction
+		// Always commit the RocksDB transaction on the caller thread for parallel commits
 		inner.commit()?;
+		// If we have a coordinator, wait for the grouped fsync
+		if let Some(coordinator) = &self.commit_coordinator {
+			coordinator.wait_for_sync().await?;
+		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);

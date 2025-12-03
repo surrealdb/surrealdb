@@ -964,15 +964,15 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.revision]]
-version = "0.14.0"
-when = "2025-11-06"
+version = "0.15.0"
+when = "2025-11-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.revision-derive]]
-version = "0.14.0"
-when = "2025-11-06"
+version = "0.15.0"
+when = "2025-11-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1104,15 +1104,15 @@ user-login = "sfackler"
 user-name = "Steven Fackler"
 
 [[publisher.storekey]]
-version = "0.9.0"
-when = "2025-10-29"
+version = "0.10.0"
+when = "2025-11-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.storekey-derive]]
-version = "0.9.0"
-when = "2025-10-29"
+version = "0.10.0"
+when = "2025-11-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1202,8 +1202,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealkv]]
-version = "0.15.0"
-when = "2025-11-14"
+version = "0.15.1"
+when = "2025-11-28"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
