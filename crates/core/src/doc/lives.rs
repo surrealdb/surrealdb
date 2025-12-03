@@ -287,7 +287,7 @@ impl Document {
 		// Extract the session ID from the session value
 		let session_id = match sess.pick(ID.as_ref()) {
 			Value::Uuid(uuid) => Some(uuid.into()),
-			//Value::String(s) => s.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
+			Value::String(s) => s.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
 			_ => None,
 		};
 
