@@ -81,7 +81,6 @@ impl Default for DefineFieldStatement {
 
 impl ToSql for DefineFieldStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		use surrealdb_types::write_sql;
 		f.push_str("DEFINE FIELD");
 		match self.kind {
 			DefineKind::Default => {}

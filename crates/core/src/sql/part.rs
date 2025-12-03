@@ -124,7 +124,7 @@ impl ToSql for Part {
 				if let Some(instruction) = instruction {
 					write_sql!(f, fmt, "+{instruction}");
 				}
-				f.push_str("}}");
+				f.push_str("}");
 
 				if let Some(nest) = nest {
 					f.push('(');

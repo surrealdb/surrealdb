@@ -31,7 +31,7 @@ impl ToSql for DefineEventStatement {
 			CoverStmts(&self.name),
 			CoverStmts(&self.target_table),
 			CoverStmts(&self.when),
-			Fmt::comma_separated(&self.then)
+			Fmt::comma_separated(self.then.iter().map(CoverStmts))
 		);
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));

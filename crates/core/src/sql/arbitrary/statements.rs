@@ -11,7 +11,7 @@ use crate::sql::statements::define::{
 };
 use crate::sql::{
 	AccessType, Base, Data, DefineFieldStatement, DefineIndexStatement, Expr, Index,
-	InsertStatement, KillStatement, Kind, Literal, SelectStatement, View,
+	InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement, View,
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {
@@ -265,6 +265,9 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 			false
 		};
 
+		let mut permissions: Permissions = u.arbitrary()?;
+		permissions.delete = Permission::Full;
+
 		Ok(DefineFieldStatement {
 			kind: u.arbitrary()?,
 			name: u.arbitrary()?,
@@ -276,7 +279,7 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 			assert: u.arbitrary()?,
 			computed: u.arbitrary()?,
 			default: u.arbitrary()?,
-			permissions: u.arbitrary()?,
+			permissions,
 			comment: u.arbitrary()?,
 			reference: u.arbitrary()?,
 		})

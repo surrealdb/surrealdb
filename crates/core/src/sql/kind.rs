@@ -521,7 +521,7 @@ impl ToSql for KindLiteral {
 			KindLiteral::String(s) => write_sql!(f, fmt, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write_sql!(f, fmt, "{}", n),
 			KindLiteral::Float(n) => write_sql!(f, fmt, " {}", Float(*n)),
-			KindLiteral::Decimal(n) => write_sql!(f, fmt, " {}dec", n),
+			KindLiteral::Decimal(n) => write_sql!(f, fmt, " {}", n),
 			KindLiteral::Duration(d) => write_sql!(f, fmt, "{}", d),
 			KindLiteral::Bool(b) => write_sql!(f, fmt, "{}", b),
 			KindLiteral::Array(a) => {

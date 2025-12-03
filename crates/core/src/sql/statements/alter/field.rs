@@ -98,13 +98,13 @@ impl ToSql for AlterFieldStatement {
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => write_sql!(f, fmt, "DROP DEFAULT"),
-			AlterDefault::Always(ref d) => write_sql!(f, fmt, "DEFAULT ALWAYS {}", CoverStmts(d)),
-			AlterDefault::Set(ref d) => write_sql!(f, fmt, "DEFAULT {}", CoverStmts(d)),
+			AlterDefault::Drop => write_sql!(f, fmt, " DROP DEFAULT"),
+			AlterDefault::Always(ref d) => write_sql!(f, fmt, " DEFAULT ALWAYS {}", CoverStmts(d)),
+			AlterDefault::Set(ref d) => write_sql!(f, fmt, " DEFAULT {}", CoverStmts(d)),
 		}
 
 		if let Some(permissions) = &self.permissions {
-			write_sql!(f, fmt, "{permissions}");
+			write_sql!(f, fmt, " {permissions}");
 		}
 
 		match self.comment {

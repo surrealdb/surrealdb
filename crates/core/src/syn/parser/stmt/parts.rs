@@ -360,7 +360,7 @@ impl Parser<'_> {
 				}
 				t!("DELETE") => {
 					if field {
-						bail!("Can't define permission DELETE for fields")
+						bail!("Can't define permission DELETE for fields", @next.span)
 					} else {
 						delete = true;
 					}
