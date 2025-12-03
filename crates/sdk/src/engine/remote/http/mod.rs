@@ -1,4 +1,54 @@
-//! HTTP engine
+//! HTTP engine for connecting to SurrealDB over HTTP/HTTPS.
+//!
+//! This module provides HTTP-based connectivity to SurrealDB servers. While HTTP is
+//! traditionally a stateless protocol, this implementation supports stateful sessions
+//! by maintaining server-side session state and using session IDs in requests.
+//!
+//! # Multi-Node Deployments and Sticky Sessions
+//!
+//! **Important:** When deploying SurrealDB in a multi-node cluster behind a load balancer,
+//! you must configure **sticky sessions** (session affinity) at the load balancer level.
+//!
+//! The SDK performs DNS resolution at connection time and pins all requests to a single
+//! resolved IP address. However, if that IP address belongs to a load balancer, the load
+//! balancer may still distribute requests to different backend nodes unless sticky sessions
+//! are configured.
+//!
+//! ## Why Sticky Sessions Are Required
+//!
+//! SurrealDB maintains session state on the server, including:
+//! - Authentication state
+//! - Selected namespace and database
+//! - Session variables set via `LET`/`SET`
+//! - Transaction context
+//!
+//! If requests for a single SDK session are routed to different server nodes, those nodes
+//! will not have the session state, resulting in "session not found" errors.
+//!
+//! ## Recommendations
+//!
+//! - **Single-node deployments:** No special configuration needed.
+//! - **Multi-node with load balancer:** Configure sticky sessions/session affinity based on client
+//!   IP or a session cookie.
+//! - **Multi-node clusters:** Consider using [WebSocket connections](`super::ws`) instead, which
+//!   maintain a persistent connection to a single node naturally.
+//!
+//! ## Example: Connecting via HTTP
+//!
+//! ```no_run
+//! use surrealdb::Surreal;
+//! use surrealdb::engine::remote::http::Http;
+//!
+//! # #[tokio::main]
+//! # async fn main() -> surrealdb::Result<()> {
+//! // Connect to a single server or load balancer with sticky sessions configured
+//! let db = Surreal::new::<Http>("localhost:8000").await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! For multi-node deployments without sticky session support at the infrastructure level,
+//! prefer WebSocket connections which maintain session affinity through persistent connections.
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
@@ -84,7 +134,10 @@ type SessionResult = std::result::Result<Arc<SessionState>, SessionError>;
 struct RouterState {
 	/// Per-session state (headers, auth for REST endpoints, replay commands)
 	sessions: HashMap<Uuid, SessionResult>,
-	/// The HTTP client used to send requests
+	/// The shared HTTP client used to send requests.
+	/// On native platforms, this client is configured with a resolved address
+	/// via `reqwest::ClientBuilder::resolve()` to ensure all requests go to
+	/// the same server node, avoiding issues with DNS round-robin.
 	client: reqwest::Client,
 	/// The base URL for the SurrealDB server
 	base_url: Url,
@@ -105,6 +158,7 @@ impl RouterState {
 		// Clone headers and auth upfront to avoid holding the lock across network I/O
 		let headers = session_state.headers.read().await.clone();
 		let auth = session_state.auth.read().await.clone();
+
 		for (_, command) in &session_state.replay {
 			let request = command
 				.clone()
@@ -170,15 +224,82 @@ impl RouterState {
 	}
 }
 
-// The HTTP scheme used to connect to `http://` endpoints
+/// The HTTP scheme used to connect to `http://` endpoints.
+///
+/// Use this for unencrypted connections to SurrealDB servers. For production
+/// deployments, consider using [`Https`] instead for encrypted connections.
+///
+/// # Multi-Node Deployments
+///
+/// When connecting to a load balancer in front of multiple SurrealDB nodes,
+/// ensure sticky sessions are configured. See the [module documentation](self)
+/// for details.
+///
+/// # Example
+///
+/// ```no_run
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::remote::http::Http;
+///
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// let db = Surreal::new::<Http>("localhost:8000").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct Http;
 
-/// The HTTPS scheme used to connect to `https://` endpoints
+/// The HTTPS scheme used to connect to `https://` endpoints.
+///
+/// Use this for TLS-encrypted connections to SurrealDB servers. This is the
+/// recommended protocol for production deployments.
+///
+/// # Multi-Node Deployments
+///
+/// When connecting to a load balancer in front of multiple SurrealDB nodes,
+/// ensure sticky sessions are configured. See the [module documentation](self)
+/// for details.
+///
+/// # Example
+///
+/// ```no_run
+/// use surrealdb::Surreal;
+/// use surrealdb::engine::remote::http::Https;
+///
+/// # #[tokio::main]
+/// # async fn main() -> surrealdb::Result<()> {
+/// let db = Surreal::new::<Https>("localhost:8000").await?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct Https;
 
-/// An HTTP client for communicating with the server via HTTP
+/// An HTTP client for communicating with the server via HTTP.
+///
+/// This client maintains session state and supports all SurrealDB operations
+/// over HTTP. The client pins connections to a specific server IP address
+/// resolved at connection time to ensure session consistency.
+///
+/// # Session Affinity
+///
+/// All requests from this client are routed to the same server node (determined
+/// by DNS resolution at connection time). However, if connecting through a load
+/// balancer, sticky sessions must be configured at the load balancer level.
+/// See the [module documentation](self) for details.
+///
+/// # Comparison with WebSocket
+///
+/// | Feature | HTTP | WebSocket |
+/// |---------|------|-----------|
+/// | Live queries | ❌ Not supported | ✅ Supported |
+/// | Connection persistence | Per-request | Persistent |
+/// | Proxy compatibility | Excellent | May require configuration |
+/// | Multi-node clusters | Requires sticky sessions | Natural session affinity |
+///
+/// For multi-node deployments or when live queries are needed, consider using
+/// [WebSocket connections](`super::ws::Client`) instead.
 #[derive(Debug, Clone)]
 pub struct Client(());
 
