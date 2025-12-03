@@ -108,22 +108,13 @@ pub struct CommitCoordinator {
 impl CommitCoordinator {
 	/// Pre-configure the commit coordinator
 	pub(super) fn configure(opts: &mut Options) -> Result<bool> {
-		// If the user has disabled synced transaction writes but enabled grouped commits,
-		// we return an error because the two features are incompatible. When grouped
-		// commits are enabled, the transaction commits are always batched together,
-		// written to WAL, and then flushed to disk.
-		if !*cnf::SYNC_DATA && *cnf::ROCKSDB_BACKGROUND_FLUSH {
-			Err(Error::Datastore(
-				"Grouped transaction commit without synced writes are incompatible".to_string(),
-			))
-		}
-		// If the user has enabled synced transaction writes and disabled background flushing,
-		// we enable grouped commit. This means that the transaction commits are batched
+		// If the user has enabled synced transaction writes and enabled grouped commits,
+		// we configure grouped commit. This means that the transaction commits are batched
 		// together, written to WAL, and then flushed to disk. This ensures that transactions
 		// are grouped together and flushed to disk in a single operation, reducing the impact
 		// of disk syncing for each individual transaction. In this mode, when a transaction is
 		// committed, the data is fully durable and will not be lost in the event of a system crash.
-		else if *cnf::ROCKSDB_GROUPED_COMMIT {
+		if *cnf::SYNC_DATA && *cnf::ROCKSDB_GROUPED_COMMIT {
 			// Log the batched group commit configuration options
 			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={})",
 				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,

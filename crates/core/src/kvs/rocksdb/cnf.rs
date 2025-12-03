@@ -231,9 +231,9 @@ pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 // Background flusher options
 // --------------------------------------------------
 
-/// Whether to enable background WAL file flushing (default: false)
+/// Whether to enable background WAL file flushing (default: true)
 pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, false);
+	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, true);
 
 /// The interval in nanoseconds between background flushes (default: 200ms)
 pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
