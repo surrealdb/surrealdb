@@ -269,8 +269,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             }))
         ])
     })),
-    "FOR $user IN SELECT * FROM users { IF user.active = true { CREATE active_users CONTENT $user } }",
-    "FOR $user IN SELECT * FROM users {\n\n\tIF user.active = true\n\t{ CREATE active_users CONTENT $user }\n}"
+    "FOR $user IN (SELECT * FROM users) { IF user.active = true { CREATE active_users CONTENT $user } }",
+    "FOR $user IN (SELECT * FROM users) {\n\n\tIF user.active = true\n\t{ CREATE active_users CONTENT $user }\n}"
 )]
 #[case::deeply_nested_object(
     Expr::Literal(Literal::Object(vec![

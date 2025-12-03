@@ -646,7 +646,7 @@ mod tests {
 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
-			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN CREATE x SET y = 1",
+			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1)",
 			out.to_sql()
 		)
 	}

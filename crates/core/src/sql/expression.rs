@@ -388,11 +388,28 @@ impl ToSql for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if *op == PrefixOperator::Negate
-					|| expr.needs_parentheses()
+				if let Expr::Literal(Literal::Integer(x)) = expr.as_ref()
+					&& x.is_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Decimal(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Float(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
+					|| matches!(
+						expr.as_ref(),
+						Expr::Prefix {
+							op: PrefixOperator::Negate,
+							..
+						}
+					) {
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {
 					write_sql!(f, fmt, "{op}{expr}");

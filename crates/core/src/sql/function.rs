@@ -154,6 +154,7 @@ impl ToSql for FunctionCall {
 					"function({}) {{{s}}}",
 					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
 				);
+				return;
 			}
 			Function::Model(ref m) => {
 				write_sql!(f, fmt, "{m}");
