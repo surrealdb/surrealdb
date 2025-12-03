@@ -11,18 +11,19 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN CREATE activity SET user = $this, `value` = $after.email, action = $event' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: { test: 'DEFINE EVENT test ON user WHEN $before.email != $after.email THEN (CREATE activity SET user = $this, `value` = $after.email, action = $event)' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.914308226Z' }]"
+value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2025-12-03T15:26:07.145335598Z' }]"
+skip-datetime = true
+
+
+[[test.results]]
+value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2025-12-03T15:26:07.147489576Z' }]"
 skip-datetime = true
 
 [[test.results]]
-value = "[{ email: 'info@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.917521775Z' }]"
-skip-datetime = true
-
-[[test.results]]
-value = "[{ email: 'test@surrealdb.com', id: user:test, updated_at: d'2024-11-28T14:57:41.918618086Z' }]"
+value = "[{ email: 'test@surrealdb.com', id: user:test, updated_at: d'2025-12-03T15:26:07.148591201Z' }]"
 skip-datetime = true
 
 [[test.results]]
