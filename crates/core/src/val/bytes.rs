@@ -1,10 +1,11 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt;
 use std::ops::Deref;
 
 use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
@@ -59,9 +60,9 @@ impl Deref for Bytes {
 	}
 }
 
-impl Display for Bytes {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
+impl ToSql for Bytes {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "b\"{}\"", hex::encode_upper(&self.0))
 	}
 }
 

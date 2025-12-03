@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
@@ -12,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::visit::Visit;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
-use crate::fmt::CoverStmts;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -131,32 +129,12 @@ impl LiveStatement {
 			}
 			v => {
 				bail!(Error::LiveStatement {
-					value: v.to_string(),
+					value: v.to_sql(),
 				});
 			}
 		};
 		// Return the query id
 		Ok(crate::val::Uuid(live_query_id).into())
-	}
-}
-
-impl fmt::Display for LiveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT")?;
-		match &self.fields {
-			LiveFields::Diff => write!(f, " DIFF")?,
-			LiveFields::Select(fields) => {
-				write!(f, " {}", fields)?;
-			}
-		}
-		write!(f, " FROM {}", CoverStmts(&self.what))?;
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
-		}
-		Ok(())
 	}
 }
 

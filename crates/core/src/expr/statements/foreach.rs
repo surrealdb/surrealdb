@@ -1,6 +1,5 @@
-use std::fmt::{self, Display};
-
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -59,7 +58,7 @@ impl ForeachStatement {
 
 			v => {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})));
 			}
 		};
@@ -106,10 +105,5 @@ impl ForeachStatement {
 		}
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-impl Display for ForeachStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
 	}
 }

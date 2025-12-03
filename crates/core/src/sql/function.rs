@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
@@ -27,7 +27,7 @@ impl Function {
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
 			Self::Custom(name) => Idiom::field(format!("fn::{name}")),
-			Self::Model(m) => Idiom::field(m.to_string()),
+			Self::Model(m) => Idiom::field(m.to_sql()),
 			Self::Module(m, s) => match s {
 				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
 				None => Idiom::field(format!("mod::{m}")),
@@ -129,43 +129,43 @@ impl From<crate::expr::FunctionCall> for FunctionCall {
 	}
 }
 
-impl fmt::Display for FunctionCall {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for FunctionCall {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self.receiver {
 			Function::Normal(ref s) => {
 				for (idx, s) in s.split("::").enumerate() {
 					if idx != 0 {
-						f.write_str("::")?;
+						f.push_str("::");
 					}
-					s.fmt(f)?;
+					f.push_str(s);
 				}
 			}
 			Function::Custom(ref s) => {
-				f.write_str("fn")?;
+				f.push_str("fn");
 				for s in s.split("::") {
-					f.write_str("::")?;
-					EscapeKwFreeIdent(s).fmt(f)?;
+					f.push_str("::");
+					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
 				}
 			}
 			Function::Script(ref s) => {
-				write!(
+				write_sql!(
 					f,
+					fmt,
 					"function({}) {{{s}}}",
 					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
-				)?;
-				return Ok(());
+				);
 			}
 			Function::Model(ref m) => {
-				write!(f, "{m}")?;
+				write_sql!(f, fmt, "{m}");
 			}
 			Function::Module(ref m, ref s) => {
-				f.write_str("mod")?;
+				f.push_str("mod");
 				for s in m.split("::") {
-					f.write_str("::")?;
-					EscapeKwFreeIdent(s).fmt(f)?;
+					f.push_str("::");
+					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
 				}
 				if let Some(s) = s {
-					write!(f, "::{}", EscapeKwFreeIdent(s))?;
+					write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(s));
 				}
 			}
 			Function::Silo {
@@ -176,21 +176,23 @@ impl fmt::Display for FunctionCall {
 				ref patch,
 				ref sub,
 			} => match sub {
-				Some(s) => write!(
+				Some(s) => write_sql!(
 					f,
+					fmt,
 					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 					EscapeKwFreeIdent(s),
-				)?,
-				None => write!(
+				),
+				None => write_sql!(
 					f,
+					fmt,
 					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
-				)?,
+				),
 			},
 		}
-		write!(f, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
+		write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}
 }

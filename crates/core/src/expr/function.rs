@@ -1,7 +1,6 @@
-use std::fmt;
-
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _};
 use crate::catalog::Permission;
@@ -11,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::fnc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -39,7 +37,7 @@ impl Function {
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
 			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
-			Self::Model(m) => Idiom::field(m.to_string()),
+			Self::Model(m) => Idiom::field(m.to_sql()),
 			Self::Module(m, s) => match s {
 				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
 				None => Idiom::field(format!("mod::{m}")),
@@ -225,69 +223,10 @@ impl FunctionCall {
 	}
 }
 
-impl fmt::Display for FunctionCall {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self.receiver {
-			Function::Normal(ref s) => {
-				for (idx, s) in s.split("::").enumerate() {
-					if idx != 0 {
-						f.write_str("::")?;
-					}
-					s.fmt(f)?;
-				}
-			}
-			Function::Custom(ref s) => {
-				f.write_str("fn")?;
-				for s in s.split("::") {
-					f.write_str("::")?;
-					EscapeKwFreeIdent(s).fmt(f)?;
-				}
-			}
-			Function::Script(ref s) => {
-				write!(
-					f,
-					"function({}) {{{s}}}",
-					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
-				)?;
-				return Ok(());
-			}
-			Function::Model(ref m) => {
-				write!(f, "{m}")?;
-			}
-			Function::Module(ref m, ref s) => {
-				f.write_str("mod")?;
-				for s in m.split("::") {
-					f.write_str("::")?;
-					EscapeKwFreeIdent(s).fmt(f)?;
-				}
-				if let Some(s) = s {
-					write!(f, "::{}", EscapeKwFreeIdent(s))?;
-				}
-			}
-			Function::Silo {
-				ref org,
-				ref pkg,
-				ref major,
-				ref minor,
-				ref patch,
-				ref sub,
-			} => match sub {
-				Some(s) => write!(
-					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
-					EscapeKwFreeIdent(org),
-					EscapeKwFreeIdent(pkg),
-					EscapeKwFreeIdent(s),
-				)?,
-				None => write!(
-					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>",
-					EscapeKwFreeIdent(org),
-					EscapeKwFreeIdent(pkg),
-				)?,
-			},
-		}
-		write!(f, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
+impl ToSql for FunctionCall {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let fnc: crate::sql::FunctionCall = self.clone().into();
+		fnc.fmt_sql(f, fmt);
 	}
 }
 

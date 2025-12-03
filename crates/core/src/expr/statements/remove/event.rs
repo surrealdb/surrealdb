@@ -1,7 +1,6 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -12,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
-use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -97,13 +95,9 @@ impl RemoveEventStatement {
 	}
 }
 
-impl Display for RemoveEventStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", CoverStmts(&self.name), self.table_name)?;
-		Ok(())
+impl ToSql for RemoveEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::remove::RemoveEventStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

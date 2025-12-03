@@ -1,14 +1,12 @@
-use std::fmt;
-
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output};
-use crate::fmt::{CoverStmts, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
@@ -123,28 +121,9 @@ impl CreateStatement {
 	}
 }
 
-impl fmt::Display for CreateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "CREATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write!(f, " VERSION {}", CoverStmts(&self.version))?;
-		}
-		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
+impl ToSql for CreateStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::create::CreateStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

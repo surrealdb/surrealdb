@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 
@@ -9,15 +9,14 @@ pub struct RemoveFunctionStatement {
 	pub if_exists: bool,
 }
 
-impl Display for RemoveFunctionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for RemoveFunctionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE FUNCTION")?;
+		write_sql!(f, fmt, "REMOVE FUNCTION");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write!(f, " fn::{}", EscapeKwFreeIdent(&self.name))?;
-		Ok(())
+		write_sql!(f, fmt, " fn::{}", EscapeKwFreeIdent(&self.name));
 	}
 }
 

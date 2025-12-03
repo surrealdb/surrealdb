@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -14,7 +12,6 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
-use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -112,29 +109,6 @@ impl DefineDatabaseStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-		if self.strict {
-			write!(f, " STRICT")?;
-		}
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
-		}
-		Ok(())
-	}
-}
-
 impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {

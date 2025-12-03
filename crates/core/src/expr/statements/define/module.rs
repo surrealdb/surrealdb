@@ -1,5 +1,3 @@
-use std::fmt::{self, Write};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -10,8 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Literal, ModuleExecutable};
-use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt as _, ModuleExecutable};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -81,31 +78,5 @@ impl DefineModuleStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for DefineModuleStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE MODULE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		if let Some(name) = &self.name {
-			write!(f, " mod::{name} AS")?;
-		}
-		write!(f, " {}", self.executable)?;
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }

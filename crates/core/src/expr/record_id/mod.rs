@@ -1,6 +1,5 @@
-use std::fmt;
-
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -40,8 +39,8 @@ impl RecordIdLit {
 	}
 }
 
-impl fmt::Display for RecordIdLit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeIdent(&self.table), self.key)
+impl ToSql for RecordIdLit {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(&self.table), self.key)
 	}
 }

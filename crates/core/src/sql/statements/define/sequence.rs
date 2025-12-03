@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::CoverStmts;
@@ -26,25 +26,25 @@ impl Default for DefineSequenceStatement {
 	}
 }
 
-impl Display for DefineSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE SEQUENCE")?;
+impl ToSql for DefineSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE SEQUENCE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(
+		write_sql!(
 			f,
+			sql_fmt,
 			" {} BATCH {} START {}",
 			CoverStmts(&self.name),
 			CoverStmts(&self.batch),
 			CoverStmts(&self.start)
-		)?;
+		);
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
+			write_sql!(f, sql_fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		Ok(())
 	}
 }
 

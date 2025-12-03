@@ -1,4 +1,3 @@
-use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -15,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
-use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
@@ -255,7 +253,7 @@ impl InfoStatement {
 						"configs".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
-								out.insert(v.name(), v.to_string().into());
+								out.insert(v.name(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -414,56 +412,6 @@ impl InfoStatement {
 		}
 	}
 }
-
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Root(false) => f.write_str("INFO FOR ROOT"),
-			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
-			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db(false, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {}", CoverStmts(v)),
-				None => f.write_str("INFO FOR DATABASE"),
-			},
-			Self::Db(true, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {} STRUCTURE", CoverStmts(v)),
-				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			},
-			Self::Tb(t, false, v) => match v {
-				Some(v) => {
-					write!(f, "INFO FOR TABLE {} VERSION {}", CoverStmts(t), CoverStmts(v))
-				}
-				None => write!(f, "INFO FOR TABLE {}", CoverStmts(t)),
-			},
-
-			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(
-					f,
-					"INFO FOR TABLE {} VERSION {} STRUCTURE",
-					CoverStmts(t),
-					CoverStmts(v)
-				),
-				None => write!(f, "INFO FOR TABLE {} STRUCTURE", CoverStmts(t)),
-			},
-			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b}", CoverStmts(u)),
-				None => write!(f, "INFO FOR USER {}", CoverStmts(u)),
-			},
-			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", CoverStmts(u)),
-				None => write!(f, "INFO FOR USER {} STRUCTURE", CoverStmts(u)),
-			},
-			Self::Index(i, t, false) => {
-				write!(f, "INFO FOR INDEX {} ON {}", CoverStmts(i), CoverStmts(t))
-			}
-			Self::Index(i, t, true) => {
-				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", CoverStmts(i), CoverStmts(t))
-			}
-		}
-	}
-}
-
 pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }

@@ -1,6 +1,5 @@
-use std::fmt::{self, Display, Formatter, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{Pretty, is_pretty, pretty_indent, pretty_sequence_item};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,64 +20,86 @@ impl From<crate::expr::Block> for Block {
 	}
 }
 
-impl Display for Block {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
+impl ToSql for Block {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self.0.len() {
-			0 => f.write_str("{;}"),
+			0 => f.push_str("{;}"),
 			1 => {
 				let v = &self.0[0];
-				if let Expr::Literal(Literal::RecordId(_)) = v {
-					write!(f, "{{ ({v}) }}")
+				if fmt.is_pretty() {
+					// Pretty mode: use expanded format even for single element
+					f.push('{');
+					f.push('\n');
+					f.push('\n');
+					let fmt = fmt.increment();
+					fmt.write_indent(f);
+					if let Expr::Literal(Literal::RecordId(_)) = v {
+						write_sql!(f, fmt, "({v})");
+					} else {
+						v.fmt_sql(f, fmt);
+					}
+					f.push('\n');
+					// Write indent at the block's level
+					if let SqlFormat::Indented(level) = fmt
+						&& level > 0
+					{
+						for _ in 0..(level - 1) {
+							f.push('\t');
+						}
+					}
+					f.push('}')
 				} else {
-					write!(f, "{{ {v} }}")
+					// Non-pretty: compact format
+					f.push_str("{ ");
+					v.fmt_sql(f, fmt);
+					f.push_str(" }");
 				}
 			}
-			l => {
-				f.write_char('{')?;
-				if l > 1 {
-					f.write_char('\n')?;
-				} else if !is_pretty() {
-					f.write_char(' ')?;
-				}
-				let indent = pretty_indent();
-				if is_pretty() {
-					for (idx, x) in self.0.iter().enumerate() {
-						if idx > 0 {
-							f.write_char('\n')?;
-							pretty_sequence_item();
+			_ => {
+				// Multi-element blocks
+				if fmt.is_pretty() {
+					f.push('{');
+					f.push('\n');
+					f.push('\n');
+					let fmt = fmt.increment();
+					for (i, v) in self.0.iter().enumerate() {
+						if i > 0 {
+							f.push('\n');
+							f.push('\n');
 						}
-
-						if idx == 0
-							&& let Expr::Literal(Literal::RecordId(_)) = x
+						fmt.write_indent(f);
+						if i == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = v
 						{
-							write!(f, "({});", x)?;
+							write_sql!(f, fmt, "({v})");
 						} else {
-							write!(f, "{};", x)?;
+							v.fmt_sql(f, fmt);
+						}
+						f.push(';');
+					}
+					f.push('\n');
+					// Write indent at the block's level (not the content level)
+					// The content was at fmt (incremented), so block's level is one less
+					if let SqlFormat::Indented(level) = fmt
+						&& level > 0
+					{
+						for _ in 0..(level - 1) {
+							f.push('\t');
 						}
 					}
+					f.push('}')
 				} else {
-					for (idx, x) in self.0.iter().enumerate() {
-						if idx > 0 {
-							f.write_char('\n')?;
+					// Non-pretty: all on one line with space separation
+					f.push_str("{ ");
+					for (i, v) in self.0.iter().enumerate() {
+						if i > 0 {
+							f.push(' ');
 						}
-
-						if idx == 0
-							&& let Expr::Literal(Literal::RecordId(_)) = x
-						{
-							write!(f, "({});", x)?;
-						} else {
-							write!(f, "{};", x)?;
-						}
+						v.fmt_sql(f, fmt);
+						f.push(';');
 					}
+					f.push_str(" }")
 				}
-				drop(indent);
-				if l > 1 {
-					f.write_char('\n')?;
-				} else if !is_pretty() {
-					f.write_char(' ')?;
-				}
-				f.write_char('}')
 			}
 		}
 	}

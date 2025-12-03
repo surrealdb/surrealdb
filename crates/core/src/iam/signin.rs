@@ -835,7 +835,7 @@ pub async fn signin_bearer(
 		ac: Some(av.name.clone()),
 		id: match &gr.subject {
 			catalog::Subject::User(user) => Some(user.clone()),
-			catalog::Subject::Record(rid) => Some(rid.to_string()),
+			catalog::Subject::Record(rid) => Some(rid.to_sql()),
 		},
 		roles: match &gr.subject {
 			catalog::Subject::User(_) => Some(roles.clone()),
@@ -941,10 +941,10 @@ pub async fn signin_bearer(
 		}
 		catalog::Subject::Record(rid) => {
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
 				if let (Some(ns), Some(db)) = (ns, db) {
-					Level::Record(ns.name.clone(), db.name.clone(), rid.to_string())
+					Level::Record(ns.name.clone(), db.name.clone(), rid.to_sql())
 				} else {
 					debug!(
 						"Invalid attempt to authenticate as a record without a namespace and database"

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -15,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Part};
-use crate::fmt::{CoverStmts, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -74,7 +72,7 @@ impl DefineIndexStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::IxAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.to_sql(),
 						});
 					}
 				}
@@ -159,32 +157,6 @@ impl DefineIndexStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
-		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter().map(CoverStmts)))?;
-		}
-		if Index::Idx != self.index {
-			write!(f, " {}", self.index.to_sql())?;
-		}
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
-	}
-}
-
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &Context,
 	opt: &Options,

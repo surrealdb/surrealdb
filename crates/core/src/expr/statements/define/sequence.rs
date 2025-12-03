@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -12,7 +10,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
-use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -124,28 +121,5 @@ impl DefineSequenceStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE SEQUENCE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} BATCH {} START {} ",
-			CoverStmts(&self.name),
-			CoverStmts(&self.batch),
-			CoverStmts(&self.start)
-		)?;
-		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
-		}
-
-		Ok(())
 	}
 }

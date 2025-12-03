@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
@@ -11,8 +10,7 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt as _, Literal, Value};
-use crate::fmt::{CoverStmts, Fmt, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -39,12 +37,12 @@ impl DefineApiStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await?.is_some() {
+		if txn.get_db_api(ns, db, &self.path.to_sql()).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::ApAlreadyExists {
-							value: self.path.to_string(),
+							value: self.path.to_sql(),
 						});
 					}
 				}
@@ -90,44 +88,6 @@ impl DefineApiStatement {
 		Ok(Value::None)
 	}
 }
-
-impl fmt::Display for DefineApiStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE API")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.path)?;
-		let indent = pretty_indent();
-
-		write!(f, " FOR any")?;
-		{
-			let indent = pretty_indent();
-
-			write!(f, "{}", self.config)?;
-
-			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {fallback}")?;
-			}
-
-			drop(indent);
-		}
-
-		for action in &self.actions {
-			write!(f, " {action}")?;
-		}
-
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-
-		drop(indent);
-		Ok(())
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
@@ -135,13 +95,9 @@ pub(crate) struct ApiAction {
 	pub config: ApiConfig,
 }
 
-impl fmt::Display for ApiAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
-		let indent = pretty_indent();
-		write!(f, "{}", &self.config)?;
-		write!(f, " THEN {}", self.action)?;
-		drop(indent);
-		Ok(())
+impl ToSql for ApiAction {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::ApiAction = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }

@@ -8,16 +8,76 @@ use rust_decimal::Decimal;
 
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
+use crate::syn::parser::ParseResult;
 use crate::syn::token::{Span, Token, TokenKind, t};
 use crate::val::DecimalExt;
 use crate::val::duration::{
 	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedInt {
+	sign: bool,
+	int: u64,
+}
+
+impl ParsedInt {
+	pub fn from_number_str(s: &str, span: Span) -> ParseResult<Self> {
+		let (sign, number) = match s.strip_prefix("-") {
+			Some(x) => (true, x.parse::<u64>().ok().filter(|x| *x <= (i64::MAX as u64) + 1)),
+			None => (false, s.parse::<u64>().ok().filter(|x| *x <= (i64::MAX as u64) + 1)),
+		};
+
+		let Some(n) = number else {
+			bail!(
+				"Failed to parse number: number cannot fit within a 64bit signed integer",
+				@span
+			)
+		};
+
+		Ok(ParsedInt {
+			sign,
+			int: n,
+		})
+	}
+
+	pub fn into_int(self, span: Span) -> ParseResult<i64> {
+		let int = if self.int <= i64::MAX as u64 {
+			if self.sign {
+				-(self.int as i64)
+			} else {
+				self.int as i64
+			}
+		} else if self.sign {
+			debug_assert_eq!(self.int, (i64::MAX as u64) + 1);
+			i64::MIN
+		} else {
+			bail!("Failed to parse number: number cannot fit within a 64bit signed integer", @span)
+		};
+		Ok(int)
+	}
+
+	pub fn into_neg_int(self, span: Span) -> ParseResult<i64> {
+		let int = if self.int <= i64::MAX as u64 {
+			if self.sign {
+				self.int as i64
+			} else {
+				-(self.int as i64)
+			}
+		} else if !self.sign {
+			debug_assert_eq!(self.int, (i64::MAX as u64) + 1);
+			i64::MIN
+		} else {
+			bail!("Failed to parse number: number cannot fit within a 64bit signed integer", @span)
+		};
+		Ok(int)
+	}
+}
+
 #[derive(Debug)]
 pub enum Numeric {
 	Float(f64),
-	Integer(i64),
+	Integer(ParsedInt),
 	Decimal(Decimal),
 	Duration(Duration),
 }
@@ -50,7 +110,7 @@ enum DurationSuffix {
 	Year,
 }
 
-fn prepare_number_str(str: &str) -> Cow<'_, str> {
+pub fn prepare_number_str(str: &str) -> Cow<'_, str> {
 	if str.contains('_') {
 		Cow::Owned(str.chars().filter(|x| *x != '_').collect())
 	} else {
@@ -177,10 +237,9 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 	let span = lexer.current_span();
 	let number_str = prepare_number_str(lexer.span_str(span));
 	match kind {
-		NumberKind::Integer => number_str
-			.parse()
-			.map(Numeric::Integer)
-			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
+		NumberKind::Integer => {
+			Ok(Numeric::Integer(ParsedInt::from_number_str(number_str.as_ref(), span)?))
+		}
 		NumberKind::Float => {
 			// Number strings cannot be empty so checking the first byte is always valid.
 			if number_str.as_bytes()[0] == b'N' {
@@ -371,39 +430,39 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 			DurationSuffix::Second => Duration::from_secs(numeric_value),
 			DurationSuffix::Minute => {
 				let minutes = numeric_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(
-						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-					)?;
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+				)?;
 				Duration::from_secs(minutes)
 			}
 			DurationSuffix::Hour => {
 				let hours = numeric_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(
-						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-					)?;
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+				)?;
 				Duration::from_secs(hours)
 			}
 			DurationSuffix::Day => {
 				let day = numeric_value.checked_mul(SECONDS_PER_DAY).ok_or_else(
-						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-					)?;
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+				)?;
 				Duration::from_secs(day)
 			}
 			DurationSuffix::Week => {
 				let week = numeric_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(
-						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-					)?;
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+				)?;
 				Duration::from_secs(week)
 			}
 			DurationSuffix::Year => {
 				let year = numeric_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(
-						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-					)?;
+					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+				)?;
 				Duration::from_secs(year)
 			}
 		};
 
 		duration = duration.checked_add(addition).ok_or_else(
-				|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-			)?;
+			|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+		)?;
 
 		match lexer.reader.peek() {
 			Some(x) if x.is_ascii_digit() => {

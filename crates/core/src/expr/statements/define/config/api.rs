@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -8,7 +6,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt};
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 
 /// The api configuration as it is received from ast.
 
@@ -50,29 +47,5 @@ impl ApiConfig {
 			middleware,
 			permissions: self.permissions.clone(),
 		})
-	}
-}
-
-impl fmt::Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-
-			for (idx, m) in self.middleware.iter().enumerate() {
-				if idx != 0 {
-					f.write_str(", ")?;
-				}
-				for (idx, s) in m.name.split("::").enumerate() {
-					if idx != 0 {
-						f.write_str("::")?;
-					}
-					EscapeKwFreeIdent(s).fmt(f)?;
-				}
-				write!(f, "({})", Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts)))?;
-			}
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }

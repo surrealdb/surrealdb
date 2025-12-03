@@ -4,6 +4,7 @@ use std::hash::BuildHasher;
 
 use geo::Point;
 use rust_decimal::Decimal;
+use surrealdb_types::ToSql;
 
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
@@ -38,7 +39,7 @@ impl fmt::Display for CoerceError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found `{from}`")
+				write!(f, "Expected `{into}` but found `{from}`", from = from.to_sql())
 			}
 			CoerceError::ElementOf {
 				inner,
@@ -313,7 +314,7 @@ impl<T: Coerce + HasKind> Coerce for Vec<T> {
 		if !v.is_array() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
-				into: <Self as HasKind>::kind().to_string(),
+				into: <Self as HasKind>::kind().to_sql(),
 			});
 		}
 		// checked above
@@ -322,7 +323,7 @@ impl<T: Coerce + HasKind> Coerce for Vec<T> {
 		let mut res = Vec::with_capacity(array.0.len());
 		for x in array.0 {
 			// TODO: Improve error message here.
-			res.push(x.coerce_to::<T>().with_element_of(|| <Self as HasKind>::kind().to_string())?)
+			res.push(x.coerce_to::<T>().with_element_of(|| <Self as HasKind>::kind().to_sql())?)
 		}
 		Ok(res)
 	}
@@ -340,7 +341,7 @@ impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
 		if !v.is_object() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
-				into: Object::kind().to_string(),
+				into: Object::kind().to_sql(),
 			});
 		};
 		// checked above
@@ -353,7 +354,7 @@ impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
 			res.insert(
 				k,
 				v.coerce_to::<T>()
-					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind()))?,
+					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind().to_sql()))?,
 			);
 		}
 		Ok(res)
@@ -372,7 +373,7 @@ impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T
 		if !v.is_object() {
 			return Err(CoerceError::InvalidKind {
 				from: v,
-				into: Kind::of::<Object>().to_string(),
+				into: Kind::of::<Object>().to_sql(),
 			});
 		};
 		// checked above
@@ -385,7 +386,7 @@ impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T
 			res.insert(
 				k,
 				v.coerce_to::<T>()
-					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind()))?,
+					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind().to_sql()))?,
 			);
 		}
 		Ok(res)
@@ -415,11 +416,11 @@ macro_rules! impl_direct {
 	};
 
 	(@kindof $inner:ty = $kind:ident) => {
-		Kind::of::<$kind>().to_string()
+		Kind::of::<$kind>().to_sql()
 	};
 
 	(@kindof $inner:ty) => {
-		Kind::of::<$inner>().to_string()
+		Kind::of::<$inner>().to_sql()
 	};
 }
 
@@ -624,7 +625,7 @@ impl Value {
 				let Some(k) = k.iter().find(|x| self.can_coerce_to_kind(x)) else {
 					return Err(CoerceError::InvalidKind {
 						from: self,
-						into: kind.to_string(),
+						into: kind.to_sql(),
 					});
 				};
 
@@ -651,7 +652,7 @@ impl Value {
 		} else {
 			Err(CoerceError::InvalidKind {
 				from: self,
-				into: literal.to_string(),
+				into: literal.to_sql(),
 			})
 		}
 	}
@@ -748,7 +749,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
 			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("array<{kind}>"))
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, and length
@@ -762,7 +763,7 @@ impl Value {
 		if array.len() as u64 != len {
 			return Err(CoerceError::InvalidLength {
 				len: array.len(),
-				into: format!("array<{kind},{len}>"),
+				into: format!("array<{},{}>", kind.to_sql(), len),
 			});
 		}
 
@@ -770,7 +771,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
 			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("array<{kind}>"))
+			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values
@@ -780,7 +781,7 @@ impl Value {
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
 			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("set<{kind}>"))
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, unique values,
@@ -796,11 +797,11 @@ impl Value {
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
 			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("set<{kind}>"))?;
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
 		if array.len() as u64 != len {
 			return Err(CoerceError::InvalidLength {
-				into: format!("set<{kind}, {len}>"),
+				into: format!("set<{},{}>", kind.to_sql(), len),
 				len: array.len(),
 			});
 		}

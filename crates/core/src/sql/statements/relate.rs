@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::CoverStmts;
 use crate::sql::{Data, Expr, Literal, Output, RecordIdKeyLit, RecordIdLit};
@@ -20,13 +20,13 @@ pub(crate) struct RelateStatement {
 	pub parallel: bool,
 }
 
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE")?;
+impl ToSql for RelateStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "RELATE");
 		if self.only {
-			f.write_str(" ONLY")?
+			write_sql!(f, fmt, " ONLY");
 		}
-		f.write_str(" ")?;
+		write_sql!(f, fmt, " ");
 
 		// Only array's, params, and record-id's that are not a range can be expressed without
 		// surrounding parens
@@ -45,23 +45,23 @@ impl fmt::Display for RelateStatement {
 					})
 			) | Expr::Param(_)
 		) {
-			self.from.fmt(f)?;
+			self.from.fmt_sql(f, fmt);
 		} else {
-			f.write_str("(")?;
-			self.from.fmt(f)?;
-			f.write_str(")")?;
+			write_sql!(f, fmt, "(");
+			self.from.fmt_sql(f, fmt);
+			write_sql!(f, fmt, ")");
 		}
-		f.write_str(" -> ")?;
+		write_sql!(f, fmt, " -> ");
 
 		if matches!(self.through, Expr::Param(_) | Expr::Table(_)) {
-			self.through.fmt(f)?;
+			self.through.fmt_sql(f, fmt);
 		} else {
-			f.write_str("(")?;
-			self.through.fmt(f)?;
-			f.write_str(")")?;
+			write_sql!(f, fmt, "(");
+			self.through.fmt_sql(f, fmt);
+			write_sql!(f, fmt, ")");
 		}
 
-		f.write_str(" -> ")?;
+		write_sql!(f, fmt, " -> ");
 
 		// Only array's, params, and record-id's that are not a range can be expressed without
 		// surrounding parens
@@ -80,29 +80,28 @@ impl fmt::Display for RelateStatement {
 					})
 			) | Expr::Param(_)
 		) {
-			self.to.fmt(f)?;
+			self.to.fmt_sql(f, fmt);
 		} else {
-			f.write_str("(")?;
-			self.to.fmt(f)?;
-			f.write_str(")")?;
+			write_sql!(f, fmt, "(");
+			self.to.fmt_sql(f, fmt);
+			write_sql!(f, fmt, ")");
 		}
 
 		if self.uniq {
-			f.write_str(" UNIQUE")?
+			write_sql!(f, fmt, " UNIQUE");
 		}
 		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
-		Ok(())
 	}
 }
 

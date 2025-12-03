@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::CoverStmts;
 use crate::sql::Expr;
@@ -10,9 +10,9 @@ pub struct KillStatement {
 	pub id: Expr,
 }
 
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", CoverStmts(&self.id))
+impl ToSql for KillStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "KILL {}", CoverStmts(&self.id));
 	}
 }
 

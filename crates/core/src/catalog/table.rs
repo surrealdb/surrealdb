@@ -1,5 +1,5 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
@@ -123,8 +123,8 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt)
 	}
 }
 
@@ -154,17 +154,17 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			TableType::Any => f.push_str("ANY"),
 			TableType::Normal => f.push_str("NORMAL"),
 			TableType::Relation(rel) => {
 				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					write_sql!(f, " IN {}", kind);
+					write_sql!(f, sql_fmt, " IN {}", kind.to_sql());
 				}
 				if let Some(kind) = &rel.to {
-					write_sql!(f, " OUT {}", kind);
+					write_sql!(f, sql_fmt, " OUT {}", kind.to_sql());
 				}
 				if rel.enforced {
 					f.push_str(" ENFORCED");

@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -10,7 +9,6 @@ use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output, Value};
-use crate::fmt::CoverStmts;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, Duration, RecordIdKey, Table};
 
@@ -90,7 +88,7 @@ impl InsertStatement {
 					Value::Table(into) => Some(into),
 					v => {
 						bail!(Error::InsertStatement {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				}
@@ -136,7 +134,7 @@ impl InsertStatement {
 					}
 					v => {
 						bail!(Error::InsertStatement {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				}
@@ -161,35 +159,10 @@ impl InsertStatement {
 	}
 }
 
-impl fmt::Display for InsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("INSERT")?;
-		if self.relation {
-			f.write_str(" RELATION")?
-		}
-		if self.ignore {
-			f.write_str(" IGNORE")?
-		}
-		if let Some(into) = &self.into {
-			write!(f, " INTO {}", CoverStmts(into))?;
-		}
-		write!(f, " {}", self.data)?;
-		if let Some(ref v) = self.update {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write!(f, " VERSION {}", CoverStmts(&self.version))?;
-		}
-		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
+impl ToSql for InsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::insert::InsertStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -199,7 +172,7 @@ fn iterable(tb: String, id: Option<RecordIdKey>, v: Value, relation: bool) -> Re
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementIn {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		};
@@ -207,7 +180,7 @@ fn iterable(tb: String, id: Option<RecordIdKey>, v: Value, relation: bool) -> Re
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementOut {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		};
@@ -240,7 +213,7 @@ fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<Reco
 			// Any other value cannot be converted to a record id key
 			v => {
 				bail!(Error::InsertStatementId {
-					value: v.to_string(),
+					value: v.to_sql(),
 				});
 			}
 		};
@@ -251,7 +224,7 @@ fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<Reco
 			Ok((rid.table, Some(rid.key)))
 		} else {
 			bail!(Error::InsertStatementId {
-				value: v.to_string(),
+				value: v.to_sql(),
 			});
 		}
 	}

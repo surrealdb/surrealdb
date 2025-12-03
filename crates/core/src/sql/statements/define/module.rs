@@ -1,7 +1,7 @@
-use std::fmt::{self, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,29 +14,28 @@ pub(crate) struct DefineModuleStatement {
 	pub permissions: Permission,
 }
 
-impl fmt::Display for DefineModuleStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE MODULE")?;
+impl ToSql for DefineModuleStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		f.push_str("DEFINE MODULE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		if let Some(name) = &self.name {
-			write!(f, " mod::{name} AS")?;
+			write_sql!(f, sql_fmt, " mod::{} AS", name);
 		}
-		write!(f, " {}", self.executable)?;
+		write_sql!(f, sql_fmt, " {}", self.executable);
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			sql_fmt.write_indent(f);
 		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
+			f.push(' ');
+		}
+		write_sql!(f, sql_fmt, "PERMISSIONS {}", self.permissions);
 	}
 }
 

@@ -3277,6 +3277,7 @@ dependencies = [
  "futures",
  "libfuzzer-sys",
  "surrealdb-core",
+ "surrealdb-types",
  "tokio",
 ]
 

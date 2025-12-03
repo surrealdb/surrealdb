@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::field::{Fields, Selector};
 use crate::sql::{Expr, Field, Literal};
@@ -15,15 +15,15 @@ pub(crate) enum Output {
 	Fields(Fields),
 }
 
-impl Display for Output {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("RETURN ")?;
+impl ToSql for Output {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("RETURN ");
 		match self {
-			Self::None => f.write_str("NONE"),
-			Self::Null => f.write_str("NULL"),
-			Self::Diff => f.write_str("DIFF"),
-			Self::After => f.write_str("AFTER"),
-			Self::Before => f.write_str("BEFORE"),
+			Self::None => f.push_str("NONE"),
+			Self::Null => f.push_str("NULL"),
+			Self::Diff => f.push_str("DIFF"),
+			Self::After => f.push_str("AFTER"),
+			Self::Before => f.push_str("BEFORE"),
 			Self::Fields(v) => {
 				// We need to escape a possible `RETURN NONE` where `NONE` is a value
 				match v {
@@ -34,24 +34,22 @@ impl Display for Output {
 								expr: Expr::Literal(Literal::None),
 								alias,
 							})) => {
-								f.write_str("(NONE)")?;
+								f.push_str("(NONE)");
 								if let Some(alias) = alias {
-									write!(f, " AS {alias}")?;
+									write_sql!(f, fmt, " AS {alias}");
 								}
 							}
 							Some(x) => {
-								x.fmt(f)?;
+								x.fmt_sql(f, fmt);
 							}
 							None => {}
 						}
 
 						for x in iter {
-							write!(f, ", {x}")?
+							write_sql!(f, fmt, ", {x}")
 						}
-
-						Ok(())
 					}
-					x => x.fmt(f),
+					x => x.fmt_sql(f, fmt),
 				}
 			}
 		}

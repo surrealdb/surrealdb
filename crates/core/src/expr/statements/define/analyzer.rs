@@ -1,8 +1,6 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -15,7 +13,6 @@ use crate::expr::filter::Filter;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Value};
-use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -117,36 +114,9 @@ impl DefineAnalyzerStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
-			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
-		}
-		write!(f, " {}", self.name)?;
-		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
-		}
-		if let Some(v) = &self.tokenizers {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " TOKENIZERS {}", tokens.join(","))?;
-		}
-		if let Some(v) = &self.filters {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " FILTERS {}", tokens.join(","))?;
-		}
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineAnalyzerStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::define::DefineAnalyzerStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }

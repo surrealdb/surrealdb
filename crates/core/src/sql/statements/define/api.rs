@@ -1,9 +1,9 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{CoverStmts, Fmt, pretty_indent};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -30,40 +30,35 @@ impl Default for DefineApiStatement {
 	}
 }
 
-impl Display for DefineApiStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE API")?;
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE API");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", CoverStmts(&self.path))?;
-		let indent = pretty_indent();
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.path));
+		let sql_fmt = sql_fmt.increment();
 
-		write!(f, " FOR any")?;
+		write_sql!(f, sql_fmt, " FOR any");
 		{
-			let indent = pretty_indent();
+			let sql_fmt = sql_fmt.increment();
 
-			write!(f, "{}", self.config)?;
+			write_sql!(f, sql_fmt, "{}", self.config);
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {}", CoverStmts(fallback))?;
+				write_sql!(f, sql_fmt, " THEN {}", CoverStmts(fallback));
 			}
-
-			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, " {}", action)?;
+			write_sql!(f, sql_fmt, " {}", action);
 		}
 
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-
-		drop(indent);
-		Ok(())
 	}
 }
 
@@ -102,13 +97,16 @@ pub(crate) struct ApiAction {
 	pub config: ApiConfig,
 }
 
-impl Display for ApiAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
-		let _indent = pretty_indent();
-		write!(f, "{}", self.config)?;
-		write!(f, " THEN {}", self.action)?;
-		Ok(())
+impl ToSql for ApiAction {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		f.push_str("FOR ");
+		f.push_str(&Fmt::comma_separated(self.methods.iter()).to_sql());
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = sql_fmt.increment();
+			inner_fmt.write_indent(f);
+		}
+		write_sql!(f, sql_fmt, "{} THEN {}", self.config, self.action);
 	}
 }
 

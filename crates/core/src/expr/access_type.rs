@@ -1,5 +1,3 @@
-use std::fmt;
-use std::fmt::Display;
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -7,7 +5,6 @@ use anyhow::Result;
 use crate::err::Error;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::{Algorithm, Expr, Literal};
-use crate::fmt::CoverStmts;
 
 /// The type of access methods available
 
@@ -27,40 +24,10 @@ impl Default for AccessType {
 	}
 }
 
-impl Display for AccessType {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			AccessType::Jwt(ac) => {
-				write!(f, "JWT {}", ac)?;
-			}
-			AccessType::Record(ac) => {
-				f.write_str("RECORD")?;
-				if let Some(ref v) = ac.signup {
-					write!(f, " SIGNUP {}", CoverStmts(v))?
-				}
-				if let Some(ref v) = ac.signin {
-					write!(f, " SIGNIN {}", CoverStmts(v))?
-				}
-				if ac.bearer.is_some() {
-					write!(f, " WITH REFRESH")?
-				}
-				write!(f, " WITH JWT {}", ac.jwt)?;
-			}
-			AccessType::Bearer(ac) => {
-				write!(f, "BEARER")?;
-				match ac.subject {
-					BearerAccessSubject::User => write!(f, " FOR USER")?,
-					BearerAccessSubject::Record => write!(f, " FOR RECORD")?,
-				}
-			}
-		}
-		Ok(())
-	}
-}
-
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
 			// The JWT access method cannot issue stateful grants.
@@ -73,6 +40,7 @@ impl AccessType {
 	}
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_tokens(&self) -> bool {
 		match self {
 			// The JWT access method can only issue tokens if an issuer is set
@@ -107,23 +75,6 @@ impl Default for JwtAccess {
 				key: Expr::Literal(Literal::String(key)),
 			}),
 		}
-	}
-}
-
-impl Display for JwtAccess {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.verify {
-			JwtAccessVerify::Key(v) => {
-				write!(f, "ALGORITHM {} KEY {}", v.alg, v.key)?;
-			}
-			JwtAccessVerify::Jwks(v) => {
-				write!(f, "URL {}", v.url,)?;
-			}
-		}
-		if let Some(ref s) = self.issue {
-			write!(f, " WITH ISSUER KEY {}", s.key)?;
-		}
-		Ok(())
 	}
 }
 

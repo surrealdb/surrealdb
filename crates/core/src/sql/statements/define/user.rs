@@ -1,10 +1,9 @@
-use std::fmt::{self, Display};
-
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
@@ -47,45 +46,43 @@ impl Default for DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE USER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
 
-		write!(f, " {} ON {}", CoverStmts(&self.name), &self.base)?;
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		match self.pass_type {
-			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
-			PassType::Hash(ref x) => write!(f, " PASSHASH {}", QuoteStr(x))?,
-			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
+			PassType::Unset => write_sql!(f, fmt, " PASSHASH \"\" "),
+			PassType::Hash(ref x) => write_sql!(f, fmt, " PASSHASH {}", QuoteStr(x)),
+			PassType::Password(ref x) => write_sql!(f, fmt, " PASSWORD {}", QuoteStr(x)),
 		}
 
-		write!(f, " ROLES ")?;
+		write_sql!(f, fmt, " ROLES ");
 		for (idx, r) in self.roles.iter().enumerate() {
 			if idx != 0 {
-				f.write_str(", ")?
+				f.push_str(", ");
 			}
 
 			let r = r.to_uppercase();
-			EscapeKwFreeIdent(&r).fmt(f)?;
+			EscapeKwFreeIdent(&r).fmt_sql(f, fmt);
 		}
 
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(f, " FOR TOKEN ")?;
-		CoverStmts(&self.token_duration).fmt(f)?;
-		write!(f, ", FOR SESSION ")?;
-		CoverStmts(&self.session_duration).fmt(f)?;
+		f.push_str(" DURATION FOR TOKEN ");
+		CoverStmts(&self.token_duration).fmt_sql(f, fmt);
+		f.push_str(", FOR SESSION ");
+		CoverStmts(&self.session_duration).fmt_sql(f, fmt);
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		Ok(())
 	}
 }
 

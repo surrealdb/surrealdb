@@ -1,16 +1,15 @@
-use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::ToSql;
 
 use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Literal, Value};
-use crate::fmt::{Pretty, is_pretty, pretty_indent, pretty_sequence_item};
+use crate::expr::{Expr, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Block(pub(crate) Vec<Expr>);
@@ -26,7 +25,7 @@ impl SerializeRevisioned for Block {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_string().serialize_revisioned(writer)?;
+		self.to_sql().serialize_revisioned(writer)?;
 		Ok(())
 	}
 }
@@ -88,71 +87,15 @@ impl Block {
 	}
 }
 
-impl Display for Block {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match self.len() {
-			0 => f.write_str("{;}"),
-			1 => {
-				let v = &self.0[0];
-				if let Expr::Literal(Literal::RecordId(_)) = v {
-					write!(f, "{{ ({v}) }}")
-				} else {
-					write!(f, "{{ {v} }}")
-				}
-			}
-			l => {
-				f.write_char('{')?;
-				if l > 1 {
-					f.write_char('\n')?;
-				} else if !is_pretty() {
-					f.write_char(' ')?;
-				}
-				let indent = pretty_indent();
-				if is_pretty() {
-					for (idx, x) in self.0.iter().enumerate() {
-						if idx > 0 {
-							f.write_char('\n')?;
-							pretty_sequence_item();
-						}
-
-						if idx == 0
-							&& let Expr::Literal(Literal::RecordId(_)) = x
-						{
-							write!(f, "({});", x)?;
-						} else {
-							write!(f, "{};", x)?;
-						}
-					}
-				} else {
-					for (idx, x) in self.0.iter().enumerate() {
-						if idx > 0 {
-							f.write_char('\n')?;
-						}
-
-						if idx == 0
-							&& let Expr::Literal(Literal::RecordId(_)) = x
-						{
-							write!(f, "({});", x)?;
-						} else {
-							write!(f, "{};", x)?;
-						}
-					}
-				}
-				drop(indent);
-				if l > 1 {
-					f.write_char('\n')?;
-				} else if !is_pretty() {
-					f.write_char(' ')?;
-				}
-				f.write_char('}')
-			}
-		}
+impl ToSql for Block {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let block: crate::sql::Block = self.clone().into();
+		block.fmt_sql(f, fmt);
 	}
 }
 
 impl InfoStructure for Block {
 	fn structure(self) -> Value {
-		Value::String(self.to_string())
+		Value::String(self.to_sql())
 	}
 }

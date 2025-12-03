@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::CoverStmts;
@@ -28,31 +28,29 @@ impl Default for DefineBucketStatement {
 	}
 }
 
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE BUCKET")?;
+impl ToSql for DefineBucketStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE BUCKET");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", CoverStmts(&self.name))?;
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 
 		if self.readonly {
-			write!(f, " READONLY")?;
+			write_sql!(f, sql_fmt, " READONLY");
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {}", CoverStmts(backend))?;
+			write_sql!(f, sql_fmt, " BACKEND {}", CoverStmts(backend));
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
+		write_sql!(f, sql_fmt, " PERMISSIONS {}", self.permissions);
 
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-
-		Ok(())
 	}
 }
 

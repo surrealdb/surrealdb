@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Idiom};
@@ -51,11 +51,14 @@ impl From<crate::expr::field::Fields> for Fields {
 	}
 }
 
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Fields {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Fields::Value(v) => write!(f, "VALUE {}", &v),
-			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
+			Fields::Value(v) => {
+				f.push_str("VALUE ");
+				v.fmt_sql(f, fmt);
+			}
+			Fields::Select(x) => write_sql!(f, fmt, "{}", Fmt::comma_separated(x)),
 		}
 	}
 }
@@ -76,11 +79,11 @@ pub(crate) struct Selector {
 	pub alias: Option<Idiom>,
 }
 
-impl Display for Field {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::All => f.write_char('*'),
-			Self::Single(s) => Display::fmt(s, f),
+			Self::All => f.push('*'),
+			Self::Single(s) => s.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -103,14 +106,12 @@ impl From<crate::expr::field::Field> for Field {
 	}
 }
 
-impl Display for Selector {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&CoverStmts(&self.expr), f)?;
+impl ToSql for Selector {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", CoverStmts(&self.expr));
 		if let Some(alias) = &self.alias {
-			f.write_str(" AS ")?;
-			Display::fmt(alias, f)
-		} else {
-			Ok(())
+			f.push_str(" AS ");
+			alias.fmt_sql(f, fmt);
 		}
 	}
 }

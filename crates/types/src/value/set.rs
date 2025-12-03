@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 
 use crate::Value;
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 
 /// A set of unique values in SurrealDB
 ///
@@ -104,7 +104,7 @@ impl DerefMut for Set {
 }
 
 impl ToSql for Set {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if self.is_empty() {
 			f.push_str("{,}");
 			return;
@@ -114,7 +114,7 @@ impl ToSql for Set {
 		f.push('{');
 		let len = self.len();
 		for (i, v) in self.iter().enumerate() {
-			v.fmt_sql(f);
+			v.fmt_sql(f, fmt);
 			if len == 1 {
 				f.push(',');
 			} else if i < len - 1 {

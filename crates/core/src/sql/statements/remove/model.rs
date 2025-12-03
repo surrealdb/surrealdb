@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
 
@@ -10,15 +10,13 @@ pub struct RemoveModelStatement {
 	pub if_exists: bool,
 }
 
-impl Display for RemoveModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE MODEL")?;
+impl ToSql for RemoveModelStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE MODEL");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " ml::{}<{}>", EscapeIdent(&self.name), self.version);
 	}
 }
 

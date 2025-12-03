@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Permission};
@@ -10,27 +10,31 @@ pub(crate) struct ApiConfig {
 	pub permissions: Permission,
 }
 
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
+			write_sql!(f, fmt, " MIDDLEWARE ");
 
 			for (idx, m) in self.middleware.iter().enumerate() {
 				if idx != 0 {
-					f.write_str(", ")?;
+					f.push_str(", ");
 				}
 				for (idx, s) in m.name.split("::").enumerate() {
 					if idx != 0 {
-						f.write_str("::")?;
+						f.push_str("::");
 					}
-					EscapeKwFreeIdent(s).fmt(f)?;
+					EscapeKwFreeIdent(s).fmt_sql(f, fmt);
 				}
-				write!(f, "({})", Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts)))?;
+				write_sql!(
+					f,
+					fmt,
+					"({})",
+					Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts))
+				);
 			}
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

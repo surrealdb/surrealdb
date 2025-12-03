@@ -218,7 +218,9 @@ impl Parser<'_> {
 				let kind = self.next_token_value::<NumberToken>()?;
 				let kind = match kind {
 					NumberToken::Float(f) => KindLiteral::Float(f),
-					NumberToken::Integer(i) => KindLiteral::Integer(i),
+					NumberToken::Integer(i) => {
+						KindLiteral::Integer(i.into_int(self.recent_span())?)
+					}
 					NumberToken::Decimal(d) => KindLiteral::Decimal(d),
 				};
 				Ok(kind)
@@ -228,7 +230,9 @@ impl Parser<'_> {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
 				let v = match compound.value {
-					compound::Numeric::Integer(x) => KindLiteral::Integer(x),
+					compound::Numeric::Integer(x) => {
+						KindLiteral::Integer(x.into_int(compound.span)?)
+					}
 					compound::Numeric::Float(x) => KindLiteral::Float(x),
 					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
 					compound::Numeric::Duration(x) => {
@@ -281,6 +285,7 @@ impl Parser<'_> {
 mod tests {
 	use reblessive::Stack;
 	use rstest::rstest;
+	use surrealdb_types::ToSql;
 
 	use super::*;
 
@@ -339,7 +344,7 @@ mod tests {
 	fn test_kind(#[case] sql: &str, #[case] expected_str: &str, #[case] expected_kind: Kind) {
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!(expected_str, format!("{}", out));
+		assert_eq!(expected_str, out.to_sql());
 		assert_eq!(expected_kind, out);
 	}
 }

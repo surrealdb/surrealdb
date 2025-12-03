@@ -1,15 +1,14 @@
 use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, RecordIdLit};
-use crate::fmt::{CoverStmts, EscapeKey, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid, Value,
 };
@@ -183,80 +182,10 @@ impl Hash for Literal {
 	}
 }
 
-impl fmt::Display for Literal {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match self {
-			Literal::None => write!(f, "NONE"),
-			Literal::Null => write!(f, "NULL"),
-			Literal::UnboundedRange => write!(f, ".."),
-			Literal::Bool(x) => {
-				if *x {
-					write!(f, "true")
-				} else {
-					write!(f, "false")
-				}
-			}
-			Literal::Float(float) => write!(f, "{}", Float(*float)),
-			Literal::Integer(x) => write!(f, "{x}"),
-			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::String(strand) => write!(f, "{}", QuoteStr(strand)),
-			Literal::Bytes(bytes) => write!(f, "{bytes}"),
-			Literal::Regex(regex) => write!(f, "{regex}"),
-			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
-			Literal::Array(exprs) => {
-				f.write_char('[')?;
-				if !exprs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(exprs.iter().map(CoverStmts)))?;
-					drop(indent);
-				}
-				f.write_char(']')
-			}
-			Literal::Set(exprs) => {
-				f.write_char('{')?;
-				if !exprs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(exprs.iter().map(CoverStmts)))?;
-					drop(indent);
-				}
-				f.write_char('}')
-			}
-			Literal::Object(items) => {
-				if is_pretty() {
-					f.write_char('{')?;
-				} else {
-					f.write_str("{ ")?;
-				}
-				if !items.is_empty() {
-					let indent = pretty_indent();
-					write!(
-						f,
-						"{}",
-						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
-							args,
-							|entry, f| write!(
-								f,
-								"{}: {}",
-								EscapeKey(&entry.key),
-								CoverStmts(&entry.value)
-							)
-						)),)
-					)?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			}
-			Literal::Duration(duration) => write!(f, "{duration}"),
-			Literal::Datetime(datetime) => write!(f, "{datetime}"),
-			Literal::Uuid(uuid) => write!(f, "{uuid}"),
-			Literal::Geometry(geometry) => write!(f, "{geometry}"),
-			Literal::File(file) => write!(f, "{file}"),
-		}
+impl ToSql for Literal {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let lit: crate::sql::Literal = self.clone().into();
+		lit.fmt_sql(f, fmt);
 	}
 }
 
@@ -266,8 +195,9 @@ pub(crate) struct ObjectEntry {
 	pub value: Expr,
 }
 
-impl fmt::Display for ObjectEntry {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}: {}", EscapeKey(&self.key), self.value)
+impl ToSql for ObjectEntry {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let entry: crate::sql::literal::ObjectEntry = self.clone().into();
+		entry.fmt_sql(f, fmt);
 	}
 }

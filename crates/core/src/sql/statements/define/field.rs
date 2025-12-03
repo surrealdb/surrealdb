@@ -1,7 +1,7 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
+use crate::fmt::CoverStmts;
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 
@@ -79,61 +79,56 @@ impl Default for DefineFieldStatement {
 	}
 }
 
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
+impl ToSql for DefineFieldStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		use surrealdb_types::write_sql;
+		f.push_str("DEFINE FIELD");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?;
+			write_sql!(f, sql_fmt, " TYPE {}", v);
 			if self.flexible {
-				write!(f, " FLEXIBLE")?;
+				f.push_str(" FLEXIBLE");
 			}
 		}
 		match self.default {
 			DefineDefault::None => {}
 			DefineDefault::Always(ref expr) => {
-				write!(f, " DEFAULT ALWAYS {}", CoverStmts(expr))?;
+				write_sql!(f, sql_fmt, " DEFAULT ALWAYS {}", CoverStmts(expr));
 			}
 			DefineDefault::Set(ref expr) => {
-				write!(f, " DEFAULT {}", CoverStmts(expr))?;
+				write_sql!(f, sql_fmt, " DEFAULT {}", CoverStmts(expr));
 			}
 		}
 		if self.readonly {
-			write!(f, " READONLY")?
+			f.push_str(" READONLY");
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {}", CoverStmts(v))?
+			write_sql!(f, sql_fmt, " VALUE {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {}", CoverStmts(v))?
+			write_sql!(f, sql_fmt, " ASSERT {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {}", CoverStmts(v))?
+			write_sql!(f, sql_fmt, " COMPUTED {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
+			write_sql!(f, sql_fmt, " REFERENCE {v}");
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			sql_fmt.write_indent(f);
 		} else {
-			f.write_char(' ')?;
-			None
-		};
-
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
-		Ok(())
+			f.push(' ');
+		}
+		self.permissions.fmt_sql(f, sql_fmt);
 	}
 }
 

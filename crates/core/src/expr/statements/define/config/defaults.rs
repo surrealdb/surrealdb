@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
@@ -45,14 +43,5 @@ impl DefaultConfig {
 			namespace,
 			database,
 		})
-	}
-}
-
-impl Display for DefaultConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " DEFAULT")?;
-		write!(f, " NAMESPACE {}", self.namespace)?;
-		write!(f, " DATABASE {}", self.database)?;
-		Ok(())
 	}
 }

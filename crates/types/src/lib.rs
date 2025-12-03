@@ -5,6 +5,7 @@ mod error;
 mod flatbuffers;
 mod kind;
 mod notification;
+#[macro_use]
 mod sql;
 mod traits;
 pub(crate) mod utils;
@@ -17,7 +18,7 @@ pub use error::*;
 pub use flatbuffers::*;
 pub use kind::*;
 pub use notification::*;
-pub use sql::ToSql;
+pub use sql::{SqlFormat, ToSql, write_sql};
 // Re-export the derive macro
 pub use surrealdb_types_derive::{SurrealValue, kind};
 pub use traits::*;

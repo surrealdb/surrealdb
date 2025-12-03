@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
@@ -29,33 +29,32 @@ impl Default for DefineAnalyzerStatement {
 	}
 }
 
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER")?;
+impl ToSql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE ANALYZER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
-			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " OVERWRITE"),
 		}
-		write!(f, " {}", self.name)?;
+		write_sql!(f, sql_fmt, " {}", self.name);
 		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn")?;
+			f.push_str(" FUNCTION fn");
 			for x in i.split("::") {
-				f.write_str("::")?;
-				EscapeKwFreeIdent(x).fmt(f)?;
+				f.push_str("::");
+				EscapeKwFreeIdent(x).fmt_sql(f, sql_fmt);
 			}
 		}
 		if let Some(v) = &self.tokenizers {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " TOKENIZERS {}", tokens.join(","))?;
+			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
+			write_sql!(f, sql_fmt, " TOKENIZERS {}", tokens.join(","));
 		}
 		if let Some(v) = &self.filters {
-			write!(f, " FILTERS {}", Fmt::comma_separated(v.iter()))?;
+			write_sql!(f, sql_fmt, " FILTERS {}", Fmt::comma_separated(v.iter()));
 		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		Ok(())
 	}
 }
 

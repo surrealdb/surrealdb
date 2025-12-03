@@ -1,6 +1,6 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt, Pretty, pretty_indent};
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -96,13 +96,13 @@ pub enum FunctionsConfig {
 	Exclude(Vec<String>),
 }
 
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "GRAPHQL")?;
-
-		write!(f, " TABLES {}", self.tables)?;
-		write!(f, " FUNCTIONS {}", self.functions)?;
-		Ok(())
+impl ToSql for GraphQLConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("GRAPHQL");
+		f.push_str(" TABLES ");
+		self.tables.fmt_sql(f, fmt);
+		f.push_str(" FUNCTIONS ");
+		self.functions.fmt_sql(f, fmt);
 	}
 }
 
@@ -128,69 +128,64 @@ impl From<crate::catalog::GraphQLFunctionsConfig> for FunctionsConfig {
 	}
 }
 
-impl Display for TablesConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for TablesConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			TablesConfig::Auto => write!(f, "AUTO")?,
-			TablesConfig::None => write!(f, "NONE")?,
+			TablesConfig::Auto => f.push_str("AUTO"),
+			TablesConfig::None => f.push_str("NONE"),
 			TablesConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE ")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
+				f.push_str("INCLUDE ");
+				for (i, table) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					table.fmt_sql(f, fmt);
 				}
 			}
 			TablesConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE ")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
+				f.push_str("EXCLUDE ");
+				for (i, table) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					table.fmt_sql(f, fmt);
 				}
 			}
 		}
-
-		Ok(())
 	}
 }
 
-impl Display for TableConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", EscapeKwFreeIdent(&self.name))?;
-		Ok(())
+impl ToSql for TableConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		EscapeKwFreeIdent(&self.name).fmt_sql(f, fmt);
 	}
 }
 
-impl Display for FunctionsConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for FunctionsConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			FunctionsConfig::Auto => write!(f, "AUTO")?,
-			FunctionsConfig::None => write!(f, "NONE")?,
+			FunctionsConfig::Auto => f.push_str("AUTO"),
+			FunctionsConfig::None => f.push_str("NONE"),
 			FunctionsConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
+				f.push_str("INCLUDE [");
+				for (i, func) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					func.fmt_sql(f, fmt);
 				}
-				f.write_char(']')?;
+				f.push(']');
 			}
 			FunctionsConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
+				f.push_str("EXCLUDE [");
+				for (i, func) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					func.fmt_sql(f, fmt);
 				}
-				f.write_char(']')?;
+				f.push(']');
 			}
 		}
-
-		Ok(())
 	}
 }

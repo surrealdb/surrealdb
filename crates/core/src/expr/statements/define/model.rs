@@ -1,7 +1,6 @@
-use std::fmt::{self, Write};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
@@ -10,8 +9,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Literal};
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -81,25 +79,9 @@ impl DefineModelStatement {
 	}
 }
 
-impl fmt::Display for DefineModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "DEFINE MODEL")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " ml::{}<{}>", EscapeKwFreeIdent(&self.name), self.version)?;
-		if !matches!(self.comment, Expr::Literal(Literal::None)) {
-			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
+impl ToSql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineModelStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

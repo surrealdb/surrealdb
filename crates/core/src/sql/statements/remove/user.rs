@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::CoverStmts;
 use crate::sql::{Base, Expr, Literal};
@@ -21,14 +21,13 @@ impl Default for RemoveUserStatement {
 	}
 }
 
-impl Display for RemoveUserStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE USER")?;
+impl ToSql for RemoveUserStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE USER");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " {} ON {}", CoverStmts(&self.name), self.base)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), self.base);
 	}
 }
 

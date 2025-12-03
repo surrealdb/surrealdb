@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Cond, Data, Explain, Expr, Literal, Output, With};
@@ -34,35 +34,34 @@ impl Default for UpsertStatement {
 	}
 }
 
-impl fmt::Display for UpsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPSERT")?;
+impl ToSql for UpsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("UPSERT");
 		if self.only {
-			f.write_str(" ONLY")?
+			f.push_str(" ONLY")
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 

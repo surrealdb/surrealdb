@@ -1,10 +1,7 @@
-use std::fmt;
-use std::fmt::Display;
-
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::language::Language;
-use crate::fmt::QuoteStr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -18,16 +15,9 @@ pub enum Filter {
 	Mapper(String),
 }
 
-impl Display for Filter {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Ascii => f.write_str("ASCII"),
-			Self::EdgeNgram(min, max) => write!(f, "EDGENGRAM({min},{max})"),
-			Self::Lowercase => f.write_str("LOWERCASE"),
-			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
-			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
-			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Mapper(path) => write!(f, "MAPPER({})", QuoteStr(path)),
-		}
+impl ToSql for Filter {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::filter::Filter = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

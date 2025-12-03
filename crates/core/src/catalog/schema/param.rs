@@ -1,5 +1,5 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
@@ -41,8 +41,8 @@ impl ParamDefinition {
 }
 
 impl ToSql for &ParamDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
