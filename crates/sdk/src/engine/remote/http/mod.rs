@@ -102,15 +102,16 @@ impl RouterState {
 
 	/// Replay all stored commands for a session (attach + any Use/Signin/etc.)
 	async fn replay_session(&self, session_id: Uuid, session_state: &SessionState) -> Result<()> {
-		// Clone headers upfront to avoid holding the lock across network I/O
+		// Clone headers and auth upfront to avoid holding the lock across network I/O
 		let headers = session_state.headers.read().await.clone();
+		let auth = session_state.auth.read().await.clone();
 		for (_, command) in &session_state.replay {
 			let request = command
 				.clone()
 				.into_router_request(None, Some(session_id))
 				.expect("replay command should convert to router request");
 
-			send_request(request, &self.base_url, &self.client, &headers).await?;
+			send_request(request, &self.base_url, &self.client, &headers, &auth).await?;
 		}
 		Ok(())
 	}
@@ -399,6 +400,7 @@ async fn send_request(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &HeaderMap,
+	auth: &Option<Auth>,
 ) -> Result<Vec<QueryResult>> {
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
@@ -407,7 +409,10 @@ async fn send_request(
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(crate::Error::UnserializableValue)?;
 
-	let http_req = client.post(url).headers(headers.clone()).body(body);
+	// Include auth header for the server to authenticate the request.
+	// This is necessary for token authentication, where the server extracts
+	// the namespace/database from the token claims.
+	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
@@ -431,15 +436,15 @@ async fn refresh_token(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &HeaderMap,
+	auth: &Option<Auth>,
 	session_id: Option<uuid::Uuid>,
 ) -> Result<(Value, Vec<QueryResult>)> {
-	// RPC call - server session handles auth, no HTTP auth headers needed
 	let req = Command::Refresh {
 		token,
 	}
 	.into_router_request(None, session_id)
 	.expect("refresh should be a valid router request");
-	let results = send_request(req, base_url, client, headers).await?;
+	let results = send_request(req, base_url, client, headers, auth).await?;
 	let value = match results.first() {
 		Some(result) => result.clone().result?,
 		None => {
@@ -469,19 +474,44 @@ async fn router(
 			.into_router_request(None, Some(session_id))
 			.expect("USE command should convert to router request");
 			// process request to check permissions
-			let out =
-				send_request(req, base_url, client, &*session_state.headers.read().await).await?;
+			let out = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
 			let mut headers = session_state.headers.write().await;
-			if let Some(ns) = namespace {
-				let value =
-					HeaderValue::try_from(&ns).map_err(|_| Error::InvalidNsName(ns.clone()))?;
-				headers.insert(&NS, value);
-			};
-			if let Some(db) = database {
-				let value =
-					HeaderValue::try_from(&db).map_err(|_| Error::InvalidDbName(db.clone()))?;
-				headers.insert(&DB, value);
-			};
+
+			// Update headers based on the response from the server.
+			// The response contains the actual namespace/database from the session,
+			// which is important when use_defaults() is called to get the ns/db from
+			// token authentication claims.
+			if let Some(result) = out.first()
+				&& let Ok(Value::Object(ref obj)) = result.clone().result
+			{
+				match obj.get("namespace") {
+					Some(Value::String(ns)) => {
+						let header_value = HeaderValue::try_from(ns.as_str())
+							.map_err(|_| Error::InvalidNsName(ns.clone()))?;
+						headers.insert(&NS, header_value);
+					}
+					_ => {
+						headers.remove(&NS);
+					}
+				}
+				match obj.get("database") {
+					Some(Value::String(db)) => {
+						let header_value = HeaderValue::try_from(db.as_str())
+							.map_err(|_| Error::InvalidDbName(db.clone()))?;
+						headers.insert(&DB, header_value);
+					}
+					_ => {
+						headers.remove(&DB);
+					}
+				}
+			}
 
 			Ok(out)
 		}
@@ -494,8 +524,14 @@ async fn router(
 			.into_router_request(None, Some(session_id))
 			.expect("signin should be a valid router request");
 
-			let results =
-				send_request(req, base_url, client, &*session_state.headers.read().await).await?;
+			let results = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
 
 			let value = match results.first() {
 				Some(result) => result.clone().result?,
@@ -536,8 +572,14 @@ async fn router(
 			}
 			.into_router_request(None, Some(session_id))
 			.expect("authenticate should be a valid router request");
-			let mut results =
-				send_request(req, base_url, client, &*session_state.headers.read().await).await?;
+			let mut results = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
 			if let Some(result) = results.first_mut() {
 				match &mut result.result {
 					Ok(result) => {
@@ -564,6 +606,7 @@ async fn router(
 									base_url,
 									client,
 									&*session_state.headers.read().await,
+									&*session_state.auth.read().await,
 									Some(session_id),
 								)
 								.await?;
@@ -588,6 +631,7 @@ async fn router(
 				base_url,
 				client,
 				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
 				Some(session_id),
 			)
 			.await?;
@@ -601,8 +645,14 @@ async fn router(
 			let req = Command::Invalidate
 				.into_router_request(None, Some(session_id))
 				.expect("invalidate should be a valid router request");
-			let results =
-				send_request(req, base_url, client, &*session_state.headers.read().await).await?;
+			let results = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
 			// Then clear local auth so future requests don't include auth headers
 			*session_state.auth.write().await = None;
 			Ok(results)
@@ -618,7 +668,14 @@ async fn router(
 			}
 			.into_router_request(None, Some(session_id))
 			.expect("set should be a valid router request");
-			send_request(req, base_url, client, &*session_state.headers.read().await).await
+			send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await
 		}
 		Command::Unset {
 			key,
@@ -628,7 +685,14 @@ async fn router(
 			}
 			.into_router_request(None, Some(session_id))
 			.expect("unset should be a valid router request");
-			send_request(req, base_url, client, &*session_state.headers.read().await).await
+			send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -770,14 +834,27 @@ async fn router(
 			}
 			.into_router_request(None, Some(session_id))
 			.expect("command should convert to router request");
-			send_request(req, base_url, client, &*session_state.headers.read().await).await
+			send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await
 		}
 		cmd => {
 			let req = cmd
 				.into_router_request(None, Some(session_id))
 				.expect("command should convert to router request");
-			let res =
-				send_request(req, base_url, client, &*session_state.headers.read().await).await?;
+			let res = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
 			Ok(res)
 		}
 	}

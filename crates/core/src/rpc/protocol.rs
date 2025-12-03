@@ -243,28 +243,33 @@ pub trait RpcProtocol {
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
 		// Get a write lock on the session to modify it
 		let mut session = session_lock.write().await;
-		// Empty use call, apply the defaults
+		// Empty use call, apply the defaults (only if session doesn't already have ns/db
+		// set from token authentication)
 		if ns.is_none() && db.is_none() {
-			let kvs = self.kvs();
-			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			let (ns, db) = if let Some(x) = tx.get_default_config().await? {
-				(x.namespace.clone(), x.database.clone())
-			} else {
-				(None, None)
-			};
+			// Only apply defaults if the session doesn't already have a namespace set
+			// (e.g., from token authentication which extracts ns/db from JWT claims)
+			if session.ns.is_none() {
+				let kvs = self.kvs();
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				let (ns, db) = if let Some(x) = tx.get_default_config().await? {
+					(x.namespace.clone(), x.database.clone())
+				} else {
+					(None, None)
+				};
 
-			if let Some(ns) = ns {
-				tx.get_or_add_ns(None, &ns).await?;
+				if let Some(ns) = ns {
+					tx.get_or_add_ns(None, &ns).await?;
 
-				if let Some(db) = db {
-					tx.ensure_ns_db(None, &ns, &db).await?;
-					session.db = Some(db);
+					if let Some(db) = db {
+						tx.ensure_ns_db(None, &ns, &db).await?;
+						session.db = Some(db);
+					}
+
+					session.ns = Some(ns);
 				}
 
-				session.ns = Some(ns);
+				tx.commit().await?;
 			}
-
-			tx.commit().await?;
 		} else {
 			// Update the selected namespace
 			match ns {
@@ -309,6 +314,11 @@ pub trait RpcProtocol {
 		if session.ns.is_none() && session.db.is_some() {
 			session.db = None;
 		}
+		// Log the session ns/db values for debugging
+		trace!(
+			"USE response: session_id={:?}, ns={:?}, db={:?}",
+			session_id, session.ns, session.db
+		);
 		// Build the return value
 		let value = PublicValue::from_t(object! {
 			namespace: session.ns.clone(),
@@ -372,11 +382,21 @@ pub trait RpcProtocol {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
+		// Log before authentication
+		trace!(
+			"Authenticate RPC: session_id={:?}, before: ns={:?}, db={:?}",
+			session_id, session.ns, session.db
+		);
 		// Attempt authentication, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
 				.map(|_| PublicValue::None);
+		// Log after authentication
+		trace!(
+			"Authenticate RPC: session_id={:?}, after: ns={:?}, db={:?}",
+			session_id, session.ns, session.db
+		);
 		// Return nothing on success
 		out.map(DbResult::Other).map_err(From::from)
 	}
