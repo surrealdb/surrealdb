@@ -746,8 +746,15 @@ impl Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn compact(&self, range: Option<Range<Key>>) -> Result<()> {
-		self.tr.inner.compact(range).await
+	pub async fn compact<K>(&self, prefix_key: Option<K>) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let rng = match prefix_key {
+			Some(prefix_key) => Some(util::to_prefix_range(prefix_key)?),
+			None => None,
+		};
+		self.tr.inner.compact(rng).await
 	}
 }
 

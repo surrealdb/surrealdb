@@ -92,6 +92,11 @@ impl AlterTableStatement {
 			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
 		}
 
+		if self.compact {
+			let key = crate::key::table::all::new(ns, db, &self.name);
+			txn.compact(Some(key)).await?;
+		}
+
 		// Set the table definition
 		txn.put_tb(ns_name, db_name, &dt).await?;
 

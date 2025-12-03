@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Timeout};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Key;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -19,7 +20,7 @@ impl AlterSystemStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Any, &Base::Root)?;
 		// Are we doing compaction?
 		if self.compact {
-			ctx.tx().compact(None).await?;
+			ctx.tx().compact::<Key>(None).await?;
 		}
 		Ok(Value::None)
 	}
