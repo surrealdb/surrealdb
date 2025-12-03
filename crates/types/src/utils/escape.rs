@@ -105,10 +105,10 @@ impl ToSql for EscapeRid<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			// Always use brackets for display (not backticks)
-			f.push('⟨');
-			Escape::escape_str(s, '⟩').fmt_sql(f, fmt);
-			f.push('⟩');
+			// Always use backticks for display (not brackets)
+			f.push('`');
+			Escape::escape_str(s, '`').fmt_sql(f, fmt);
+			f.push('`');
 		} else {
 			f.push_str(s)
 		}
