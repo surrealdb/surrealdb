@@ -1,6 +1,4 @@
-use std::fmt;
-
-use crate::fmt::EscapeKwFreeIdent;
+use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct OptionStatement {
@@ -8,12 +6,9 @@ pub(crate) struct OptionStatement {
 	pub what: bool,
 }
 
-impl fmt::Display for OptionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		if self.what {
-			write!(f, "OPTION {}", EscapeKwFreeIdent(&self.name))
-		} else {
-			write!(f, "OPTION {} = FALSE", EscapeKwFreeIdent(&self.name))
-		}
+impl ToSql for OptionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::option::OptionStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

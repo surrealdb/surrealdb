@@ -1,5 +1,7 @@
 use std::fmt;
 
+use surrealdb_types::{SqlFormat, ToSql};
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Algorithm {
@@ -63,6 +65,12 @@ impl fmt::Display for Algorithm {
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
 		})
+	}
+}
+
+impl ToSql for Algorithm {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.to_string())
 	}
 }
 

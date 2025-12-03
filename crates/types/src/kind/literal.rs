@@ -1,13 +1,12 @@
 use std::collections::BTreeMap;
-use std::fmt::Display;
 use std::hash;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::display::format_seperated;
+use crate::sql::fmt_sql_comma_separated;
 use crate::utils::escape::QuoteStr;
-use crate::{Duration, Kind, Value};
+use crate::{Duration, Kind, SqlFormat, ToSql, Value};
 
 /// Represents literal values in SurrealDB's type system
 ///
@@ -186,33 +185,41 @@ impl hash::Hash for KindLiteral {
 	}
 }
 
-impl Display for KindLiteral {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ToSql for KindLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			KindLiteral::String(string) => QuoteStr(string).fmt(f),
-			KindLiteral::Integer(x) => write!(f, "{}", x),
+			KindLiteral::String(string) => QuoteStr(string).fmt_sql(f, fmt),
+			KindLiteral::Integer(x) => x.fmt_sql(f, fmt),
 			KindLiteral::Float(v) => {
 				if v.is_finite() {
 					// Add suffix to distinguish between int and float
-					write!(f, "{v}f")
+					v.fmt_sql(f, fmt);
+					f.push('f');
 				} else {
 					// Don't add suffix for NaN, inf, -inf
-					Display::fmt(v, f)
+					v.fmt_sql(f, fmt);
 				}
 			}
-			KindLiteral::Decimal(v) => write!(f, "{v}dec"),
-			KindLiteral::Duration(duration) => duration.fmt_internal(f),
-			KindLiteral::Array(kinds) => write!(f, "[{}]", format_seperated(kinds, ", ")),
-			KindLiteral::Object(btree_map) => write!(
-				f,
-				"{{{}}}",
-				btree_map
+			KindLiteral::Decimal(v) => {
+				v.fmt_sql(f, fmt);
+				f.push_str("dec");
+			}
+			KindLiteral::Duration(duration) => duration.fmt_sql_internal(f),
+			KindLiteral::Array(kinds) => {
+				f.push('[');
+				fmt_sql_comma_separated(kinds, f, fmt);
+				f.push(']');
+			}
+			KindLiteral::Object(btree_map) => {
+				f.push('{');
+				let items = btree_map
 					.iter()
-					.map(|(k, v)| format!("{}: {}", k, v))
-					.collect::<Vec<String>>()
-					.join(", ")
-			),
-			KindLiteral::Bool(x) => write!(f, "{}", x),
+					.map(|(k, v)| format!("{}: {}", k.to_sql(), v.to_sql()))
+					.collect::<Vec<String>>();
+				fmt_sql_comma_separated(&items, f, fmt);
+				f.push('}');
+			}
+			KindLiteral::Bool(x) => x.fmt_sql(f, fmt),
 		}
 	}
 }

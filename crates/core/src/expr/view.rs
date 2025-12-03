@@ -1,14 +1,13 @@
-use std::fmt;
 use std::fmt::Debug;
 
 use anyhow::{Result, bail};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::ViewDefinition;
 use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct View {
@@ -58,25 +57,14 @@ impl View {
 	}
 }
 
-impl fmt::Display for View {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"AS SELECT {} FROM {}",
-			self.expr,
-			Fmt::comma_separated(self.what.iter().map(|x| EscapeKwFreeIdent(x)))
-		)?;
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
-		}
-		Ok(())
+impl ToSql for View {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_view: crate::sql::View = self.clone().into();
+		sql_view.fmt_sql(f, fmt);
 	}
 }
 impl InfoStructure for View {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }

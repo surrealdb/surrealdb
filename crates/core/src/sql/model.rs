@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 
@@ -8,15 +8,15 @@ pub struct Model {
 	pub version: String,
 }
 
-impl fmt::Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("ml")?;
+impl ToSql for Model {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("ml");
 		for s in self.name.split("::") {
-			f.write_str("::")?;
-			EscapeKwFreeIdent(s).fmt(f)?;
+			f.push_str("::");
+			write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
 		}
 
-		write!(f, "<{}>", self.version)
+		write_sql!(f, fmt, "<{}>", self.version);
 	}
 }
 

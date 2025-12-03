@@ -1,10 +1,10 @@
 use std::cmp::Ordering;
-use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Variables};
@@ -50,7 +50,7 @@ impl Closure {
 		{
 			bail!(Error::InvalidArguments {
 				name: "ANONYMOUS".to_string(),
-				message: format!("Expected a value for {}", x.0),
+				message: format!("Expected a value for {}", x.0.to_sql()),
 			})
 		}
 
@@ -60,7 +60,11 @@ impl Closure {
 			} else {
 				bail!(Error::InvalidArguments {
 					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value of type '{kind}' for argument {name}"),
+					message: format!(
+						"Expected a value of type '{}' for argument {}",
+						kind.to_sql(),
+						name.to_sql()
+					),
 				});
 			}
 		}
@@ -81,24 +85,24 @@ impl Closure {
 	}
 }
 
-impl fmt::Display for Closure {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("|")?;
+impl ToSql for Closure {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "|");
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
-				f.write_str(", ")?;
+				write_sql!(f, sql_fmt, ", ");
 			}
-			write!(f, "{name}: ")?;
+			write_sql!(f, sql_fmt, "{name}: ");
 			match kind {
-				k @ Kind::Either(_) => write!(f, "<{k}>")?,
-				k => write!(f, "{k}")?,
+				k @ Kind::Either(_) => write_sql!(f, sql_fmt, "<{k}>"),
+				k => write_sql!(f, sql_fmt, "{k}"),
 			}
 		}
-		f.write_str("|")?;
+		write_sql!(f, sql_fmt, "|");
 		if let Some(returns) = &self.returns {
-			write!(f, " -> {returns}")?;
+			write_sql!(f, sql_fmt, " -> {returns}");
 		}
-		write!(f, " {}", self.body)
+		write_sql!(f, sql_fmt, " {}", self.body);
 	}
 }
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
@@ -318,7 +319,7 @@ impl Iterator {
 				self.ingest(Iterable::Thing(v))
 			}
 			// Check if the context is finished
-			if ctx.ctx.is_done(count % 100 == 0).await? {
+			if ctx.ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -346,7 +347,7 @@ impl Iterator {
 					..Default::default()
 				}),
 			])
-			.to_string();
+			.to_sql();
 			bail!(Error::InvalidStatementTarget {
 				value,
 			})
@@ -378,7 +379,7 @@ impl Iterator {
 		ensure!(
 			!ctx.stm.is_create(),
 			Error::InvalidStatementTarget {
-				value: v.to_string(),
+				value: v.to_sql(),
 			}
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
@@ -417,7 +418,7 @@ impl Iterator {
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 						v => {
 							bail!(Error::InvalidStatementTarget {
-								value: v.to_string(),
+								value: v.to_sql(),
 							})
 						}
 					}
@@ -426,7 +427,7 @@ impl Iterator {
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		}
@@ -515,7 +516,7 @@ impl Iterator {
 		rs: RecordStrategy,
 	) -> Result<Value> {
 		// Log the statement
-		trace!(target: TARGET, statement = %stm, "Iterating statement");
+		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();
@@ -909,7 +910,7 @@ impl Iterator {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}

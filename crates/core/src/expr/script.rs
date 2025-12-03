@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
@@ -19,13 +18,15 @@ impl From<&str> for Script {
 
 impl Deref for Script {
 	type Target = String;
+
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
 }
 
-impl Display for Script {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl surrealdb_types::ToSql for Script {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_script: crate::sql::Script = self.clone().into();
+		sql_script.fmt_sql(f, fmt);
 	}
 }

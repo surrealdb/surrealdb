@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
-	TableDefinition, TableId, UserDefinition,
+	DatabaseDefinition, DatabaseId, DefaultConfig, IndexId, NamespaceDefinition, NamespaceId,
+	Record, TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
@@ -26,6 +26,27 @@ pub(crate) trait NodeProvider {
 
 	/// Retrieve a specific node definition.
 	async fn get_node(&self, id: Uuid) -> Result<Arc<Node>>;
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+pub(crate) trait RootProvider {
+	/// Retrieve a specific root definition.
+	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>>;
+
+	/// Retrieve a specific config definition from the root.
+	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<catalog::ConfigDefinition>>>;
+
+	/// Retrieve a specific config definition from the root returning an error if it does not exist.
+	async fn expect_root_config(&self, cg: &str) -> Result<Arc<catalog::ConfigDefinition>> {
+		if let Some(val) = self.get_root_config(cg).await? {
+			Ok(val)
+		} else {
+			Err(anyhow::Error::new(Error::CgNotFound {
+				name: cg.to_owned(),
+			}))
+		}
+	}
 }
 
 /// Namespace data access provider.

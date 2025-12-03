@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -27,7 +26,6 @@ use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
@@ -739,76 +737,6 @@ impl DefineTableStatement {
 			// Refresh the table cache for the fields
 			tb.cache_fields_ts = Uuid::now_v7();
 		}
-		Ok(())
-	}
-}
-
-impl Display for DefineTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
-		match &self.table_type {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
-			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						EscapeIdent(k).fmt(f)?;
-					}
-				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						EscapeIdent(k).fmt(f)?;
-					}
-				}
-				if rel.enforced {
-					write!(f, " ENFORCED")?;
-				}
-			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
-		}
-		if self.drop {
-			f.write_str(" DROP")?;
-		}
-		f.write_str(if self.full {
-			" SCHEMAFULL"
-		} else {
-			" SCHEMALESS"
-		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		if let Some(ref v) = self.view {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "{}", self.permissions)?;
 		Ok(())
 	}
 }

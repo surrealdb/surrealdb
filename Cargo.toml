@@ -60,7 +60,7 @@ revision = { version = "0.15.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
-surrealkv = "0.15.0"
+surrealkv = "0.15.1"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
@@ -68,7 +68,7 @@ surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
-js = { version = "0.9.0", package = "rquickjs" }
+js = { version = "0.9.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
 ipnet = "2.11.0"

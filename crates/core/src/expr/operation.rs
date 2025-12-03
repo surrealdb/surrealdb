@@ -1,6 +1,7 @@
 use std::fmt;
 
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::val::{Array, Object, Value};
 
@@ -11,7 +12,7 @@ pub(crate) struct PatchError {
 
 impl fmt::Display for PatchError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Failed to parse JSON patch structure: {}", self.message)
+		write!(f, "Failed to parse JSON patch structure: {}", self.message.to_sql())
 	}
 }
 
@@ -248,5 +249,11 @@ impl Operation {
 	pub fn operations_to_value(operations: Vec<Operation>) -> Value {
 		let array = operations.into_iter().map(|x| Value::Object(x.into_object())).collect();
 		Value::Array(Array(array))
+	}
+}
+
+impl ToSql for Operation {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.clone().into_object().fmt_sql(f, fmt);
 	}
 }

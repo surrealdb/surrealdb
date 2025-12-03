@@ -84,7 +84,7 @@ impl Document {
 
 		ctx.tx().rollback_to_save_point().await?;
 
-		if ctx.is_done(true).await? {
+		if ctx.is_done(None).await? {
 			return Err(IgnoreError::Ignore);
 		}
 

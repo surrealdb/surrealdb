@@ -10,6 +10,7 @@ use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
 mod kind;
+mod write_sql;
 
 #[proc_macro_derive(SurrealValue, attributes(surreal))]
 pub fn surreal_value(input: TokenStream) -> TokenStream {
@@ -69,4 +70,50 @@ pub fn surreal_value(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn kind(input: TokenStream) -> TokenStream {
 	kind::kind(input)
+}
+
+/// A procedural macro for writing SQL strings with automatic `ToSql` formatting.
+///
+/// This macro parses format strings at compile time and generates code that calls
+/// `ToSql::fmt_sql` for each placeholder argument.
+///
+/// # Syntax
+///
+/// ```ignore
+/// write_sql!(f, fmt, "format string", arg1, arg2, ...)
+/// ```
+///
+/// Where:
+/// - `f` is a mutable reference to a `String`
+/// - `fmt` is a `SqlFormat` value
+/// - `"format string"` contains literal text and placeholders
+/// - Arguments follow for each positional placeholder
+///
+/// # Placeholders
+///
+/// - `{}` - Positional placeholder (uses corresponding argument from the list)
+/// - `{identifier}` - Named placeholder (uses variable with that name in scope)
+///
+/// # Examples
+///
+/// ```ignore
+/// use surrealdb_types::{write_sql, SqlFormat, ToSql};
+///
+/// let mut f = String::new();
+/// let fmt = SqlFormat::SingleLine;
+///
+/// // Positional placeholders
+/// write_sql!(f, fmt, "{}", value);
+/// write_sql!(f, fmt, "a: {}, {}", b, c);
+///
+/// // Named placeholders
+/// let x = 42;
+/// write_sql!(f, fmt, "x = {x}");
+///
+/// // Mixed
+/// write_sql!(f, fmt, "{a} {} {c}", b);
+/// ```
+#[proc_macro]
+pub fn write_sql(input: TokenStream) -> TokenStream {
+	write_sql::write_sql_impl(input)
 }

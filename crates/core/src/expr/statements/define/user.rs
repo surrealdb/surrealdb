@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -7,7 +5,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -19,7 +17,6 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
-use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
@@ -217,48 +214,9 @@ impl DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
-			self.base,
-			QuoteStr(&self.hash),
-			Fmt::comma_separated(self.roles.iter().map(|r| r.to_uppercase())),
-		)?;
-		// Always print relevant durations so defaults can be changed in the future
-		// If default values were not printed, exports would not be forward compatible
-		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(f, " FOR TOKEN ",)?;
-		match self.duration.token {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => dur.fmt(f)?,
-			None => f.write_str("NONE")?,
-		}
-		write!(f, ", FOR SESSION ",)?;
-		match self.duration.session {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => dur.fmt(f)?,
-			None => f.write_str("NONE")?,
-		}
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

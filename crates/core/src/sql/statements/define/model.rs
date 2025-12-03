@@ -1,7 +1,7 @@
-use std::fmt::{self, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,26 +28,19 @@ impl Default for DefineModelStatement {
 	}
 }
 
-impl fmt::Display for DefineModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "DEFINE MODEL")?;
+impl ToSql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE MODEL");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
+		write_sql!(f, fmt, " ml::{}<{}>", EscapeIdent(&self.name), self.version);
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
+			write_sql!(f, fmt, " COMMENT {}", comment);
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

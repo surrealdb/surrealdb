@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use radix_trie::Trie;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::cnf::COUNT_BATCH_SIZE;
@@ -481,7 +482,10 @@ impl IndexRangeThingIterator {
 				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
 				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
 				_ => {
-					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
+					bail!(Error::Unreachable(format!(
+						"Invalid operator for range extraction {}",
+						op.to_sql()
+					)))
 				}
 			}
 		}
@@ -916,7 +920,7 @@ impl IndexUnionThingIterator {
 		limit: u32,
 	) -> Result<B> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done(true).await? {
+			if ctx.is_done(None).await? {
 				break;
 			}
 			let records: B =
@@ -932,7 +936,7 @@ impl IndexUnionThingIterator {
 
 	async fn next_count(&mut self, ctx: &Context, tx: &Transaction, limit: u32) -> Result<usize> {
 		while let Some(r) = &mut self.current {
-			if ctx.is_done(true).await? {
+			if ctx.is_done(None).await? {
 				break;
 			}
 			let res = IndexEqualThingIterator::next_scan(tx, &mut r.0, &r.1, limit).await?;
@@ -983,7 +987,7 @@ impl JoinThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<bool> {
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(it) = &mut self.current_remote {
 				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
 				if !self.current_remote_batch.is_empty() {
@@ -1008,10 +1012,10 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator>,
 	{
-		while !ctx.is_done(true).await? {
-			let mut count = 0;
+		let mut count = 0;
+		while !ctx.is_done(None).await? {
 			while let Some(r) = self.current_remote_batch.pop_front() {
-				if ctx.is_done(count % 100 == 0).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				let record = r.record_id();
@@ -1040,7 +1044,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
 				let records: B = current_local.next_batch(ctx, tx, limit).await?;
 				if !records.is_empty() {
@@ -1064,7 +1068,7 @@ impl JoinThingIterator {
 	where
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
 	{
-		while !ctx.is_done(true).await? {
+		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
 				let count = current_local.next_count(ctx, tx, limit).await?;
 				if count > 0 {
@@ -1458,7 +1462,7 @@ impl UniqueUnionThingIterator {
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if let Some(val) = tx.get(&key, None).await? {
@@ -1477,7 +1481,7 @@ impl UniqueUnionThingIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if tx.exists(&key, None).await? {
@@ -1563,9 +1567,10 @@ where
 	) -> Result<B> {
 		if let Some(hits) = &mut self.hits {
 			let limit = limit as usize;
+			let mut count = 0;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
 			while limit > records.len() {
-				if ctx.is_done(self.hits_left.is_multiple_of(100)).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
@@ -1579,6 +1584,7 @@ where
 				} else {
 					break;
 				}
+				count += 1;
 			}
 			Ok(records)
 		} else {
@@ -1591,7 +1597,7 @@ where
 			let limit = limit as usize;
 			let mut count = 0;
 			while limit > count {
-				if ctx.is_done(self.hits_left.is_multiple_of(100)).await? {
+				if ctx.is_done(Some(count)).await? {
 					break;
 				}
 				if let Some((_, _)) = hits.next(tx).await? {
@@ -1624,9 +1630,10 @@ impl KnnIterator {
 	}
 	async fn next_batch<B: IteratorBatch>(&mut self, ctx: &Context, limit: u32) -> Result<B> {
 		let limit = limit as usize;
+		let mut count = 0;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
 		while limit > records.len() {
-			if ctx.is_done(records.len() % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if let Some((thing, dist, val)) = self.res.pop_front() {
@@ -1639,6 +1646,7 @@ impl KnnIterator {
 			} else {
 				break;
 			}
+			count += 1;
 		}
 		Ok(records)
 	}
@@ -1647,7 +1655,7 @@ impl KnnIterator {
 		let limit = limit as usize;
 		let mut count = 0;
 		while limit > count {
-			if ctx.is_done(count % 100 == 0).await? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 			if self.res.pop_front().is_some() {
@@ -1680,7 +1688,7 @@ impl IndexCountThingIterator {
 				let batch = txn.batch_keys(range, *COUNT_BATCH_SIZE, None).await?;
 				for key in batch.result.iter() {
 					loops += 1;
-					ctx.is_done(loops % 1000 == 0).await?;
+					ctx.is_done(Some(loops)).await?;
 					let iu = IndexCountKey::decode_key(key)?;
 					if iu.pos {
 						count += iu.count as i64;
@@ -1689,7 +1697,7 @@ impl IndexCountThingIterator {
 					}
 				}
 				current_range = batch.next;
-				ctx.is_done(true).await?;
+				ctx.is_done(None).await?;
 			}
 			Ok(count as usize)
 		} else {

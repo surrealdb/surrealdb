@@ -62,11 +62,12 @@ impl Visitor for ParamVisitor<'_> {
 			&& !value.is_none()
 			&& !value.is_null()
 		{
-			let value = value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
 			if !self.params.is_empty() {
 				self.params.push_str(", ");
 			}
-			write!(&mut self.params, "{}={}", param, value)
+
+			let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+			write!(&mut self.params, "{}={}", param.to_sql(), value)
 				.expect("Writing into a string cannot fail");
 		}
 		Ok(())

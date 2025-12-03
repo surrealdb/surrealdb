@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
@@ -15,59 +15,59 @@ pub(crate) struct DefineAccessStatement {
 	pub comment: Option<Expr>,
 }
 
-impl Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS")?;
+impl ToSql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE ACCESS");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {
-				write!(f, " OVERWRITE")?;
+				write_sql!(f, fmt, " OVERWRITE");
 			}
 			DefineKind::IfNotExists => {
-				write!(f, " IF NOT EXISTS")?;
+				write_sql!(f, fmt, " IF NOT EXISTS");
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write_sql!(f, fmt, " {} ON {} TYPE {}", self.name, self.base, self.access_type);
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
-			write!(f, " AUTHENTICATE {v}")?
+			write_sql!(f, fmt, " AUTHENTICATE {v}");
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
+		write_sql!(f, fmt, " DURATION");
 		if self.access_type.can_issue_grants() {
-			write!(
+			write_sql!(
 				f,
+				fmt,
 				" FOR GRANT {},",
 				match self.duration.grant {
-					Some(ref dur) => format!("{}", dur),
+					Some(ref dur) => dur.to_sql(),
 					None => "NONE".to_string(),
 				}
-			)?;
+			);
 		}
 		if self.access_type.can_issue_tokens() {
-			f.write_str(" FOR TOKEN ")?;
+			write_sql!(f, fmt, " FOR TOKEN ");
 
 			match self.duration.token {
-				Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-				Some(ref dur) => write!(f, "{}", dur)?,
-				None => f.write_str("NONE")?,
+				Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
+				Some(ref dur) => write_sql!(f, fmt, "{}", dur),
+				None => write_sql!(f, fmt, "NONE"),
 			}
-			f.write_str(",")?;
+			write_sql!(f, fmt, ",");
 		}
 
-		f.write_str(" FOR SESSION ")?;
+		write_sql!(f, fmt, " FOR SESSION ");
 		match self.duration.session {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => write!(f, "{}", dur)?,
-			None => f.write_str("NONE")?,
+			Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
+			Some(ref dur) => write_sql!(f, fmt, "{}", dur),
+			None => write_sql!(f, fmt, "NONE"),
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, fmt, " COMMENT {}", v);
 		}
-		Ok(())
 	}
 }
 

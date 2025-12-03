@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::Fmt;
@@ -16,26 +16,26 @@ pub(crate) struct DefineEventStatement {
 	pub comment: Option<Expr>,
 }
 
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE EVENT",)?;
+impl ToSql for DefineEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE EVENT");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(
+		write_sql!(
 			f,
+			fmt,
 			" {} ON {} WHEN {} THEN {}",
 			self.name,
 			self.target_table,
 			self.when,
 			Fmt::comma_separated(&self.then)
-		)?;
+		);
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, fmt, " COMMENT {}", v)
 		}
-		Ok(())
 	}
 }
 
