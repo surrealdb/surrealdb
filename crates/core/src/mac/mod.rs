@@ -60,6 +60,30 @@ macro_rules! lazy_env_parse {
 				.unwrap_or($default)
 		})
 	};
+	// With a closure for the default value, allowing for byte suffixes
+	(duration, $key:expr_2021, $t:ty, || $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.ok()
+				.and_then(|s| {
+					use $crate::str::ParseDuration;
+					s.parse_duration::<$t>().ok()
+				})
+				.unwrap_or_else(|| $default)
+		})
+	};
+	// With a static expression for the default value, allowing for byte suffixes
+	(duration, $key:expr_2021, $t:ty, $default:expr_2021) => {
+		std::sync::LazyLock::new(|| {
+			std::env::var($key)
+				.ok()
+				.and_then(|s| {
+					use $crate::str::ParseDuration;
+					s.parse_duration::<$t>().ok()
+				})
+				.unwrap_or($default)
+		})
+	};
 }
 
 /// Creates a new b-tree map of key-value pairs.
@@ -196,7 +220,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:187: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:211: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -204,7 +228,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:204: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:228: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -212,6 +236,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:191: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:215: Found test but expected other", msg);
 	}
 }

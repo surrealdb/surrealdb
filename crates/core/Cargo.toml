@@ -44,7 +44,7 @@ http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
 surrealism = ["dep:surrealism-runtime"]
-allocator = ["dep:jemallocator"]
+allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -215,8 +215,11 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 surrealism-runtime = { workspace = true, optional = true }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(all(any(unix, windows), not(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))))'.dependencies]
+mimalloc = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]

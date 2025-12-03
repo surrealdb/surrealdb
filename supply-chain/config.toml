@@ -787,6 +787,10 @@ criteria = "safe-to-deploy"
 version = "0.2.15"
 criteria = "safe-to-deploy"
 
+[[exemptions.libmimalloc-sys]]
+version = "0.1.44"
+criteria = "safe-to-deploy"
+
 [[exemptions.libredox]]
 version = "0.1.10"
 criteria = "safe-to-deploy"
@@ -849,6 +853,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.memmap2]]
 version = "0.9.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.mimalloc]]
+version = "0.1.48"
 criteria = "safe-to-deploy"
 
 [[exemptions.mime_guess]]
