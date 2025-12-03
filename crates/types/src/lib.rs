@@ -25,7 +25,6 @@ pub use traits::*;
 pub use utils::either::*;
 pub use value::*;
 pub use variables::*;
-pub use rpc::*;
 
 /// Macro for creating a SurrealDB object.
 ///

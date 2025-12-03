@@ -456,7 +456,7 @@ impl SurrealBridge for Datastore {
 
     async fn new_session(&self) -> Result<Uuid> {
         let id = Uuid::now_v7();
-        self.get_sessions().insert(id, Arc::new(Session::default()));
+        self.get_sessions().insert(id, Arc::new(Session::default())).await?;
         Ok(id)
     }
 
@@ -544,7 +544,7 @@ impl SurrealBridge for Datastore {
 
         let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
         let id = Uuid::now_v7();
-        self.get_transactions().insert(id, Arc::new(tx));
+        self.get_transactions().insert(id, Arc::new(tx)).await?;
         Ok(id)
     }
 
@@ -660,7 +660,7 @@ impl SurrealBridge for Datastore {
         };
 
         let (chn, rcv) = crate::channel::bounded(1);
-        self.export_with_config(session.as_ref(), chn, config).await?;
+        self.export_with_config(session.as_ref(), chn, config).await?.await?;
 
         Ok(rcv.map(Bytes::from))
     }
@@ -687,12 +687,54 @@ impl SurrealBridge for Datastore {
             self.execute_with_transaction(&query, session.as_ref(), Some(vars), tx.clone())
                 .await?
         } else {
-            self.kvs().execute(&query, &session, Some(vars)).await?
+            self.execute(&query, &session, Some(vars)).await?
         };
 
-        Ok(res.into_iter().map(SurrealValue::into_value).collect());
+        let chunks = res.into_iter().enumerate().map(|(idx, query_result)| {
+            let (result, error) = match query_result.result {
+                Ok(value) => {
+                    // Value from QueryResult is already PublicValue (surrealdb_types::Value)
+                    let public_values = match value {
+                        crate::types::PublicValue::Array(arr) => arr.into_vec(),
+                        v => vec![v],
+                    };
+                    (Some(public_values), None)
+                },
+                Err(e) => (None, Some(anyhow::anyhow!(e.to_string()))),
+            };
 
-        todo!()
+            let query_type = match query_result.query_type {
+                crate::dbs::QueryType::Live => Some(QueryType::Live),
+                crate::dbs::QueryType::Kill => Some(QueryType::Kill),
+                crate::dbs::QueryType::Other => Some(QueryType::Other),
+            };
+
+            QueryChunk {
+                query: idx as u64,
+                batch: 0,
+                kind: QueryResponseKind::Single,
+                stats: Some(QueryStats {
+                    records_received: 0,
+                    bytes_received: 0,
+                    records_scanned: 0,
+                    bytes_scanned: 0,
+                    duration: PublicDuration::from(query_result.time),
+                }),
+                result,
+                r#type: query_type,
+                error,
+            }
+        });
+
+        Ok(futures::stream::iter(chunks))
+    }
+
+    async fn notifications(&self) -> Result<impl Stream<Item = PublicNotification>> {
+        let Some(stream) = self.notifications() else {
+            bail!("Notifications not enabled");
+        };
+
+        Ok(stream.map(PublicNotification::from))
     }
 }
 

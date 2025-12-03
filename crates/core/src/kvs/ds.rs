@@ -2589,7 +2589,7 @@ impl<T> LowMap<T> {
 		self.0.get(id).map(|entry| entry.value().1.clone())
 	}
 
-	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LowMutGuard<T>>> {
+	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LowMutGuard<'_, T>>> {
 		let Some(value) = self.0.get_mut(id) else {
 			return Ok(None);
 		};
@@ -2628,12 +2628,12 @@ impl<T> LowMap<T> {
 }
 pub struct LowMutGuard<'a, T> {
 	value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
-	permit: OwnedSemaphorePermit,
+	_permit: OwnedSemaphorePermit,
 }
 
 impl<'a, T> LowMutGuard<'a, T> {
 	pub fn new(value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
-		Self { value, permit }
+		Self { value, _permit: permit }
 	}
 }
 
@@ -2659,7 +2659,7 @@ impl<T> LorMap<T> {
 		Self(DashMap::new())
 	}
 
-	pub async fn get(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorGuard<T>>> {
+	pub async fn get(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorGuard<'_, T>>> {
 		let Some(value) = self.0.get(id) else {
 			return Ok(None);
 		};
@@ -2669,7 +2669,7 @@ impl<T> LorMap<T> {
         Ok(Some(LorGuard::new(value, permit)))
 	}
 
-	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorMutGuard<T>>> {
+	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorMutGuard<'_, T>>> {
 		let Some(value) = self.0.get_mut(id) else {
 			return Ok(None);
 		};
@@ -2709,12 +2709,12 @@ impl<T> LorMap<T> {
 
 pub struct LorGuard<'a, T> {
 	value: Ref<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
-	permit: OwnedSemaphorePermit,
+	_permit: OwnedSemaphorePermit,
 }
 
 impl<'a, T> LorGuard<'a, T> {
 	pub fn new(value: Ref<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
-		Self { value, permit }
+		Self { value, _permit: permit }
 	}
 }
 
@@ -2728,12 +2728,12 @@ impl<'a, T> std::ops::Deref for LorGuard<'a, T> {
 
 pub struct LorMutGuard<'a, T> {
 	value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
-	permit: OwnedSemaphorePermit,
+	_permit: OwnedSemaphorePermit,
 }
 
 impl<'a, T> LorMutGuard<'a, T> {
 	pub fn new(value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
-		Self { value, permit }
+		Self { value, _permit: permit }
 	}
 }
 
