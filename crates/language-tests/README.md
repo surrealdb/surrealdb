@@ -373,6 +373,56 @@ utility functions.
 
 Defaults to `[]`
 
+#### `[env.backend]`
+
+Specifies which backends (storage engines) the test should run on. This is useful 
+when a test is specific to certain backend implementations or when testing 
+backend-specific features like compaction.
+
+The value should be an array of strings with valid backend identifiers:
+- `"mem"`: In-memory storage engine
+- `"rocksdb"`: RocksDB embedded storage engine
+- `"surrealkv"`: SurrealKV file-based storage engine
+- `"tikv"`: TiKV distributed storage engine
+
+**Behavior:**
+- If the array is **empty** (default): The test runs on all backends
+- If the array is **specified**: The test only runs when the selected backend (via `--backend` CLI flag) is in the list
+- If no `[env]` section exists: The test runs on all backends
+
+**Examples:**
+
+```toml
+# Test that only runs on RocksDB
+[env]
+backend = ["rocksdb"]
+```
+
+```toml
+# Test that runs on both memory and RocksDB backends
+[env]
+backend = ["mem", "rocksdb"]
+```
+
+```toml
+# Test that runs on all backends (empty array)
+[env]
+backend = []
+```
+
+```toml
+# Test that runs on all backends (no backend field specified)
+[env]
+namespace = "test"
+# No backend field means run on all backends
+```
+
+This feature is particularly useful for testing backend-specific operations. For 
+example, the `ALTER TABLE COMPACT` statement behaves differently on different 
+backends: it succeeds on RocksDB but returns an error on the memory backend.
+
+Defaults to `[]` (runs on all backends)
+
 #### `[env.timeout]`
 
 Specifies a duration in milliseconds within which the entire test should finish. 

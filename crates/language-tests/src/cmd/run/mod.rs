@@ -57,13 +57,18 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 		subset
 	};
 
+	// Filter tests based on backend specification in their environment configuration.
+	// Tests are included if:
+	// - They have no env config (run on all backends)
+	// - They have an empty backend list (run on all backends)
+	// - Their backend list contains the current backend
 	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
 		subset.filter_map(|_, test| {
 			if let Some(env) = &test.config.env {
 				if !env.backend.is_empty() {
 					env.backend.contains(&backend.to_string())
 				} else {
-					false
+					true
 				}
 			} else {
 				true

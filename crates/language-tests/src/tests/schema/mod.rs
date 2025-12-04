@@ -96,6 +96,10 @@ pub struct TestEnv {
 	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
+	/// Specifies which backends this test should run on.
+	/// If empty, the test runs on all backends.
+	/// If specified, the test only runs when the selected backend is in this list.
+	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
 	#[serde(default)]
 	pub backend: Vec<String>,
 
