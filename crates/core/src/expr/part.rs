@@ -133,7 +133,11 @@ impl Part {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::Start(v) => v.to_raw_string(),
-			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v).to_sql()),
+			Part::Field(v) => {
+				let mut s = ".".to_string();
+				EscapeKwFreeIdent(v).fmt_sql(&mut s, SqlFormat::SingleLine);
+				s
+			}
 			_ => self.to_sql(),
 		}
 	}

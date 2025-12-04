@@ -369,7 +369,7 @@ jobs:
     name: KVS - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
@@ -423,7 +423,7 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
@@ -476,7 +476,7 @@ jobs:
     name: SurrealQL tests - ${{ matrix.engine }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         engine: [mem, surrealkv, rocksdb, tikv]
     steps:
@@ -936,7 +936,7 @@ jobs:
   sdk-output:
     name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '❌ SDK tests failed' || '✅ SDK tests passed' }}
     runs-on: ubuntu-latest
-    if: always()
+    if: success() || failure()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -967,7 +967,7 @@ jobs:
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
-    if: always()
+    if: success() || failure()
     needs:
       # Server build
       - build

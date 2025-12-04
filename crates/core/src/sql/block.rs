@@ -1,6 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::Expr;
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,7 +33,11 @@ impl ToSql for Block {
 					f.push('\n');
 					let fmt = fmt.increment();
 					fmt.write_indent(f);
-					v.fmt_sql(f, fmt);
+					if let Expr::Literal(Literal::RecordId(_)) = v {
+						write_sql!(f, fmt, "({v})");
+					} else {
+						v.fmt_sql(f, fmt);
+					}
 					f.push('\n');
 					// Write indent at the block's level
 					if let SqlFormat::Indented(level) = fmt
@@ -64,7 +68,13 @@ impl ToSql for Block {
 							f.push('\n');
 						}
 						fmt.write_indent(f);
-						v.fmt_sql(f, fmt);
+						if i == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = v
+						{
+							write_sql!(f, fmt, "({v})");
+						} else {
+							v.fmt_sql(f, fmt);
+						}
 						f.push(';');
 					}
 					f.push('\n');

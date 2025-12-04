@@ -1,10 +1,17 @@
 use arbitrary::Arbitrary;
 
-use crate::sql::arbitrary::{arb_group, arb_order, arb_splits, arb_vec1, atleast_one, insert_data};
-use crate::sql::statements::define::{DefineAccessStatement, DefineUserStatement};
+use crate::sql::access_type::{BearerAccess, BearerAccessSubject};
+use crate::sql::arbitrary::{
+	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
+};
+use crate::sql::kind::KindLiteral;
+use crate::sql::statements::alter::{AlterIndexStatement, AlterKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
+};
 use crate::sql::{
-	AccessType, Base, Data, DefineIndexStatement, Expr, Fields, Index, InsertStatement,
-	KillStatement, Literal, LiveStatement, SelectStatement, View,
+	AccessType, Base, Data, DefineFieldStatement, DefineIndexStatement, Expr, Index,
+	InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement, View,
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {
@@ -29,16 +36,19 @@ impl<'a> Arbitrary<'a> for DefineAccessStatement {
 		let authenticate = u.arbitrary()?;
 		let duration = crate::sql::access::AccessDuration {
 			grant: u.arbitrary()?,
-			token: Some(u.arbitrary()?),
+			token: u.arbitrary()?,
 			session: u.arbitrary()?,
 		};
-		// Work around badly designed code where value `NONE` can conflict with a `NONE` clause.
-		if matches!(duration.token, Some(Expr::Literal(Literal::None))) {
-			return Err(arbitrary::Error::IncorrectFormat);
-		}
 		let comment = u.arbitrary()?;
 
-		let base = if matches!(access_type, AccessType::Record(_)) {
+		let base = if matches!(
+			access_type,
+			AccessType::Record(_)
+				| AccessType::Bearer(BearerAccess {
+					subject: BearerAccessSubject::Record,
+					..
+				})
+		) {
 			Base::Db
 		} else {
 			u.arbitrary()?
@@ -62,7 +72,6 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
 		let name = u.arbitrary()?;
 		let base = u.arbitrary()?;
 		let pass_type = u.arbitrary()?;
-		let session_duration = u.arbitrary()?;
 		let comment = u.arbitrary()?;
 
 		let mut roles = vec![match u.int_in_range(0u8..=2)? {
@@ -86,8 +95,8 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
 			name,
 			base,
 			pass_type,
-			token_duration: Some(u.arbitrary()?),
-			session_duration,
+			token_duration: u.arbitrary()?,
+			session_duration: u.arbitrary()?,
 			roles,
 			comment,
 		})
@@ -124,28 +133,6 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineIndexStatement {
 			index,
 			comment,
 			concurrently,
-		})
-	}
-}
-
-impl<'a> arbitrary::Arbitrary<'a> for LiveStatement {
-	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let diff = u.arbitrary()?;
-		let fields = if diff {
-			Fields::none()
-		} else {
-			u.arbitrary()?
-		};
-		let what = u.arbitrary()?;
-		let cond = u.arbitrary()?;
-		let fetch = u.arbitrary()?;
-
-		Ok(LiveStatement {
-			fields,
-			diff,
-			what,
-			cond,
-			fetch,
 		})
 	}
 }
@@ -235,9 +222,85 @@ impl<'a> arbitrary::Arbitrary<'a> for View {
 
 		Ok(View {
 			expr,
-			what: u.arbitrary()?,
+			what: arb_vec1(u, |u| u.arbitrary())?,
 			cond: u.arbitrary()?,
 			group,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineAnalyzerStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(DefineAnalyzerStatement {
+			kind: u.arbitrary()?,
+			name: u.arbitrary()?,
+			function: u.arbitrary()?,
+			tokenizers: arb_opt(u, |u| arb_vec1(u, Arbitrary::arbitrary))?,
+			filters: arb_opt(u, |u| arb_vec1(u, Arbitrary::arbitrary))?,
+			comment: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let field_kind = u.arbitrary()?;
+
+		fn contains_object(kind: &Kind) -> bool {
+			match kind {
+				Kind::Object => true,
+				Kind::Either(kinds) => kinds.iter().any(contains_object),
+				Kind::Array(inner, _) | Kind::Set(inner, _) => contains_object(inner),
+				Kind::Literal(KindLiteral::Object(_)) => true,
+				Kind::Literal(KindLiteral::Array(x)) => x.iter().any(contains_object),
+				_ => false,
+			}
+		}
+
+		let flexible = if let Some(kind) = &field_kind
+			&& contains_object(kind)
+		{
+			u.arbitrary()?
+		} else {
+			false
+		};
+
+		let mut permissions: Permissions = u.arbitrary()?;
+		permissions.delete = Permission::Full;
+
+		Ok(DefineFieldStatement {
+			kind: u.arbitrary()?,
+			name: u.arbitrary()?,
+			what: u.arbitrary()?,
+			field_kind,
+			flexible,
+			readonly: u.arbitrary()?,
+			value: u.arbitrary()?,
+			assert: u.arbitrary()?,
+			computed: u.arbitrary()?,
+			default: u.arbitrary()?,
+			permissions,
+			comment: u.arbitrary()?,
+			reference: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterIndexStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		// Make sure there is atleast one modification.
+		let comment = u.arbitrary()?;
+		let prepare_remove = if let AlterKind::None = comment {
+			true
+		} else {
+			u.arbitrary()?
+		};
+		Ok(AlterIndexStatement {
+			name: u.arbitrary()?,
+			table: u.arbitrary()?,
+			if_exists: u.arbitrary()?,
+			comment,
+			prepare_remove,
 		})
 	}
 }

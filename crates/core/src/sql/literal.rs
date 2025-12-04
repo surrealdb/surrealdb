@@ -3,7 +3,7 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, Float, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKey, Float, QuoteStr};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -21,7 +21,10 @@ pub enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	Decimal(Decimal),
+	Decimal(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::arb_decimal))]
+		Decimal,
+	),
 	Duration(PublicDuration),
 
 	String(String),
@@ -97,7 +100,7 @@ impl ToSql for Literal {
 						if i > 0 {
 							fmt.write_separator(f);
 						}
-						expr.fmt_sql(f, fmt);
+						CoverStmts(expr).fmt_sql(f, fmt);
 					}
 					if fmt.is_pretty() {
 						f.push('\n');
@@ -125,7 +128,7 @@ impl ToSql for Literal {
 						if i > 0 {
 							fmt.write_separator(f);
 						}
-						expr.fmt_sql(f, fmt);
+						CoverStmts(expr).fmt_sql(f, fmt);
 					}
 					if fmt.is_pretty() {
 						f.push('\n');
@@ -157,7 +160,13 @@ impl ToSql for Literal {
 						if i > 0 {
 							fmt.write_separator(f);
 						}
-						write_sql!(f, fmt, "{}: {}", EscapeKey(&entry.key), entry.value);
+						write_sql!(
+							f,
+							fmt,
+							"{}: {}",
+							EscapeKey(&entry.key),
+							CoverStmts(&entry.value)
+						);
 					}
 					if fmt.is_pretty() {
 						f.push('\n');

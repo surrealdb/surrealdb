@@ -132,10 +132,6 @@ impl Parser<'_> {
 						break;
 					}
 				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
-				}
 				_ => break,
 			}
 		}
@@ -196,10 +192,6 @@ impl Parser<'_> {
 					} else {
 						break;
 					}
-				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -530,7 +522,9 @@ impl Parser<'_> {
 							let number = self.next_token_value::<NumberToken>()?;
 							let expr = match number {
 								NumberToken::Float(x) => Expr::Literal(Literal::Float(x)),
-								NumberToken::Integer(x) => Expr::Literal(Literal::Integer(x)),
+								NumberToken::Integer(x) => {
+									Expr::Literal(Literal::Integer(x.into_int(self.recent_span())?))
+								}
 								NumberToken::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
 							};
 							Part::Value(expr)
@@ -585,7 +579,9 @@ impl Parser<'_> {
 								Numeric::Duration(_) => {
 									bail!("Unexpected token `duration` expected a number", @number.span );
 								}
-								Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
+								Numeric::Integer(x) => {
+									Expr::Literal(Literal::Integer(x.into_int(number.span)?))
+								}
 								Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
 								Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
 							};
@@ -595,7 +591,9 @@ impl Parser<'_> {
 							let number = self.next_token_value::<NumberToken>()?;
 							let number = match number {
 								NumberToken::Float(f) => Expr::Literal(Literal::Float(f)),
-								NumberToken::Integer(i) => Expr::Literal(Literal::Integer(i)),
+								NumberToken::Integer(i) => {
+									Expr::Literal(Literal::Integer(i.into_int(self.recent_span())?))
+								}
 								NumberToken::Decimal(decimal) => {
 									Expr::Literal(Literal::Decimal(decimal))
 								}
@@ -994,7 +992,7 @@ mod tests {
 	fn idiom_start_thing_remote_traversal() {
 		let sql = "person:test.friend->like->person";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("person:test.friend->like->person", out.to_sql());
+		assert_eq!("(person:test).friend->like->person", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![

@@ -5,7 +5,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeIdent;
 use crate::val::RecordId;
 
 pub(crate) mod key;
@@ -41,6 +41,6 @@ impl RecordIdLit {
 
 impl ToSql for RecordIdLit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeRid(&self.table), self.key)
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(&self.table), self.key)
 	}
 }

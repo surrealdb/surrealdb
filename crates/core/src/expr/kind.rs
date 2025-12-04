@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -760,19 +761,51 @@ impl KindLiteral {
 				}
 				_ => false,
 			},
-			Self::Object(o) => match value {
-				Value::Object(x) => {
-					if o.len() < x.len() {
-						return false;
-					}
+			Self::Object(lit) => match value {
+				Value::Object(val) => {
+					let mut lit_iter = lit.iter();
+					let mut val_iter = val.iter();
 
-					for (k, v) in o.iter() {
-						if let Some(value) = x.get(k) {
-							if !value.can_coerce_to_kind(v) {
+					let mut lit_next = lit_iter.next();
+					let mut val_next = val_iter.next();
+
+					while lit_next.is_some() || val_next.is_some() {
+						match (lit_next, val_next) {
+							(Some((lit_k, lit_kind)), Some((val_k, val_v))) => {
+								match lit_k.cmp(val_k) {
+									Ordering::Less => {
+										// Key in type but not in value - check if optional
+										if !lit_kind.can_be_none() {
+											return false;
+										}
+										lit_next = lit_iter.next();
+									}
+									Ordering::Equal => {
+										// Key in both - validate type
+										if !val_v.can_coerce_to_kind(lit_kind) {
+											return false;
+										}
+										lit_next = lit_iter.next();
+										val_next = val_iter.next();
+									}
+									Ordering::Greater => {
+										// Key in value but not in type - extra key!
+										return false;
+									}
+								}
+							}
+							(Some((_, lit_kind)), None) => {
+								// Remaining keys in type but not in value - check if optional
+								if !lit_kind.can_be_none() {
+									return false;
+								}
+								lit_next = lit_iter.next();
+							}
+							(None, Some(_)) => {
+								// Remaining keys in value but not in type - extra keys!
 								return false;
 							}
-						} else if !v.can_be_none() {
-							return false;
+							(None, None) => break,
 						}
 					}
 

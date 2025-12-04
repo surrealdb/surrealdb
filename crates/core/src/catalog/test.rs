@@ -67,18 +67,17 @@ use crate::val::{Datetime, Value};
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
-	fields: Fields::Select(vec![Field::All, Field::Single(Selector{
+	fields: SubscriptionFields::Select(Fields::Select(vec![Field::All, Field::Single(Selector{
 		expr: Expr::Literal(Literal::String("expr".to_string())),
 		alias: Some(Idiom::from_str("field[0]").unwrap()),
-	})]),
-	diff: false,
+	})])),
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
 	fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 100)]
+}, 101)]
 #[case::access(AccessDefinition {
 	name: "access".to_string(),
 	access_type: AccessType::Bearer(BearerAccess {

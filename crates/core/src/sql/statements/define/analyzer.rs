@@ -1,19 +1,19 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineAnalyzerStatement {
@@ -24,7 +24,7 @@ impl Default for DefineAnalyzerStatement {
 			function: None,
 			tokenizers: None,
 			filters: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -39,18 +39,21 @@ impl ToSql for DefineAnalyzerStatement {
 		}
 		write_sql!(f, sql_fmt, " {}", self.name);
 		if let Some(ref i) = self.function {
-			write_sql!(f, sql_fmt, " FUNCTION fn::{i}");
+			f.push_str(" FUNCTION fn");
+			for x in i.split("::") {
+				f.push_str("::");
+				EscapeKwFreeIdent(x).fmt_sql(f, sql_fmt);
+			}
 		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
 			write_sql!(f, sql_fmt, " TOKENIZERS {}", tokens.join(","));
 		}
 		if let Some(v) = &self.filters {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
-			write_sql!(f, sql_fmt, " FILTERS {}", tokens.join(","));
+			write_sql!(f, sql_fmt, " FILTERS {}", Fmt::comma_separated(v.iter()));
 		}
-		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", v);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -63,7 +66,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -76,7 +79,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

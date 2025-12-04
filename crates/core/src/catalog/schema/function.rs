@@ -5,8 +5,8 @@ use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Block, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::DefineFunctionStatement;
 use crate::sql::statements::define::DefineKind;
+use crate::sql::{self, DefineFunctionStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -27,19 +27,15 @@ impl FunctionDefinition {
 		DefineFunctionStatement {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
-			args: self
-				.args
-				.clone()
-				.into_iter()
-				.map(|(n, k)| (n, crate::sql::Kind::from(k)))
-				.collect(),
+			args: self.args.clone().into_iter().map(|(n, k)| (n, sql::Kind::from(k))).collect(),
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }

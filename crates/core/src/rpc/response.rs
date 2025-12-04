@@ -6,12 +6,12 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types::{ToSql, kind, object};
 use thiserror::Error;
 
+use crate::dbs;
 use crate::dbs::{QueryResult, QueryType};
 use crate::rpc::RpcError;
 use crate::types::{
 	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
 };
-use crate::{dbs, map};
 
 /// Query statistics.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

@@ -360,8 +360,8 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		if let Some(to) = self.try_parse_timeout(stk).await? {
-			res.timeout = Some(to);
+		if self.eat(t!("TIMEOUT")) {
+			res.timeout = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 		}
 
 		Ok(res)

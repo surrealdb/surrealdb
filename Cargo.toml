@@ -122,6 +122,7 @@ jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
+mimalloc = "0.1.48"
 nanoid = "0.4.0"
 native-tls = "0.2.11"
 ndarray = "=0.16.1"

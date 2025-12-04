@@ -18,6 +18,12 @@ path = "../core"
 features = ["kv-mem", "arbitrary"]
 default-features = false
 
+[dependencies.surrealdb-types]
+path = "../types/"
+features = ["arbitrary"]
+default-features = false
+
+
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]

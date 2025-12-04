@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmtsSql, Fmt, fmt_separated_by};
+use crate::fmt::{CoverStmts, Fmt, fmt_separated_by};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -157,7 +157,7 @@ impl ToSql for IfelseStatement {
 						Fmt::new(args, |(cond, then), f, fmt| {
 							if use_separated {
 								// Separated format: condition and block on different lines
-								write_sql!(f, fmt, "IF {}", CoverStmtsSql(cond));
+								write_sql!(f, fmt, "IF {}", CoverStmts(cond));
 								f.push('\n');
 								// For nested IFs, use same indent level; for top-level complex IFs,
 								// increment
@@ -171,7 +171,7 @@ impl ToSql for IfelseStatement {
 								}
 							} else {
 								// Inline format: condition and block on same line
-								write_sql!(f, fmt, "IF {} ", CoverStmtsSql(cond));
+								write_sql!(f, fmt, "IF {} ", CoverStmts(cond));
 								fmt_block(f, fmt, then, false);
 							}
 						})
@@ -212,13 +212,13 @@ impl ToSql for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f, fmt| {
 							if fmt.is_pretty() {
-								write_sql!(f, fmt, "IF {} THEN", CoverStmtsSql(cond));
+								write_sql!(f, fmt, "IF {} THEN", CoverStmts(cond));
 								f.push('\n');
 								let fmt = fmt.increment();
 								fmt.write_indent(f);
 								write_sql!(f, fmt, "{then}");
 							} else {
-								write_sql!(f, fmt, "IF {} THEN {then}", CoverStmtsSql(cond));
+								write_sql!(f, fmt, "IF {} THEN {then}", CoverStmts(cond));
 							}
 						})
 					}),
@@ -236,9 +236,9 @@ impl ToSql for IfelseStatement {
 					f.push('\n');
 					let fmt = fmt.increment();
 					fmt.write_indent(f);
-					write_sql!(f, fmt, "{v}");
+					write_sql!(f, fmt, "{}", CoverStmts(v));
 				} else {
-					write_sql!(f, fmt, " ELSE {v}");
+					write_sql!(f, fmt, " ELSE {}", CoverStmts(v));
 				}
 			}
 			if fmt.is_pretty() {

@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Filter, Tokenizer};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
@@ -19,17 +20,18 @@ pub struct AnalyzerDefinition {
 impl_kv_value_revisioned!(AnalyzerDefinition);
 
 impl AnalyzerDefinition {
-	fn to_sql_definition(&self) -> crate::sql::statements::define::DefineAnalyzerStatement {
-		crate::sql::statements::define::DefineAnalyzerStatement {
-			kind: crate::sql::statements::define::DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+	fn to_sql_definition(&self) -> sql::statements::define::DefineAnalyzerStatement {
+		sql::statements::define::DefineAnalyzerStatement {
+			kind: sql::statements::define::DefineKind::Default,
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone().map(|v| v.into_iter().map(|t| t.into()).collect()),
 			filters: self.filters.clone().map(|v| v.into_iter().map(|f| f.into()).collect()),
 			comment: self
 				.comment
 				.clone()
-				.map(|c| crate::sql::Expr::Literal(crate::sql::Literal::String(c))),
+				.map(|c| sql::Expr::Literal(sql::Literal::String(c)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }

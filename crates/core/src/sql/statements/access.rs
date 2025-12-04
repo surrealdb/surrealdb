@@ -256,6 +256,15 @@ impl ToSql for AccessStatement {
 				if let Some(ref v) = stmt.base {
 					write_sql!(f, fmt, " ON {v}");
 				}
+				f.push_str(" PURGE");
+				match stmt.kind {
+					PurgeKind::Expired => f.push_str(" EXPIRED"),
+					PurgeKind::Revoked => f.push_str(" REVOKED"),
+					PurgeKind::Both => f.push_str(" EXPIRED, REVOKED"),
+				}
+				if !stmt.grace.is_zero() {
+					write_sql!(f, fmt, " FOR {}", stmt.grace);
+				}
 			}
 		}
 	}

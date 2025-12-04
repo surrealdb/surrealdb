@@ -2,7 +2,7 @@ use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, EscapeRid, Fmt};
+use crate::fmt::{EscapeKey, EscapeRidKey, Fmt};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -121,8 +121,8 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 impl ToSql for RecordIdKeyLit {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Number(v) => f.push_str(&v.to_string()),
-			Self::String(v) => write_sql!(f, fmt, "{}", EscapeRid(v)),
+			Self::Number(v) => write_sql!(f, fmt, "{v}"),
+			Self::String(v) => EscapeRidKey(v).fmt_sql(f, fmt),
 			Self::Uuid(v) => v.fmt_sql(f, fmt),
 			Self::Array(v) => {
 				f.push('[');

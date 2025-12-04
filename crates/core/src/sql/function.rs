@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,8 +139,6 @@ impl ToSql for FunctionCall {
 					}
 					f.push_str(s);
 				}
-
-				write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter()));
 			}
 			Function::Custom(ref s) => {
 				f.push_str("fn");
@@ -148,18 +146,18 @@ impl ToSql for FunctionCall {
 					f.push_str("::");
 					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
 				}
-				write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter()));
 			}
 			Function::Script(ref s) => {
 				write_sql!(
 					f,
 					fmt,
 					"function({}) {{{s}}}",
-					Fmt::comma_separated(self.arguments.iter())
+					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
 				);
+				return;
 			}
 			Function::Model(ref m) => {
-				write_sql!(f, fmt, "{m}({})", Fmt::comma_separated(self.arguments.iter()));
+				write_sql!(f, fmt, "{m}");
 			}
 			Function::Module(ref m, ref s) => {
 				f.push_str("mod");
@@ -170,7 +168,6 @@ impl ToSql for FunctionCall {
 				if let Some(s) = s {
 					write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(s));
 				}
-				write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter()));
 			}
 			Function::Silo {
 				ref org,
@@ -183,21 +180,20 @@ impl ToSql for FunctionCall {
 				Some(s) => write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}<{major}.{minor}.{patch}>::{}({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 					EscapeKwFreeIdent(s),
-					Fmt::comma_separated(self.arguments.iter())
 				),
 				None => write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}<{major}.{minor}.{patch}>({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
-					Fmt::comma_separated(self.arguments.iter())
 				),
 			},
 		}
+		write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}
 }
