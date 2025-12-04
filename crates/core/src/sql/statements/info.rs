@@ -405,7 +405,12 @@ where
 }
 
 async fn system() -> Value {
-	let info = INFORMATION.lock().await;
+	// Use standard mutex lock - this is quick (just reading values)
+	// and doesn't need to be on a blocking thread pool
+	let info = match INFORMATION.lock() {
+		Ok(guard) => guard,
+		Err(poisoned) => poisoned.into_inner(),
+	};
 	Value::from(map! {
 		"available_parallelism".to_string() => info.available_parallelism.into(),
 		"cpu_usage".to_string() => info.cpu_usage.into(),

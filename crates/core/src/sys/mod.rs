@@ -1,24 +1,44 @@
-use futures::lock::Mutex;
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use sysinfo::Pid;
 use sysinfo::System;
 
 /// The current system environment which is used to
 /// periodically fetch and compute the system metrics.
+/// Uses a standard mutex since operations on Environment are blocking anyway.
 pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
 	LazyLock::new(|| Mutex::new(Environment::default()));
 
 /// The current system information which was acquired
 /// from the periodic environment process computation.
+/// Uses a standard mutex since we update it together with ENVIRONMENT.
 pub static INFORMATION: LazyLock<Mutex<Information>> =
 	LazyLock::new(|| Mutex::new(Information::default()));
 
+/// Refreshes system metrics by spawning blocking work on a dedicated thread.
+/// This avoids blocking the async runtime during sysinfo operations which
+/// read from /proc or equivalent system APIs.
 pub async fn refresh() {
-	// Get the environment
-	let mut environment = ENVIRONMENT.lock().await;
+	// Spawn the blocking sysinfo work on a blocking thread pool
+	// to avoid blocking the async runtime
+	let _ = tokio::task::spawn_blocking(refresh_blocking).await;
+}
+
+/// Synchronous version of refresh for use in blocking contexts.
+/// This function performs blocking I/O operations to gather system metrics.
+fn refresh_blocking() {
+	// Get the environment - use standard mutex since this is blocking anyway
+	let mut environment = match ENVIRONMENT.lock() {
+		Ok(guard) => guard,
+		Err(poisoned) => poisoned.into_inner(),
+	};
+	// Refresh the system information (blocking I/O)
 	environment.refresh();
 	// Get the system information cache
-	let mut information = INFORMATION.lock().await;
+	let mut information = match INFORMATION.lock() {
+		Ok(guard) => guard,
+		Err(poisoned) => poisoned.into_inner(),
+	};
 	// Update the cached information metrics
 	information.cpu_usage = environment.cpu_usage();
 	(information.memory_allocated, information.threads) = crate::mem::ALLOC.current_usage();
