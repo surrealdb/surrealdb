@@ -1,8 +1,5 @@
 use std::collections::HashSet;
 
-// Removed anyhow::bail - using return Err() instead
-#[cfg(feature = "protocol-http")]
-use reqwest::ClientBuilder;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -20,9 +17,6 @@ use crate::engine::any::Any;
 use crate::engine::remote::http;
 use crate::err::Error;
 use crate::method::BoxFuture;
-#[cfg(any(feature = "native-tls", feature = "rustls"))]
-#[cfg(feature = "protocol-http")]
-use crate::opt::Tls;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
 use crate::{Result, SessionClone, Surreal, conn};
 impl crate::Connection for Any {}
@@ -132,89 +126,14 @@ impl conn::Sealed for Any {
 				EndpointKind::Http | EndpointKind::Https => {
 					#[cfg(feature = "protocol-http")]
 					{
-						use std::net::SocketAddr;
-
 						features.insert(ExtraFeatures::Backup);
-						let headers = http::default_headers();
 						let base_url = address.url;
 
-						// Extract hostname and port for DNS resolution
-						let hostname = base_url.host_str().unwrap_or("localhost").to_string();
-						let port = base_url.port_or_known_default().unwrap_or(8000);
-
-						// Resolve hostname to get list of addresses
-						let host_port = format!("{}:{}", hostname, port);
-						let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&host_port)
-							.await
-							.map_err(|e| {
-								Error::InternalError(format!(
-									"DNS resolution failed for {}: {}",
-									host_port, e
-								))
-							})?
-							.collect();
-
-						if addrs.is_empty() {
-							return Err(Error::InternalError(format!(
-								"DNS resolution returned no addresses for {}",
-								host_port
-							)));
-						}
-
-						// Try each address until one works
-						let mut last_error = None;
-						let mut successful_client = None;
-
-						for addr in addrs {
-							#[cfg_attr(
-								not(any(feature = "native-tls", feature = "rustls")),
-								expect(unused_mut)
-							)]
-							let mut builder = ClientBuilder::new()
-								.default_headers(headers.clone())
-								.resolve(&hostname, addr);
-
-							#[cfg(any(feature = "native-tls", feature = "rustls"))]
-							if let Some(ref tls) = address.config.tls_config {
-								builder = match tls {
-									#[cfg(feature = "native-tls")]
-									Tls::Native(config) => builder.use_preconfigured_tls(config.clone()),
-									#[cfg(feature = "rustls")]
-									Tls::Rust(config) => builder.use_preconfigured_tls(config.clone()),
-								};
-							}
-
-							let client = match builder.build() {
-								Ok(c) => c,
-								Err(e) => {
-									last_error = Some(Error::from(e));
-									continue;
-								}
-							};
-
-							// Try health check with this address
-							let req = client.get(base_url.join("health")?).header(
-								reqwest::header::USER_AGENT,
-								&*surrealdb_core::cnf::SURREALDB_USER_AGENT,
-							);
-
-							match http::health(req).await {
-								Ok(()) => {
-									successful_client = Some(client);
-									break;
-								}
-								Err(e) => {
-									last_error = Some(e);
-									continue;
-								}
-							}
-						}
-
-						let client = successful_client.ok_or_else(|| {
-							last_error.unwrap_or_else(|| {
-								Error::InternalError("No addresses available".to_string())
-							})
-						})?;
+						#[cfg(any(feature = "native-tls", feature = "rustls"))]
+						let client = http::native::create_client(&base_url, address.config.tls_config.as_ref())
+							.await?;
+						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+						let client = http::native::create_client(&base_url).await?;
 
 						tokio::spawn(http::native::run_router(
 							client,

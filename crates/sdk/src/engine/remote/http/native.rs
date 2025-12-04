@@ -1,12 +1,11 @@
 use std::collections::HashSet;
-use std::iter::Iterator;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_channel::Receiver;
 use reqwest::ClientBuilder;
 use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use tokio::sync::watch;
+use url::Url;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
@@ -17,12 +16,76 @@ use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
 
-/// Resolve the hostname to a list of socket addresses.
-async fn resolve_addresses(hostname: &str, port: u16) -> Result<impl Iterator<Item = SocketAddr>> {
+/// Creates an HTTP client with address pinning for the given URL.
+///
+/// This function resolves the hostname to IP addresses and tries each one
+/// until a successful health check is performed. The resulting client is
+/// configured with `reqwest::ClientBuilder::resolve()` to pin all requests
+/// to the working IP address, ensuring session consistency.
+///
+/// # Arguments
+///
+/// * `base_url` - The base URL of the SurrealDB server
+/// * `tls_config` - Optional TLS configuration for HTTPS connections
+///
+/// # Returns
+///
+/// A configured `reqwest::Client` pinned to a specific server IP address.
+pub(crate) async fn create_client(
+	base_url: &Url,
+	#[cfg(any(feature = "native-tls", feature = "rustls"))] tls_config: Option<&Tls>,
+) -> Result<reqwest::Client> {
+	let headers = super::default_headers();
+
+	// Extract hostname and port for DNS resolution
+	let hostname = base_url.domain().unwrap_or("localhost");
+	let port = base_url.port_or_known_default().unwrap_or(8000);
+
+	// Resolve hostname to get list of addresses
 	let addrs = tokio::net::lookup_host((hostname, port)).await.map_err(|error| {
 		Error::InternalError(format!("DNS resolution failed for {hostname}:{port}; {error}"))
 	})?;
-	Ok(addrs)
+
+	// Try each address until one works
+	let mut last_error = None;
+
+	for addr in addrs {
+		#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_mut))]
+		let mut builder = ClientBuilder::new().default_headers(headers.clone()).resolve(hostname, addr);
+
+		#[cfg(any(feature = "native-tls", feature = "rustls"))]
+		if let Some(tls) = tls_config {
+			builder = match tls {
+				#[cfg(feature = "native-tls")]
+				Tls::Native(config) => builder.use_preconfigured_tls(config.clone()),
+				#[cfg(feature = "rustls")]
+				Tls::Rust(config) => builder.use_preconfigured_tls(config.clone()),
+			};
+		}
+
+		let client = match builder.build() {
+			Ok(client) => client,
+			Err(error) => {
+				last_error = Some(Error::from(error));
+				continue;
+			}
+		};
+
+		// Try health check with this address
+		let req = client
+			.get(base_url.join("health")?)
+			.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+
+		match super::health(req).await {
+			Ok(()) => return Ok(client),
+			Err(e) => {
+				last_error = Some(e);
+				continue;
+			}
+		}
+	}
+
+	Err(last_error.unwrap_or_else(|| Error::InternalError("No addresses available".to_string())))
 }
 
 impl crate::Connection for Client {}
@@ -34,67 +97,13 @@ impl conn::Sealed for Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			let headers = super::default_headers();
 			let config = address.config.clone();
 			let base_url = address.url;
 
-			// Extract hostname and port for DNS resolution
-			let hostname = base_url.domain().unwrap_or("localhost");
-			let port = base_url.port_or_known_default().unwrap_or(8000);
-
-			// Resolve hostname to get list of addresses
-			let addrs = resolve_addresses(hostname, port).await?;
-
-			// Try each address until one works
-			let mut last_error = None;
-			let mut successful_client = None;
-
-			for addr in addrs {
-				#[cfg_attr(
-					not(any(feature = "native-tls", feature = "rustls")),
-					expect(unused_mut)
-				)]
-				let mut builder = ClientBuilder::new().default_headers(headers.clone()).resolve(hostname, addr);
-
-				#[cfg(any(feature = "native-tls", feature = "rustls"))]
-				if let Some(ref tls) = address.config.tls_config {
-					builder = match tls {
-						#[cfg(feature = "native-tls")]
-						Tls::Native(config) => builder.use_preconfigured_tls(config.clone()),
-						#[cfg(feature = "rustls")]
-						Tls::Rust(config) => builder.use_preconfigured_tls(config.clone()),
-					};
-				}
-
-				let client = match builder.build() {
-					Ok(client) => client,
-					Err(error) => {
-						last_error = Some(Error::from(error));
-						continue;
-					}
-				};
-
-				// Try health check with this address
-				let req = client
-					.get(base_url.join("health")?)
-					.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
-
-				match super::health(req).await {
-					Ok(()) => {
-						successful_client = Some(client);
-						break;
-					}
-					Err(e) => {
-						last_error = Some(e);
-						continue;
-					}
-				}
-			}
-
-			let client = successful_client.ok_or_else(|| {
-				last_error
-					.unwrap_or_else(|| Error::InternalError("No addresses available".to_string()))
-			})?;
+			#[cfg(any(feature = "native-tls", feature = "rustls"))]
+			let client = create_client(&base_url, address.config.tls_config.as_ref()).await?;
+			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
+			let client = create_client(&base_url).await?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
