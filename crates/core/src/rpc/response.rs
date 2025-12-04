@@ -299,6 +299,42 @@ impl From<RpcError> for DbResultError {
 	}
 }
 
+impl From<anyhow::Error> for DbResultError {
+	fn from(error: anyhow::Error) -> Self {
+		// Try to downcast to RpcError first
+		if let Some(rpc_err) = error.downcast_ref::<RpcError>() {
+			return match rpc_err {
+				RpcError::ParseError => DbResultError::ParseError("Parse error".to_string()),
+				RpcError::InvalidRequest => {
+					DbResultError::InvalidRequest("Invalid request".to_string())
+				}
+				RpcError::MethodNotFound => {
+					DbResultError::MethodNotFound("Method not found".to_string())
+				}
+				RpcError::MethodNotAllowed => {
+					DbResultError::MethodNotAllowed("Method not allowed".to_string())
+				}
+				RpcError::InvalidParams(message) => DbResultError::InvalidParams(message.clone()),
+				RpcError::InternalError(error) => DbResultError::InternalError(error.to_string()),
+				RpcError::LqNotSuported => DbResultError::LiveQueryNotSupported,
+				RpcError::BadLQConfig => {
+					DbResultError::BadLiveQueryConfig("Bad live query config".to_string())
+				}
+				RpcError::BadGQLConfig => {
+					DbResultError::BadGraphQLConfig("Bad GraphQL config".to_string())
+				}
+				RpcError::Thrown(message) => DbResultError::Thrown(message.clone()),
+				RpcError::Serialize(message) => DbResultError::SerializationError(message.clone()),
+				RpcError::Deserialize(message) => {
+					DbResultError::DeserializationError(message.clone())
+				}
+			};
+		}
+		// For any other error, return InternalError
+		DbResultError::InternalError(error.to_string())
+	}
+}
+
 #[derive(Debug)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,

@@ -5,6 +5,7 @@ mod error;
 mod flatbuffers;
 mod kind;
 mod notification;
+pub mod proto;
 mod sql;
 mod traits;
 pub(crate) mod utils;
@@ -84,7 +85,7 @@ macro_rules! object {
 #[macro_export]
 macro_rules! set {
 	($($value:expr),* $(,)?) => {
-		$crate::Set::from(vec![$($value),*])
+		$crate::Set::from(vec![$($value.into()),*])
 	};
 }
 

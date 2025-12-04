@@ -46,6 +46,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
 surrealdb-types.workspace = true
 
 # External surreal crates
@@ -140,6 +141,7 @@ tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
+tonic.workspace = true
 tracing.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 
@@ -167,7 +169,6 @@ opentelemetry-proto = { version = "0.7.0", features = [
     "logs",
 ] }
 rcgen = "0.13.2"
-tonic = "0.12.3"
 
 # Other crates
 chrono.workspace = true

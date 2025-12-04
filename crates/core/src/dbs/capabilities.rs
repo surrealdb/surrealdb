@@ -124,6 +124,7 @@ pub enum ExperimentalTarget {
 	DefineApi,
 	Files,
 	Surrealism,
+	Grpc,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -133,6 +134,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
+			Self::Grpc => write!(f, "grpc"),
 		}
 	}
 }
@@ -150,6 +152,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
+			Self::Grpc => elem.eq_ignore_ascii_case("grpc"),
 		}
 	}
 }
@@ -179,6 +182,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
+			"grpc" => Ok(ExperimentalTarget::Grpc),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
