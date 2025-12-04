@@ -57,6 +57,22 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 		subset
 	};
 
+	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
+		subset.filter_map(|_, test| {
+			if let Some(env) = &test.config.env {
+				if !env.backend.is_empty() {
+					env.backend.contains(&backend.to_string())
+				} else {
+					false
+				}
+			} else {
+				true
+			}
+		})
+	} else {
+		subset
+	};
+
 	if matches.get_flag("no-results") {
 		subset.filter_map(|_, set| {
 			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)

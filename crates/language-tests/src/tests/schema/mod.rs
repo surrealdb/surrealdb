@@ -96,6 +96,9 @@ pub struct TestEnv {
 	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
+	#[serde(default)]
+	pub backend: Vec<String>,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
