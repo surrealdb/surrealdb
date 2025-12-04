@@ -11,8 +11,17 @@ use crate::kvs::Key;
 use crate::val::{Duration, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Alters system-wide settings and maintenance operations.
+///
+/// Supported operations:
+/// - `query_timeout`: set/drop a global query timeout which is enforced across queries. The value
+///   is evaluated as a `Duration` expression at runtime.
+/// - `compact`: runs a storage compaction across the entire datastore.
 pub(crate) struct AlterSystemStatement {
+	/// Global query timeout alteration. `Set` evaluates an expression to a
+	/// `Duration`; `Drop` clears the timeout; `None` leaves it unchanged.
 	pub query_timeout: AlterKind<Expr>,
+	/// When true, triggers a datastore-wide compaction.
 	pub compact: bool,
 }
 

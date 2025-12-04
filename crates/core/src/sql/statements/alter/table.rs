@@ -6,6 +6,18 @@ use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+/// AST node for `ALTER TABLE`.
+///
+/// Supported operations include (order-insensitive after the table name):
+/// - `TYPE NORMAL | RELATION [IN <from> [OUT <to>]] | ANY`
+/// - `SCHEMAFULL` / `SCHEMALESS`
+/// - `PERMISSIONS ...`
+/// - `CHANGEFEED ...` / `DROP CHANGEFEED`
+/// - `COMMENT <string>` / `DROP COMMENT`
+/// - `COMPACT` (request table keyspace compaction)
+///
+/// Note: `COMPACT` is parsed and preserved on the expression side, however it is
+/// currently not rendered by this node's `ToSql` implementation.
 pub struct AlterTableStatement {
 	pub name: String,
 	pub if_exists: bool,
@@ -14,6 +26,7 @@ pub struct AlterTableStatement {
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
+	/// Request table‑level compaction when true.
 	pub compact: bool,
 }
 
@@ -77,6 +90,7 @@ impl ToSql for AlterTableStatement {
 		if let Some(permissions) = &self.permissions {
 			write_sql!(f, fmt, " {permissions}");
 		}
+		// Note: `COMPACT` is intentionally not emitted here at the moment.
 	}
 }
 

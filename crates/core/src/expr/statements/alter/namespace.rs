@@ -7,11 +7,22 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Executes `ALTER NAMESPACE` operations for the current namespace.
+///
+/// Supported options:
+/// - `compact`: triggers a compaction of the current namespace keyspace.
 pub(crate) struct AlterNamespaceStatement {
+	/// When true, compacts the underlying storage for the namespace.
 	pub compact: bool,
 }
 
 impl AlterNamespaceStatement {
+	/// Computes the effect of the `ALTER NAMESPACE` statement.
+	///
+	/// Permissions: requires `Action::Edit` on `ResourceKind::Namespace`.
+	///
+	/// Side effects:
+	/// - If `compact` is true, compacts the underlying storage for the current namespace.
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> anyhow::Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;

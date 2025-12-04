@@ -18,6 +18,11 @@ pub use table::AlterTableStatement;
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+/// Tri‑state alteration helper used across `ALTER` AST nodes.
+///
+/// - `None`: leave the current value unchanged
+/// - `Set(T)`: set/replace the current value to `T`
+/// - `Drop`: remove/clear the current value
 pub enum AlterKind<T> {
 	#[default]
 	None,
@@ -53,6 +58,7 @@ where
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+/// SQL AST for `ALTER` statements. Variants mirror specific resources.
 pub enum AlterStatement {
 	System(AlterSystemStatement),
 	Namespace(AlterNamespaceStatement),

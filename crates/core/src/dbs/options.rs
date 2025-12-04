@@ -417,6 +417,10 @@ impl Options {
 		}
 	}
 
+	/// Returns the handle to runtime‑adjustable configuration toggles.
+	///
+	/// Currently this includes the global query timeout, which can be modified
+	/// via `ALTER SYSTEM QUERY_TIMEOUT ...`.
 	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
 		&self.dynamic_configuration
 	}

@@ -24,6 +24,10 @@ pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Helper to express a tri‑state alteration:
+/// - `None`: leave the current value unchanged
+/// - `Set(T)`: set/replace the current value to `T`
+/// - `Drop`: remove/clear the current value
 pub(crate) enum AlterKind<T> {
 	#[default]
 	None,
@@ -82,6 +86,10 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+/// Execution‑time representation of all `ALTER` statements.
+///
+/// Variants map to specific resources and delegate execution to their
+/// corresponding implementations.
 pub(crate) enum AlterStatement {
 	System(AlterSystemStatement),
 	Namespace(AlterNamespaceStatement),
@@ -93,7 +101,10 @@ pub(crate) enum AlterStatement {
 }
 
 impl AlterStatement {
-	/// Process this type returning a computed simple Value
+	/// Executes this statement, returning a simple value.
+	///
+	/// All `ALTER` statements currently return `Value::None` on success and may
+	/// perform side effects such as storage compaction or metadata updates.
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
