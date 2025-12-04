@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,7 +25,7 @@ impl ToSql for RemoveSequenceStatement {
 		if self.if_exists {
 			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 	}
 }
 

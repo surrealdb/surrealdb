@@ -9,10 +9,11 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr, Literal, Timeout, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
+use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineSequenceStatement {
@@ -20,7 +21,7 @@ pub(crate) struct DefineSequenceStatement {
 	pub name: Expr,
 	pub batch: Expr,
 	pub start: Expr,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 }
 
 impl Default for DefineSequenceStatement {
@@ -30,7 +31,7 @@ impl Default for DefineSequenceStatement {
 			name: Expr::Literal(Literal::None),
 			batch: Expr::Literal(Literal::Integer(0)),
 			start: Expr::Literal(Literal::Integer(0)),
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -48,7 +49,12 @@ impl DefineSequenceStatement {
 		// Compute name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?;
 		// Compute timeout
-		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
+		let timeout = stk
+			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -76,12 +82,30 @@ impl DefineSequenceStatement {
 
 		// Process the statement
 		let key = Sq::new(db.namespace_id, db.database_id, &name);
+
+		let batch = stk
+			.run(|stk| self.batch.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<i64>()?;
+
+		let Ok(batch) = u32::try_from(batch) else {
+			bail!(Error::Query {
+				message: format!(
+					"`{batch}` is not valid batch size for a sequence definition. A batch size must be within 0..={}",
+					u32::MAX
+				),
+			})
+		};
+
 		let sq = SequenceDefinition {
 			name: name.clone(),
-			batch: compute_to!(stk, ctx, opt, doc, self.batch => i64)
-				.try_into()
-				.map_err(|_| anyhow::anyhow!("batch must be a u32"))?,
-			start: compute_to!(stk, ctx, opt, doc, self.start => i64),
+			batch,
+			start: stk
+				.run(|stk| self.start.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to()?,
 			timeout,
 		};
 		// Set the definition

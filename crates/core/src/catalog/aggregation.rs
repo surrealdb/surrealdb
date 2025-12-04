@@ -684,15 +684,11 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		for e in s.what.iter_mut() {
 			self.visit_mut_expr(e)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 		if let Some(d) = &mut s.data {
 			ParentRewritor.visit_mut_data(d)?;
 		}
-		if let Some(v) = &mut s.version {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -703,9 +699,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(l) = s.limit.as_mut() {
 			self.visit_mut_expr(&mut l.0)?;
 		}
-		if let Some(v) = s.version.as_mut() {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 
 		ParentRewritor.visit_mut_fields(&mut s.expr)?;
 		for o in s.omit.iter_mut() {
@@ -746,9 +740,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(e) = &mut s.cond {
 			ParentRewritor.visit_mut_expr(&mut e.0)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 		Ok(())
 	}
 
@@ -762,9 +754,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(e) = &mut s.cond {
 			ParentRewritor.visit_mut_expr(&mut e.0)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 		Ok(())
 	}
 
@@ -772,9 +762,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		self.visit_mut_expr(&mut s.through)?;
 		self.visit_mut_expr(&mut s.from)?;
 		self.visit_mut_expr(&mut s.to)?;
-		if let Some(o) = s.timeout.as_mut() {
-			self.visit_mut_expr(&mut o.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 
 		if let Some(d) = s.data.as_mut() {
 			ParentRewritor.visit_mut_data(d)?;
@@ -789,12 +777,8 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(v) = i.into.as_mut() {
 			self.visit_mut_expr(v)?;
 		}
-		if let Some(o) = i.timeout.as_mut() {
-			self.visit_mut_expr(&mut o.0)?;
-		}
-		if let Some(o) = i.version.as_mut() {
-			self.visit_mut_expr(o)?;
-		}
+		self.visit_mut_expr(&mut i.timeout)?;
+		self.visit_mut_expr(&mut i.version)?;
 
 		ParentRewritor.visit_mut_data(&mut i.data)?;
 		if let Some(update) = i.update.as_mut() {
@@ -811,9 +795,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		d: &mut DefineApiStatement,
 	) -> std::result::Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.path)?;
-		if let Some(c) = &mut d.comment {
-			self.visit_mut_expr(c)?
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 
@@ -821,9 +803,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		&mut self,
 		d: &mut DefineFunctionStatement,
 	) -> std::result::Result<(), Self::Error> {
-		if let Some(c) = &mut d.comment {
-			self.visit_mut_expr(c)?
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 
@@ -832,35 +812,23 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		d: &mut DefineAccessStatement,
 	) -> std::result::Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
-		if let Some(c) = &mut d.comment {
-			self.visit_mut_expr(c)?
-		}
-		if let Some(e) = d.duration.grant.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
-		if let Some(e) = d.duration.token.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
-		if let Some(e) = d.duration.session.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
+		self.visit_mut_expr(&mut d.duration.grant)?;
+		self.visit_mut_expr(&mut d.duration.token)?;
+		self.visit_mut_expr(&mut d.duration.session)?;
 		Ok(())
 	}
 
 	fn visit_mut_define_index(&mut self, d: &mut DefineIndexStatement) -> Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
-		if let Some(expr) = d.comment.as_mut() {
-			self.visit_mut_expr(expr)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 
 	fn visit_mut_define_field(&mut self, d: &mut DefineFieldStatement) -> Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
 		self.visit_mut_expr(&mut d.what)?;
-		if let Some(expr) = d.comment.as_mut() {
-			self.visit_mut_expr(expr)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 }
@@ -887,12 +855,8 @@ impl MutVisitor for ParentRewritor {
 		for e in s.what.iter_mut() {
 			self.visit_mut_expr(e)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
-		if let Some(v) = &mut s.version {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -904,9 +868,7 @@ impl MutVisitor for ParentRewritor {
 		if let Some(l) = s.limit.as_mut() {
 			self.visit_mut_expr(&mut l.0)?;
 		}
-		if let Some(v) = s.version.as_mut() {
-			self.visit_mut_expr(v)?;
-		}
+		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -914,9 +876,8 @@ impl MutVisitor for ParentRewritor {
 		for e in s.what.iter_mut() {
 			self.visit_mut_expr(e)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
+
+		self.visit_mut_expr(&mut s.timeout)?;
 		Ok(())
 	}
 
@@ -924,9 +885,7 @@ impl MutVisitor for ParentRewritor {
 		for e in s.what.iter_mut() {
 			self.visit_mut_expr(e)?;
 		}
-		if let Some(t) = &mut s.timeout {
-			self.visit_mut_expr(&mut t.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 		Ok(())
 	}
 
@@ -934,9 +893,7 @@ impl MutVisitor for ParentRewritor {
 		self.visit_mut_expr(&mut s.through)?;
 		self.visit_mut_expr(&mut s.from)?;
 		self.visit_mut_expr(&mut s.to)?;
-		if let Some(o) = s.timeout.as_mut() {
-			self.visit_mut_expr(&mut o.0)?;
-		}
+		self.visit_mut_expr(&mut s.timeout)?;
 
 		Ok(())
 	}
@@ -945,12 +902,8 @@ impl MutVisitor for ParentRewritor {
 		if let Some(v) = i.into.as_mut() {
 			self.visit_mut_expr(v)?;
 		}
-		if let Some(o) = i.timeout.as_mut() {
-			self.visit_mut_expr(&mut o.0)?;
-		}
-		if let Some(o) = i.version.as_mut() {
-			self.visit_mut_expr(o)?;
-		}
+		self.visit_mut_expr(&mut i.timeout)?;
+		self.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 
@@ -959,9 +912,7 @@ impl MutVisitor for ParentRewritor {
 		d: &mut DefineApiStatement,
 	) -> std::result::Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.path)?;
-		if let Some(c) = &mut d.comment {
-			self.visit_mut_expr(c)?
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 
@@ -988,35 +939,23 @@ impl MutVisitor for ParentRewritor {
 		d: &mut DefineAccessStatement,
 	) -> std::result::Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
-		if let Some(c) = &mut d.comment {
-			self.visit_mut_expr(c)?
-		}
-		if let Some(e) = d.duration.grant.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
-		if let Some(e) = d.duration.token.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
-		if let Some(e) = d.duration.session.as_mut() {
-			self.visit_mut_expr(e)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
+		self.visit_mut_expr(&mut d.duration.grant)?;
+		self.visit_mut_expr(&mut d.duration.token)?;
+		self.visit_mut_expr(&mut d.duration.session)?;
 		Ok(())
 	}
 
 	fn visit_mut_define_index(&mut self, d: &mut DefineIndexStatement) -> Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
-		if let Some(expr) = d.comment.as_mut() {
-			self.visit_mut_expr(expr)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 
 	fn visit_mut_define_field(&mut self, d: &mut DefineFieldStatement) -> Result<(), Self::Error> {
 		self.visit_mut_expr(&mut d.name)?;
 		self.visit_mut_expr(&mut d.what)?;
-		if let Some(expr) = d.comment.as_mut() {
-			self.visit_mut_expr(expr)?;
-		}
+		self.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 }

@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,21 +21,10 @@ impl Fields {
 		Fields::Select(vec![Field::All])
 	}
 
-	pub fn none() -> Fields {
-		Fields::Select(vec![])
-	}
-
 	pub fn contains_all(&self) -> bool {
 		match self {
 			Fields::Value(_) => false,
 			Fields::Select(fields) => fields.iter().any(|x| matches!(x, Field::All)),
-		}
-	}
-
-	pub fn is_empty(&self) -> bool {
-		match self {
-			Fields::Value(_field) => false,
-			Fields::Select(fields) => fields.is_empty(),
 		}
 	}
 }
@@ -119,7 +108,7 @@ impl From<crate::expr::field::Field> for Field {
 
 impl ToSql for Selector {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "{}", CoverStmtsSql(&self.expr));
+		write_sql!(f, fmt, "{}", CoverStmts(&self.expr));
 		if let Some(alias) = &self.alias {
 			f.push_str(" AS ");
 			alias.fmt_sql(f, fmt);

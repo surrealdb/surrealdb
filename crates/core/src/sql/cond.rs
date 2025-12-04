@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,7 +9,7 @@ pub(crate) struct Cond(pub(crate) Expr);
 
 impl ToSql for Cond {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "WHERE {}", self.0)
+		write_sql!(f, fmt, "WHERE {}", CoverStmts(&self.0))
 	}
 }
 

@@ -1198,7 +1198,7 @@ async fn permissions_checks_remove_event() {
 	// succeeded and when it failed
 	let check_success =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
-	let check_error = "{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
+	let check_error = "{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level

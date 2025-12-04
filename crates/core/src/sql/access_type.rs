@@ -7,6 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Expr;
 use crate::err::Error;
+use crate::fmt::CoverStmts;
 use crate::sql::{Algorithm, Literal};
 
 pub(crate) fn random_key() -> String {
@@ -60,10 +61,10 @@ impl ToSql for AccessType {
 			AccessType::Record(ac) => {
 				write_sql!(f, sql_fmt, "RECORD");
 				if let Some(ref v) = ac.signup {
-					write_sql!(f, sql_fmt, " SIGNUP {v}")
+					write_sql!(f, sql_fmt, " SIGNUP {}", CoverStmts(v));
 				}
 				if let Some(ref v) = ac.signin {
-					write_sql!(f, sql_fmt, " SIGNIN {v}")
+					write_sql!(f, sql_fmt, " SIGNIN {}", CoverStmts(v));
 				}
 				if ac.bearer.is_some() {
 					write_sql!(f, sql_fmt, " WITH REFRESH")
@@ -108,7 +109,6 @@ impl AccessType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,

@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::{CoverStmts, EscapeIdent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -141,26 +141,10 @@ impl Expr {
 	// NOTE: Changes to this function also likely require changes to
 	// crate::expr::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
-	fn needs_parentheses(&self) -> bool {
+	pub(crate) fn needs_parentheses(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
+			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
+			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Throw(_)
@@ -181,6 +165,26 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Postfix {
+				op,
+				..
+			} => matches!(op, PostfixOperator::Range | PostfixOperator::RangeSkip),
+
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
 		}
 	}
 }
@@ -384,10 +388,28 @@ impl ToSql for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
+				if let Expr::Literal(Literal::Integer(x)) = expr.as_ref()
+					&& x.is_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Decimal(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Float(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
+					|| matches!(
+						expr.as_ref(),
+						Expr::Prefix {
+							op: PrefixOperator::Negate,
+							..
+						}
+					) {
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {
 					write_sql!(f, fmt, "{op}{expr}");
@@ -402,6 +424,7 @@ impl ToSql for Expr {
 				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					|| matches!(op, PostfixOperator::Call(_))
 				{
 					write_sql!(f, fmt, "({expr}){op}");
 				} else {
@@ -420,8 +443,10 @@ impl ToSql for Expr {
 				if left.needs_parentheses()
 					|| left_bp < op_bp
 					|| left_bp == op_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
+						&& matches!(
+							left_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write_sql!(f, fmt, "({left})");
 				} else {
 					write_sql!(f, fmt, "{left}");
@@ -444,8 +469,10 @@ impl ToSql for Expr {
 				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
+						&& matches!(
+							right_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write_sql!(f, fmt, "({right})");
 				} else {
 					write_sql!(f, fmt, "{right}");
@@ -456,7 +483,7 @@ impl ToSql for Expr {
 			Expr::Break => f.push_str("BREAK"),
 			Expr::Continue => f.push_str("CONTINUE"),
 			Expr::Return(x) => x.fmt_sql(f, fmt),
-			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {expr}"),
+			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {}", CoverStmts(expr.as_ref())),
 			Expr::IfElse(s) => s.fmt_sql(f, fmt),
 			Expr::Select(s) => s.fmt_sql(f, fmt),
 			Expr::Create(s) => s.fmt_sql(f, fmt),

@@ -1,5 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -11,8 +12,7 @@ pub struct KillStatement {
 
 impl ToSql for KillStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str("KILL ");
-		self.id.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "KILL {}", CoverStmts(&self.id));
 	}
 }
 

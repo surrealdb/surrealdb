@@ -1,7 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Idiom, Kind, Permissions};
 
@@ -86,25 +86,25 @@ impl ToSql for AlterFieldStatement {
 			AlterKind::None => {}
 		}
 		match self.value {
-			AlterKind::Set(ref x) => write_sql!(f, fmt, " VALUE {x}"),
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " VALUE {}", CoverStmts(x)),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP VALUE"),
 			AlterKind::None => {}
 		}
 		match self.assert {
-			AlterKind::Set(ref x) => write_sql!(f, fmt, " ASSERT {x}"),
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " ASSERT {}", CoverStmts(x)),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP ASSERT"),
 			AlterKind::None => {}
 		}
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => write_sql!(f, fmt, "DROP DEFAULT"),
-			AlterDefault::Always(ref d) => write_sql!(f, fmt, "DEFAULT ALWAYS {d}"),
-			AlterDefault::Set(ref d) => write_sql!(f, fmt, "DEFAULT {d}"),
+			AlterDefault::Drop => write_sql!(f, fmt, " DROP DEFAULT"),
+			AlterDefault::Always(ref d) => write_sql!(f, fmt, " DEFAULT ALWAYS {}", CoverStmts(d)),
+			AlterDefault::Set(ref d) => write_sql!(f, fmt, " DEFAULT {}", CoverStmts(d)),
 		}
 
 		if let Some(permissions) = &self.permissions {
-			write_sql!(f, fmt, "{permissions}");
+			write_sql!(f, fmt, " {permissions}");
 		}
 
 		match self.comment {

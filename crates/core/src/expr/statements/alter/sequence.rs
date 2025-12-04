@@ -9,15 +9,16 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Timeout, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
+use crate::val::Duration;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub(crate) struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub timeout: Option<Timeout>,
+	pub timeout: Option<Expr>,
 }
 
 impl AlterSequenceStatement {
@@ -45,13 +46,18 @@ impl AlterSequenceStatement {
 				}
 			}
 		};
-		// Process the statement
+
 		if let Some(timeout) = &self.timeout {
-			let timeout = timeout.compute(stk, ctx, opt, doc).await?.0;
-			if timeout.is_zero() {
-				sq.timeout = None;
+			// Process the statement
+			if let Some(timeout) = stk
+				.run(|stk| timeout.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to::<Option<Duration>>()?
+			{
+				sq.timeout = Some(timeout.0);
 			} else {
-				sq.timeout = Some(timeout);
+				sq.timeout = None;
 			}
 		}
 		// Set the sequence definition

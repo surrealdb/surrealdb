@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
@@ -152,10 +153,10 @@ impl ToSql for DefaultConfig {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "DEFAULT");
 		if let Some(namespace) = &self.namespace {
-			write_sql!(f, fmt, " NAMESPACE {namespace}");
+			write_sql!(f, fmt, " NAMESPACE {}", EscapeKwFreeIdent(namespace));
 		}
 		if let Some(database) = &self.database {
-			write_sql!(f, fmt, " DATABASE {database}");
+			write_sql!(f, fmt, " DATABASE {}", EscapeKwFreeIdent(database));
 		}
 	}
 }

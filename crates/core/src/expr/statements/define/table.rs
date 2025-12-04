@@ -41,7 +41,7 @@ pub(crate) struct DefineTableStatement {
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub table_type: TableType,
 }
 
@@ -56,7 +56,7 @@ impl Default for DefineTableStatement {
 			view: None,
 			permissions: Permissions::default(),
 			changefeed: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
 		}
 	}
@@ -100,6 +100,12 @@ impl DefineTableStatement {
 			ctx.try_get_sequences()?.next_table_id(Some(ctx), ns, db).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		// Process the statement
 		let cache_ts = Uuid::now_v7();
 		let mut tb_def = TableDefinition {
@@ -112,7 +118,7 @@ impl DefineTableStatement {
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()).transpose()?,
 			permissions: self.permissions.clone(),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,

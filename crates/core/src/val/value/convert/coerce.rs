@@ -286,6 +286,22 @@ impl Coerce for Point<f64> {
 	}
 }
 
+impl<T: Coerce + HasKind> Coerce for Option<T> {
+	fn can_coerce(v: &Value) -> bool {
+		if let Value::None = v {
+			return true;
+		}
+		T::can_coerce(v)
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::None => Ok(None),
+			x => Ok(Some(T::coerce(x)?)),
+		}
+	}
+}
+
 impl<T: Coerce + HasKind> Coerce for Vec<T> {
 	fn can_coerce(v: &Value) -> bool {
 		let Value::Array(a) = v else {

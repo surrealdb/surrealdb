@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeIdent;
 
 pub mod key;
 pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
@@ -36,6 +36,6 @@ impl From<crate::expr::RecordIdLit> for RecordIdLit {
 
 impl ToSql for RecordIdLit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeRid(&self.table), self.key);
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(&self.table), self.key);
 	}
 }

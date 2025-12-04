@@ -14,7 +14,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
@@ -378,7 +378,7 @@ impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
-			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRid(v)),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v)),
 			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
 			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
 			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
@@ -475,6 +475,6 @@ impl From<crate::types::PublicRecordId> for RecordId {
 
 impl ToSql for RecordId {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeRid(&self.table), self.key)
+		write_sql!(f, sql_fmt, "{}:{}", EscapeRidKey(&self.table), self.key)
 	}
 }
