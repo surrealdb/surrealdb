@@ -142,7 +142,7 @@ pub enum DbResultError {
 	ClientSideError(String),
 	InvalidAuth(String),
 	QueryNotExecuted(String),
-	QueryTimedout,
+	QueryTimedout(String),
 	QueryCancelled,
 }
 
@@ -182,7 +182,7 @@ impl DbResultError {
 			Self::ClientSideError(_) => Self::CLIENT_SIDE_ERROR,
 			Self::InvalidAuth(_) => Self::INVALID_AUTH,
 			Self::QueryNotExecuted(_) => Self::QUERY_NOT_EXECUTED,
-			Self::QueryTimedout => Self::QUERY_TIMEDOUT,
+			Self::QueryTimedout(_) => Self::QUERY_TIMEDOUT,
 			Self::QueryCancelled => Self::QUERY_CANCELLED,
 		}
 	}
@@ -204,7 +204,7 @@ impl DbResultError {
 			Self::ClientSideError(msg) => msg.clone(),
 			Self::InvalidAuth(msg) => msg.clone(),
 			Self::QueryNotExecuted(msg) => msg.clone(),
-			Self::QueryTimedout => "Query timed out".to_string(),
+			Self::QueryTimedout(timeout) => format!("Query timed out: {timeout}"),
 			Self::QueryCancelled => {
 				"The query was not executed due to a cancelled transaction".to_string()
 			}
@@ -228,7 +228,7 @@ impl DbResultError {
 			Self::CLIENT_SIDE_ERROR => Self::ClientSideError(message),
 			Self::INVALID_AUTH => Self::InvalidAuth(message),
 			Self::QUERY_NOT_EXECUTED => Self::QueryNotExecuted(message),
-			Self::QUERY_TIMEDOUT => Self::QueryTimedout,
+			Self::QUERY_TIMEDOUT => Self::QueryTimedout(message),
 			Self::QUERY_CANCELLED => Self::QueryCancelled,
 			// For any unknown code, map to InternalError
 			_ => Self::InternalError(format!("Unknown error code {code}: {message}")),

@@ -1741,7 +1741,7 @@ impl Datastore {
 			Some(Error::Channel(msg)) => {
 				DbResultError::InternalError(format!("Channel error: {}", msg))
 			}
-			Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
@@ -1845,7 +1845,9 @@ impl Datastore {
 				Some(Error::Channel(msg)) => {
 					DbResultError::InternalError(format!("Channel error: {}", msg))
 				}
-				Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+				Some(Error::QueryTimedout(timeout)) => {
+					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
+				}
 				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 				Some(Error::QueryNotExecuted {
 					message,

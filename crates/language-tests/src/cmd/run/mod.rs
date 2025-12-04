@@ -295,16 +295,19 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let config = &context.testset[context.id].config;
 	let capabilities = core_capabilities_from_test_config(config);
 
-	let timeout_duration = config
+	let context_timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
+		.map(|x| x.context_timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(3));
 
 	let res = context
 		.ds
 		.with(
-			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
+			move |ds| {
+				ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(context_timeout_duration))
+			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -312,7 +315,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let res = match res {
 		Ok(x) => x?,
 		Err(PermitError::Other(e)) => return Err(e),
-		Err(PermitError::Panic(e)) => TestTaskResult::Paniced(e),
+		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
 	};
 
 	context.result.send((context.id, res)).await.expect("result channel quit early");

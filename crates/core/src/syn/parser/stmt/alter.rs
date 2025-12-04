@@ -56,7 +56,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.compact = true;
 				}
-				_ => break,
+				o => {
+					println!("{o}");
+					break;
+				}
 			}
 		}
 

@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -132,7 +132,7 @@ impl InsertStatement {
 			// Process the statement
 			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
-			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			ctx.expect_not_timedout().await?;
 			// Output the results
 			Ok(res)
 		})

@@ -44,9 +44,6 @@ value = "NONE"
 match = "'status' in $result.building"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "{ building: { initial: 1, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
@@ -69,12 +66,7 @@ DEFINE INDEX ft_title ON book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIG
 REBUILD INDEX uniq_isbn ON book;
 REBUILD INDEX idx_author ON book;
 REBUILD INDEX ft_title ON book;
--- This test might be somewhat flaky as indexing could be ready before we hit this info for.
 INFO FOR INDEX ft_title ON book;
-SLEEP 2s;
--- Further more it might be possible for indexing to not finish after 2 seconds.
--- Maybe we need a way to wait on indexing to finish
--- However currently (when testing this test) the results seem pretty consistant.
 INFO FOR INDEX ft_title ON book;
 INFO FOR TABLE book;
 SELECT * FROM book WHERE title @@ 'Rust';

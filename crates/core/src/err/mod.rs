@@ -26,7 +26,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::val::{CastError, CoerceError, RecordId, Value};
+use crate::val::{CastError, CoerceError, Duration, RecordId, Value};
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
@@ -197,8 +197,8 @@ pub(crate) enum Error {
 	InvalidControlFlow,
 
 	/// The query timedout
-	#[error("The query was not executed because it exceeded the timeout")]
-	QueryTimedout,
+	#[error("The query was not executed because it exceeded the timeout: {0}")]
+	QueryTimedout(Duration),
 
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]

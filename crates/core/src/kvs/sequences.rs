@@ -522,16 +522,15 @@ impl Sequence {
 		// We check the timeout inherited from the context
 		loop {
 			if let Some(ctx) = ctx {
-				if ctx.is_timedout().await? {
-					break;
-				}
+				ctx.expect_not_timedout().await?;
 			} else {
 				yield_now!();
 			}
 			if let (Some(ref start), Some(ref to)) = (start, to) {
 				// We check the time associated with the sequence
 				if start.elapsed().ge(to) {
-					break;
+					let timeout = (*to).into();
+					return Err(anyhow::Error::new(Error::QueryTimedout(timeout)));
 				}
 			}
 			if let Ok(r) = Self::check_batch_allocation(sqs, seq, next, batch).await {
@@ -544,7 +543,6 @@ impl Sequence {
 				tempo *= 2;
 			}
 		}
-		Err(anyhow::Error::new(Error::QueryTimedout))
 	}
 
 	/// Attempts to allocate a batch of IDs in a single transaction.
