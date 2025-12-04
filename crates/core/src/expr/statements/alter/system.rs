@@ -5,14 +5,14 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::alter::AlterKind;
-use crate::expr::{Base, Timeout};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Key;
-use crate::val::Value;
+use crate::val::{Duration, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterSystemStatement {
-	pub query_timeout: AlterKind<Timeout>,
+	pub query_timeout: AlterKind<Expr>,
 	pub compact: bool,
 }
 
@@ -33,8 +33,12 @@ impl AlterSystemStatement {
 		match &self.query_timeout {
 			AlterKind::None => {}
 			AlterKind::Set(timeout) => {
-				let timeout = timeout.compute(stk, ctx, opt, doc).await?.0;
-				opt.dynamic_configuration().set_query_timeout(Some(timeout));
+				let timeout = stk
+					.run(|stk| timeout.compute(stk, ctx, opt, doc))
+					.await
+					.catch_return()?
+					.cast_to::<Duration>()?;
+				opt.dynamic_configuration().set_query_timeout(Some(timeout.0));
 			}
 			AlterKind::Drop => {
 				opt.dynamic_configuration().set_query_timeout(None);

@@ -1,12 +1,12 @@
 use reblessive::Stk;
 
+use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{
 	AlterDatabaseStatement, AlterFieldStatement, AlterIndexStatement, AlterKind,
 	AlterNamespaceStatement, AlterSequenceStatement, AlterSystemStatement,
 };
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
-use crate::sql::{TableType, Timeout};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
@@ -50,7 +50,7 @@ impl Parser<'_> {
 				t!("QUERY_TIMEOUT") => {
 					self.pop_peek();
 					let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
-					res.query_timeout = AlterKind::Set(Timeout(duration));
+					res.query_timeout = AlterKind::Set(duration);
 				}
 				t!("COMPACT") => {
 					self.pop_peek();

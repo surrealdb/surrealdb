@@ -1,12 +1,12 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::Timeout;
+use crate::sql::Expr;
 use crate::sql::statements::alter::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterSystemStatement {
-	pub query_timeout: AlterKind<Timeout>,
+	pub query_timeout: AlterKind<Expr>,
 	pub compact: bool,
 }
 
@@ -15,8 +15,8 @@ impl ToSql for AlterSystemStatement {
 		write_sql!(f, _fmt, "ALTER SYSTEM");
 		match &self.query_timeout {
 			AlterKind::None => {}
-			AlterKind::Set(time_out) => {
-				write_sql!(f, _fmt, " QUERY_TIMEOUT {}", time_out.0);
+			AlterKind::Set(duration) => {
+				write_sql!(f, _fmt, " QUERY_TIMEOUT {}", duration);
 			}
 			AlterKind::Drop => {
 				write_sql!(f, _fmt, " DROP QUERY_TIMEOUT");
