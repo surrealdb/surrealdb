@@ -5,16 +5,16 @@
 value = "NONE"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 0ns"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 0ns"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 0ns"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 0ns"
 
 */
 LET $timeout = 0ns;

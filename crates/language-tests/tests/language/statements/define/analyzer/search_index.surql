@@ -1,6 +1,7 @@
 /**
 [env]
 timeout = 10000
+context-timeout = 10000
 
 [test]
 

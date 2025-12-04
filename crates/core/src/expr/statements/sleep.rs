@@ -37,7 +37,7 @@ impl SleepStatement {
 	// Sleep for the specified time
 	async fn sleep(&self) {
 		#[cfg(target_family = "wasm")]
-		wasmtimer::tokio::sleep(dur).await;
+		wasmtimer::tokio::sleep(self.duration.0).await;
 		#[cfg(not(target_family = "wasm"))]
 		tokio::time::sleep(self.duration.0).await;
 	}

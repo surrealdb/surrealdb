@@ -2,6 +2,7 @@
 [env]
 # This tast can take a bit longer so give it a longer timeout.
 timeout = 4000
+context-timeout = 4000
 
 [test]
 run = false

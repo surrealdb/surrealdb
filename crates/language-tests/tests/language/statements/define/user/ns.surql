@@ -4,6 +4,7 @@ namespace = false
 database = false
 clean = true
 timeout = 10000
+context-timeout = 10000
 
 [test]
 
