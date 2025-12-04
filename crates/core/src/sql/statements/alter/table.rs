@@ -90,7 +90,10 @@ impl ToSql for AlterTableStatement {
 		if let Some(permissions) = &self.permissions {
 			write_sql!(f, fmt, " {permissions}");
 		}
-		// Note: `COMPACT` is intentionally not emitted here at the moment.
+
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
 	}
 }
 
