@@ -13,10 +13,26 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
 use super::KeyEncode;
+
+/// A dedicated commit pool for RocksDB to avoid blocking the async runtime
+/// during transaction commits which may involve WAL syncs and memtable flushes.
+pub(crate) static ROCKSDB_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
+
+pub(crate) fn commit_pool() -> &'static affinitypool::Threadpool {
+	ROCKSDB_COMMIT_POOL.get_or_init(|| {
+		affinitypool::Builder::new()
+			.thread_name("rocksdb-commitpool")
+			.thread_stack_size(5 * 1024 * 1024)
+			.thread_per_core(false)
+			.worker_threads(1)
+			.build()
+	})
+}
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
@@ -326,8 +342,10 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
-		// Cancel this transaction
-		self.inner.as_ref().unwrap().rollback()?;
+		// Take ownership of the inner transaction
+		let inner = self.inner.take().unwrap();
+		// Cancel this transaction in the pool to avoid blocking the async runtime.
+		commit_pool().spawn(move || inner.rollback().map_err(|e| Error::Tx(e.to_string()))).await?;
 		// Continue
 		Ok(())
 	}
@@ -345,8 +363,12 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
-		// Commit this transaction
-		self.inner.take().unwrap().commit()?;
+		// Take ownership of the inner transaction
+		let inner = self.inner.take().unwrap();
+		// Commit this transaction in the pool to avoid blocking the async runtime.
+		// RocksDB commits can be slow under memory pressure due to WAL syncs
+		// and memtable flushes, which would otherwise block the Tokio runtime.
+		commit_pool().spawn(move || inner.commit().map_err(|e| Error::Tx(e.to_string()))).await?;
 		// Continue
 		Ok(())
 	}
