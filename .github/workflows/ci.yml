@@ -338,28 +338,14 @@ jobs:
         run: cargo make ci-graphql-integration
 
   # ----------------------------------------
-  # Workspace tests
+  # Workspace tests (reusable workflow)
   # ----------------------------------------
 
   test:
-    name: Test workspace
-    runs-on: [ runner-amd64-2xlarge ]
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tools: cargo-nextest,cargo-llvm-cov,cargo-make
-
-      - name: Test workspace
-        run: cargo make ci-workspace-test
+    name: Test
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      save-cache: ${{ github.ref == 'refs/heads/main' }}
 
   # ----------------------------------------
   # Storage engine tests
