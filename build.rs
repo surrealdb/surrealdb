@@ -25,13 +25,14 @@ fn main() {
 fn build_version() -> Option<String> {
 	let input = env::var(BUILD_VERSION).ok()?;
 	let version = input.trim();
-	let version = version.split_once('v').map(|(_, version)| version).unwrap_or(version);
 	if version.is_empty() {
 		return None;
 	}
 	let parsed = match Version::parse(version) {
-		Ok(v) => v,
-		Err(..) => panic!("invalid build version `{input}`: expected a version in SemVer format"),
+		Ok(version) => version,
+		Err(..) => panic!(
+			"invalid build version `{input}`: expected a version in SemVer format without the 'v' prefix"
+		),
 	};
 	if !parsed.build.is_empty() {
 		let version_without_metadata = Version {
