@@ -839,13 +839,24 @@ mod test {
 
 	#[test]
 	fn expression_negate_with_lt() {
+		// should be lt
 		let sql = "a < -5";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(sql, out.to_sql());
 
+		// should be lt
 		let sql = "a < -b";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(sql, out.to_sql());
+
+		// should be graph-relation
+		let sql = "a <- b";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("a<-b", out.to_sql());
+
+		let sql = "a<-b";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!("a<-b", out.to_sql());
 	}
 
 	#[test]
