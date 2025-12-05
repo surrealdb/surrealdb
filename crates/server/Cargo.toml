@@ -25,6 +25,8 @@ default = [
     "scripting",
     "http",
     "surrealism",
+    "graphql",
+    "cli",
 ]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
@@ -37,6 +39,14 @@ storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv", "surrealdb-core/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv", "surrealdb-core/kv-tikv"]
+# GraphQL API support
+graphql = [
+    "surrealdb-core/graphql",
+    "dep:async-graphql",
+    "dep:async-graphql-axum",
+]
+# Interactive CLI support (SQL shell)
+cli = ["dep:rustyline"]
 
 [dependencies]
 # workspace internal dependencies
@@ -73,7 +83,7 @@ hyper.workspace = true
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-rustyline = { version = "17.0.1", features = ["derive"] }
+rustyline = { version = "17.0.1", features = ["derive"], optional = true }
 tower = { version = "0.4.13", features = ["limit", "load-shed"] }
 tower-http = { version = "0.5.2", features = [
     "trace",
@@ -94,8 +104,8 @@ tracing-opentelemetry = "0.25.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 
 # Other crates
-async-graphql = { workspace = true, default-features = false }
-async-graphql-axum.workspace = true
+async-graphql = { workspace = true, default-features = false, optional = true }
+async-graphql-axum = { workspace = true, optional = true }
 bytes.workspace = true
 futures.workspace = true
 futures-util.workspace = true

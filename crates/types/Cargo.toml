@@ -61,5 +61,9 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 [dev-dependencies]
 serde_json = { workspace = true }
 
+[package.metadata.cargo-machete]
+# geo-types and js are optional dependencies tied to features
+ignored = ["geo-types", "js"]
+
 [lints]
 workspace = true

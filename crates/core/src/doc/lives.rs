@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
-use async_graphql::futures_util::future::try_join_all;
+use futures::future::try_join_all;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
 
