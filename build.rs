@@ -1,12 +1,14 @@
 use std::process::Command;
 use std::{env, str};
 
-use semver::BuildMetadata;
+use semver::{BuildMetadata, Version};
 
 const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
+const BUILD_VERSION: &str = "SURREAL_BUILD_VERSION";
 
 fn main() {
 	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
+	println!("cargo:rerun-if-env-changed={BUILD_VERSION}");
 	println!("cargo:rerun-if-changed=crates/core");
 	println!("cargo:rerun-if-changed=crates/server");
 	println!("cargo:rerun-if-changed=crates/sdk");
@@ -17,6 +19,37 @@ fn main() {
 	if let Some(metadata) = build_metadata() {
 		println!("cargo:rustc-env={BUILD_METADATA}={metadata}");
 	}
+	if let Some(version) = build_version() {
+		println!("cargo:rustc-env={BUILD_VERSION}={version}");
+	}
+}
+
+fn build_version() -> Option<String> {
+	let input = env::var(BUILD_VERSION).ok()?;
+	let version = input.trim();
+	if version.is_empty() {
+		return None;
+	}
+	let parsed = match Version::parse(version) {
+		Ok(v) => v,
+		Err(..) => panic!("invalid build version `{input}`: expected a version in SemVer format"),
+	};
+	if !parsed.build.is_empty() {
+		let version_without_metadata = Version {
+			major: parsed.major,
+			minor: parsed.minor,
+			patch: parsed.patch,
+			pre: parsed.pre.clone(),
+			build: BuildMetadata::EMPTY,
+		};
+		panic!(
+			"build metadata should not be included in {BUILD_VERSION}, \
+			use {BUILD_METADATA} instead. Try:\n  \
+			{BUILD_VERSION}=\"{version_without_metadata}\" {BUILD_METADATA}=\"{build}\"",
+			build = parsed.build
+		);
+	}
+	Some(version.to_owned())
 }
 
 fn build_metadata() -> Option<String> {
