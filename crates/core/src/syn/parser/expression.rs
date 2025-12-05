@@ -90,8 +90,24 @@ impl Parser<'_> {
 
 			t!("<") => {
 				let peek = self.peek_whitespace1();
-				if matches!(peek.kind, t!("-") | t!("~") | t!("->") | t!("..")) {
-					return None;
+				match peek.kind {
+					t!("-") => {
+						// Check if this is `< -number` (comparison) or `<-` (graph operator)
+						// If - is followed by a numeric token, treat < as comparison operator
+						let next = self.peek_whitespace2();
+						if matches!(
+							next.kind,
+							TokenKind::Digits
+								| TokenKind::Infinity | TokenKind::NaN
+								| TokenKind::Glued(Glued::Number)
+						) {
+							return Some(BindingPower::Relation);
+						}
+						// Otherwise it's a graph operator like `<-user`
+						return None;
+					}
+					t!("~") | t!("->") | t!("..") => return None,
+					_ => {}
 				}
 				Some(BindingPower::Relation)
 			}
@@ -148,10 +164,16 @@ impl Parser<'_> {
 			t!("<") => {
 				let peek = self.peek_whitespace1();
 				if peek.kind == t!("-") {
-					let recover = self.recent_span();
-					if self.peek2().kind == TokenKind::Digits {
-						self.backup_after(recover);
-						return Some(BindingPower::Prefix);
+					// Check if this is `< -number` (comparison) or `<-` (graph operator) or cast
+					let next = self.peek_whitespace2();
+					if matches!(
+						next.kind,
+						TokenKind::Digits
+							| TokenKind::Infinity | TokenKind::NaN
+							| TokenKind::Glued(Glued::Number)
+					) {
+						// This is `< -number`, should be treated as comparison operator (infix), not prefix
+						return None;
 					}
 					return None;
 				}
@@ -813,6 +835,17 @@ mod test {
 		let sql = "-(5) + 5";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("-5 + 5", out.to_sql());
+	}
+
+	#[test]
+	fn expression_negate_with_lt() {
+		let sql = "a < -5";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(sql, out.to_sql());
+
+		let sql = "a < -b";
+		let out = syn::expr(sql).unwrap();
+		assert_eq!(sql, out.to_sql());
 	}
 
 	#[test]

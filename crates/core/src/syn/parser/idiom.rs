@@ -17,7 +17,29 @@ impl Parser<'_> {
 		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...")) {
 			return true;
 		}
-		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("~") | t!("->"))
+		if peek == t!("<") {
+			let next = self.peek_whitespace1().kind;
+			match next {
+				t!("~") | t!("->") => return true,
+				t!("-") => {
+					// Check if this is `<-` (graph) or `< -number` (comparison)
+					let after = self.peek_whitespace2().kind;
+					if matches!(
+						after,
+						TokenKind::Digits
+							| TokenKind::Infinity | TokenKind::NaN
+							| TokenKind::Glued(Glued::Number)
+					) {
+						// This is `< -number`, not graph operator
+						return false;
+					}
+					// This is `<-` graph operator
+					return true;
+				}
+				_ => {}
+			}
+		}
+		false
 	}
 
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM
