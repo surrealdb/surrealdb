@@ -93,7 +93,6 @@ impl Parser<'_> {
 				match peek.kind {
 					t!("-") => {
 						// Check if this is `< -number` (comparison) or `<-` (graph operator)
-						// If - is followed by a numeric token, treat < as comparison operator
 						let next = self.peek_whitespace2();
 						if matches!(
 							next.kind,

@@ -18,23 +18,16 @@ impl Parser<'_> {
 			return true;
 		}
 		if peek == t!("<") {
-			let next = self.peek_whitespace1().kind;
-			match next {
+			match self.peek_whitespace1().kind {
 				t!("~") | t!("->") => return true,
 				t!("-") => {
-					// Check if this is `<-` (graph) or `< -number` (comparison)
-					let after = self.peek_whitespace2().kind;
-					if matches!(
-						after,
+					// If negate operator is followed by a number, treat it as non-idiom
+					return !matches!(
+						self.peek_whitespace2().kind,
 						TokenKind::Digits
 							| TokenKind::Infinity | TokenKind::NaN
 							| TokenKind::Glued(Glued::Number)
-					) {
-						// This is `< -number`, not graph operator
-						return false;
-					}
-					// This is `<-` graph operator
-					return true;
+					);
 				}
 				_ => {}
 			}
