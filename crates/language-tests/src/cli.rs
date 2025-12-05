@@ -1,8 +1,8 @@
-use std::fmt;
-
 use clap::builder::{EnumValueParser, PossibleValue};
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use semver::Version;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
@@ -50,6 +50,17 @@ impl ValueEnum for Backend {
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
+		}
+	}
+}
+
+impl Display for Backend {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Memory => f.write_str("mem"),
+			Self::RocksDb => f.write_str("rocksdb"),
+			Self::SurrealKv => f.write_str("surrealkv"),
+			Self::TikV => f.write_str("tikv"),
 		}
 	}
 }

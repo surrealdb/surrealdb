@@ -57,6 +57,27 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 		subset
 	};
 
+	// Filter tests based on backend specification in their environment configuration.
+	// Tests are included if:
+	// - They have no env config (run on all backends)
+	// - They have an empty backend list (run on all backends)
+	// - Their backend list contains the current backend
+	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
+		subset.filter_map(|_, test| {
+			if let Some(env) = &test.config.env {
+				if !env.backend.is_empty() {
+					env.backend.contains(&backend.to_string())
+				} else {
+					true
+				}
+			} else {
+				true
+			}
+		})
+	} else {
+		subset
+	};
+
 	if matches.get_flag("no-results") {
 		subset.filter_map(|_, set| {
 			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
@@ -295,16 +316,19 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let config = &context.testset[context.id].config;
 	let capabilities = core_capabilities_from_test_config(config);
 
-	let timeout_duration = config
+	let context_timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
+		.map(|x| x.context_timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(3));
 
 	let res = context
 		.ds
 		.with(
-			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
+			move |ds| {
+				ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(context_timeout_duration))
+			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -312,7 +336,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let res = match res {
 		Ok(x) => x?,
 		Err(PermitError::Other(e)) => return Err(e),
-		Err(PermitError::Panic(e)) => TestTaskResult::Paniced(e),
+		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
 	};
 
 	context.result.send((context.id, res)).await.expect("result channel quit early");

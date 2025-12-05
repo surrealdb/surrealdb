@@ -23,7 +23,7 @@ pub enum TestTaskResult {
 	Import(String, String),
 	Timeout,
 	Results(Vec<Result<SurValue, String>>),
-	Paniced(Box<dyn Any + Send + 'static>),
+	Panicked(Box<dyn Any + Send + 'static>),
 }
 
 /// Enum with the outcome of a test
@@ -41,7 +41,7 @@ pub enum TestGrade {
 pub enum TestError {
 	Timeout,
 	Running(String),
-	Paniced(String),
+	Panicked(String),
 	Import(String, String),
 }
 
@@ -323,7 +323,7 @@ impl TestReport {
 			TestTaskResult::Timeout => None,
 			TestTaskResult::Import(_, _) => None,
 			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(e.clone())),
-			TestTaskResult::Paniced(_) => None,
+			TestTaskResult::Panicked(_) => None,
 		};
 
 		let kind = Self::grade_result(&set[id].config, job_result, matching_datastore).await;
@@ -348,14 +348,14 @@ impl TestReport {
 			}
 			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
-			TestTaskResult::Paniced(e) => {
+			TestTaskResult::Panicked(e) => {
 				let error = e
 					.downcast::<String>()
 					.map(|x| *x)
 					.or_else(|e| e.downcast::<&'static str>().map(|x| (*x).to_owned()))
 					.unwrap_or_else(|_| "Could not retrieve panic payload".to_owned());
 
-				TestReportKind::Error(TestError::Paniced(error))
+				TestReportKind::Error(TestError::Panicked(error))
 			}
 			TestTaskResult::SignupError(err) => {
 				let expectation = TestExpectation::from_test_config(config);

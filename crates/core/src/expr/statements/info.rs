@@ -61,6 +61,7 @@ impl InfoStatement {
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
+						"config".to_string() => opt.dynamic_configuration().clone().structure()
 					};
 					Ok(Value::Object(Object(object)))
 				} else {
@@ -96,6 +97,9 @@ impl InfoStatement {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
+						},
+						"config".to_string() => {
+							opt.dynamic_configuration().clone().structure()
 						}
 					};
 					Ok(Value::Object(Object(object)))

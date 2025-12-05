@@ -20,7 +20,7 @@ error = "The sequence 'sq' does not exist"
 value = "NONE"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 0ns"
 
 */
 DEFINE SEQUENCE sq START 10;

@@ -424,7 +424,7 @@ impl Transactable for Transaction {
 		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
-			self.db.compact_range::<&[u8], &[u8]>(None, None);
+			self.compact(None).await?;
 		}
 		// Continue
 		Ok(())
@@ -915,6 +915,15 @@ impl Transactable for Transaction {
 
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
+		Ok(())
+	}
+
+	async fn compact(&self, range: Option<Range<Key>>) -> anyhow::Result<()> {
+		let (start, end) = match range {
+			Some(r) => (Some(r.start), Some(r.end)),
+			None => (None, None),
+		};
+		self.db.compact_range(start, end);
 		Ok(())
 	}
 }
