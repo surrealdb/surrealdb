@@ -211,6 +211,10 @@ criteria = "safe-to-deploy"
 version = "1.5.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.boxcar]]
+version = "0.2.14"
+criteria = "safe-to-deploy"
+
 [[exemptions.brotli]]
 version = "8.0.2"
 criteria = "safe-to-deploy"

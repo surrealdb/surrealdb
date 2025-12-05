@@ -54,10 +54,13 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			let result = router
-				.execute_value(Command::Use {
-					namespace: Some(self.ns),
-					database: None,
-				})
+				.execute_value(
+					self.client.session_id,
+					Command::Use {
+						namespace: Some(self.ns),
+						database: None,
+					},
+				)
 				.await?;
 
 			let Value::Object(obj) = result else {

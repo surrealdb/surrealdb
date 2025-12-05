@@ -42,7 +42,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			router.execute_unit(Command::Invalidate).await
+			router.execute_unit(self.client.session_id, Command::Invalidate).await
 		})
 	}
 }
@@ -94,9 +94,12 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			router
-				.execute_unit(Command::Revoke {
-					token: SurrealValue::from_value(self.token)?,
-				})
+				.execute_unit(
+					self.client.session_id,
+					Command::Revoke {
+						token: SurrealValue::from_value(self.token)?,
+					},
+				)
 				.await
 		})
 	}

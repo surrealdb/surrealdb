@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::validate_data;
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// A merge future
@@ -51,7 +51,7 @@ macro_rules! into_future {
 			let content = content.into_value();
 			Box::pin(async move {
 				let content = match content {
-					surrealdb_types::Value::None | surrealdb_types::Value::Null => None,
+					crate::types::Value::None | crate::types::Value::Null => None,
 					data => {
 						validate_data(
 							&data,
@@ -88,7 +88,7 @@ macro_rules! into_future {
 					variables,
 				};
 
-				router.$method(cmd).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};

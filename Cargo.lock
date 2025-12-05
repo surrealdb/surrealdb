@@ -982,6 +982,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "brotli"
 version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6897,10 +6903,12 @@ dependencies = [
  "arrayvec",
  "async-channel",
  "bincode 1.3.3",
+ "boxcar",
  "castaway",
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "dmp",
  "env_logger",
  "flate2",
@@ -6909,8 +6917,10 @@ dependencies = [
  "getrandom 0.3.4",
  "hashbrown 0.14.5",
  "indexmap 2.12.0",
+ "js-sys",
  "nanoid",
  "native-tls",
+ "papaya",
  "parking_lot",
  "path-clean",
  "pharos",
@@ -6946,8 +6956,10 @@ dependencies = [
  "ulid",
  "url",
  "uuid",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasmtimer",
+ "web-sys",
  "wiremock",
  "ws_stream_wasm",
 ]
@@ -6962,6 +6974,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "arbitrary",
+ "arc-swap",
  "argon2",
  "async-channel",
  "async-executor",
@@ -7006,6 +7019,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store",
+ "papaya",
  "parking_lot",
  "path-clean",
  "pbkdf2",
@@ -7162,6 +7176,7 @@ dependencies = [
  "opentelemetry_sdk",
  "ort",
  "ort-sys",
+ "papaya",
  "pin-project-lite",
  "pprof",
  "rand 0.8.5",
@@ -7242,6 +7257,7 @@ dependencies = [
  "hex",
  "http 1.3.1",
  "nanoid",
+ "papaya",
  "regex",
  "regex-syntax",
  "rquickjs",

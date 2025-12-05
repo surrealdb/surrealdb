@@ -32,7 +32,7 @@ impl Tasks {
 	#[cfg(not(target_family = "wasm"))]
 	pub async fn resolve(self) -> Result<(), Error> {
 		for task in self.0.into_iter() {
-			let _ = task.await;
+			task.await.ok();
 		}
 		Ok(())
 	}
