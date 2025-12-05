@@ -3,30 +3,29 @@ use std::{env, str};
 
 use semver::{BuildMetadata, Version};
 
-const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 const BUILD_VERSION: &str = "SURREAL_BUILD_VERSION";
+const BUILD_METADATA: &str = "SURREAL_BUILD_METADATA";
 
 fn main() {
-	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
 	println!("cargo:rerun-if-env-changed={BUILD_VERSION}");
-	println!("cargo:rerun-if-changed=crates/core");
-	println!("cargo:rerun-if-changed=crates/server");
-	println!("cargo:rerun-if-changed=crates/sdk");
+	println!("cargo:rerun-if-env-changed={BUILD_METADATA}");
+	println!("cargo:rerun-if-changed=crates");
 	println!("cargo:rerun-if-changed=src");
 	println!("cargo:rerun-if-changed=build.rs");
 	println!("cargo:rerun-if-changed=Cargo.toml");
 	println!("cargo:rerun-if-changed=Cargo.lock");
-	if let Some(metadata) = build_metadata() {
-		println!("cargo:rustc-env={BUILD_METADATA}={metadata}");
-	}
 	if let Some(version) = build_version() {
 		println!("cargo:rustc-env={BUILD_VERSION}={version}");
+	}
+	if let Some(metadata) = build_metadata() {
+		println!("cargo:rustc-env={BUILD_METADATA}={metadata}");
 	}
 }
 
 fn build_version() -> Option<String> {
 	let input = env::var(BUILD_VERSION).ok()?;
 	let version = input.trim();
+	let version = version.split_once('v').map(|(_, version)| version).unwrap_or(version);
 	if version.is_empty() {
 		return None;
 	}
