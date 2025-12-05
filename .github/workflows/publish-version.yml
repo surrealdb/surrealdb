@@ -48,6 +48,10 @@ permissions:
   contents: read
 
 jobs:
+  # ----------------------------------------
+  # Prepare release variables
+  # ----------------------------------------
+
   prepare-vars:
     permissions:
       contents: write
@@ -61,7 +65,7 @@ jobs:
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -97,141 +101,31 @@ jobs:
             fi
           fi
 
+  # ----------------------------------------
+  # Quality checks (reusable workflow)
+  # ----------------------------------------
+
+  quality-checks:
+    name: Quality
+    needs: [ prepare-vars ]
+    uses: ./.github/workflows/reusable-quality-checks.yml
+    with:
+      git-ref: ${{ inputs.git-ref }}
+
+  # ----------------------------------------
+  # Workspace tests (reusable workflow)
+  # ----------------------------------------
+
   test:
     name: Test
     needs: [ prepare-vars ]
-    runs-on: [ runner-amd64-2xlarge ]
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ inputs.git-ref }}
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      git-ref: ${{ inputs.git-ref }}
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tools: cargo-llvm-cov,cargo-make
-
-      - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
-        with:
-          files: lcov.info
-          fail_ci_if_error: true
-          flags: workspace-tests
-          name: released-coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-          cat /tmp/surrealdb.log || true
-
-  format:
-    name: Check format
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Lookup the nightly toolchain
-        id: info
-        run: |
-          set -x
-          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          toolchain: ${{ steps.info.outputs.toolchain }}
-          components: rustfmt
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Check format
-        run: cargo make ci-format
-
-  check:
-    name: Check workspace
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Check workspace
-        run: cargo make ci-check
-
-  check-wasm:
-    name: Check wasm
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          targets: wasm32-unknown-unknown
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Check wasm
-        run: cargo make ci-check-wasm
-
-  clippy:
-    name: Check clippy
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-        with:
-          ref: ${{ inputs.git-ref }}
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          components: clippy
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Check clippy
-        run: cargo make ci-clippy
+  # ----------------------------------------
+  # Build release binaries
+  # ----------------------------------------
 
   build:
     name: Release binaries
@@ -246,15 +140,23 @@ jobs:
       upload: true
     secrets: inherit
 
+  # ----------------------------------------
+  # Publish crates
+  # ----------------------------------------
+
   publish-crates:
     name: Publish crates
-    needs: [ test, format, check, check-wasm, clippy, build ]
+    needs: [ test, quality-checks, build ]
     uses: ./.github/workflows/crate.yml
     with:
       git-ref: ${{ inputs.git-ref }}
       publish: ${{ inputs.publish }}
       nightly-release: ${{ inputs.nightly-release }}
     secrets: inherit
+
+  # ----------------------------------------
+  # Publish binaries
+  # ----------------------------------------
 
   publish:
     name: Publish binaries
@@ -264,18 +166,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.git-ref }}
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # (Actions must be pinned by commit hash) v2.2.2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
           tag_name: v${{ needs.prepare-vars.outputs.version }}
@@ -291,7 +193,7 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
         if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
@@ -317,6 +219,10 @@ jobs:
             aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           done
 
+  # ----------------------------------------
+  # Docker images
+  # ----------------------------------------
+
   docker:
     name: Docker images
     needs: [ prepare-vars, publish ]
@@ -331,6 +237,10 @@ jobs:
       push: true
     secrets: inherit
 
+  # ----------------------------------------
+  # macOS universal binary
+  # ----------------------------------------
+
   package-macos:
     name: Package and publish macOS universal binary
     needs: [ prepare-vars, publish ]
@@ -339,19 +249,19 @@ jobs:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
     steps:
       - name: Download amd64 binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
           path: amd64
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -370,6 +280,10 @@ jobs:
           aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
           aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ needs.prepare-vars.outputs.name }}/
 
+  # ----------------------------------------
+  # Propagate binaries
+  # ----------------------------------------
+
   propagate:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
@@ -378,7 +292,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v5.0.0
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}

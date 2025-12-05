@@ -1,0 +1,130 @@
+name: Quality Checks
+
+on:
+  workflow_call:
+    inputs:
+      git-ref:
+        description: 'Git ref to checkout (defaults to current ref)'
+        required: false
+        type: string
+      save-cache:
+        description: 'Whether to save the cargo cache'
+        required: false
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  format:
+    name: Check format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref || github.ref }}
+
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: ${{ steps.info.outputs.toolchain }}
+          components: rustfmt
+          save-cache: ${{ inputs.save-cache }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check format
+        run: cargo make ci-format
+
+  clippy:
+    name: Check clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref || github.ref }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          components: clippy
+          save-cache: ${{ inputs.save-cache }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Run clippy
+        run: cargo make ci-clippy
+
+  check:
+    name: Check workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref || github.ref }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ inputs.save-cache }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check workspace
+        run: cargo make ci-check
+
+  check-wasm:
+    name: Check Wasm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref || github.ref }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ inputs.save-cache }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check wasm
+        run: cargo make ci-check-wasm
+
+  check-docs:
+    name: Check docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref || github.ref }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ inputs.save-cache }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check docs
+        run: cargo make ci-docs
+
