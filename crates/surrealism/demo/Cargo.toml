@@ -16,8 +16,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 surrealdb-types.workspace = true
 surrealism.workspace = true
 

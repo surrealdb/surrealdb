@@ -100,7 +100,6 @@ ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
-async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ] }
@@ -153,7 +152,6 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-snap.workspace = true
 strsim.workspace = true
 subtle.workspace = true
 sysinfo.workspace = true

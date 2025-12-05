@@ -48,7 +48,6 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 surrealdb-types-derive.workspace = true
-tracing.workspace = true
 ulid.workspace = true
 
 # WASM DEPENDENCY CONFIGURATION

@@ -253,7 +253,6 @@ surrealdb = { workspace = true, features = [
 ] }
 surrealdb-core.workspace = true
 surrealdb-server.workspace = true
-surrealdb-types.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { version = "0.27.1", features = ["signal", "user"] }
