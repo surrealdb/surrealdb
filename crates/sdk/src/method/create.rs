@@ -101,7 +101,7 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		Content::from_closure(self.client, self.txn, || {
 			let content = data.into_value();
@@ -133,7 +133,7 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		Content::from_closure(self.client, self.txn, || {
 			let content = data.into_value();
