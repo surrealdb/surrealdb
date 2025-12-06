@@ -97,7 +97,7 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -108,7 +108,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
@@ -120,7 +120,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;

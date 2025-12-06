@@ -166,7 +166,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check format
-        run: cargo make ci-format
+        run: cargo make ci-fmt
 
   check:
     name: Check workspace
