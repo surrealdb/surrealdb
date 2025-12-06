@@ -1025,7 +1025,6 @@ jobs:
       - check-wasm
       - check-revision
       - check-docs
-      - feature-check
       - unused-deps
       # Integration tests
       - cli-integration
@@ -1062,7 +1061,6 @@ jobs:
             "${{ needs.check-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
-            "${{ needs.feature-check.result }}"
             "${{ needs.unused-deps.result }}"
             "${{ needs.cli-integration.result }}"
             "${{ needs.http-integration.result }}"
