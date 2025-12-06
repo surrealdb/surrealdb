@@ -91,7 +91,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check format
-        run: cargo make ci-format
+        run: cargo make ci-fmt
 
   clippy:
     name: Check clippy
