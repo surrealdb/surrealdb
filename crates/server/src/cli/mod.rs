@@ -7,6 +7,7 @@ mod fix;
 mod import;
 mod isready;
 mod ml;
+#[cfg(feature = "cli")]
 mod sql;
 mod start;
 #[cfg(test)]
@@ -30,6 +31,7 @@ use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
 use semver::Version;
+#[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
 use surrealdb_core::buc::BucketStoreProvider;
@@ -165,6 +167,7 @@ enum Commands {
 	Version(VersionCommandArguments),
 	#[command(about = "Upgrade to the latest stable version")]
 	Upgrade(UpgradeCommandArguments),
+	#[cfg(feature = "cli")]
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
@@ -279,6 +282,7 @@ pub async fn init<
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
 		Commands::Upgrade(args) => upgrade::init(args).await,
+		#[cfg(feature = "cli")]
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,

@@ -677,7 +677,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	composer: C,
 	opt: &Config,
 	canceller: CancellationToken,
-	StartCommandDbsOptions {
+	#[cfg_attr(not(storage), allow(unused_variables))] StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
@@ -739,9 +739,10 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
-		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
+	#[cfg(storage)]
+	let dbs = dbs.with_temporary_directory(temporary_directory);
 	// Ensure the storage version is up to date to prevent corruption
 	let (_, is_new) =
 		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;

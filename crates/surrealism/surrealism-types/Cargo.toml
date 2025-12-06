@@ -17,15 +17,8 @@ host = []
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-thiserror.workspace = true
-uuid.workspace = true
 surrealdb-types.workspace = true
-chrono.workspace = true
 bytes = "1.10.1"
-flatbuffers = "25.2.10"
-rust_decimal = "1.39.0"
 
 [lints]
 workspace = true

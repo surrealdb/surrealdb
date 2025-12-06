@@ -160,7 +160,7 @@ pub(crate) enum Error {
 
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
-	#[cfg_attr(not(feature = "http"), expect(dead_code))]
+	#[cfg_attr(not(any(feature = "http", feature = "jwks")), expect(dead_code))]
 	InvalidUrl(String),
 
 	/// The size of the vector is incorrect
@@ -608,7 +608,7 @@ pub(crate) enum Error {
 
 	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request: {0}")]
-	#[cfg_attr(not(feature = "http"), expect(dead_code))]
+	#[cfg_attr(not(any(feature = "http", feature = "jwks")), expect(dead_code))]
 	Http(String),
 
 	/// There was an error processing a value in parallel
