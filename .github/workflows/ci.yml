@@ -338,14 +338,20 @@ jobs:
         run: cargo make ci-graphql-integration
 
   # ----------------------------------------
-  # Workspace tests (reusable workflow)
+  # Workspace tests
   # ----------------------------------------
 
   test:
-    name: Test
-    uses: ./.github/workflows/reusable-test.yml
-    with:
-      save-cache: ${{ github.ref == 'refs/heads/main' }}
+    name: Test workspace
+    runs-on: [ runner-amd64-2xlarge ]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Test workspace
+        uses: ./.github/actions/test-workspace
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
   # ----------------------------------------
   # Storage engine tests

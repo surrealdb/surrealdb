@@ -23,14 +23,342 @@ permissions:
   contents: read
 
 jobs:
-  release:
+  # ----------------------------------------
+  # Prepare release variables
+  # ----------------------------------------
+
+  prepare-vars:
     permissions:
       contents: write
-    name: Prepare nightly release
-    uses: ./.github/workflows/publish-version.yml
-    with:
-      nightly-release: true
-      git-ref: main
-      extra-features: storage-tikv,jwks,ml
-      publish: ${{ inputs.publish || github.event_name == 'schedule' }}
-    secrets: inherit
+    name: Prepare vars
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.vars.outputs.name }}
+      version: ${{ steps.vars.outputs.version }}
+      pre-release: ${{ steps.vars.outputs.pre-release }}
+      release-name: ${{ steps.vars.outputs.release-name }}
+      build-metadata: ${{ steps.vars.outputs.build-metadata }}
+      publish: ${{ steps.publish.outputs.publish }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Prepare release variables
+        id: vars
+        uses: ./.github/actions/prepare-release-vars
+        with:
+          nightly-release: true
+
+      - name: Determine publish flag
+        id: publish
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "publish=${{ inputs.publish }}" >> $GITHUB_OUTPUT
+          fi
+
+  # ----------------------------------------
+  # Quality checks
+  # ----------------------------------------
+
+  format:
+    name: Check format
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Check format
+        uses: ./.github/actions/quality-format
+
+  clippy:
+    name: Check clippy
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Check clippy
+        uses: ./.github/actions/quality-clippy
+
+  check:
+    name: Check workspace
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Check workspace
+        uses: ./.github/actions/quality-check
+
+  check-wasm:
+    name: Check Wasm
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Check Wasm
+        uses: ./.github/actions/quality-check-wasm
+
+  check-docs:
+    name: Check docs
+    needs: [ prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Check docs
+        uses: ./.github/actions/quality-check-docs
+
+  # ----------------------------------------
+  # Workspace tests
+  # ----------------------------------------
+
+  test:
+    name: Test workspace
+    needs: [ prepare-vars ]
+    runs-on: [ runner-amd64-2xlarge ]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Test workspace
+        uses: ./.github/actions/test-workspace
+
+  # ----------------------------------------
+  # Build release binaries
+  # ----------------------------------------
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    needs: [ prepare-vars ]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux amd64
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [ runner-amd64-2xlarge ]
+          # Linux arm64
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [ runner-arm64-2xlarge ]
+          # macOS amd64
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15
+          # macOS arm64
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15
+          # Windows amd64
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-2025
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare-vars.outputs.name }}
+          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
+          extra-features: storage-tikv,jwks,ml
+          upload: true
+          release: true
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare-vars.outputs.name }}
+          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
+          extra-features: storage-tikv,jwks,ml
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare-vars.outputs.name }}
+          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
+          extra-features: storage-tikv,jwks,ml
+          upload: true
+          release: true
+
+  # ----------------------------------------
+  # Publish crates
+  # ----------------------------------------
+
+  publish-crates:
+    name: Publish crates
+    needs: [ test, format, clippy, check, check-wasm, check-docs, build, prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Publish crate
+        uses: ./.github/actions/publish-crate
+        with:
+          publish: ${{ needs.prepare-vars.outputs.publish }}
+          nightly-release: true
+          cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ----------------------------------------
+  # Publish binaries
+  # ----------------------------------------
+
+  publish:
+    name: Publish binaries
+    permissions:
+      contents: write
+    needs: [ prepare-vars, publish-crates ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Publish binaries
+        uses: ./.github/actions/publish-binaries
+        with:
+          name: ${{ needs.prepare-vars.outputs.name }}
+          version: ${{ needs.prepare-vars.outputs.version }}
+          pre-release: ${{ needs.prepare-vars.outputs.pre-release }}
+          release-name: ${{ needs.prepare-vars.outputs.release-name }}
+          publish: ${{ needs.prepare-vars.outputs.publish }}
+          create-release: false
+          latest: false
+          git-ref: main
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+  # ----------------------------------------
+  # Docker images
+  # ----------------------------------------
+
+  docker-prepare:
+    name: Prepare Docker build
+    needs: [ prepare-vars, publish ]
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag-prefix: ${{ steps.prepare.outputs.tag-prefix }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Prepare Docker build
+        id: prepare
+        uses: ./.github/actions/docker-prepare
+        with:
+          tag-prefix: ${{ needs.prepare-vars.outputs.name }}
+
+  docker:
+    name: Build ${{ matrix.name }} (${{ matrix.build-target }})
+    needs: [ prepare-vars, publish, docker-prepare ]
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
+    environment: ${{ needs.prepare-vars.outputs.release-name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.docker-prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build and push Docker image
+        uses: ./.github/actions/docker-build
+        with:
+          environment: ${{ needs.prepare-vars.outputs.release-name }}
+          tag-prefix: ${{ needs.docker-prepare.outputs.tag-prefix }}
+          build-target: ${{ matrix.build-target }}
+          tag-suffix: ${{ matrix.tag-suffix }}
+          push: true
+          latest: false
+          docker-user: ${{ secrets.DOCKER_USER }}
+          docker-pass: ${{ secrets.DOCKER_PASS }}
+
+  # ----------------------------------------
+  # macOS universal binary
+  # ----------------------------------------
+
+  package-macos:
+    name: Package and publish macOS universal binary
+    needs: [ prepare-vars, publish ]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Package macOS universal binary
+        uses: ./.github/actions/package-macos-universal
+        with:
+          name: ${{ needs.prepare-vars.outputs.name }}
+          publish: ${{ needs.prepare-vars.outputs.publish }}
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+  # ----------------------------------------
+  # Propagate binaries
+  # ----------------------------------------
+
+  propagate:
+    name: Propagate binaries to all regions
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
+    environment: ${{ needs.prepare-vars.outputs.release-name }}
+    needs: [ publish, package-macos, prepare-vars ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Propagate binaries
+        uses: ./.github/actions/propagate-binaries
+        with:
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
