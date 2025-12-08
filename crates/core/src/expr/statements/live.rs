@@ -43,7 +43,7 @@ impl LiveStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Get the Node ID
-		let nid = opt.id()?;
+		let nid = opt.id();
 
 		let mut vars = Variables::new();
 		let mut pass = ParameterCapturePass {

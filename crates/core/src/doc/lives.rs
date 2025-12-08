@@ -388,7 +388,7 @@ impl DefaultBroker {
 }
 impl MessageBroker for DefaultBroker {
 	fn can_be_sent(&self, opt: &Options, subscription: &SubscriptionDefinition) -> Result<bool> {
-		Ok(opt.id()? == subscription.node)
+		Ok(opt.id() == subscription.node)
 	}
 
 	fn send(

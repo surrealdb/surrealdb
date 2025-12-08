@@ -201,7 +201,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::default();
+		let opts = Options::new(ds.id());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(
