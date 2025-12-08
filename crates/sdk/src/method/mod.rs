@@ -5,11 +5,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use surrealdb_types::{self, SurrealValue, Value, Variables};
-
 use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
-use crate::{Connect, Connection, OnceLockExt, Surreal};
+use crate::types::{SurrealValue, Value, Variables};
+use crate::{Connect, Connection, OnceLockExt, SessionClone, Surreal};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -197,13 +196,12 @@ where
 	/// }
 	/// ```
 	pub fn init() -> Self {
-		Self {
-			inner: Arc::new(super::Inner {
-				router: OnceLock::new(),
-				waiter: watch::channel(None),
-			}),
-			engine: PhantomData,
-		}
+		Arc::new(super::Inner {
+			router: OnceLock::new(),
+			waiter: watch::channel(None),
+			session_clone: SessionClone::new(),
+		})
+		.into()
 	}
 
 	/// Connects to a local or remote database endpoint
@@ -234,13 +232,13 @@ where
 		}
 	}
 
-	pub fn begin(&self) -> Begin<C> {
+	pub fn begin(self) -> Begin<C> {
 		Begin {
-			client: self.clone(),
+			client: self,
 		}
 	}
 
-	/// Switch to a specific namespace
+	/// Use the default namespace and database configuration
 	///
 	/// # Examples
 	///
@@ -248,11 +246,11 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// db.use_ns("namespace").await?;
+	/// db.use_defaults().await?;
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_defaults(&'_ self) -> UseDefaults<'_, C> {
+	pub fn use_defaults(&self) -> UseDefaults<'_, C> {
 		UseDefaults {
 			client: Cow::Borrowed(self),
 		}
@@ -270,7 +268,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_ns(&'_ self, ns: impl Into<String>) -> UseNs<'_, C> {
+	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<'_, C> {
 		UseNs {
 			client: Cow::Borrowed(self),
 			ns: ns.into(),
@@ -289,7 +287,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_db(&'_ self, db: impl Into<String>) -> UseDb<'_, C> {
+	pub fn use_db(&self, db: impl Into<String>) -> UseDb<'_, C> {
 		UseDb {
 			client: Cow::Borrowed(self),
 			ns: None,

@@ -22,7 +22,8 @@ where
 		let client = self.client;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let result: surrealdb_types::Value = router.execute(Command::Begin).await?;
+			let result: crate::types::Value =
+				router.execute(client.session_id, Command::Begin).await?;
 			// Extract the UUID from the result
 			let uuid = result.into_uuid()?;
 			Ok(Transaction {

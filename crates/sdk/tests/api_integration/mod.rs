@@ -46,6 +46,7 @@ mod backup_version;
 mod basic;
 mod live;
 mod serialisation;
+mod session_isolation;
 mod version;
 
 const ROOT_USER: &str = "root";
@@ -275,7 +276,7 @@ mod ws {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live);
+	include_tests!(new_db => basic, serialisation, live, session_isolation);
 }
 
 #[cfg(feature = "protocol-http")]
@@ -310,7 +311,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-mem")]
@@ -429,7 +430,7 @@ mod mem {
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -475,7 +476,7 @@ mod rocksdb {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -509,7 +510,7 @@ mod tikv {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -557,7 +558,7 @@ mod surrealkv {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -605,7 +606,7 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version);
+	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version, session_isolation);
 }
 
 #[cfg(feature = "protocol-http")]
@@ -632,5 +633,5 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
 }

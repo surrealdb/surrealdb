@@ -31,6 +31,7 @@ arbitrary = [
 anyhow.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
+papaya.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }

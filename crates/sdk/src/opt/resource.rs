@@ -1,12 +1,11 @@
 use std::ops::{self, Bound};
 
-use surrealdb_types::{
+use crate::Result;
+use crate::err::Error;
+use crate::types::{
 	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Table, ToSql,
 	Value, Variables,
 };
-
-use crate::Result;
-use crate::err::Error;
 
 /// A table range.
 #[derive(Debug, Clone, PartialEq)]
@@ -131,8 +130,8 @@ impl SurrealValue for Resource {
 		}
 	}
 
-	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
-		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
+	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
+		Err(crate::types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
 	}
 }
 

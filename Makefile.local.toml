@@ -55,6 +55,7 @@ args = [
     "--",
     "start",
     "--allow-all",
+    "--deny-guests",
     "${@}",
 ]
 
