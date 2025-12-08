@@ -49,8 +49,11 @@ impl Document {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
-		// Get the table
-		let tb = self.tb(ctx, opt).await?;
+		// Get the table definition
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// This table is schemafull
 		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via

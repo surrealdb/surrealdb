@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use crate::catalog::providers::TableProvider;
@@ -17,8 +19,13 @@ impl Document {
 		if !self.changed() {
 			return Ok(());
 		}
-		// Check if the table is a view
-		if self.tb(ctx, opt).await?.drop {
+		// Get the table definition
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
+		// Check if writes should be dropped
+		if tb.drop {
 			return Ok(());
 		}
 		// Get the record id

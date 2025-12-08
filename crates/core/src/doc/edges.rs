@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{Result, ensure};
 use surrealdb_types::ToSql;
 
@@ -17,8 +19,11 @@ impl Document {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
-		// Get the table
-		let tb = self.tb(ctx, opt).await?;
+		// Get the table definition
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Check if the table is a view
 		if tb.drop {
 			return Ok(());

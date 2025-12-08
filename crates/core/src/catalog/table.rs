@@ -53,7 +53,6 @@ pub struct TableDefinition {
 	pub(crate) changefeed: Option<ChangeFeed>,
 	pub(crate) comment: Option<String>,
 	pub(crate) table_type: TableType,
-
 	/// The last time that a DEFINE FIELD was added to this table
 	pub(crate) cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table

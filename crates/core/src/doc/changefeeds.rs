@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 
 use crate::ctx::Context;
@@ -18,7 +20,10 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the table for this record
-		let tbv = self.tb(ctx, opt).await?;
+		let tbv = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Get the database for this record
 		let dbv = self.db(ctx, opt).await?;
 		// Get the changefeed definition on the database

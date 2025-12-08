@@ -15,6 +15,8 @@
 //! Range scans and lookups benefit because a single probe/range can be used for
 //! numeric predicates without fanning out per numeric variant.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -40,8 +42,12 @@ impl Document {
 			_ if self.changed() => self.ix(ctx, opt).await?,
 			_ => return Ok(()),
 		};
-		// Check if the table is a view
-		let tb = self.tb(ctx, opt).await?;
+		// Get the table definition
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
+		// Check if writes should be dropped
 		if tb.drop {
 			return Ok(());
 		}

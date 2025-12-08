@@ -22,6 +22,8 @@ use crate::val::{RecordId, Value};
 pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,
+	/// The table definition for this document
+	pub(super) tb: Option<Arc<TableDefinition>>,
 	/// The table that we should generate a record id from
 	pub(super) r#gen: Option<String>,
 	/// Whether this is the second iteration of the processing
@@ -220,6 +222,7 @@ impl Document {
 	) -> Self {
 		Document {
 			id: id.clone(),
+			tb: None,
 			r#gen,
 			retry,
 			extras,
@@ -523,12 +526,53 @@ impl Document {
 		}
 	}
 
+	/// Get the fields for this document
+	pub async fn fd(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+	) -> Result<Arc<[catalog::FieldDefinition]>> {
+		// Get the NS + DB
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		// Get the document table
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(&tb),
+			None => self.tb(ctx, opt).await?,
+		};
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => {
+				// Get the cache entry key
+				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
+				// Get or update the cache entry
+				match cache.get(&key) {
+					Some(val) => val.try_into_fds(),
+					None => {
+						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
+						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
+						Ok(val)
+					}
+				}
+			}
+			// No cache is present on the context
+			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
+		}
+	}
+
 	/// Get the foreign tables for this document
+	///
+	/// We don't store the fetched cache entries for foreign
+	/// tables on the record, as they are only fetched once for
+	/// each record when the reccord foreign tables are processed.
 	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(&tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -553,6 +597,10 @@ impl Document {
 	}
 
 	/// Get the events for this document
+	///
+	/// We don't store the fetched cache entries for events
+	/// on the record, as they are only fetched once for
+	/// each record when the reccord events are processed.
 	pub async fn ev(
 		&self,
 		ctx: &Context,
@@ -561,7 +609,10 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(&tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -585,38 +636,11 @@ impl Document {
 		}
 	}
 
-	/// Get the fields for this document
-	pub async fn fd(
-		&self,
-		ctx: &Context,
-		opt: &Options,
-	) -> Result<Arc<[catalog::FieldDefinition]>> {
-		// Get the NS + DB
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
-		// Get the cache from the context
-		match ctx.get_cache() {
-			// A cache is present on the context
-			Some(cache) => {
-				// Get the cache entry key
-				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
-				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_fds(),
-					None => {
-						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
-						Ok(val)
-					}
-				}
-			}
-			// No cache is present on the context
-			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
-		}
-	}
-
 	/// Get the indexes for this document
+	///
+	/// We don't store the fetched cache entries for indexes
+	/// on the record, as they are only fetched once for
+	/// each record when the reccord indexes are processed.
 	pub async fn ix(
 		&self,
 		ctx: &Context,
@@ -625,7 +649,10 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(&tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -650,6 +677,10 @@ impl Document {
 	}
 
 	// Get the lives for this document
+	///
+	/// We don't store the fetched cache entries for live
+	/// queries on the record, as they are only fetched once for
+	/// each record when the reccord live queries are processed.
 	pub async fn lv(
 		&self,
 		ctx: &Context,
@@ -658,8 +689,10 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
-		// Get the cache from the context
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(&tb),
+			None => self.tb(ctx, opt).await?,
+		}; // Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
 			Some(cache) => {
