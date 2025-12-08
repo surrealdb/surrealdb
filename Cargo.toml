@@ -51,15 +51,17 @@ affinitypool = "0.4.0"
 dmp = "0.2.3"
 indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.15.0", features = [
+revision = { version = "0.16.0", features = [
+    "bytes",
     "chrono",
     "geo",
     "roaring",
     "regex",
     "rust_decimal",
+    "specialised",
     "uuid",
 ] }
-storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
+storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.15.1"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use revision::revisioned;
 
@@ -40,13 +41,13 @@ impl From<TableDefinition> for Value {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableMutations(pub String, pub Vec<TableMutation>);
+pub struct TableMutations(pub Arc<str>, pub Vec<TableMutation>);
 
 impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
 	/// Create a new table mutations
-	pub fn new(tb: String) -> Self {
+	pub fn new(tb: Arc<str>) -> Self {
 		Self(tb, Vec::new())
 	}
 	/// Push a table change to the table mutations
@@ -210,7 +211,7 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				Arc::from("mytb"),
 				vec![
 					TableMutation::Set(
 						RecordId::new("mytb".to_string(), "tobie".to_owned()),
@@ -245,7 +246,7 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				Arc::from("mytb"),
 				vec![
 					TableMutation::SetWithDiff(
 						RecordId::new("mytb".to_owned(), "tobie".to_owned()),

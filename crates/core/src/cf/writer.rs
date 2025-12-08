@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use dashmap::DashMap;
 
@@ -9,13 +11,13 @@ use crate::val::RecordId;
 
 // PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).
 // The timestamp will be provided at commit time via Transaction::current_timestamp().
-type PreparedWrite = (NamespaceId, DatabaseId, String, crate::kvs::Val);
+type PreparedWrite = (NamespaceId, DatabaseId, Arc<str>, crate::kvs::Val);
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ChangeKey {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: String,
+	pub tb: Arc<str>,
 }
 
 /// Writer is a helper for writing table mutations to a transaction.
@@ -41,15 +43,17 @@ impl Writer {
 		tb: &str,
 		dt: &TableDefinition,
 	) {
+		// Convert table name to Arc<str> once
+		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: tb.to_string(),
+				tb: Arc::clone(&tb),
 			})
-			.or_insert_with(|| TableMutations::new(tb.to_string()));
+			.or_insert_with(|| TableMutations::new(tb));
 		// Push the table change to the entry
 		entry.push_table_change(dt.to_owned());
 	}
@@ -66,15 +70,17 @@ impl Writer {
 		current: CursorRecord,
 		store_difference: bool,
 	) {
+		// Convert table name to Arc<str> once
+		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: tb.to_string(),
+				tb: Arc::clone(&tb),
 			})
-			.or_insert_with(|| TableMutations::new(tb.to_string()));
+			.or_insert_with(|| TableMutations::new(tb));
 		// Push the record change to the entry
 		entry.push_record_change(id, previous, current, store_difference);
 	}
@@ -82,8 +88,14 @@ impl Writer {
 	// get returns all the mutations buffered for this transaction.
 	// The timestamp will be provided at commit time.
 	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
+		// Get the length once
+		let len = self.buffer.len();
+		// For zero-length changes, return early
+		if len == 0 {
+			return Ok(Vec::new());
+		}
 		// Create a new change result set
-		let mut res = Vec::with_capacity(self.buffer.len());
+		let mut res = Vec::with_capacity(len);
 		// Iterate over the buffered mutations
 		for entry in self.buffer.iter() {
 			// Deconstruct the change key
