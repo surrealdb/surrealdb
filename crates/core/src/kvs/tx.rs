@@ -725,20 +725,6 @@ impl Transaction {
 	// Cache functions
 	// --------------------------------------------------
 
-	#[inline]
-	fn set_record_cache(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &str,
-		id: &RecordIdKey,
-		record: Arc<Record>,
-	) {
-		// Set the value in the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(record));
-	}
-
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn clear_cache(&self) {
@@ -1902,40 +1888,28 @@ impl TableProvider for Transaction {
 					};
 					record.data.to_mut().def(&rid);
 					// Convert to read-only format for better sharing and performance
-					Ok(record.into_read_only())
+					return Ok(record.into_read_only());
 				}
 				// The value is not in the datastore
-				None => Ok(Arc::new(Default::default())),
+				None => return Ok(Arc::new(Default::default())),
 			}
-		} else {
-			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-			match self.cache.get(&qey) {
-				// The entry is in the cache
-				Some(val) => val.try_into_record(),
-				// The entry is not in the cache
-				None => {
-					// Fetch the record from the datastore
-					let key = crate::key::record::new(ns, db, tb, id);
-					match self.get(&key, None).await? {
-						// The value exists in the datastore
-						Some(mut record) => {
-							// Inject the id field into the document
-							let rid = RecordId {
-								table: tb.to_owned(),
-								key: id.clone(),
-							};
-							record.data.to_mut().def(&rid);
-							// Convert to read-only format for better sharing and performance
-							let record = record.into_read_only();
-							let entry = cache::tx::Entry::Val(record.clone());
-							self.cache.insert(qey, entry);
-							Ok(record)
-						}
-						// The value is not in the datastore
-						None => Ok(Arc::new(Default::default())),
-					}
-				}
+		};
+
+		// Fetch the record from the datastore
+		let key = crate::key::record::new(ns, db, tb, id);
+		match self.get(&key, None).await? {
+			// The value exists in the datastore
+			Some(mut record) => {
+				// Inject the id field into the document
+				let rid = RecordId {
+					table: tb.to_owned(),
+					key: id.clone(),
+				};
+				record.data.to_mut().def(&rid);
+				Ok(Arc::new(record))
 			}
+			// The value is not in the datastore
+			None => Ok(Arc::new(Default::default())),
 		}
 	}
 
@@ -1962,7 +1936,6 @@ impl TableProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::record::new(ns, db, tb, id);
 		self.put(&key, &record, version).await?;
-		self.set_record_cache(ns, db, tb, id, record);
 		Ok(())
 	}
 
@@ -1979,8 +1952,6 @@ impl TableProvider for Transaction {
 		// Set the value in the datastore
 		let key = crate::key::record::new(ns, db, tb, id);
 		self.set(&key, &record, version).await?;
-		// Set the value in the cache
-		self.set_record_cache(ns, db, tb, id, record);
 		// Return nothing
 		Ok(())
 	}
@@ -1996,9 +1967,6 @@ impl TableProvider for Transaction {
 		// Delete the value in the datastore
 		let key = crate::key::record::new(ns, db, tb, id);
 		self.del(&key).await?;
-		// Clear the value from the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.remove(qey);
 		// Return nothing
 		Ok(())
 	}

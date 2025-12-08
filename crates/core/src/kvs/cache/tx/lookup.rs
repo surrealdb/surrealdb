@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use super::key::Key;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::RecordIdKey;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
@@ -115,8 +114,6 @@ pub(crate) enum Lookup<'a> {
 	Fd(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for an index (on a table)
 	Ix(NamespaceId, DatabaseId, &'a str, &'a str),
-	/// A cache key for a record
-	Record(NamespaceId, DatabaseId, &'a str, &'a RecordIdKey),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -179,7 +176,6 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ev(la, lb, lc, ld), Key::Ev(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Fd(la, lb, lc, ld), Key::Fd(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Ix(la, lb, lc, ld), Key::Ix(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
-			(Self::Record(la, lb, lc, ld), Key::Record(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && *ld == kd,
 			//
 			_ => false,
 		}
@@ -283,9 +279,6 @@ mod tests {
 	#[case(Lookup::Ev(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ev(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Fd(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Fd(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Ix(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ix(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
-	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(1)), true)]
-	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(2)), false)]
-	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(2), "test".to_string(), RecordIdKey::Number(1)), false)]
 	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
 		assert_eq!(l.equivalent(&k), expected);
 	}

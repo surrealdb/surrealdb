@@ -3,15 +3,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::catalog::{self, Record};
+use crate::catalog;
 use crate::dbs::node::Node;
 
 #[derive(Clone)]
 pub(crate) enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),
-	/// A cached record document content
-	Val(Arc<Record>),
 	/// A slice of Node specified at the root.
 	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
@@ -298,14 +296,6 @@ impl Entry {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Lvs"),
-		}
-	}
-	/// Converts this cache entry into a single [`Record`].
-	/// This panics if called on a cache entry that is not an [`Entry::Val`].
-	pub(crate) fn try_into_record(self) -> Result<Arc<Record>> {
-		match self {
-			Entry::Val(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Val"),
 		}
 	}
 }
