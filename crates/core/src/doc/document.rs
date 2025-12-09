@@ -536,7 +536,7 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = match &self.tb {
-			Some(tb) => Arc::clone(&tb),
+			Some(tb) => Arc::clone(tb),
 			None => self.tb(ctx, opt).await?,
 		};
 		// Get the cache from the context
@@ -570,7 +570,7 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = match &self.tb {
-			Some(tb) => Arc::clone(&tb),
+			Some(tb) => Arc::clone(tb),
 			None => self.tb(ctx, opt).await?,
 		};
 		// Get the cache from the context
@@ -610,7 +610,7 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = match &self.tb {
-			Some(tb) => Arc::clone(&tb),
+			Some(tb) => Arc::clone(tb),
 			None => self.tb(ctx, opt).await?,
 		};
 		// Get the cache from the context
@@ -650,7 +650,7 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = match &self.tb {
-			Some(tb) => Arc::clone(&tb),
+			Some(tb) => Arc::clone(tb),
 			None => self.tb(ctx, opt).await?,
 		};
 		// Get the cache from the context
@@ -690,7 +690,7 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = match &self.tb {
-			Some(tb) => Arc::clone(&tb),
+			Some(tb) => Arc::clone(tb),
 			None => self.tb(ctx, opt).await?,
 		}; // Get the cache from the context
 		match ctx.get_cache() {
