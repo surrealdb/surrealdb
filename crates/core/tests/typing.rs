@@ -77,7 +77,7 @@ async fn strict_typing_inline() -> Result<()> {
 				age: 18,
 				enabled: true,
 				name: 'Tobie Morgan Hitchcock',
-				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
+				scores: {1.0, 2.0, 3.0, 4.0, 5.0},
 			}
 		]",
 	)
