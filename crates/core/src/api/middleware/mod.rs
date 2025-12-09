@@ -2,14 +2,13 @@ pub mod api;
 pub(super) mod invoke;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Array, Object, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct RequestMiddleware(pub(crate) Vec<(String, Vec<Value>)>);
 
 impl InfoStructure for RequestMiddleware {

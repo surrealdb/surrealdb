@@ -44,7 +44,6 @@ use std::mem;
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
@@ -135,7 +134,7 @@ impl Aggregation {
 
 /// A enum containing the data for an aggregation.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum AggregationStat {
 	Count {
 		count: i64,

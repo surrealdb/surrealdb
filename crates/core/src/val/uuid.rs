@@ -4,7 +4,6 @@ use std::str;
 use std::str::FromStr;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -14,21 +13,8 @@ use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone,
-	Copy,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
+	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode,
 )]
-#[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
