@@ -427,7 +427,8 @@ mod tests {
 	fn is_allowed() {
 		// With auth disabled
 		{
-			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default()).with_auth_enabled(false);
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+				.with_auth_enabled(false);
 
 			// When no NS is provided and it targets the NS base, it should return an error
 			opts.is_allowed(Action::View, ResourceKind::Any, &Base::Ns).unwrap_err();

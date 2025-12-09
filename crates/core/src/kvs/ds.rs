@@ -872,7 +872,8 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new(self.id).with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let opt = Options::new(self.id, self.dynamic_configuration.clone())
+				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
@@ -2102,7 +2103,7 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::new(self.dynamic_configuration.clone(), self.id)
+		Options::new(self.id, self.dynamic_configuration.clone())
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -2419,7 +2420,7 @@ mod test {
 
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
-		let opt = Options::new(dbs.id())
+		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)

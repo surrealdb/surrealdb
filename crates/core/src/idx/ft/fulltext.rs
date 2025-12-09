@@ -1032,8 +1032,9 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
-			let opt =
-				Options::new(DynamicConfiguration::default(), nid).with_ns(Some("testns".into())).with_db(Some("testdb".into()));
+			let opt = Options::new(nid, DynamicConfiguration::default())
+				.with_ns(Some("testns".into()))
+				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
 				FullTextIndex::with_analyzer(
 					ctx.get_index_stores(),

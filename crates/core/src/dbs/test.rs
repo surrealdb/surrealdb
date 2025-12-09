@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::cnf::dynamic::DynamicConfiguration;
 use uuid::Uuid;
 
+use crate::cnf::dynamic::DynamicConfiguration;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::iam::{Auth, Role};
