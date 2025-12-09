@@ -56,11 +56,6 @@ impl<'a> Hv<'a> {
 
 #[cfg(test)]
 mod tests {
-	use revision::specialised::{
-		RevisionSpecialisedVecF32, RevisionSpecialisedVecF64, RevisionSpecialisedVecI16,
-		RevisionSpecialisedVecI32, RevisionSpecialisedVecI64,
-	};
-
 	use super::*;
 	use crate::kvs::KVKey;
 
@@ -72,31 +67,31 @@ mod tests {
 			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
 		};
 		test(
-			SerializedVector::I16(RevisionSpecialisedVecI16::from_vec(vec![1, 2, 3])),
+			SerializedVector::I16(vec![1, 2, 3]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x04\x03\x01\x01\x01\0\x02\x01\0\x03\x01\0\0",
 			"i16",
 		);
 
 		test(
-			SerializedVector::I32(RevisionSpecialisedVecI32::from_vec(vec![1, 2, 3])),
+			SerializedVector::I32(vec![1, 2, 3]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x03\x03\x01\x01\x01\0\x01\0\x01\0\x02\x01\0\x01\0\x01\0\x03\x01\0\x01\0\x01\0\0",
 			"i32",
 		);
 
 		test(
-			SerializedVector::I64(RevisionSpecialisedVecI64::from_vec(vec![1, 2, 3])),
+			SerializedVector::I64(vec![1, 2, 3]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x02\x03\x01\x01\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x02\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\0",
 			"i64",
 		);
 
 		test(
-			SerializedVector::F32(RevisionSpecialisedVecF32::from_vec(vec![1.0, 2.0, 3.0])),
+			SerializedVector::F32(vec![1.0, 2.0, 3.0]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\x01\x03\x01\0\x01\0\x80\x3F\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x40\x40\0",
 			"f32",
 		);
 
 		test(
-			SerializedVector::F64(RevisionSpecialisedVecF64::from_vec(vec![1.0, 2.0, 3.0])),
+			SerializedVector::F64(vec![1.0, 2.0, 3.0]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\xF0\x3F\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x08\x40\0",
 			"f64",
 		);

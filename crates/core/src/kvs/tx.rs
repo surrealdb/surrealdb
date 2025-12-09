@@ -702,12 +702,18 @@ impl Transaction {
 	// This function should be called immediately before calling the commit function
 	// to ensure the timestamp reflects the actual commit time.
 	pub(crate) async fn store_changes(&self) -> Result<()> {
+		// Get the changes from the changefeed
+		let changes = self.cf.changes()?;
+		// For zero-length changes, return early
+		if changes.is_empty() {
+			return Ok(());
+		}
 		// Get the current transaction timestamp
 		let ts = self.timestamp().await?.to_ts_bytes();
 		// Convert the timestamp bytes to a slice
 		let ts = ts.as_slice();
 		// Collect all changefeed write operations as futures
-		let futures = self.cf.changes()?.into_iter().map(|(ns, db, tb, value)| async move {
+		let futures = changes.into_iter().map(|(ns, db, tb, value)| async move {
 			// Create the changefeed key with the current timestamp
 			let key = crate::key::change::new(ns, db, ts, &tb).encode_key()?;
 			// Write the changefeed entry using the raw transactor API
