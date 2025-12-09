@@ -348,18 +348,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
+      - name: Test workspace
+        uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tools: cargo-nextest,cargo-llvm-cov,cargo-make
-
-      - name: Test workspace
-        run: cargo make ci-workspace-test
 
   # ----------------------------------------
   # Storage engine tests

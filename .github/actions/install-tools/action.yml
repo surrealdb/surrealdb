@@ -2,15 +2,41 @@ name: 'Install tools'
 description: 'Install tools'
 
 inputs:
+  preset:
+    description: 'Preset tool collection to install (test, build). Takes precedence over tools if specified.'
+    required: false
   tools:
-    description: 'Tools to install'
+    description: 'Tools to install (comma-separated). Used if preset is not specified.'
     required: false
     default: 'cargo-make'
 
 runs:
   using: 'composite'
   steps:
+    - name: Determine tools to install
+      id: resolve-tools
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.preset }}" ]]; then
+          case "${{ inputs.preset }}" in
+            test)
+              # Tools needed for workspace testing
+              echo "tools=cargo-nextest,cargo-make" >> $GITHUB_OUTPUT
+              ;;
+            build)
+              # Tools needed for basic builds
+              echo "tools=cargo-make" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "::error::Unknown preset: ${{ inputs.preset }}"
+              exit 1
+              ;;
+          esac
+        else
+          echo "tools=${{ inputs.tools }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Install tools
       uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
       with:
-        tool: ${{ inputs.tools }}
+        tool: ${{ steps.resolve-tools.outputs.tools }}
