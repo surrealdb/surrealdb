@@ -1,21 +1,23 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use dashmap::DashMap;
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::cf::{TableMutation, TableMutations};
+use crate::cf::TableMutations;
 use crate::doc::CursorRecord;
 use crate::kvs::KVValue;
 use crate::val::RecordId;
 
 // PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).
 // The timestamp will be provided at commit time via Transaction::current_timestamp().
-type PreparedWrite = (NamespaceId, DatabaseId, String, crate::kvs::Val);
+type PreparedWrite = (NamespaceId, DatabaseId, Arc<str>, crate::kvs::Val);
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ChangeKey {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: String,
+	pub tb: Arc<str>,
 }
 
 /// Writer is a helper for writing table mutations to a transaction.
@@ -41,17 +43,19 @@ impl Writer {
 		tb: &str,
 		dt: &TableDefinition,
 	) {
+		// Convert table name to Arc<str> once
+		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: tb.to_string(),
+				tb: Arc::clone(&tb),
 			})
-			.or_insert_with(|| TableMutations::new(tb.to_string()));
-		// Push the define table mutation to the entry
-		entry.1.push(TableMutation::Def(dt.to_owned()));
+			.or_insert_with(|| TableMutations::new(tb));
+		// Push the table change to the entry
+		entry.push_table_change(dt.to_owned());
 	}
 
 	/// Record a record modification or deletion
@@ -66,50 +70,32 @@ impl Writer {
 		current: CursorRecord,
 		store_difference: bool,
 	) {
+		// Convert table name to Arc<str> once
+		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: tb.to_string(),
+				tb: Arc::clone(&tb),
 			})
-			.or_insert_with(|| TableMutations::new(tb.to_string()));
-		// Check if this is a delete operation
-		if current.as_ref().is_nullish() {
-			// Push the delete mutation to the entry
-			entry.1.push(match store_difference {
-				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
-				false => TableMutation::Del(id),
-			});
-		} else {
-			// Push the set mutation to the entry
-			entry.1.push(match store_difference {
-				true => {
-					if previous.as_ref().is_none() {
-						TableMutation::Set(id, current.into_owned())
-					} else {
-						// We intentionally record the patches in reverse (current -> previous)
-						// because we cannot otherwise resolve operations such as "replace" and
-						// "remove".
-						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
-						TableMutation::SetWithDiff(
-							id,
-							current.into_owned(),
-							patches_to_create_previous,
-						)
-					}
-				}
-				false => TableMutation::Set(id, current.into_owned()),
-			});
-		}
+			.or_insert_with(|| TableMutations::new(tb));
+		// Push the record change to the entry
+		entry.push_record_change(id, previous, current, store_difference);
 	}
 
 	// get returns all the mutations buffered for this transaction.
 	// The timestamp will be provided at commit time.
 	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
+		// Get the length once
+		let len = self.buffer.len();
+		// For zero-length changes, return early
+		if len == 0 {
+			return Ok(Vec::new());
+		}
 		// Create a new change result set
-		let mut res = Vec::with_capacity(self.buffer.len());
+		let mut res = Vec::with_capacity(len);
 		// Iterate over the buffered mutations
 		for entry in self.buffer.iter() {
 			// Deconstruct the change key

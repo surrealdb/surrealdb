@@ -1276,7 +1276,7 @@ version = "12.16.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
-version = "2.0.110"
+version = "2.0.111"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
