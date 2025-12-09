@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Block, Expr, Param};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,7 +13,7 @@ pub struct ForeachStatement {
 
 impl ToSql for ForeachStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "FOR {} IN {} {}", self.param, self.range, self.block);
+		write_sql!(f, sql_fmt, "FOR {} IN {} {}", self.param, CoverStmts(&self.range), self.block)
 	}
 }
 

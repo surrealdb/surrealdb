@@ -711,7 +711,7 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()).await?;
 		*rc = false;
 		Ok(())
 	}

@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::sql::CreateStatement;
+use crate::sql::{CreateStatement, Expr, Literal};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
@@ -14,9 +14,9 @@ impl Parser<'_> {
 		let data = self.try_parse_data(stk).await?;
 		let output = self.try_parse_output(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
+			stk.run(|stk| self.parse_expr_field(stk)).await?
 		} else {
-			None
+			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));

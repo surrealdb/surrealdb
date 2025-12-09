@@ -1,14 +1,15 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeKwIdent;
-use crate::sql::Timeout;
+use crate::fmt::{CoverStmts, EscapeKwIdent};
+use crate::sql::Expr;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Default)]
 pub struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub timeout: Option<Timeout>,
+	pub timeout: Option<Expr>,
 }
 
 impl ToSql for AlterSequenceStatement {
@@ -18,8 +19,8 @@ impl ToSql for AlterSequenceStatement {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
 		write_sql!(f, fmt, " {}", EscapeKwIdent(&self.name, &["IF"]));
-		if let Some(ref timeout) = self.timeout {
-			write_sql!(f, fmt, " {timeout}");
+		if let Some(timeout) = &self.timeout {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(timeout));
 		}
 	}
 }
@@ -29,7 +30,7 @@ impl From<AlterSequenceStatement> for crate::expr::statements::alter::AlterSeque
 		crate::expr::statements::alter::AlterSequenceStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.map(From::from),
 		}
 	}
 }
@@ -38,7 +39,7 @@ impl From<crate::expr::statements::alter::AlterSequenceStatement> for AlterSeque
 		AlterSequenceStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.map(From::from),
 		}
 	}
 }

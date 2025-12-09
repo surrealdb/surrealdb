@@ -1,5 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::fmt::EscapeKwFreeIdent;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct GraphQLConfig {
@@ -31,8 +33,14 @@ pub enum TablesConfig {
 	#[default]
 	None,
 	Auto,
-	Include(Vec<TableConfig>),
-	Exclude(Vec<TableConfig>),
+	Include(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<TableConfig>,
+	),
+	Exclude(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<TableConfig>,
+	),
 }
 
 impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
@@ -81,7 +89,10 @@ pub enum FunctionsConfig {
 	#[default]
 	None,
 	Auto,
+	// These variants are not actually implemented yet
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Include(Vec<String>),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Exclude(Vec<String>),
 }
 
@@ -146,7 +157,7 @@ impl ToSql for TablesConfig {
 
 impl ToSql for TableConfig {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.name.fmt_sql(f, fmt);
+		EscapeKwFreeIdent(&self.name).fmt_sql(f, fmt);
 	}
 }
 

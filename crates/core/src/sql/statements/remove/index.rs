@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,7 +27,7 @@ impl ToSql for RemoveIndexStatement {
 		if self.if_exists {
 			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 	}
 }
 

@@ -8,7 +8,7 @@ use crate::sql::Param;
 use crate::sql::language::Language;
 use crate::syn::error::{bail, syntax_error};
 use crate::syn::lexer::Lexer;
-use crate::syn::lexer::compound::{self, NumberKind};
+use crate::syn::lexer::compound::{self, NumberKind, ParsedInt, prepare_number_str};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Span, TokenKind, t};
@@ -223,7 +223,7 @@ impl TokenValue for surrealdb_types::Regex {
 
 pub enum NumberToken {
 	Float(f64),
-	Integer(i64),
+	Integer(ParsedInt),
 	Decimal(Decimal),
 }
 
@@ -236,12 +236,12 @@ impl TokenValue for NumberToken {
 				let GluedValue::Number(x) = mem::take(&mut parser.glued_value) else {
 					panic!("Glued token was next but glued value was not of the correct value");
 				};
-				let number_str = parser.lexer.span_str(token.span);
+				let number_str = prepare_number_str(parser.lexer.span_str(token.span));
 				match x {
-					NumberKind::Integer => number_str
-						.parse()
-						.map(NumberToken::Integer)
-						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
+					NumberKind::Integer => Ok(NumberToken::Integer(ParsedInt::from_number_str(
+						number_str.as_ref(),
+						token.span,
+					)?)),
 					NumberKind::Float => number_str
 						.trim_end_matches("f")
 						.parse()
@@ -267,12 +267,22 @@ impl TokenValue for NumberToken {
 				let token = parser.lexer.lex_compound(token, compound::number)?;
 				match token.value {
 					compound::Numeric::Float(f) => Ok(NumberToken::Float(f)),
-					compound::Numeric::Integer(i) => Ok(NumberToken::Integer(i)),
+					compound::Numeric::Integer(x) => Ok(NumberToken::Integer(x)),
 					compound::Numeric::Decimal(d) => Ok(NumberToken::Decimal(d)),
 					compound::Numeric::Duration(_) => {
 						bail!("Unexpected token `duration`, expected a number", @token.span)
 					}
 				}
+			}
+			TokenKind::NaN => {
+				parser.pop_peek();
+
+				Ok(NumberToken::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				parser.pop_peek();
+
+				Ok(NumberToken::Float(f64::INFINITY))
 			}
 			_ => unexpected!(parser, token, "a number"),
 		}
@@ -285,7 +295,7 @@ impl TokenValue for surrealdb_types::Number {
 		let token = parser.next_token_value::<NumberToken>()?;
 		match token {
 			NumberToken::Float(x) => Ok(Self::Float(x)),
-			NumberToken::Integer(x) => Ok(Self::Int(x)),
+			NumberToken::Integer(i) => Ok(Self::Int(i.into_int(parser.recent_span())?)),
 			NumberToken::Decimal(x) => Ok(Self::Decimal(x)),
 		}
 	}

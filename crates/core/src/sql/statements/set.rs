@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent};
 use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,7 +17,7 @@ impl ToSql for SetStatement {
 		if let Some(ref kind) = self.kind {
 			write_sql!(f, fmt, ": {}", kind);
 		}
-		write_sql!(f, fmt, " = {}", self.what);
+		write_sql!(f, fmt, " = {}", CoverStmts(&self.what));
 	}
 }
 

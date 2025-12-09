@@ -9,7 +9,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr, Literal};
+use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -18,7 +18,7 @@ pub(crate) struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineNamespaceStatement {
@@ -27,7 +27,7 @@ impl Default for DefineNamespaceStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::String(String::new())),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -66,11 +66,16 @@ impl DefineNamespaceStatement {
 			ctx.try_get_sequences()?.next_namespace_id(Some(ctx)).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 		// Process the statement
 		let ns_def = NamespaceDefinition {
 			namespace_id,
 			name,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.put_ns(ns_def).await?;
 		// Clear the cache

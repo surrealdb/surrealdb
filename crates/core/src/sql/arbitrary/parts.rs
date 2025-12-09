@@ -2,6 +2,7 @@ use std::ops::Bound;
 
 use arbitrary::Arbitrary;
 
+use crate::sql::access_type::{JwtAccess, JwtAccessIssue, JwtAccessVerify};
 use crate::sql::arbitrary::idiom::plain_idiom;
 use crate::sql::arbitrary::{arb_vec1, atleast_one, basic_idiom};
 use crate::sql::field::Selector;
@@ -87,7 +88,7 @@ impl<'a> Arbitrary<'a> for Data {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		let r = match u.int_in_range(0u8..=5)? {
 			0 => Data::SetExpression(atleast_one(u)?),
-			1 => Data::UnsetExpression(atleast_one(u)?),
+			1 => Data::UnsetExpression(arb_vec1(u, |u| plain_idiom(u))?),
 			2 => Data::PatchExpression(u.arbitrary()?),
 			3 => Data::MergeExpression(u.arbitrary()?),
 			4 => Data::ReplaceExpression(u.arbitrary()?),
@@ -205,8 +206,13 @@ impl<'a> Arbitrary<'a> for Selector {
 			None
 		};
 
+		let expr = match u.arbitrary()? {
+			Expr::Table(x) => Expr::Idiom(Idiom::field(x)),
+			x => x,
+		};
+
 		Ok(Selector {
-			expr: u.arbitrary()?,
+			expr,
 			alias,
 		})
 	}
@@ -411,5 +417,37 @@ fn idiom_from_expr<'a>(
 				x => Ok(x.to_idiom()),
 			}
 		}
+	}
+}
+
+impl<'a> Arbitrary<'a> for JwtAccess {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let verify = u.arbitrary()?;
+		let issue = if u.arbitrary()? {
+			let alg = if let JwtAccessVerify::Key(ref ver) = verify {
+				ver.alg
+			} else {
+				u.arbitrary()?
+			};
+
+			let key = if alg.is_symmetric()
+				&& let JwtAccessVerify::Key(ref ver) = verify
+			{
+				ver.key.clone()
+			} else {
+				u.arbitrary()?
+			};
+			Some(JwtAccessIssue {
+				alg,
+				key,
+			})
+		} else {
+			None
+		};
+
+		Ok(JwtAccess {
+			verify,
+			issue,
+		})
 	}
 }

@@ -118,7 +118,7 @@
             depsBuildBuild = buildSpec.depsBuildBuild or [ ]
               ++ [ rustToolchain ] ++ (with pkgs; [ nixfmt cargo-watch wasm-pack pre-commit cargo-make]);
 
-            inherit (util) SURREAL_BUILD_METADATA;
+            inherit (util) SURREAL_BUILD_VERSION SURREAL_BUILD_METADATA;
           })) util.platforms);
 
         # nix run
