@@ -9,7 +9,7 @@ use crate::sql::statements::alter::{
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::t;
+use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_alter_stmt(&mut self, stk: &mut Stk) -> ParseResult<AlterStatement> {
@@ -38,28 +38,36 @@ impl Parser<'_> {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
-						t!("QUERY_TIMEOUT") => {
-							self.pop_peek();
-							res.query_timeout = AlterKind::Drop;
+						TokenKind::Identifier => {
+							let name = self.parse_ident()?;
+							match name.as_str() {
+								"QUERY_TIMEOUT" => {
+									res.query_timeout = AlterKind::Drop;
+								}
+								_ => unexpected!(self, peek, "`QUERY_TIMEOUT`"),
+							}
 						}
 						_ => {
 							unexpected!(self, peek, "`QUERY_TIMEOUT`")
 						}
 					}
 				}
-				t!("QUERY_TIMEOUT") => {
-					self.pop_peek();
-					let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
-					res.query_timeout = AlterKind::Set(duration);
-				}
 				t!("COMPACT") => {
 					self.pop_peek();
 					res.compact = true;
 				}
-				o => {
-					println!("{o}");
-					break;
+				TokenKind::Identifier => {
+					let peek = self.peek();
+					let name = self.parse_ident()?;
+					match name.as_str() {
+						"QUERY_TIMEOUT" => {
+							let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+							res.query_timeout = AlterKind::Set(duration);
+						}
+						_ => unexpected!(self, peek, "`QUERY_TIMEOUT`"),
+					}
 				}
+				_ => break,
 			}
 		}
 

@@ -158,7 +158,6 @@ keyword! {
 	Prepare => "PREPARE",
 	Punct => "PUNCT",
 	Purge => "PURGE",
-	QueryTimeOut => "QUERY_TIMEOUT",
 	Range => "RANGE",
 	Readonly => "READONLY",
 	Rebuild => "REBUILD",
