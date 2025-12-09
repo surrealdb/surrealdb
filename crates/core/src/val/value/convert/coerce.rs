@@ -52,7 +52,7 @@ impl fmt::Display for CoerceError {
 				len,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found an collection of length `{len}`")
+				write!(f, "Expected `{into}` but found a collection of length `{len}`")
 			}
 		}
 	}

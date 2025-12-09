@@ -10,7 +10,6 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
-use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
 	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
@@ -61,7 +60,7 @@ impl fmt::Display for CastError {
 				len,
 				into,
 			} => {
-				write!(f, "Expected `{into}` buf found an collection of length `{len}`")
+				write!(f, "Expected `{into}` but found a collection of length `{len}`")
 			}
 			CastError::RangeSizeLimit {
 				value,
@@ -1073,40 +1072,37 @@ impl Value {
 			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique values
-	pub(crate) fn cast_to_set_type(self, kind: &Kind) -> Result<Array, CastError> {
+	/// Try to convert this value to a `Set` of a certain type
+	pub(crate) fn cast_to_set_type(self, kind: &Kind) -> Result<Set, CastError> {
 		let array = self.cast_to::<Array>()?;
 
-		let array = array
+		let set = array
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
-			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
-			.uniq();
+			.collect::<Result<Set, CastError>>()
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
-		Ok(array)
+		Ok(set)
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique
-	/// values, and length
-	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Array, CastError> {
+	/// Try to convert this value to a `Set` of a certain type and length
+	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Set, CastError> {
 		let array = self.cast_to::<Array>()?;
 
-		let array = array
+		let set = array
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
-			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
-			.uniq();
+			.collect::<Result<Set, CastError>>()
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
-		if (array.len() as u64) != len {
+		if (set.len() as u64) != len {
 			return Err(CastError::InvalidLength {
-				len: array.len(),
+				len: set.len(),
 				into: format!("set<{},{}>", kind.to_sql(), len),
 			});
 		}
 
-		Ok(array)
+		Ok(set)
 	}
 
 	pub(crate) fn cast_to_file_buckets(self, buckets: &[String]) -> Result<File, CastError> {
