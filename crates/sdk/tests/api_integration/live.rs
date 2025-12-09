@@ -405,9 +405,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 
 		// Start listening
 		let mut users = db
-			.query("BEGIN")
-			.query(format!("LIVE SELECT * FROM {table}"))
-			.query("COMMIT")
+			.query(format!("BEGIN; LIVE SELECT * FROM {table}; COMMIT"))
 			.await
 			.unwrap()
 			.stream::<Value>(())

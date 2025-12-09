@@ -43,7 +43,7 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
-[tasks.ci-format]
+[tasks.ci-fmt]
 category = "CI - CHECK"
 description = "Run code formatting checks"
 toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
@@ -845,7 +845,7 @@ category = "CI - ALL REQUIRED CHECKS"
 description = "Run almost all required CI checks that must pass for PR merge"
 dependencies = [
     # Code quality checks
-    "ci-format",
+    "ci-fmt",
     "ci-clippy",
     "ci-check",
     "ci-check-wasm",

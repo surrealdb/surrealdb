@@ -29,6 +29,6 @@ runs:
 
     - name: Check format
       shell: bash
-      run: cargo make ci-format
+      run: cargo make ci-fmt
 
 
