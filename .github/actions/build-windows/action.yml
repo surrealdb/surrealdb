@@ -1,0 +1,102 @@
+name: 'Build Windows binary'
+description: 'Build SurrealDB binary for Windows'
+
+inputs:
+  arch:
+    description: 'Target architecture (x86_64-pc-windows-msvc)'
+    required: true
+  platform:
+    description: 'Platform name (amd64)'
+    required: true
+  name:
+    description: 'The name of output'
+    required: true
+  build-metadata:
+    description: 'Build metadata'
+    required: false
+    default: ''
+  onnx-version:
+    description: 'The ONNX library version'
+    required: false
+    default: '1.16.3'
+  extra-features:
+    description: 'Extra features enabled in the binary'
+    required: false
+    default: 'storage-tikv,jwks,ml'
+  upload:
+    description: 'Upload build artifacts'
+    required: false
+    default: 'true'
+  release:
+    description: 'Compile with release flag'
+    required: false
+    default: 'true'
+
+outputs:
+  artifact-name:
+    description: 'Name of the uploaded artifact'
+    value: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        targets: ${{ inputs.arch }}
+
+    - name: Output package versions
+      shell: bash
+      run: |
+        set -x
+        set +e
+        go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
+    - name: Prepare dependencies
+      shell: bash
+      run: vcpkg integrate install
+
+    - name: Build binary
+      shell: bash
+      env:
+        SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
+      run: |
+        set -x
+
+        # Build
+        extra_args=""
+        compile_profile="debug"
+        if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
+          extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+        else
+          extra_args="${extra_args} --features default"
+          if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+            extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+          fi
+        fi
+        if [[ "${{ inputs.release }}" == "true" ]]; then
+          extra_args="${extra_args} --release"
+          compile_profile="release"
+        fi
+
+        # Download libonnxruntime's static library and tell ORT crate to use it
+        tmp_dir=$(mktemp -d)
+        curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-win-x64-static_lib-${{ inputs.onnx-version }}.zip -o $tmp_dir/onnxruntime.zip
+        unzip -d $tmp_dir $tmp_dir/onnxruntime.zip
+        export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmp_dir/lib
+
+        cargo build --no-default-features ${extra_args} --locked --target ${{ inputs.arch }}
+
+        # Package
+        ./target/${{ inputs.arch }}/${compile_profile}/surreal.exe version
+        cp target/${{ inputs.arch }}/${compile_profile}/surreal.exe surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+        echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt
+
+    - name: Upload artifacts
+      if: ${{ inputs.upload == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: surreal-${{ inputs.name }}.windows-${{ inputs.platform }}
+        path: |
+          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.exe
+          surreal-${{ inputs.name }}.windows-${{ inputs.platform }}.txt

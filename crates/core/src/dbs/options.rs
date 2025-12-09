@@ -24,7 +24,7 @@ use crate::types::PublicNotification;
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// The current Node ID of the datastore instance
-	id: Option<Uuid>,
+	id: Uuid,
 	/// The currently selected Namespace
 	pub(crate) ns: Option<Arc<str>>,
 	/// The currently selected Database
@@ -69,17 +69,11 @@ pub trait MessageBroker: Send + Sync + Debug {
 	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-impl Default for Options {
-	fn default() -> Self {
-		Options::new()
-	}
-}
-
 impl Options {
 	/// Create a new Options object
-	pub fn new() -> Options {
+	pub fn new(id: Uuid) -> Options {
 		Options {
-			id: None,
+			id,
 			ns: None,
 			db: None,
 			dive: *MAX_COMPUTATION_DEPTH,
@@ -113,13 +107,6 @@ impl Options {
 	/// Set the maximum depth a computation can reach.
 	pub fn with_max_computation_depth(mut self, depth: u32) -> Self {
 		self.dive = depth;
-		self
-	}
-
-	/// Set the Node ID for subsequent code which uses
-	/// this `Options`, with support for chaining.
-	pub fn with_id(mut self, id: Uuid) -> Self {
-		self.id = Some(id);
 		self
 	}
 
@@ -284,11 +271,9 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Get current Node ID
-	#[inline(always)]
-	pub fn id(&self) -> Result<Uuid> {
+	#[inline]
+	pub fn id(&self) -> Uuid {
 		self.id
-			.ok_or_else(|| Error::unreachable("No Node ID is specified"))
-			.map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS
@@ -427,7 +412,7 @@ mod tests {
 	fn is_allowed() {
 		// With auth disabled
 		{
-			let opts = Options::default().with_auth_enabled(false);
+			let opts = Options::new(Uuid::new_v4()).with_auth_enabled(false);
 
 			// When no NS is provided and it targets the NS base, it should return an error
 			opts.is_allowed(Action::View, ResourceKind::Any, &Base::Ns).unwrap_err();
@@ -455,7 +440,7 @@ mod tests {
 
 		// With auth enabled
 		{
-			let opts = Options::default()
+			let opts = Options::new(Uuid::new_v4())
 				.with_auth_enabled(true)
 				.with_auth(Auth::for_root(Role::Owner).into());
 
