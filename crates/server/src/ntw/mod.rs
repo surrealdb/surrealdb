@@ -3,6 +3,7 @@ mod auth;
 pub mod client_ip;
 pub mod error;
 mod export;
+#[cfg(feature = "graphql")]
 mod gql;
 pub(crate) mod headers;
 mod health;
@@ -75,7 +76,7 @@ pub trait RouterFactory {
 /// composer to customize routes.
 impl RouterFactory for CommunityComposer {
 	fn configure_router() -> Router<Arc<RpcState>> {
-		Router::<Arc<RpcState>>::new()
+		let router = Router::<Arc<RpcState>>::new()
 			// Redirect until we provide a UI
 			.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 			.route("/status", get(|| async {}))
@@ -90,8 +91,12 @@ impl RouterFactory for CommunityComposer {
 			.merge(signup::router())
 			.merge(key::router())
 			.merge(ml::router())
-			.merge(api::router())
-			.merge(gql::router())
+			.merge(api::router());
+
+		#[cfg(feature = "graphql")]
+		let router = router.merge(gql::router());
+
+		router
 	}
 }
 
