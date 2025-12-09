@@ -486,7 +486,7 @@ impl Cast for Bytes {
 impl Cast for Array {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Array(_) | Value::Bytes(_) => true,
+			Value::Array(_) | Value::Bytes(_) | Value::Set(_) => true,
 			Value::Range(r) => r.can_coerce_to_typed::<i64>(),
 			_ => false,
 		}
@@ -495,6 +495,7 @@ impl Cast for Array {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Array(x) => Ok(x),
+			Value::Set(s) => Ok(s.into_iter().collect()),
 			Value::Range(range) => {
 				if !range.can_coerce_to_typed::<i64>() {
 					return Err(CastError::InvalidKind {
