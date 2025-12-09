@@ -7,7 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
 use crate::catalog::{self, AccessDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -153,7 +153,7 @@ impl DefineAccessStatement {
 	async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<AccessDefinition> {
@@ -177,7 +177,7 @@ impl DefineAccessStatement {
 
 		async fn convert_jwt_access(
 			stk: &mut Stk,
-			ctx: &Context,
+			ctx: &FrozenContext,
 			opt: &Options,
 			doc: Option<&CursorDoc>,
 			access: &JwtAccess,
@@ -213,7 +213,7 @@ impl DefineAccessStatement {
 
 		async fn convert_bearer_access(
 			stk: &mut Stk,
-			ctx: &Context,
+			ctx: &FrozenContext,
 			opt: &Options,
 			doc: Option<&CursorDoc>,
 			access: &BearerAccess,
@@ -288,7 +288,7 @@ impl DefineAccessStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

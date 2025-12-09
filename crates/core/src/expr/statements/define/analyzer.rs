@@ -5,7 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::DefineKind;
 use crate::catalog;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -42,7 +42,7 @@ impl DefineAnalyzerStatement {
 	pub(crate) async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::AnalyzerDefinition> {
@@ -79,7 +79,7 @@ impl DefineAnalyzerStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

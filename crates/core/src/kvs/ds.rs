@@ -9,7 +9,7 @@ use std::time::Duration;
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
@@ -38,7 +38,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
@@ -872,7 +872,7 @@ impl Datastore {
 				INITIAL_USER_ROLE.to_owned(),
 			);
 			let opt = Options::new(self.id).with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let mut ctx = MutableContext::default();
+			let mut ctx = Context::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
 			let mut stack = reblessive::TreeStack::new();
@@ -1958,7 +1958,7 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -2107,8 +2107,8 @@ impl Datastore {
 			.with_auth_enabled(self.auth_enabled)
 	}
 
-	pub fn setup_ctx(&self) -> Result<MutableContext> {
-		let mut ctx = MutableContext::from_ds(
+	pub fn setup_ctx(&self) -> Result<Context> {
+		let mut ctx = Context::from_ds(
 			self.query_timeout,
 			self.slow_log.clone(),
 			self.capabilities.clone(),
@@ -2144,7 +2144,7 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
@@ -2424,7 +2424,7 @@ mod test {
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction

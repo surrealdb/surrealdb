@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::alter::AlterKind;
@@ -34,7 +34,7 @@ pub(crate) struct AlterIndexStatement {
 }
 
 impl AlterIndexStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB

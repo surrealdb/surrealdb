@@ -20,7 +20,7 @@ use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultConfig, IndexId,
 	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::doc::CursorRecord;
 use crate::err::Error;
@@ -894,7 +894,7 @@ impl NamespaceProvider for Transaction {
 		Ok(cached_ns)
 	}
 
-	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
+	async fn get_next_ns_id(&self, ctx: Option<&Context>) -> Result<NamespaceId> {
 		self.sequences.next_namespace_id(ctx).await
 	}
 }
@@ -949,7 +949,7 @@ impl DatabaseProvider for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_db_upwards(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
 		upwards: bool,
@@ -996,11 +996,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	async fn get_next_db_id(
-		&self,
-		ctx: Option<&MutableContext>,
-		ns: NamespaceId,
-	) -> Result<DatabaseId> {
+	async fn get_next_db_id(&self, ctx: Option<&Context>, ns: NamespaceId) -> Result<DatabaseId> {
 		self.sequences.next_database_id(ctx, ns).await
 	}
 
@@ -1448,7 +1444,7 @@ impl TableProvider for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_tb_upwards(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
 		tb: &str,
@@ -2005,7 +2001,7 @@ impl TableProvider for Transaction {
 
 	async fn get_next_tb_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {

@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{TableDefinition, ViewDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -35,7 +35,7 @@ impl RemoveTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

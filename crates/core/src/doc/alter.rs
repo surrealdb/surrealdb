@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::RecordType;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
@@ -80,7 +80,7 @@ impl Document {
 	/// fields are reset back to the original state.
 	pub(super) async fn default_record_data(
 		&mut self,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -170,7 +170,7 @@ impl Document {
 	pub(super) async fn process_record_data(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -217,7 +217,7 @@ impl Document {
 	pub(super) async fn compute_input_data(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Option<&ComputedData>> {
@@ -247,7 +247,7 @@ impl Document {
 					let assignments = {
 						let ctx = if matches!(x, Data::UpdateExpression(_)) {
 							// Duplicate context
-							let mut ctx = MutableContext::new(ctx);
+							let mut ctx = Context::new(ctx);
 							// Add insertable value
 							if let Workable::Insert(value) = &self.extras {
 								ctx.add_value("input", value.clone());
@@ -296,7 +296,7 @@ impl Document {
 	pub(super) async fn compute_input_value(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Option<Arc<Value>>> {
@@ -355,7 +355,7 @@ pub(super) struct ComputedAssignment {
 
 async fn apply_assignments(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: &mut Value,
 	assignments: Vec<ComputedAssignment>,

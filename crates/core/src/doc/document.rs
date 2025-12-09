@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, Data, DatabaseDefinition, Permission, Record, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Workable};
 use crate::doc::alter::ComputedData;
 use crate::expr::{Base, FlowResultExt as _};
@@ -46,12 +46,12 @@ pub(crate) struct CursorDoc {
 impl CursorDoc {
 	/// Updates the `"parent"` doc field for statements with a meaning full
 	/// document.
-	pub async fn update_parent<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
+	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
 	where
-		F: AsyncFnOnce(Cow<Context>) -> R,
+		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
 	{
 		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = MutableContext::new(ctx);
+			let mut new_ctx = Context::new(ctx);
 			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
 			Cow::Owned(new_ctx.freeze())
 		} else {
@@ -338,7 +338,7 @@ impl Document {
 	pub(crate) async fn reduced(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		permitted: Permitted,
 	) -> Result<bool> {
@@ -385,7 +385,7 @@ impl Document {
 	pub(crate) async fn compute_reduced_target(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		full: &CursorDoc,
 	) -> Result<CursorDoc> {
@@ -407,7 +407,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = MutableContext::new(ctx);
+						let mut ctx = Context::new(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
@@ -444,7 +444,7 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+	pub async fn db(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -473,7 +473,7 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
+	pub async fn tb(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the record id
@@ -524,7 +524,7 @@ impl Document {
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
+	pub async fn ft(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -555,7 +555,7 @@ impl Document {
 	/// Get the events for this document
 	pub async fn ev(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
@@ -588,7 +588,7 @@ impl Document {
 	/// Get the fields for this document
 	pub async fn fd(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
@@ -619,7 +619,7 @@ impl Document {
 	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
@@ -652,7 +652,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB

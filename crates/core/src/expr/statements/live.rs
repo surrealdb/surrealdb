@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -34,7 +34,7 @@ impl LiveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

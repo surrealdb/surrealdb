@@ -6,7 +6,7 @@ use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -330,7 +330,7 @@ impl Expr {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -446,7 +446,7 @@ impl Expr {
 
 	async fn compute_prefix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		op: &PrefixOperator,
@@ -476,7 +476,7 @@ impl Expr {
 
 	async fn compute_postfix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
@@ -527,7 +527,7 @@ impl Expr {
 
 	async fn compute_binary(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,

@@ -7,7 +7,7 @@ use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::paths::ID;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
@@ -108,7 +108,7 @@ impl Fields {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -123,7 +123,7 @@ impl Fields {
 	async fn compute_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: &CursorDoc,
 	) -> Result<Value> {
