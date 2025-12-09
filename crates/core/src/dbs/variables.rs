@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use serde::{Deserialize, Serialize};
-
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::expr::Param;
@@ -47,7 +45,7 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
 

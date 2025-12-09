@@ -9,7 +9,6 @@ use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -67,10 +66,7 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Value")]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum Value {
@@ -91,10 +87,8 @@ pub(crate) enum Value {
 	Table(Table),
 	RecordId(RecordId),
 	File(File),
-	#[serde(skip)]
 	Regex(Regex),
 	Range(Box<Range>),
-	#[serde(skip)]
 	Closure(Box<Closure>),
 	// Add new variants here
 }

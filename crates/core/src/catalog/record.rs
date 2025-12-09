@@ -11,8 +11,6 @@ use std::sync::Arc;
 
 use revision::error::Error;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use serde::de::Deserializer;
-use serde::{Deserialize, Serialize, Serializer};
 
 use crate::catalog::aggregation::AggregationStat;
 use crate::kvs::impl_kv_value_revisioned;
@@ -38,7 +36,7 @@ use crate::val::Value;
 /// assert!(!record.is_edge());
 /// ```
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Record {
 	/// Optional metadata about the record (e.g., record type)
 	pub(crate) metadata: Option<Metadata>,
@@ -262,30 +260,6 @@ impl Hash for Data {
 	}
 }
 
-impl Serialize for Data {
-	/// Serializes the Data instance
-	///
-	/// This delegates to the underlying Value's serialization.
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		self.as_ref().serialize(serializer)
-	}
-}
-
-impl<'de> Deserialize<'de> for Data {
-	/// Deserializes a Data instance
-	///
-	/// This deserializes a Value and wraps it in a Mutable Data variant.
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		Value::deserialize(deserializer).map(Self::Mutable)
-	}
-}
-
 impl From<Value> for Data {
 	fn from(value: Value) -> Self {
 		Self::Mutable(value)
@@ -304,7 +278,7 @@ impl From<Arc<Value>> for Data {
 /// Currently, only Edge is supported, but this can be extended to support
 /// other record types in the future.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub(crate) enum RecordType {
 	/// Represents a normal table record
 	#[default]
@@ -320,7 +294,7 @@ pub(crate) enum RecordType {
 /// The metadata is revisioned to ensure compatibility across different versions
 /// of the database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Metadata {
 	/// The type of the record (e.g., Edge for graph edges)
 	pub(crate) record_type: RecordType,
