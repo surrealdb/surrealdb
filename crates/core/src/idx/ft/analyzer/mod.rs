@@ -202,7 +202,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::new(DynamicConfiguration::default());
+		let opts = Options::new(ds.id(), DynamicConfiguration::default());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(

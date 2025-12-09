@@ -45,7 +45,7 @@ impl KillStatement {
 			Ok(id) => id,
 		};
 		// Get the Node ID
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the LIVE ID
 		let lid = lid.0;
 		// Get the transaction
