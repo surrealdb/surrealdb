@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use surrealdb::Connection;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Export, ExportConfig};
-use surrealdb_core::kvs::export::TableConfig;
+use surrealdb_types::ExportTableConfig;
 use tokio::io::{self, AsyncWriteExt};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
@@ -41,7 +41,7 @@ struct ExportConfigArguments {
 	analyzers: Option<bool>,
 	/// Whether tables should be exported, optionally providing a list of tables
 	#[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = super::validator::export_tables)]
-	tables: Option<TableConfig>,
+	tables: Option<ExportTableConfig>,
 	/// Whether versions should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	versions: Option<bool>,

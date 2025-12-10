@@ -11,6 +11,7 @@ pub(crate) mod utils;
 mod value;
 mod variables;
 mod rpc;
+mod bridge;
 
 #[doc(hidden)]
 pub use anyhow;
@@ -25,6 +26,7 @@ pub use traits::*;
 pub use utils::either::*;
 pub use value::*;
 pub use variables::*;
+pub use bridge::*;
 
 /// Macro for creating a SurrealDB object.
 ///

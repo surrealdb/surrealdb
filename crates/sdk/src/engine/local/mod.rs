@@ -166,7 +166,6 @@ use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
@@ -174,6 +173,8 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_types::ExportConfig;
 use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
@@ -428,7 +429,7 @@ async fn export_file(
 	kvs: &Datastore,
 	sess: &Session,
 	chn: async_channel::Sender<Vec<u8>>,
-	config: Option<DbExportConfig>,
+	config: Option<ExportConfig>,
 ) -> std::result::Result<(), crate::Error> {
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,

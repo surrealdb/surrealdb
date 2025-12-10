@@ -175,6 +175,8 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
 ], optional = true }
 tempfile = { workspace = true, optional = true }
+sdk2 = { version = "3.0.0-alpha.16", path = "../sdk2" }
+arc-swap = "1.7.1"
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]

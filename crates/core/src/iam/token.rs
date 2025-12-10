@@ -14,6 +14,7 @@ use crate::kvs::Datastore;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::val::{Object, Value, convert_object_to_public_map};
 use crate::{iam, syn};
+use crate::types::PublicTokens;
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 
 /// A token that can be either an access token alone or an access token with a refresh token.
@@ -75,6 +76,26 @@ pub enum Token {
 		/// The refresh token used to obtain new access tokens
 		refresh: String,
 	},
+}
+
+impl TryFrom<PublicTokens> for Token {
+	type Error = anyhow::Error;
+	fn try_from(value: PublicTokens) -> Result<Self> {
+		match value {
+			PublicTokens { access: Some(access), refresh: None } => Ok(Token::Access(access)),
+			PublicTokens { access: Some(access), refresh: Some(refresh) } => Ok(Token::WithRefresh { access, refresh }),
+			_ => bail!("Invalid tokens"),
+		}
+	}
+}
+
+impl From<Token> for PublicTokens {
+	fn from(value: Token) -> Self {
+		match value {
+			Token::Access(access) => PublicTokens { access: Some(access), refresh: None },
+			Token::WithRefresh { access, refresh } => PublicTokens { access: Some(access), refresh: Some(refresh) },
+		}
+	}
 }
 
 impl Token {

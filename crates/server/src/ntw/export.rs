@@ -13,7 +13,6 @@ use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::Action::View;
 use surrealdb_core::iam::ResourceKind::Any;
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::kvs::export;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_types::SurrealValue;
 
@@ -33,7 +32,7 @@ async fn get_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 ) -> Result<impl IntoResponse, ResponseError> {
-	let cfg = export::Config::default();
+	let cfg = surrealdb_types::ExportConfig::default();
 	handle_inner(state, session, cfg).await
 }
 
@@ -60,14 +59,14 @@ async fn post_handler(
 		}
 	};
 
-	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
+	let cfg = surrealdb_types::ExportConfig::from_value(val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 
 async fn handle_inner(
 	state: AppState,
 	session: Session,
-	cfg: export::Config,
+	cfg: surrealdb_types::ExportConfig,
 ) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
 	let db = &state.datastore;

@@ -1,0 +1,32 @@
+[package]
+name = "sdk2"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "sdk2"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+arc-swap = "1.7.1"
+futures.workspace = true
+parking_lot.workspace = true
+surrealdb-types.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros"] }
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+
+[lints]
+workspace = true

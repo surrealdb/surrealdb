@@ -6,8 +6,7 @@ use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use surrealdb_core::kvs::export::TableConfig;
-use surrealdb_types::Duration;
+use surrealdb_types::{Duration, ExportTableConfig};
 
 pub(crate) mod parser;
 
@@ -161,16 +160,16 @@ pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String>
 	Ok(Targets::Some(result))
 }
 
-pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
+pub(crate) fn export_tables(value: &str) -> Result<ExportTableConfig, String> {
 	if ["*", "", "true"].contains(&value) {
-		return Ok(TableConfig::All);
+		return Ok(ExportTableConfig::All);
 	}
 
 	if value == "false" {
-		return Ok(TableConfig::None);
+		return Ok(ExportTableConfig::None);
 	}
 
-	Ok(TableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
+	Ok(ExportTableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
 }
 
 #[cfg(test)]

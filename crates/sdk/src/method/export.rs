@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 use async_channel::Receiver;
 use futures::{Stream, StreamExt};
 use semver::Version;
-use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
+use surrealdb_types::{ExportConfig, ExportTableConfig};
 
 use crate::conn::{Command, MlExportConfig};
 use crate::method::{BoxFuture, ExportConfig as Config, Model, OnceLockExt};
@@ -21,7 +21,7 @@ pub struct Export<'r, C: Connection, R, T = ()> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) target: R,
 	pub(super) ml_config: Option<MlExportConfig>,
-	pub(super) db_config: Option<DbExportConfig>,
+	pub(super) db_config: Option<ExportConfig>,
 	pub(super) response: PhantomData<R>,
 	pub(super) export_type: PhantomData<T>,
 }
@@ -127,7 +127,7 @@ where
 	/// # let target = ();
 	/// db.export(target).with_config().tables(vec!["users"]);
 	/// ```
-	pub fn tables(mut self, tables: impl Into<TableConfig>) -> Self {
+	pub fn tables(mut self, tables: impl Into<ExportTableConfig>) -> Self {
 		if let Some(cfg) = self.db_config.as_mut() {
 			cfg.tables = tables.into();
 		}

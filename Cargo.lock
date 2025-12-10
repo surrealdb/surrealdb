@@ -6376,6 +6376,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
+name = "sdk2"
+version = "3.0.0-alpha.16"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "futures",
+ "parking_lot",
+ "surrealdb-types",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "seahash"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6943,6 +6957,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "arbitrary",
+ "arc-swap",
  "argon2",
  "async-channel",
  "async-executor",
@@ -7010,6 +7025,7 @@ dependencies = [
  "rust-stemmers",
  "rust_decimal",
  "scrypt",
+ "sdk2",
  "semver",
  "serde",
  "serde_json",
@@ -7214,9 +7230,11 @@ version = "3.0.0-alpha.16"
 dependencies = [
  "anyhow",
  "arbitrary",
+ "async-trait",
  "bytes",
  "chrono",
  "flatbuffers",
+ "futures",
  "geo 0.28.0",
  "geo-types",
  "hex",

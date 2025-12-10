@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
-use surrealdb_types::{SurrealValue, ToSql};
+use surrealdb_types::ToSql;
 
 use super::Transaction;
 use crate::catalog::providers::{
@@ -19,83 +19,6 @@ use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::statements::OptionStatement;
-
-#[derive(Clone, Debug, SurrealValue)]
-#[surreal(default)]
-pub struct Config {
-	pub users: bool,
-	pub accesses: bool,
-	pub params: bool,
-	pub functions: bool,
-	pub analyzers: bool,
-	pub tables: TableConfig,
-	pub versions: bool,
-	pub records: bool,
-	pub sequences: bool,
-}
-
-impl Default for Config {
-	fn default() -> Config {
-		Config {
-			users: true,
-			accesses: true,
-			params: true,
-			functions: true,
-			analyzers: true,
-			tables: TableConfig::default(),
-			versions: false,
-			records: true,
-			sequences: true,
-		}
-	}
-}
-
-#[derive(Clone, Debug, Default, SurrealValue)]
-#[surreal(untagged)]
-pub enum TableConfig {
-	#[default]
-	#[surreal(value = true)]
-	All,
-	#[surreal(value = false)]
-	None,
-	Some(Vec<String>),
-}
-
-impl From<bool> for TableConfig {
-	fn from(value: bool) -> Self {
-		match value {
-			true => TableConfig::All,
-			false => TableConfig::None,
-		}
-	}
-}
-
-impl From<Vec<String>> for TableConfig {
-	fn from(value: Vec<String>) -> Self {
-		TableConfig::Some(value)
-	}
-}
-
-impl From<Vec<&str>> for TableConfig {
-	fn from(value: Vec<&str>) -> Self {
-		TableConfig::Some(value.into_iter().map(ToOwned::to_owned).collect())
-	}
-}
-
-impl TableConfig {
-	/// Check if we should export tables
-	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Self::All | Self::Some(_))
-	}
-	// Check if we should export a specific table
-	pub(crate) fn includes(&self, table: &str) -> bool {
-		match self {
-			Self::All => true,
-			Self::None => false,
-			Self::Some(v) => v.iter().any(|v| v.eq(table)),
-		}
-	}
-}
 
 struct InlineCommentWriter<'a, F>(&'a mut F);
 impl<F: fmt::Write> fmt::Write for InlineCommentWriter<'_, F> {
@@ -134,7 +57,7 @@ impl Transaction {
 		&self,
 		ns: &str,
 		db: &str,
-		cfg: Config,
+		cfg: crate::types::ExportConfig,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
 		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
@@ -152,7 +75,7 @@ impl Transaction {
 
 	async fn export_metadata(
 		&self,
-		cfg: &Config,
+		cfg: &crate::types::ExportConfig,
 		chn: &Sender<Vec<u8>>,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -244,7 +167,7 @@ impl Transaction {
 
 	async fn export_tables(
 		&self,
-		cfg: &Config,
+		cfg: &crate::types::ExportConfig,
 		chn: &Sender<Vec<u8>>,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -312,7 +235,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		table: &TableDefinition,
-		cfg: &Config,
+		cfg: &crate::types::ExportConfig,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;

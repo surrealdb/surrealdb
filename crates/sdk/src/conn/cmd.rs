@@ -3,10 +3,9 @@ use std::path::PathBuf;
 
 use async_channel::Sender;
 use surrealdb_core::iam::token::Token;
-use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_types::SurrealValue;
-use surrealdb_types::{Array, Notification, Object, Value, Variables};
+use surrealdb_types::{Array, ExportConfig, Notification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
@@ -49,7 +48,7 @@ pub(crate) enum Command {
 	},
 	ExportFile {
 		path: PathBuf,
-		config: Option<DbExportConfig>,
+		config: Option<ExportConfig>,
 	},
 	ExportMl {
 		path: PathBuf,
@@ -57,7 +56,7 @@ pub(crate) enum Command {
 	},
 	ExportBytes {
 		bytes: Sender<Result<Vec<u8>>>,
-		config: Option<DbExportConfig>,
+		config: Option<ExportConfig>,
 	},
 	ExportBytesMl {
 		bytes: Sender<Result<Vec<u8>>>,

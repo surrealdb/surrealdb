@@ -44,7 +44,7 @@ mod surrealism;
 mod sys;
 
 pub mod api;
-pub mod bridge;
+pub mod embedded;
 pub mod catalog;
 pub mod cnf;
 pub mod ctx;
@@ -77,7 +77,8 @@ pub(crate) mod types {
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
 		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Set as PublicSet,
 		SurrealValue, Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
-		Variables as PublicVariables,
+		Variables as PublicVariables, ExportConfig, Tokens as PublicTokens,
+		Session as PublicSession,
 	};
 }
 

@@ -12,7 +12,7 @@ members = [
     "crates/surrealism/surrealism-runtime",
     "crates/surrealism/surrealism-types",
     "crates/surrealism/demo"
-]
+, "crates/sdk2"]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
