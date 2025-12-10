@@ -1496,17 +1496,15 @@ where
 
 	// Post-process hooks for web layer
 	for response in &res {
-		// This error should be unreachable because we shouldn't proceed if there's no
-		// handler
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(*&lqid, session_id).await;
+					this.handle_live(lqid, session_id).await;
 				}
 			}
 			QueryType::Kill => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_kill(*&lqid).await;
+					this.handle_kill(lqid).await;
 				}
 			}
 			_ => {}
