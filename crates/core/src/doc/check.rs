@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -29,7 +31,10 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		// Get the table for this document
-		let tb = self.tb(ctx, opt).await?;
+		let tb = match &self.tb {
+			Some(tb) => Arc::clone(tb),
+			None => self.tb(ctx, opt).await?,
+		};
 		// Determine the type of statement
 		match stm {
 			Statement::Create(_) => {
@@ -253,14 +258,17 @@ impl Document {
 			// Should we run permissions checks?
 			if opt.check_perms(Action::View)? {
 				// Get the table for this document
-				let table = self.tb(ctx, opt).await?;
+				let tb = match &self.tb {
+					Some(tb) => Arc::clone(tb),
+					None => self.tb(ctx, opt).await?,
+				};
 				// Get the correct document to check
 				let doc = match stm.is_delete() {
 					true => &self.initial,
 					false => &self.current,
 				};
 				// Process the table permissions
-				match &table.permissions.select {
+				match &tb.permissions.select {
 					Permission::None => return Err(IgnoreError::Ignore),
 					Permission::Full => (),
 					Permission::Specific(e) => {
@@ -299,9 +307,12 @@ impl Document {
 			// Should we run permissions checks?
 			if opt.check_perms(stm.into())? {
 				// Get the table for this document
-				let table = self.tb(ctx, opt).await?;
+				let tb = match &self.tb {
+					Some(tb) => Arc::clone(tb),
+					None => self.tb(ctx, opt).await?,
+				};
 				// Get the permissions for this table
-				let perms = stm.permissions(&table, self.is_new());
+				let perms = stm.permissions(&tb, self.is_new());
 				// Exit early if permissions are NONE
 				if perms.is_none() {
 					return Err(IgnoreError::Ignore);
@@ -342,10 +353,13 @@ impl Document {
 						})));
 					}
 				}
-				// Get the table
-				let table = self.tb(ctx, opt).await?;
+				// Get the table definition
+				let tb = match &self.tb {
+					Some(tb) => Arc::clone(tb),
+					None => self.tb(ctx, opt).await?,
+				};
 				// Get the permission clause
-				let perms = stm.permissions(&table, self.is_new());
+				let perms = stm.permissions(&tb, self.is_new());
 				// Process the table permissions
 				match perms {
 					Permission::None => return Err(IgnoreError::Ignore),

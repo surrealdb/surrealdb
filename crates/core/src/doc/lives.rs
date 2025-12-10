@@ -349,8 +349,11 @@ impl Document {
 		// Should we run permissions checks?
 		// Live queries are always
 		if opt.check_perms(crate::iam::Action::View)? {
-			// Get the table
-			let tb = self.tb(ctx, opt).await?;
+			// Get the table definition
+			let tb = match &self.tb {
+				Some(tb) => Arc::clone(tb),
+				None => self.tb(ctx, opt).await?,
+			};
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(IgnoreError::Ignore),

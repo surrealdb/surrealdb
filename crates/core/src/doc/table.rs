@@ -1099,6 +1099,7 @@ impl Document {
 		//
 		// Generate a document so that we can run the events.
 		let mut document = Document {
+			tb: None,
 			r#gen: None,
 			retry: false,
 			extras: Workable::Normal,
