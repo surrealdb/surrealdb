@@ -149,6 +149,12 @@ impl Index {
 			Self::Count(cond) => sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
+
+	/// Returns true if this index type can be used for ORDER BY optimization.
+	/// Only indexes storing values in lexicographic order (Idx, Uniq) support ordered iteration.
+	pub fn supports_order(&self) -> bool {
+		matches!(self, Self::Idx | Self::Uniq)
+	}
 }
 
 impl InfoStructure for Index {
