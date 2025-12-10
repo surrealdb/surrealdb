@@ -14,7 +14,7 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
@@ -39,7 +39,7 @@ pub struct Executor {
 	stack: TreeStack,
 	results: Vec<QueryResult>,
 	opt: Options,
-	ctx: Context,
+	ctx: FrozenContext,
 }
 
 impl Executor {
@@ -58,7 +58,7 @@ impl Executor {
 }
 
 impl Executor {
-	pub fn new(ctx: Context, opt: Options) -> Self {
+	pub fn new(ctx: FrozenContext, opt: Options) -> Self {
 		Executor {
 			stack: TreeStack::new(),
 			results: Vec::new(),
@@ -702,7 +702,7 @@ impl Executor {
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub(crate) async fn execute_plan(
 		kvs: &Datastore,
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		qry: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
@@ -713,7 +713,7 @@ impl Executor {
 	/// Execute a logical plan with an existing transaction
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub(crate) async fn execute_plan_with_transaction(
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		qry: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
@@ -755,7 +755,7 @@ impl Executor {
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub(crate) async fn execute_stream<S>(
 		kvs: &Datastore,
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
@@ -776,7 +776,7 @@ impl Executor {
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub(crate) async fn execute_expr_stream<S>(
 		kvs: &Datastore,
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,

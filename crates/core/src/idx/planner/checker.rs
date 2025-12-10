@@ -8,7 +8,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseDefinition, Record};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, FlowResultExt as _};
@@ -29,7 +29,11 @@ impl<'a> HnswConditionChecker<'a> {
 		Self::Hnsw(HnswChecker {})
 	}
 
-	pub(in crate::idx) fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
+	pub(in crate::idx) fn new_cond(
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
+		cond: Arc<Cond>,
+	) -> Self {
 		Self::HnswCondition(HnswCondChecker {
 			ctx,
 			opt,
@@ -101,7 +105,7 @@ impl CheckerCacheEntry {
 	async fn build(
 		stk: &mut Stk,
 		db: &DatabaseDefinition,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: Option<RecordId>,
 		cond: &Cond,
@@ -162,7 +166,7 @@ impl HnswChecker {
 }
 
 pub struct HnswCondChecker<'a> {
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	cond: Arc<Cond>,
 	cache: HashMap<DocId, CheckerCacheEntry>,

@@ -2,14 +2,14 @@ pub mod table {
 	use anyhow::Result;
 
 	use crate::catalog::providers::TableProvider;
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::dbs::Options;
 	use crate::expr::Base;
 	use crate::iam::{Action, ResourceKind};
 	use crate::val::Value;
 
 	pub async fn exists(
-		(ctx, opt): (&Context, Option<&Options>),
+		(ctx, opt): (&FrozenContext, Option<&Options>),
 		(arg,): (String,),
 	) -> Result<Value> {
 		if let Some(opt) = opt {

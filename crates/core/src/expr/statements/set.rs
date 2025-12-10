@@ -2,7 +2,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -35,7 +35,7 @@ impl SetStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &mut Option<Context>,
+		ctx: &mut Option<FrozenContext>,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -68,7 +68,7 @@ impl SetStatement {
 			None => result,
 		};
 
-		let mut c = MutableContext::unfreeze(ctx.take().expect("context should be initialized"))?;
+		let mut c = Context::unfreeze(ctx.take().expect("context should be initialized"))?;
 		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)

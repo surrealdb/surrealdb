@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Base;
@@ -17,7 +17,7 @@ impl SleepStatement {
 	#[instrument(level = "trace", name = "SleepStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {

@@ -15,7 +15,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -30,7 +30,7 @@ use crate::idx::planner::tree::Tree;
 /// passed from one function to the other, so we don't pass too many arguments.
 /// It also caches evaluated fields (like is_keys_only)
 pub(crate) struct StatementContext<'a> {
-	pub(crate) ctx: &'a Context,
+	pub(crate) ctx: &'a FrozenContext,
 	pub(crate) opt: &'a Options,
 	pub(crate) stm: &'a Statement<'a>,
 	pub(crate) fields: Option<&'a Fields>,
@@ -71,7 +71,11 @@ pub(crate) enum GrantedPermission {
 }
 
 impl<'a> StatementContext<'a> {
-	pub(crate) fn new(ctx: &'a Context, opt: &'a Options, stm: &'a Statement<'a>) -> Result<Self> {
+	pub(crate) fn new(
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
+		stm: &'a Statement<'a>,
+	) -> Result<Self> {
 		let is_perm = opt.check_perms(stm.into())?;
 		Ok(Self {
 			ctx,

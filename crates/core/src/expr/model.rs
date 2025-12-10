@@ -14,7 +14,7 @@ use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 use crate::catalog::Permission;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -48,7 +48,7 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		mut args: Vec<Value>,
@@ -220,7 +220,7 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
 		_args: Vec<Value>,

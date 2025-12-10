@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::{Action, CursorDoc, Document};
 use crate::err::Error;
@@ -35,7 +35,7 @@ impl Document {
 	pub(super) async fn process_table_views(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -63,7 +63,7 @@ impl Document {
 	async fn process_views(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		act: Action,
 	) -> Result<()> {
@@ -88,7 +88,7 @@ impl Document {
 	async fn process_view(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		table_name: &str,
 		view: &ViewDefinition,
@@ -147,7 +147,7 @@ impl Document {
 	async fn process_aggregate_view(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		view_table_name: &str,
 		aggr: &AggregationAnalysis,
@@ -309,7 +309,7 @@ impl Document {
 	async fn process_view_record_create(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
 		view_table_name: &str,
@@ -390,7 +390,7 @@ impl Document {
 	async fn process_view_record_delete(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
 		view_table_name: &str,
@@ -707,7 +707,7 @@ impl Document {
 	async fn process_view_record_update(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
 		view_table_name: &str,
@@ -1084,7 +1084,7 @@ impl Document {
 	/// Run triggers which are defined on the view, like events and second order views.
 	pub(crate) async fn run_triggers(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		id: Arc<RecordId>,
 		action: Action,

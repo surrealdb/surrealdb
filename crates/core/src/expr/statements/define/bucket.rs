@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use super::{CursorDoc, DefineKind};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
@@ -40,7 +40,7 @@ impl DefineBucketStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

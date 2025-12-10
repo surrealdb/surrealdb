@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{ParamDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -27,7 +27,7 @@ impl DefineParamStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

@@ -14,7 +14,7 @@ use crate::catalog::{
 	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record, RecordType,
 	TableDefinition, TableType, ViewDefinition,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
@@ -67,7 +67,7 @@ impl DefineTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -208,7 +208,7 @@ impl DefineTableStatement {
 
 	async fn initialize_view(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		view_table_name: &str,
 		view: &ViewDefinition,
@@ -256,7 +256,7 @@ impl DefineTableStatement {
 
 	async fn initialize_materialized_view(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		view_table_name: &str,
 		fields: &Fields,
@@ -309,7 +309,7 @@ impl DefineTableStatement {
 
 	async fn initialize_aggregate_view(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		view_table_name: &str,
 		analysis: &AggregationAnalysis,

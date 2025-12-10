@@ -9,7 +9,7 @@ use super::modules::surrealdb::query::QueryContext;
 use super::modules::{loader, resolver};
 use super::{classes, fetch, globals, modules};
 use crate::cnf::{SCRIPTING_MAX_MEMORY_LIMIT, SCRIPTING_MAX_STACK_SIZE};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -21,7 +21,7 @@ use crate::val::Value;
 /// Caller must ensure that the runtime from which `Ctx` originates cannot
 /// outlife 'a.
 pub unsafe fn create_query_data<'a>(
-	context: &'a Context,
+	context: &'a FrozenContext,
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc>,
 	ctx: &Ctx<'_>,
@@ -43,7 +43,7 @@ pub unsafe fn create_query_data<'a>(
 }
 
 pub async fn run(
-	context: &Context,
+	context: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	src: &str,

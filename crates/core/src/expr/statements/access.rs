@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -86,7 +86,7 @@ impl Subject {
 	async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<catalog::Subject> {
@@ -182,7 +182,7 @@ pub async fn create_grant(
 	access: String,
 	base: Option<Base>,
 	subject: catalog::Subject,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<catalog::AccessGrant> {
 	let base = match &base {
@@ -447,7 +447,7 @@ pub async fn create_grant(
 async fn compute_grant(
 	stmt: &AccessStatementGrant,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 ) -> FlowResult<Value> {
@@ -461,7 +461,7 @@ async fn compute_grant(
 async fn compute_show(
 	stmt: &AccessStatementShow,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -607,7 +607,7 @@ async fn compute_show(
 pub async fn revoke_grant(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value> {
 	let base = match &stmt.base {
@@ -819,7 +819,7 @@ pub async fn revoke_grant(
 async fn compute_revoke(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -829,7 +829,7 @@ async fn compute_revoke(
 
 async fn compute_purge(
 	stmt: &AccessStatementPurge,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -921,7 +921,7 @@ impl AccessStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {

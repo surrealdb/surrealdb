@@ -458,7 +458,7 @@ mod tests {
 		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
 		TableDefinition, TableId, VectorType,
 	};
-	use crate::ctx::{Context, MutableContext};
+	use crate::ctx::{Context, FrozenContext};
 	use crate::idx::IndexKeyBase;
 	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::seqdocids::DocId;
@@ -728,9 +728,9 @@ mod tests {
 		Ok(())
 	}
 
-	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> Context {
+	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		ctx.set_transaction(tx);
 		ctx.freeze()
 	}

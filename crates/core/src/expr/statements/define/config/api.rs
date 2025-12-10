@@ -2,7 +2,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt};
@@ -28,7 +28,7 @@ impl ApiConfig {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<ApiConfigDefinition> {
