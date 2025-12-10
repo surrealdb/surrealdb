@@ -30,7 +30,6 @@ use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -48,8 +47,7 @@ pub(crate) enum NumberKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-#[serde(rename = "$surrealdb::private::Number")]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Number {
 	Int(i64),

@@ -91,7 +91,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check format
-        run: cargo make ci-format
+        run: cargo make ci-fmt
 
   clippy:
     name: Check clippy
@@ -243,6 +243,50 @@ jobs:
       - name: Check docs
         run: cargo make ci-docs
 
+  feature-check:
+    name: Check feature combinations
+    runs-on: ubuntu-latest
+    # Only run on main branch to avoid slowing down PR CI
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Install cargo-hack
+        run: cargo install cargo-hack
+
+      - name: Check feature combinations
+        run: cargo make ci-feature-check
+
+  unused-deps:
+    name: Check unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Install cargo-machete
+        run: cargo install cargo-machete
+
+      - name: Check unused dependencies
+        run: cargo make ci-unused-deps
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------
@@ -348,18 +392,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
+      - name: Test workspace
+        uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tools: cargo-nextest,cargo-llvm-cov,cargo-make
-
-      - name: Test workspace
-        run: cargo make ci-workspace-test
 
   # ----------------------------------------
   # Storage engine tests
@@ -981,6 +1017,7 @@ jobs:
       - check-wasm
       - check-revision
       - check-docs
+      - unused-deps
       # Integration tests
       - cli-integration
       - http-integration
@@ -1016,6 +1053,7 @@ jobs:
             "${{ needs.check-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
+            "${{ needs.unused-deps.result }}"
             "${{ needs.cli-integration.result }}"
             "${{ needs.http-integration.result }}"
             "${{ needs.ws-integration.result }}"
@@ -1030,10 +1068,10 @@ jobs:
             "${{ needs.upgrade-tests.result }}"
           )
 
-          # Check if any job failed
+          # Check if any job failed (skipped is ok for conditional jobs)
           failed=false
           for result in "${results[@]}"; do
-            if [[ "$result" != "success" ]]; then
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "❌ A required job had result: $result"
               failed=true
             fi

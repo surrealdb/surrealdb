@@ -51,6 +51,7 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
+#[cfg(feature = "graphql")]
 pub mod gql;
 pub mod iam;
 pub mod idx;

@@ -51,15 +51,17 @@ affinitypool = "0.4.0"
 dmp = "0.2.3"
 indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.15.0", features = [
+revision = { version = "0.16.0", features = [
+    "bytes",
     "chrono",
     "geo",
     "roaring",
     "regex",
     "rust_decimal",
+    "specialised",
     "uuid",
 ] }
-storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
+storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.15.1"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
@@ -229,6 +231,8 @@ default = [
     "scripting",
     "http",
     "surrealism",
+    "graphql",
+    "cli",
 ]
 
 allocator = ["surrealdb-server/allocator"]
@@ -243,6 +247,10 @@ storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
+# GraphQL API support
+graphql = ["surrealdb-server/graphql"]
+# Interactive SQL CLI support
+cli = ["surrealdb-server/cli"]
 
 [dependencies]
 # workspace internal dependencies
@@ -253,7 +261,6 @@ surrealdb = { workspace = true, features = [
 ] }
 surrealdb-core.workspace = true
 surrealdb-server.workspace = true
-surrealdb-types.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { version = "0.27.1", features = ["signal", "user"] }

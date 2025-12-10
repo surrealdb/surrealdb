@@ -4,7 +4,6 @@ use std::ops::Bound;
 use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use ulid::Ulid;
@@ -19,7 +18,7 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordIdKeyRange {
@@ -180,10 +179,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::sql::Id")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum RecordIdKey {
@@ -388,10 +384,7 @@ impl ToSql for RecordIdKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::RecordId")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordId {
