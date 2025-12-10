@@ -24,6 +24,7 @@ pub(crate) struct ShowStatement {
 
 impl ShowStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "ShowStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &Context,

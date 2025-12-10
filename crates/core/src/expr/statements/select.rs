@@ -71,6 +71,7 @@ impl SelectStatement {
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "SelectStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

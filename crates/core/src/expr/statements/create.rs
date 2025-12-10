@@ -44,6 +44,7 @@ impl Default for CreateStatement {
 
 impl CreateStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "CreateStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

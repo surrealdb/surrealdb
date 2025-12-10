@@ -9,6 +9,7 @@ use crate::err::Error;
 use crate::val::Value;
 
 impl Document {
+	#[instrument(level = "trace", name = "Document::process", skip_all)]
 	pub(crate) async fn process(
 		stk: &mut Stk,
 		ctx: &Context,

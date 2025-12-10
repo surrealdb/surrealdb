@@ -74,6 +74,7 @@ pub(crate) enum LookupSubject {
 }
 
 impl LookupSubject {
+	#[instrument(level = "trace", name = "LookupSubject::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

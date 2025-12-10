@@ -44,6 +44,7 @@ impl Default for DefineIndexStatement {
 
 impl DefineIndexStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineIndexStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

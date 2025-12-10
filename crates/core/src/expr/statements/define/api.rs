@@ -24,6 +24,7 @@ pub(crate) struct DefineApiStatement {
 }
 
 impl DefineApiStatement {
+	#[instrument(level = "trace", name = "DefineApiStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

@@ -109,6 +109,7 @@ impl Collected {
 	///
 	/// Each variant uses a specific processing strategy optimized for its data
 	/// source and use case.
+	#[instrument(level = "trace", name = "Collected::process", skip_all)]
 	pub(super) async fn process(
 		self,
 		ctx: &Context,
@@ -155,6 +156,7 @@ impl Collected {
 		}
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
 		ctx: &Context,
 		opt: &Options,
@@ -197,6 +199,7 @@ impl Collected {
 		})
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_range_key(key: Key) -> Result<Processed> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let val = Record::new(Value::Null.into());
@@ -217,6 +220,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_table_key(key: Key) -> Result<Processed> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let rid = RecordId {
@@ -235,6 +239,7 @@ impl Collected {
 	}
 
 	#[expect(clippy::too_many_arguments)]
+	#[instrument(level = "trace", skip_all)]
 	async fn process_relatable(
 		ctx: &Context,
 		opt: &Options,
@@ -285,7 +290,8 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_record(
+	#[instrument(level = "trace", skip_all)]
+		async fn process_record(
 		ctx: &Context,
 		opt: &Options,
 		txn: &Transaction,
@@ -313,6 +319,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_yield(v: String) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
@@ -325,6 +332,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn process_value(v: Value) -> Processed {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
@@ -340,6 +348,7 @@ impl Collected {
 		}
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_defer(v: RecordId) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
@@ -352,6 +361,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_mergeable(tb: String, id: Option<RecordIdKey>, o: Value) -> Result<Processed> {
 		// Process the document record
 		let pro = if let Some(id) = id {
@@ -375,6 +385,7 @@ impl Collected {
 		Ok(pro)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
@@ -396,6 +407,7 @@ impl Collected {
 		})
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn process_count(count: usize) -> Processed {
 		Processed {
 			rs: RecordStrategy::Count,
@@ -406,6 +418,7 @@ impl Collected {
 		}
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn process_index_item_key(i: IndexItemRecord) -> Processed {
 		let (t, v, ir) = i.consume();
 		Processed {
@@ -419,6 +432,7 @@ impl Collected {
 		}
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn process_index_item(
 		ctx: &Context,
 		opt: &Options,
@@ -458,6 +472,7 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 impl Collector for ConcurrentCollector<'_> {
+	#[instrument(skip_all)]
 	async fn collect(&mut self, collected: Collected) -> Result<()> {
 		// if it is skippable don't need to process the document
 		if self.ite.skippable() == 0 {
@@ -480,6 +495,7 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 }
 
 impl Collector for ConcurrentDistinctCollector<'_> {
+	#[instrument(skip_all)]
 	async fn collect(&mut self, collected: Collected) -> Result<()> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
@@ -533,6 +549,7 @@ pub(super) trait Collector {
 		Cow::Borrowed(ctx)
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_iterable(
 		&mut self,
 		ctx: &Context,
@@ -608,6 +625,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn start_skip(
 		&mut self,
 		ctx: &Context,
@@ -660,6 +678,7 @@ pub(super) trait Collector {
 		Ok(Some(rng))
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_table(
 		&mut self,
 		ctx: &Context,
@@ -703,6 +722,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_table_keys(
 		&mut self,
 		ctx: &Context,
@@ -749,6 +769,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
 		let db = ctx.get_db(opt).await?;
 
@@ -769,6 +790,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn range_prepare(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -797,6 +819,7 @@ pub(super) trait Collector {
 		Ok((beg, end))
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_range(
 		&mut self,
 		ctx: &Context,
@@ -838,6 +861,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_range_keys(
 		&mut self,
 		ctx: &Context,
@@ -878,6 +902,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_range_count(
 		&mut self,
 		ctx: &Context,
@@ -899,6 +924,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_lookup(
 		&mut self,
 		ctx: &Context,
@@ -972,6 +998,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_index_items(
 		&mut self,
 		ctx: &Context,
@@ -1008,6 +1035,7 @@ pub(super) trait Collector {
 		})
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_index_item_key(
 		&mut self,
 		ctx: &Context,
@@ -1030,6 +1058,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_index_item_key_value(
 		&mut self,
 		ctx: &Context,
@@ -1052,6 +1081,7 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	async fn collect_index_item_count(
 		&mut self,
 		ctx: &Context,

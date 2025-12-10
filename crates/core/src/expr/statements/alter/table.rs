@@ -26,6 +26,7 @@ pub(crate) struct AlterTableStatement {
 }
 
 impl AlterTableStatement {
+	#[instrument(level = "trace", name = "AlterTableStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;

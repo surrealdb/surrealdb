@@ -19,6 +19,7 @@ pub(crate) enum RebuildStatement {
 
 impl RebuildStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "RebuildStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,

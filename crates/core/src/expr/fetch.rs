@@ -52,6 +52,7 @@ impl InfoStructure for Fetchs {
 pub(crate) struct Fetch(pub(crate) Expr);
 
 impl Fetch {
+	#[instrument(level = "trace", name = "Fetch::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

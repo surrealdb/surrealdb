@@ -7,6 +7,7 @@ use crate::doc::Document;
 use crate::val::Value;
 
 impl Document {
+	#[instrument(level = "trace", name = "Document::select", skip_all)]
 	pub(super) async fn select(
 		&mut self,
 		stk: &mut Stk,

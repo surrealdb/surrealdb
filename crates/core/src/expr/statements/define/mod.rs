@@ -73,6 +73,7 @@ pub(crate) enum DefineStatement {
 
 impl DefineStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

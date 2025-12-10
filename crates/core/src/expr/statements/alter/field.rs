@@ -41,6 +41,7 @@ pub(crate) struct AlterFieldStatement {
 }
 
 impl AlterFieldStatement {
+	#[instrument(level = "trace", name = "AlterFieldStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;

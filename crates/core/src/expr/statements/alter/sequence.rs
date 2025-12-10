@@ -22,6 +22,7 @@ pub(crate) struct AlterSequenceStatement {
 }
 
 impl AlterSequenceStatement {
+	#[instrument(level = "trace", name = "AlterSequenceStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

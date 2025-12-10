@@ -919,6 +919,7 @@ impl Iterator {
 	}
 
 	/// Process a new record Thing and Value
+	#[instrument(level = "trace", name = "Iterator::process", skip_all)]
 	pub async fn process(
 		&mut self,
 		stk: &mut Stk,
@@ -936,6 +937,7 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", name = "Iterator::extract_value", skip_all)]
 	async fn extract_value(
 		stk: &mut Stk,
 		ctx: &Context,

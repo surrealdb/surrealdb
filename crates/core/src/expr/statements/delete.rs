@@ -39,6 +39,7 @@ impl Default for DeleteStatement {
 
 impl DeleteStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DeleteStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

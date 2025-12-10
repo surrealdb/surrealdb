@@ -22,6 +22,7 @@ impl Default for DefaultConfig {
 }
 
 impl DefaultConfig {
+	#[instrument(level = "trace", name = "DefaultConfig::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

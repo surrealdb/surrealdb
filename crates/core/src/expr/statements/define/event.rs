@@ -26,6 +26,7 @@ pub(crate) struct DefineEventStatement {
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineEventStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

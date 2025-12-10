@@ -24,6 +24,7 @@ pub(crate) struct Middleware {
 }
 
 impl ApiConfig {
+	#[instrument(level = "trace", name = "ApiConfig::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

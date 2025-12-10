@@ -11,7 +11,8 @@ members = [
     "crates/surrealism/surrealism-macros",
     "crates/surrealism/surrealism-runtime",
     "crates/surrealism/surrealism-types",
-    "crates/surrealism/demo"
+    "crates/surrealism/demo",
+    "profiling"
 ]
 
 [workspace.package]

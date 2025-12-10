@@ -34,6 +34,7 @@ pub(crate) struct AlterIndexStatement {
 }
 
 impl AlterIndexStatement {
+	#[instrument(level = "trace", name = "AlterIndexStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
