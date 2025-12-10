@@ -1,11 +1,7 @@
 // Temporary allow deprecated until the 3.0
 #![allow(deprecated)]
-// This triggers because we have regex's in or Value type which have a unsafecell inside.
+// This triggers because we have regex's in our Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
-// Warn about explicit .into_iter() in for loops
-#![warn(clippy::explicit_into_iter_loop)]
-// Warn about unnecessary .to_owned() and .to_string() calls
-#![warn(clippy::unnecessary_to_owned)]
 
 //! # Surrealdb Core
 //!

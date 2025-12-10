@@ -127,17 +127,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.clone()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.clone()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -159,17 +159,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.clone()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.clone()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -193,17 +193,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.clone()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.clone()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())

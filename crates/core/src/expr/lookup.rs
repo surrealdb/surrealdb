@@ -123,8 +123,8 @@ impl ComputedLookupSubject {
 				table,
 				referencing_field,
 			} => LookupSubject::Table {
-				table: table.clone(),
-				referencing_field: referencing_field.clone(),
+				table,
+				referencing_field,
 			},
 			ComputedLookupSubject::Range {
 				table,
@@ -133,7 +133,7 @@ impl ComputedLookupSubject {
 			} => LookupSubject::Range {
 				table,
 				range: range.into_literal(),
-				referencing_field: referencing_field.clone(),
+				referencing_field,
 			},
 		}
 	}

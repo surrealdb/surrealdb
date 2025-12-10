@@ -120,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.clone().into());
+				o.insert("error".to_string(), error.into());
 				"error"
 			}
 		};

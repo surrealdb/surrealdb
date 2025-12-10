@@ -50,7 +50,7 @@ pub async fn iam_run_case(
 	{
 		if !prepare.is_empty() {
 			let resp = ds.execute(prepare, &owner_sess, None).await.unwrap();
-			for r in resp.into_iter() {
+			for r in resp {
 				let tmp = r.output();
 				ensure!(tmp.is_ok(), "Prepare statement failed: {}", tmp.unwrap_err());
 			}
@@ -190,7 +190,7 @@ pub async fn iam_check_cases_impl(
 	// Anonymous user
 	let ns = "NS";
 	let db = "DB";
-	for auth_enabled in [true, false].into_iter() {
+	for auth_enabled in [true, false] {
 		{
 			println!(
 				"* Testing '{test}' for 'Anonymous' on '({ns}, {db})' with {auth_enabled}",

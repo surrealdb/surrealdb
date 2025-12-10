@@ -628,27 +628,25 @@ impl MutableContext {
 
 	/// Attach variables to the context.
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
-		for (key, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+		for (name, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(Error::InvalidParam {
-					name: key.clone(),
+					name,
 				});
 			}
-			self.add_value(key, val.into());
+			self.add_value(name, Arc::new(val));
 		}
 		Ok(())
 	}
 
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
-		for (key, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+		for (name, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(Error::InvalidParam {
-					name: key.clone(),
+					name,
 				});
 			}
-
-			let internal_val = convert_public_value_to_internal(val);
-			self.add_value(key, Arc::new(internal_val));
+			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
 		}
 		Ok(())
 	}

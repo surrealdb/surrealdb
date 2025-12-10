@@ -807,8 +807,8 @@ fn bench_nested_allocations(c: &mut Criterion) {
 	group.bench_function("deep_nesting", |b| {
 		b.iter(|| {
 			let v1 = vec![0u8; 100];
-			let v2 = vec![v1.clone(); 2];
-			let v3 = vec![v2.clone(); 2];
+			let v2 = vec![v1; 2];
+			let v3 = vec![v2; 2];
 			black_box(v3);
 		});
 	});

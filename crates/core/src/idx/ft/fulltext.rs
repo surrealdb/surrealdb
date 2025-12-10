@@ -1034,13 +1034,8 @@ mod tests {
 			let opt =
 				Options::new(nid).with_ns(Some("testns".into())).with_db(Some("testdb".into()));
 			let fti = Arc::new(
-				FullTextIndex::with_analyzer(
-					ctx.get_index_stores(),
-					az.clone(),
-					ikb.clone(),
-					&ft_params,
-				)
-				.unwrap(),
+				FullTextIndex::with_analyzer(ctx.get_index_stores(), az, ikb.clone(), &ft_params)
+					.unwrap(),
 			);
 			let start = Arc::new(Instant::now());
 			Self {

@@ -521,8 +521,8 @@ fn to_range(val: CborValue) -> Result<PublicRange> {
 	match val {
 		CborValue::Array(v) if v.len() == 2 => {
 			let mut v = v;
-			let beg = decode_bound(v.remove(0).clone())?;
-			let end = decode_bound(v.remove(0).clone())?;
+			let beg = decode_bound(v.remove(0))?;
+			let end = decode_bound(v.remove(0))?;
 			Ok(PublicRange::new(beg, end))
 		}
 		_ => Err(anyhow!("Expected a CBOR array with 2 bounds")),
@@ -571,8 +571,8 @@ fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
 	match val {
 		CborValue::Array(v) if v.len() == 2 => {
 			let mut v = v;
-			let start = decode_bound(v.remove(0).clone())?;
-			let end = decode_bound(v.remove(0).clone())?;
+			let start = decode_bound(v.remove(0))?;
+			let end = decode_bound(v.remove(0))?;
 
 			Ok(PublicRecordIdKeyRange {
 				start,

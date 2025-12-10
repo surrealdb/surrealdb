@@ -298,7 +298,7 @@ pub trait RpcProtocol {
 		// Lock the context for update
 		let guard = mutex.acquire().await;
 		// Clone the current session
-		let mut session = self.get_session(session_id.as_ref()).clone().as_ref().clone();
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
@@ -327,7 +327,7 @@ pub trait RpcProtocol {
 		// Lock the context for update
 		let guard = mutex.acquire().await;
 		// Clone the current session
-		let mut session = self.get_session(session_id.as_ref()).clone().as_ref().clone();
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
 		// Attempt signin, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())

@@ -1038,10 +1038,7 @@ fn convert_regex_to_public(value: crate::val::Regex) -> Result<surrealdb_types::
 }
 
 fn convert_file_to_public(value: crate::val::File) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(
-		value.bucket.clone(),
-		value.key.clone(),
-	)))
+	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(value.bucket, value.key)))
 }
 
 fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_types::Value> {

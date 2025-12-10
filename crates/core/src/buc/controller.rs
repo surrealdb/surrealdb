@@ -89,7 +89,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -108,7 +108,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put_if_not_exists(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -122,7 +122,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.head(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -136,7 +136,7 @@ impl<'a> BucketController<'a> {
 			.store
 			.get(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?
 		{
 			Some(v) => v,
 			None => return Ok(None),
@@ -155,7 +155,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.delete(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -170,7 +170,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -189,7 +189,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -205,7 +205,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -224,7 +224,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -235,7 +235,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.exists(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -248,7 +248,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.list(opts)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
