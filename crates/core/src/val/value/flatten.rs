@@ -3,10 +3,10 @@ use crate::val::{Array, Value};
 impl Value {
 	pub fn flatten(self) -> Self {
 		match self {
-		Value::Array(v) => {
-			let mut res = Vec::with_capacity(v.len());
+			Value::Array(v) => {
+				let mut res = Vec::with_capacity(v.len());
 
-			for v in v {
+				for v in v {
 					match v {
 						Value::Array(x) => {
 							for x in x {

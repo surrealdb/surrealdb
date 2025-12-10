@@ -151,9 +151,9 @@ impl Expr {
 			surrealdb_types::Value::Uuid(u) => {
 				Expr::Literal(Literal::Uuid(crate::val::Uuid(u.into_inner())))
 			}
-		surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
-			a.into_iter().map(Expr::from_public_value).collect(),
-		)),
+			surrealdb_types::Value::Array(a) => {
+				Expr::Literal(Literal::Array(a.into_iter().map(Expr::from_public_value).collect()))
+			}
 			surrealdb_types::Value::Set(s) => {
 				// Convert set to array for literal representation since there's no set literal
 				// syntax
@@ -181,17 +181,17 @@ impl Expr {
 					surrealdb_types::RecordIdKey::Uuid(u) => {
 						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
 					}
-				surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-					a.into_iter().map(Expr::from_public_value).collect(),
-				),
-				surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
-					o.into_iter()
-						.map(|(k, v)| ObjectEntry {
-							key: k,
-							value: Expr::from_public_value(v),
-						})
-						.collect(),
-				),
+					surrealdb_types::RecordIdKey::Array(a) => {
+						RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
+					}
+					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
+						o.into_iter()
+							.map(|(k, v)| ObjectEntry {
+								key: k,
+								value: Expr::from_public_value(v),
+							})
+							.collect(),
+					),
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
