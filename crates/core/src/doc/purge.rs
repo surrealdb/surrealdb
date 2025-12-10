@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -25,7 +25,7 @@ impl Document {
 	pub(super) async fn purge(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -53,7 +53,7 @@ impl Document {
 	async fn purge_edges(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
@@ -113,7 +113,7 @@ impl Document {
 	async fn purge_references(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
@@ -240,7 +240,7 @@ impl Document {
 						};
 
 						// Set the `$reference` variable in the context
-						let mut ctx = MutableContext::new(ctx);
+						let mut ctx = Context::new(ctx);
 						ctx.add_value("reference", reference.into());
 						let ctx = ctx.freeze();
 

@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
@@ -89,7 +89,7 @@ impl AlterStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

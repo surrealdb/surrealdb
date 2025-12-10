@@ -2,7 +2,7 @@ use anyhow::Result;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 //use crate::expr::edges::Edges;
 use crate::expr::field::{Field, Fields};
@@ -15,7 +15,7 @@ impl Value {
 	pub(crate) async fn fetch(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		path: &[Part],
 	) -> Result<()> {

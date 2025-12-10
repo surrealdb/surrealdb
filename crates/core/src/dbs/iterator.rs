@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::{Canceller, Context, MutableContext};
+use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
@@ -175,7 +175,7 @@ impl Iterator {
 	pub(crate) async fn prepare(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
@@ -238,7 +238,7 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_table(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
@@ -397,7 +397,7 @@ impl Iterator {
 	async fn prepare_computed(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
@@ -439,7 +439,7 @@ impl Iterator {
 	pub(crate) async fn prepare_array(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
@@ -510,7 +510,7 @@ impl Iterator {
 	pub async fn output(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
@@ -518,7 +518,7 @@ impl Iterator {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
-		let mut cancel_ctx = MutableContext::new(ctx);
+		let mut cancel_ctx = Context::new(ctx);
 		self.run = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
@@ -547,7 +547,7 @@ impl Iterator {
 				let is_specific_permission = qp.is_any_specific_permission();
 				while let Some(s) = qp.next_iteration_stage().await {
 					let is_last = matches!(s, IterationStage::Iterate(_));
-					let mut c = MutableContext::unfreeze(cancel_ctx)?;
+					let mut c = Context::unfreeze(cancel_ctx)?;
 					c.set_iteration_stage(s);
 					cancel_ctx = c.freeze();
 					if !is_last {
@@ -624,7 +624,7 @@ impl Iterator {
 	pub(crate) async fn setup_limit(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -645,7 +645,7 @@ impl Iterator {
 	async fn setup_start(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -671,7 +671,7 @@ impl Iterator {
 	/// In short: push START down to storage only for a single iterator where any filtering is
 	/// performed by the index itself and, if ORDER BY is used, the iterator natively yields
 	/// rows in the required order.
-	fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	fn can_start_skip(&self, ctx: &FrozenContext, stm: &Statement<'_>) -> bool {
 		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
@@ -730,7 +730,7 @@ impl Iterator {
 	///
 	/// Note: WHERE filtering is fine here because cancellation is based on the number of
 	/// accepted results after filtering, not on the raw scanned rows.
-	fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+	fn can_cancel_on_limit(&self, ctx: &FrozenContext, stm: &Statement<'_>) -> bool {
 		// GROUP BY changes result count post-iteration.
 		// Cannot cancel early as we need to evalute every records.
 		if stm.group().is_some() {
@@ -754,7 +754,7 @@ impl Iterator {
 
 	fn compute_start_limit(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
 	) {
@@ -809,7 +809,7 @@ impl Iterator {
 	async fn output_split(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		rs: RecordStrategy,
@@ -850,7 +850,12 @@ impl Iterator {
 		Ok(())
 	}
 
-	async fn output_group(&mut self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<()> {
+	async fn output_group(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+	) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
 			self.results = Results::Memory(g.output(stk, ctx, opt).await?);
@@ -862,7 +867,7 @@ impl Iterator {
 	async fn output_fetch(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -887,7 +892,7 @@ impl Iterator {
 	async fn iterate(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
@@ -922,7 +927,7 @@ impl Iterator {
 	pub async fn process(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
@@ -938,7 +943,7 @@ impl Iterator {
 
 	async fn extract_value(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		pro: Processed,
@@ -961,7 +966,7 @@ impl Iterator {
 	async fn result(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rs: RecordStrategy,
 		res: Result<Value, IgnoreError>,

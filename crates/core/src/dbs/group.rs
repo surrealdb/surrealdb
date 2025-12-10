@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
@@ -122,7 +122,7 @@ impl GroupCollector {
 	pub async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rs: RecordStrategy,
 		obj: Value,
@@ -174,7 +174,7 @@ impl GroupCollector {
 	pub(super) async fn output(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<MemoryCollector> {
 		let mut collector = MemoryCollector::default();

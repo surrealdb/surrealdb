@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
@@ -428,7 +428,7 @@ impl RecordId {
 	pub(crate) async fn select_document(
 		self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> anyhow::Result<Option<Object>> {

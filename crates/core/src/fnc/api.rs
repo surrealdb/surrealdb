@@ -10,13 +10,13 @@ use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
 use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::val::{Object, Value};
 
 pub async fn invoke(
-	(stk, ctx, opt): (&mut Stk, &Context, &Options),
+	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
 	(path, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value> {
 	let (body, method, query, headers) = if let Some(opts) = opts {

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
@@ -12,7 +12,7 @@ impl Value {
 	pub(crate) async fn increment(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		path: &[Part],
 		val: Value,

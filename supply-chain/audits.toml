@@ -1478,6 +1478,24 @@ user-id = 10
 start = "2019-04-27"
 end = "2025-09-03"
 
+[[trusted.tracing]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-27"
+end = "2026-12-10"
+
+[[trusted.tracing-attributes]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-26"
+end = "2026-12-10"
+
+[[trusted.tracing-core]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-25"
+end = "2026-12-10"
+
 [[trusted.trice]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)

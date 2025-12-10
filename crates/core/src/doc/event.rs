@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::{Action, Document};
 use crate::expr::FlowResultExt as _;
@@ -18,7 +18,7 @@ impl Document {
 	pub(super) async fn process_table_events(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -53,7 +53,7 @@ impl Document {
 	pub(super) async fn process_events(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		action: Action,
 		input: Option<Arc<Value>>,
@@ -86,7 +86,7 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let mut ctx = MutableContext::new(ctx);
+			let mut ctx = Context::new(ctx);
 			ctx.add_value("event", evt.into());
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);

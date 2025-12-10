@@ -1,7 +1,7 @@
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
@@ -28,7 +28,7 @@ impl RecordIdLit {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<RecordId> {

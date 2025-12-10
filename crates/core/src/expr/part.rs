@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -173,7 +173,7 @@ impl<'a> RecursionPlan {
 	pub async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
@@ -198,7 +198,7 @@ impl<'a> RecursionPlan {
 	pub async fn compute_inner(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
@@ -453,7 +453,7 @@ pub(crate) enum RecurseInstruction {
 #[allow(clippy::too_many_arguments)]
 async fn walk_paths(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	recursion: Recursion<'_>,
@@ -531,7 +531,7 @@ impl RecurseInstruction {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'_>,

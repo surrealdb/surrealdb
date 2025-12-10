@@ -11,7 +11,7 @@ use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -71,7 +71,7 @@ impl DefineFieldStatement {
 	pub(crate) async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::FieldDefinition> {
@@ -115,7 +115,7 @@ impl DefineFieldStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -422,7 +422,7 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: NamespaceId,
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,
@@ -485,7 +485,7 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn validate_flexible_restrictions(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: NamespaceId,
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,

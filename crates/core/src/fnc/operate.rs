@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Expr;
@@ -131,7 +131,7 @@ enum ExecutorOption<'a> {
 }
 
 fn get_executor_and_thing<'a>(
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	doc: &'a CursorDoc,
 ) -> Option<(&'a QueryExecutor, &'a RecordId)> {
 	if let Some(thg) = &doc.rid {
@@ -150,7 +150,7 @@ fn get_executor_and_thing<'a>(
 }
 
 fn get_executor_option<'a>(
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	doc: Option<&'a CursorDoc>,
 	exp: &'a Expr,
 ) -> ExecutorOption<'a> {
@@ -169,7 +169,7 @@ fn get_executor_option<'a>(
 
 pub(crate) async fn matches(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	exp: &Expr,
@@ -186,7 +186,7 @@ pub(crate) async fn matches(
 
 pub(crate) async fn knn(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	exp: &Expr,

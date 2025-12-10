@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{self, FieldDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
@@ -45,7 +45,7 @@ impl Document {
 	/// nested fields or array values are untouched.
 	pub(super) async fn cleanup_table_fields(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -188,7 +188,7 @@ impl Document {
 	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -351,7 +351,7 @@ impl Document {
 	pub(super) async fn cleanup_table_references(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
 		// Check import
@@ -398,13 +398,13 @@ impl Document {
 
 struct FieldEditContext<'a> {
 	/// The mutable request context
-	context: Option<MutableContext>,
+	context: Option<Context>,
 	/// The defined field statement
 	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
 	/// The current request context
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	/// The current request options
 	opt: &'a Options,
 	/// The current document record being processed
@@ -505,7 +505,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -519,7 +519,7 @@ impl FieldEditContext<'_> {
 			let val =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
 			return Ok(val);
 		}
@@ -542,7 +542,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -556,7 +556,7 @@ impl FieldEditContext<'_> {
 			let val =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
 			return Ok(val);
 		}
@@ -585,7 +585,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -599,7 +599,7 @@ impl FieldEditContext<'_> {
 			let res =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Check the ASSERT clause result
 			ensure!(
 				res.is_truthy(),
@@ -660,7 +660,7 @@ impl FieldEditContext<'_> {
 							ctx
 						}
 						None => {
-							let mut ctx = MutableContext::new(self.ctx);
+							let mut ctx = Context::new(self.ctx);
 							ctx.add_value("before", self.old.clone());
 							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());
@@ -677,7 +677,7 @@ impl FieldEditContext<'_> {
 						.await
 						.catch_return()?;
 					// Unfreeze the new context
-					self.context = Some(MutableContext::unfreeze(ctx)?);
+					self.context = Some(Context::unfreeze(ctx)?);
 					// If the specific permissions
 					// expression was not truthy,
 					// then this field could not be

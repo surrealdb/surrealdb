@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
@@ -77,7 +77,7 @@ impl LookupSubject {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<ComputedLookupSubject> {
