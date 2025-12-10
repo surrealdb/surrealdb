@@ -98,7 +98,7 @@ pub async fn all(
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in set.into_iter() {
+				for arg in set {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
@@ -123,7 +123,7 @@ pub async fn any(
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in set.into_iter() {
+				for arg in set {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
@@ -161,7 +161,7 @@ pub async fn filter(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				let mut res = Set::new();
-				for arg in set.into_iter() {
+				for arg in set {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.insert(arg);
 					}
@@ -183,7 +183,7 @@ pub async fn find(
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
-				for arg in set.into_iter() {
+				for arg in set {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
@@ -214,7 +214,7 @@ pub async fn fold(
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		let mut accum = init;
-		for val in set.into_iter() {
+		for val in set {
 			accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val]).await?
 		}
 		Ok(accum)
@@ -240,7 +240,7 @@ pub async fn map(
 ) -> Result<Value> {
 	if let Some(opt) = opt {
 		let mut res = Set::new();
-		for arg in set.into_iter() {
+		for arg in set {
 			res.insert(mapper.invoke(stk, ctx, opt, doc, vec![arg]).await?);
 		}
 		Ok(res.into())

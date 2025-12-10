@@ -466,7 +466,7 @@ impl Cast for Bytes {
 
 				let mut res = Vec::new();
 
-				for v in x.0.into_iter() {
+				for v in x.0 {
 					// Condition checked above
 					let x = v.clone().cast_to::<i64>().expect("value checked to be castable above");
 					// TODO: Fix truncation.

@@ -10,9 +10,9 @@ use crate::sql::{SqlFormat, ToSql};
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct File {
 	/// The bucket name where the file is stored
-	pub(crate) bucket: String,
+	pub bucket: String,
 	/// The key/identifier for the file within the bucket
-	pub(crate) key: String,
+	pub key: String,
 }
 
 impl File {

@@ -176,7 +176,7 @@ pub async fn rrf(
 	// Process each result list from the input array (e.g., vector search results,
 	// full-text search results)
 	let mut count = 0;
-	for result_list in results.into_iter() {
+	for result_list in results {
 		if let Value::Array(array) = result_list {
 			// Process each document in this result list, using enumerate to get 0-based
 			// rank
@@ -382,7 +382,7 @@ pub async fn linear(
 	let mut count = 0;
 	for (list_idx, result_list) in results.into_iter().enumerate() {
 		if let Value::Array(array) = result_list {
-			for doc in array.into_iter() {
+			for doc in array {
 				if let Value::Object(mut obj) = doc {
 					// Extract the document ID
 					if let Some(id_value) = obj.remove("id") {

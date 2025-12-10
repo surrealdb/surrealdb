@@ -81,7 +81,7 @@ impl From<Uuid> for uuid::Uuid {
 
 impl From<surrealdb_types::Uuid> for Uuid {
 	fn from(v: surrealdb_types::Uuid) -> Self {
-		Uuid(v.0)
+		Uuid(v.into_inner())
 	}
 }
 

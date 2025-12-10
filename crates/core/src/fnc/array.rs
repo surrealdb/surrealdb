@@ -56,7 +56,7 @@ pub async fn all(
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
@@ -80,7 +80,7 @@ pub async fn any(
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					// TODO: Don't clone the closure every time the function is called.
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
@@ -303,7 +303,7 @@ pub async fn filter(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
@@ -357,7 +357,7 @@ pub async fn find(
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}

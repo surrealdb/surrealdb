@@ -453,7 +453,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				// If `id` is not set, this may be a live query notification
 				None => {
 					if let Ok(DbResult::Live(notification)) = response.result {
-						let live_query_id = notification.id.0;
+						let live_query_id = notification.id.into_inner();
 						// Check if this live query is registered
 						if let Some(sender) = state.live_queries.get(&live_query_id) {
 							// Send the notification back to the caller or kill live query

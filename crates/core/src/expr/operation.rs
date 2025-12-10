@@ -235,7 +235,7 @@ impl Operation {
 		};
 
 		let mut res = Vec::new();
-		for o in array.into_iter() {
+		for o in array {
 			let Value::Object(o) = o else {
 				return Err(PatchError {
 					message: "Patch operations should be an array of objects".to_owned(),

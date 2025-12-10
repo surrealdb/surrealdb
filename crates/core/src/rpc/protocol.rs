@@ -115,7 +115,10 @@ pub trait RpcProtocol {
 
 	async fn sessions(&self) -> Result<DbResult, RpcError> {
 		Ok(DbResult::Other(PublicValue::Array(
-			self.list_sessions().into_iter().map(|x| PublicValue::Uuid(PublicUuid(x))).collect(),
+			self.list_sessions()
+				.into_iter()
+				.map(|x| PublicValue::Uuid(PublicUuid::from(x)))
+				.collect(),
 		)))
 	}
 
@@ -1498,12 +1501,12 @@ where
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(&lqid.0, session_id).await;
+					this.handle_live(*&lqid, session_id).await;
 				}
 			}
 			QueryType::Kill => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_kill(&lqid.0).await;
+					this.handle_kill(*&lqid).await;
 				}
 			}
 			_ => {}

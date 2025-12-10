@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
+#![warn(clippy::explicit_into_iter_loop)]
 
 mod error;
 mod flatbuffers;

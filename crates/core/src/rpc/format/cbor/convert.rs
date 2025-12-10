@@ -437,8 +437,8 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::File(file) => Ok(CborValue::Tag(
 			TAG_FILE,
 			Box::new(CborValue::Array(vec![
-				CborValue::Text(file.bucket().to_string()),
-				CborValue::Text(file.key().to_string()),
+				CborValue::Text(file.bucket),
+				CborValue::Text(file.key),
 			])),
 		)),
 		PublicValue::Set(v) => Ok(CborValue::Tag(
@@ -537,8 +537,8 @@ fn from_range(r: PublicRange) -> Result<CborValue> {
 			Bound::Unbounded => Ok(CborValue::Null),
 		}
 	}
-
-	Ok(CborValue::Array(vec![encode(r.start)?, encode(r.end)?]))
+	let (start, end) = r.into_inner();
+	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
 }
 
 fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
@@ -554,7 +554,8 @@ fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
 		}
 	}
 
-	Ok(CborValue::Array(vec![encode(r.start)?, encode(r.end)?]))
+	let (start, end) = r.into_inner();
+	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
 }
 
 fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {

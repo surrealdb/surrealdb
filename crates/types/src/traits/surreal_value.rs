@@ -1477,7 +1477,7 @@ impl SurrealValue for http::HeaderMap {
 		// Header map can contain multiple values for each header.
 		// This is handled by returning the key name first and then return multiple
 		// values with key name = None.
-		for (k, v) in self.into_iter() {
+		for (k, v) in self {
 			let v = match v.to_str() {
 				Ok(v) => Value::String(v.to_owned()),
 				Err(_) => continue,
@@ -1525,7 +1525,7 @@ impl SurrealValue for http::HeaderMap {
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		let mut res = http::HeaderMap::new();
-		for (k, v) in o.into_iter() {
+		for (k, v) in o {
 			let k = k.parse::<http::HeaderName>()?;
 			match v {
 				Value::Array(Array(a)) => {

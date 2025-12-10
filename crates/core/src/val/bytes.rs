@@ -45,7 +45,7 @@ impl From<surrealdb_types::Bytes> for Bytes {
 
 impl From<Bytes> for surrealdb_types::Bytes {
 	fn from(v: Bytes) -> Self {
-		surrealdb_types::Bytes::new(v.into_inner())
+		surrealdb_types::Bytes::from(v.into_inner())
 	}
 }
 

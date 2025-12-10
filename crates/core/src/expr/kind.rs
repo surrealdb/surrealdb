@@ -566,7 +566,7 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Float(f) => KindLiteral::Float(f),
 			crate::types::PublicKindLiteral::Decimal(d) => KindLiteral::Decimal(d),
 			crate::types::PublicKindLiteral::Duration(d) => {
-				KindLiteral::Duration(crate::val::Duration(d.inner()))
+				KindLiteral::Duration(crate::val::Duration(*d))
 			}
 			crate::types::PublicKindLiteral::Array(kinds) => {
 				KindLiteral::Array(kinds.into_iter().map(Kind::from).collect())

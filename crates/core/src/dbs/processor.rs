@@ -950,7 +950,7 @@ pub(super) trait Collector {
 		let txn = ctx.tx();
 		// Check that the table exists
 		// Loop over the chosen edge types
-		for (beg, end) in keys.into_iter() {
+		for (beg, end) in keys {
 			// Create a new iterable range
 			let mut stream =
 				txn.stream_keys_vals(beg..end, opt.version, None, ScanDirection::Forward);

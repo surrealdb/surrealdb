@@ -1255,7 +1255,7 @@ impl Datastore {
 		// Fetch expired nodes
 		let txn = self.transaction(Write, Optimistic).await?;
 		// Loop over the live query unique ids
-		for id in ids.into_iter() {
+		for id in ids {
 			// Get the key for this node live query
 			let nlq = crate::key::node::lq::new(self.id(), id);
 			// Fetch the LIVE meta data node entry

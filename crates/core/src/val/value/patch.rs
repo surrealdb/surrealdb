@@ -11,12 +11,11 @@ impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
 		let mut this = self.clone();
 		// Create a new object for testing and patching
-		// Loop over the patch operations and apply them
-		for operation in Operation::value_to_operations(ops)
-			.map_err(Error::InvalidPatch)
-			.map_err(anyhow::Error::new)?
-			.into_iter()
-		{
+	// Loop over the patch operations and apply them
+	for operation in Operation::value_to_operations(ops)
+		.map_err(Error::InvalidPatch)
+		.map_err(anyhow::Error::new)?
+	{
 			match operation {
 				// Add a value
 				Operation::Add {

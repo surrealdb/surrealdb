@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 use std::str::FromStr;
 
 use regex::RegexBuilder;
@@ -15,9 +16,8 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 ///
 /// A regular expression is a pattern used for matching strings.
 /// This type wraps the `regex::Regex` type and provides custom serialization/deserialization.
-
 #[derive(Clone)]
-pub struct Regex(pub regex::Regex);
+pub struct Regex(pub(crate) ::regex::Regex);
 
 impl Regex {
 	/// Returns a reference to the underlying regex
@@ -25,6 +25,17 @@ impl Regex {
 	/// Note: This method returns the regex without the '/' delimiters that are used in display.
 	pub fn regex(&self) -> &regex::Regex {
 		&self.0
+	}
+
+	/// Convert into the inner regex::Regex
+	pub fn into_inner(self) -> regex::Regex {
+		self.0
+	}
+}
+
+impl From<regex::Regex> for Regex {
+	fn from(regex: regex::Regex) -> Self {
+		Regex(regex)
 	}
 }
 
@@ -38,9 +49,7 @@ impl FromStr for Regex {
 
 impl PartialEq for Regex {
 	fn eq(&self, other: &Self) -> bool {
-		let str_left = self.0.as_str();
-		let str_right = other.0.as_str();
-		str_left == str_right
+		self.0.as_str() == other.0.as_str()
 	}
 }
 
@@ -61,6 +70,14 @@ impl PartialOrd for Regex {
 impl Hash for Regex {
 	fn hash<H: Hasher>(&self, state: &mut H) {
 		self.0.as_str().hash(state);
+	}
+}
+
+impl Deref for Regex {
+	type Target = regex::Regex;
+
+	fn deref(&self) -> &Self::Target {
+		&self.0
 	}
 }
 

@@ -2,6 +2,8 @@
 #![allow(deprecated)]
 // This triggers because we have regex's in or Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
+// Warn about explicit .into_iter() in for loops
+#![warn(clippy::explicit_into_iter_loop)]
 
 //! # Surrealdb Core
 //!
