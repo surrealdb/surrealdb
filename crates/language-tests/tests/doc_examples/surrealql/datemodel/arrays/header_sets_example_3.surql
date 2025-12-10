@@ -8,7 +8,7 @@ value = "NONE"
 value = "[{ cards: { clubs: ['queen', '10'], diamonds: ['king'], hearts: ['jack', '2'], spades: [] }, suits: {'clubs', 'diamonds', 'hearts', 'spades'} }]"
 
 */
-DEFINE FIELD suits ON TABLE hand TYPE option<set<string>> VALUE <set>object::keys(cards);
+DEFINE FIELD suits ON TABLE hand TYPE option<set<string>> VALUE <set> object::keys(cards);
 
 CREATE hand SET cards = {
     clubs: [
