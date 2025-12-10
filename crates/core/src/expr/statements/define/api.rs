@@ -20,7 +20,7 @@ pub(crate) struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl DefineApiStatement {
@@ -68,12 +68,18 @@ impl DefineApiStatement {
 			});
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		let ap = ApiDefinition {
 			path,
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache

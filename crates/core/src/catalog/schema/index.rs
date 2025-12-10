@@ -10,6 +10,7 @@ use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, Value};
 
@@ -68,17 +69,18 @@ pub struct IndexDefinition {
 impl_kv_value_revisioned!(IndexDefinition);
 
 impl IndexDefinition {
-	pub(crate) fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
-		crate::sql::DefineIndexStatement {
+	pub(crate) fn to_sql_definition(&self) -> sql::DefineIndexStatement {
+		sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.table_name.clone())),
-			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			what: sql::Expr::Idiom(sql::Idiom::field(self.table_name.clone())),
+			cols: self.cols.iter().cloned().map(|x| sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			concurrently: false,
 		}
 	}
@@ -138,13 +140,13 @@ pub(crate) enum Index {
 }
 
 impl Index {
-	pub fn to_sql_definition(&self) -> crate::sql::index::Index {
+	pub fn to_sql_definition(&self) -> sql::index::Index {
 		match self {
-			Self::Idx => crate::sql::index::Index::Idx,
-			Self::Uniq => crate::sql::index::Index::Uniq,
-			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
-			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
-			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
+			Self::Idx => sql::index::Index::Idx,
+			Self::Uniq => sql::index::Index::Uniq,
+			Self::Hnsw(params) => sql::index::Index::Hnsw(params.clone().into()),
+			Self::FullText(params) => sql::index::Index::FullText(params.clone().into()),
+			Self::Count(cond) => sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
 

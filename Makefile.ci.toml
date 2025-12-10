@@ -43,7 +43,7 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
-[tasks.ci-format]
+[tasks.ci-fmt]
 category = "CI - CHECK"
 description = "Run code formatting checks"
 toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
@@ -119,6 +119,72 @@ args = [
     "warnings",
 ]
 
+[tasks.ci-feature-check]
+category = "CI - CHECK"
+description = "Verify each feature compiles individually"
+run_task = { name = [
+    "ci-feature-check-sdk",
+    "ci-feature-check-core",
+    "ci-feature-check-server",
+], fork = true, parallel = true }
+
+[tasks.ci-feature-check-sdk]
+category = "CI - CHECK"
+description = "Verify each SDK feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb",
+    "--each-feature",
+    "--exclude-features",
+    "kv-indxdb",
+]
+
+[tasks.ci-feature-check-core]
+category = "CI - CHECK"
+description = "Verify each core feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-core",
+    "--each-feature",
+    "--exclude-features",
+    "kv-indxdb",
+]
+
+[tasks.ci-feature-check-server]
+category = "CI - CHECK"
+description = "Verify each server feature compiles individually (with storage-mem base)"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-server",
+    "--each-feature",
+    "--exclude-features",
+    "storage-indxdb",
+    "--include-features",
+    "storage-mem",
+]
+
+[tasks.ci-unused-deps]
+category = "CI - CHECK"
+description = "Check for unused dependencies"
+install_crate = "cargo-machete"
+command = "cargo"
+args = ["machete"]
+
 [tasks.ci-check-wasm]
 # Note: On Mac, Apple ships its own version of LLVM which does not cross-compile to WASM.
 # To build this on a Mac, you need to install the upstream LLVM Clang.
@@ -156,7 +222,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli",
     "--workspace",
     "--test",
     "cli_integration",
@@ -779,10 +845,12 @@ category = "CI - ALL REQUIRED CHECKS"
 description = "Run almost all required CI checks that must pass for PR merge"
 dependencies = [
     # Code quality checks
-    "ci-format",
+    "ci-fmt",
     "ci-clippy",
     "ci-check",
     "ci-check-wasm",
+    "ci-feature-check",
+    "ci-unused-deps",
     "ci-docs",
     # Workspace tests
     "ci-workspace-test",

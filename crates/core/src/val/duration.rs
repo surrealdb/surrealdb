@@ -5,7 +5,6 @@ use std::{fmt, ops, time};
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -24,21 +23,8 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone,
-	Copy,
-	Debug,
-	Default,
-	Eq,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Ord,
-	Encode,
-	BorrowDecode,
+	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, BorrowDecode,
 )]
-#[serde(rename = "$surrealdb::private::Duration")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Duration(pub time::Duration);

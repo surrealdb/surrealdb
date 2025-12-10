@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::CoverStmtsSql;
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -27,7 +27,7 @@ impl ToSql for RemoveEventStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {} ON {}", CoverStmtsSql(&self.name), self.what);
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 	}
 }
 

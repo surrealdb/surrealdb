@@ -1,15 +1,11 @@
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::File")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]

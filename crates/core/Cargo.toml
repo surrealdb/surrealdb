@@ -15,7 +15,7 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["kv-mem"]
+default = ["kv-mem", "graphql"]
 kv-mem = [
     "dep:surrealmx",
     "tokio/time",
@@ -55,10 +55,12 @@ arbitrary = [
     "surrealdb-types/arbitrary",
 ]
 allocation-tracking = []
+# GraphQL support
+graphql = ["dep:async-graphql"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql"]
 targets = []
 
 [dependencies]
@@ -100,10 +102,9 @@ ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
-async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
-] }
+], optional = true }
 async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
@@ -153,7 +154,6 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-snap.workspace = true
 strsim.workspace = true
 subtle.workspace = true
 sysinfo.workspace = true
@@ -235,6 +235,10 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
+
+[package.metadata.cargo-machete]
+# md-5 crate is imported as md5::, regex-syntax is optional (tied to arbitrary feature)
+ignored = ["md-5", "regex-syntax"]
 
 [lints]
 workspace = true

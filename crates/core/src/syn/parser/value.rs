@@ -170,7 +170,7 @@ impl Parser<'_> {
 										@number_span => "Coordinate numbers can't be NaN or a decimal");
 								}
 								Numeric::Float(x) => x,
-								Numeric::Integer(x) => x as f64,
+								Numeric::Integer(x) => x.into_int(number_span)? as f64,
 							};
 
 							self.pop_peek();
@@ -183,7 +183,9 @@ impl Parser<'_> {
 
 							match number {
 								Numeric::Float(x) => PublicValue::Number(PublicNumber::Float(x)),
-								Numeric::Integer(x) => PublicValue::Number(PublicNumber::Int(x)),
+								Numeric::Integer(x) => {
+									PublicValue::Number(PublicNumber::Int(x.into_int(number_span)?))
+								}
 								Numeric::Decimal(x) => {
 									PublicValue::Number(PublicNumber::Decimal(x))
 								}
@@ -228,7 +230,9 @@ impl Parser<'_> {
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
 					Numeric::Duration(x) => PublicValue::Duration(PublicDuration::from(x)),
-					Numeric::Integer(x) => PublicValue::Number(PublicNumber::Int(x)),
+					Numeric::Integer(x) => {
+						PublicValue::Number(PublicNumber::Int(x.into_int(compound.span)?))
+					}
 					Numeric::Float(x) => PublicValue::Number(PublicNumber::Float(x)),
 					Numeric::Decimal(x) => PublicValue::Number(PublicNumber::Decimal(x)),
 				}
@@ -236,7 +240,9 @@ impl Parser<'_> {
 			TokenKind::Glued(Glued::Number) => {
 				let number = self.next_token_value()?;
 				match number {
-					NumberToken::Integer(i) => PublicValue::Number(PublicNumber::Int(i)),
+					NumberToken::Integer(i) => {
+						PublicValue::Number(PublicNumber::Int(i.into_int(self.recent_span())?))
+					}
 					NumberToken::Float(f) => PublicValue::Number(PublicNumber::Float(f)),
 					NumberToken::Decimal(d) => PublicValue::Number(PublicNumber::Decimal(d)),
 				}
@@ -340,7 +346,9 @@ impl Parser<'_> {
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
 					Numeric::Duration(x) => Ok(PublicValue::Duration(PublicDuration::from(x))),
-					Numeric::Integer(x) => Ok(PublicValue::Number(PublicNumber::Int(x))),
+					Numeric::Integer(x) => {
+						Ok(PublicValue::Number(PublicNumber::Int(x.into_int(compound.span)?)))
+					}
 					Numeric::Float(x) => Ok(PublicValue::Number(PublicNumber::Float(x))),
 					Numeric::Decimal(x) => Ok(PublicValue::Number(PublicNumber::Decimal(x))),
 				}

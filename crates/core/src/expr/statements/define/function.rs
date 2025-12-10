@@ -9,17 +9,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Block, Expr, Kind};
+use crate::expr::{Base, Block, Expr, FlowResultExt, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -54,11 +54,16 @@ impl DefineFunctionStatement {
 				}
 			}
 		}
+
 		// Process the statement
-		{
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(Some(ctx), ns, db).await?
-		};
+		let (ns_name, db_name) = opt.ns_db()?;
+		txn.get_or_add_db(Some(ctx), ns_name, db_name).await?;
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 
 		txn.put_db_function(
 			ns,
@@ -67,9 +72,9 @@ impl DefineFunctionStatement {
 				name: self.name.clone(),
 				args: self.args.clone(),
 				block: self.block.clone(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
+				comment,
 			},
 		)
 		.await?;

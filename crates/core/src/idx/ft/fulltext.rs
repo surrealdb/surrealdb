@@ -205,7 +205,7 @@ impl FullTextIndex {
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
@@ -234,7 +234,7 @@ impl FullTextIndex {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
-					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
+					let key = self.ikb.new_dc_with_id(doc_id, opt.id(), Uuid::now_v7());
 					tx.put(&key, &dcl, None).await?;
 					*require_compaction = true;
 				}
@@ -267,7 +267,7 @@ impl FullTextIndex {
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the doc id (if it exists)
 		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
 		// Collect the tokens.
@@ -285,7 +285,7 @@ impl FullTextIndex {
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id()?, Uuid::now_v7());
+			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id(), Uuid::now_v7());
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
@@ -984,7 +984,7 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::default();
+			let opts = Options::new(ds.id());
 			let stk_ctx = ctx.clone();
 			let az = stack
 				.enter(|stk| async move {
@@ -1031,10 +1031,8 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
-			let opt = Options::default()
-				.with_id(nid)
-				.with_ns(Some("testns".into()))
-				.with_db(Some("testdb".into()));
+			let opt =
+				Options::new(nid).with_ns(Some("testns".into())).with_db(Some("testdb".into()));
 			let fti = Arc::new(
 				FullTextIndex::with_analyzer(
 					ctx.get_index_stores(),

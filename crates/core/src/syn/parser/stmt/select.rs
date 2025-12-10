@@ -3,7 +3,7 @@ use reblessive::Stk;
 use super::parts::MissingKind;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
-use crate::sql::{Fields, Limit, Order, Split, Splits, Start};
+use crate::sql::{Expr, Fields, Limit, Literal, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};
@@ -57,9 +57,9 @@ impl Parser<'_> {
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
+			stk.run(|stk| self.parse_expr_field(stk)).await?
 		} else {
-			None
+			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));

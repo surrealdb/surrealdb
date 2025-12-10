@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Value};
-use crate::fmt::{EscapeKwIdent, QuoteStr};
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 
 /// Represents an `ALTER INDEX` statement.
@@ -99,7 +99,13 @@ impl ToSql for AlterIndexStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]));
+		write_sql!(
+			f,
+			fmt,
+			" {} ON {}",
+			EscapeKwIdent(&self.name, &["IF"]),
+			EscapeKwFreeIdent(&self.table)
+		);
 
 		if self.prepare_remove {
 			write_sql!(f, fmt, " PREPARE REMOVE");

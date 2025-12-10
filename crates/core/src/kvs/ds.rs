@@ -871,7 +871,7 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let opt = Options::new(self.id).with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = MutableContext::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
@@ -2099,8 +2099,7 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::default()
-			.with_id(self.id)
+		Options::new(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -2316,9 +2315,10 @@ impl Datastore {
 		let model = DefineModelStatement {
 			name: name.to_string(),
 			version: version.to_string(),
-			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			comment: Expr::Literal(Literal::String(description.to_string())),
 			hash,
-			..Default::default()
+			kind: Default::default(),
+			permissions: Default::default(),
 		};
 
 		let q = LogicalPlan {
@@ -2416,8 +2416,7 @@ mod test {
 
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
-		let opt = Options::default()
-			.with_id(dbs.id)
+		let opt = Options::new(dbs.id())
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)

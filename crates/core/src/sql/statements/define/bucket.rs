@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,7 +12,7 @@ pub(crate) struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineBucketStatement {
@@ -22,7 +23,7 @@ impl Default for DefineBucketStatement {
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -35,20 +36,20 @@ impl ToSql for DefineBucketStatement {
 			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
 			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 
 		if self.readonly {
 			write_sql!(f, sql_fmt, " READONLY");
 		}
 
 		if let Some(ref backend) = self.backend {
-			write_sql!(f, sql_fmt, " BACKEND {}", backend);
+			write_sql!(f, sql_fmt, " BACKEND {}", CoverStmts(backend));
 		}
 
 		write_sql!(f, sql_fmt, " PERMISSIONS {}", self.permissions);
 
-		if let Some(ref comment) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", comment);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -61,7 +62,7 @@ impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -74,7 +75,7 @@ impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

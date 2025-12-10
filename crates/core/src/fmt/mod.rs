@@ -7,7 +7,9 @@ mod escape;
 use std::cell::Cell;
 use std::fmt::Display;
 
-pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
+pub use escape::{
+	EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRidKey, QuoteStr,
+};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::sql;
@@ -130,9 +132,9 @@ pub fn fmt_separated_by<T: ToSql, I: IntoIterator<Item = T>>(
 	}
 }
 
-pub struct CoverStmtsSql<'a>(pub &'a sql::Expr);
+pub struct CoverStmts<'a>(pub &'a sql::Expr);
 
-impl ToSql for CoverStmtsSql<'_> {
+impl ToSql for CoverStmts<'_> {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self.0 {
 			sql::Expr::Literal(_)

@@ -7,20 +7,20 @@ use crate::val::Duration;
 // does not expire
 pub(crate) struct UserDuration {
 	// Duration after which the token obtained after authenticating with user credentials expires
-	pub(crate) token: Option<Expr>,
+	pub(crate) token: Expr,
 	// Duration after which the session authenticated with user credentials or token expires
-	pub(crate) session: Option<Expr>,
+	pub(crate) session: Expr,
 }
 
 impl Default for UserDuration {
 	fn default() -> Self {
 		Self {
 			// By default, tokens expire after one hour
-			token: Some(Expr::Literal(Literal::Duration(
+			token: Expr::Literal(Literal::Duration(
 				Duration::from_hours(1).expect("1 hour should fit in a duration"),
-			))),
+			)),
 			// By default, sessions do not expire
-			session: None,
+			session: Expr::Literal(Literal::None),
 		}
 	}
 }

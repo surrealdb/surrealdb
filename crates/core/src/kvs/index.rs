@@ -277,7 +277,7 @@ impl IndexBuilder {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
@@ -711,7 +711,7 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()).await?;
 		*rc = false;
 		Ok(())
 	}

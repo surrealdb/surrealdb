@@ -7,8 +7,8 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Output,
-	Permission, Permissions, Timeout, View, With,
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Literal,
+	Output, Permission, Permissions, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -103,15 +103,12 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
-	pub(crate) async fn try_parse_timeout(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<Option<Timeout>> {
+	pub(crate) async fn try_parse_timeout(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		if !self.eat(t!("TIMEOUT")) {
-			return Ok(None);
+			return Ok(Expr::Literal(Literal::None));
 		}
 		let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
-		Ok(Some(Timeout(duration)))
+		Ok(duration)
 	}
 
 	pub(crate) async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
@@ -315,12 +312,15 @@ impl Parser<'_> {
 				} else {
 					Permissions::none()
 				};
-				stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field)).await?;
-				self.eat(t!(","));
-				while self.eat(t!("FOR")) {
+				loop {
 					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
 						.await?;
+
 					self.eat(t!(","));
+
+					if !self.eat(t!("FOR")) {
+						break;
+					}
 				}
 				Ok(permission)
 			}
@@ -360,7 +360,7 @@ impl Parser<'_> {
 				}
 				t!("DELETE") => {
 					if field {
-						bail!("Can't define permission DELETE for fields")
+						bail!("Can't define permission DELETE for fields", @next.span)
 					} else {
 						delete = true;
 					}

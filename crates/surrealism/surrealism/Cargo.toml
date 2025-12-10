@@ -1,6 +1,6 @@
 [package]
 name = "surrealism"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -13,12 +13,7 @@ license-file.workspace = true
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-wasmtime.workspace = true
 surrealdb-types.workspace = true
-uuid.workspace = true
-chrono.workspace = true
 surrealism-macros = { workspace = true, default-features = false }
 surrealism-types = { workspace = true, default-features = false }
 

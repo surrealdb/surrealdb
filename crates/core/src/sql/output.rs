@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::field::{Fields, Selector};
 use crate::sql::{Expr, Field, Literal};
@@ -26,29 +26,30 @@ impl ToSql for Output {
 			Self::Before => f.push_str("BEFORE"),
 			Self::Fields(v) => {
 				// We need to escape a possible `RETURN NONE` where `NONE` is a value
-				let starts_with_none = match v {
-					Fields::Value(selector) => {
-						matches!(selector.expr, Expr::Literal(Literal::None))
+				match v {
+					Fields::Select(fields) => {
+						let mut iter = fields.iter();
+						match iter.next() {
+							Some(Field::Single(Selector {
+								expr: Expr::Literal(Literal::None),
+								alias,
+							})) => {
+								f.push_str("(NONE)");
+								if let Some(alias) = alias {
+									write_sql!(f, fmt, " AS {alias}");
+								}
+							}
+							Some(x) => {
+								x.fmt_sql(f, fmt);
+							}
+							None => {}
+						}
+
+						for x in iter {
+							write_sql!(f, fmt, ", {x}")
+						}
 					}
-					Fields::Select(fields) => fields
-						.first()
-						.map(|x| {
-							matches!(
-								x,
-								Field::Single(Selector {
-									expr: Expr::Literal(Literal::None),
-									..
-								})
-							)
-						})
-						.unwrap_or(false),
-				};
-				if starts_with_none {
-					f.push('(');
-					v.fmt_sql(f, fmt);
-					f.push(')');
-				} else {
-					v.fmt_sql(f, fmt);
+					x => x.fmt_sql(f, fmt),
 				}
 			}
 		}

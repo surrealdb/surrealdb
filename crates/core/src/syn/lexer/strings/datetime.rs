@@ -188,12 +188,10 @@ impl Lexer<'_> {
 
 		let date_time = NaiveDateTime::new(date, time);
 
-		let datetime = timezone
-			.from_local_datetime(&date_time)
-			.earliest()
-			// this should never panic with a fixed offset
-			.expect("valid datetime with fixed offset")
-			.with_timezone(&Utc);
+		let Some(datetime) = timezone.from_local_datetime(&date_time).earliest() else {
+			bail!("Invalid Datetime, timezone was outside of the range of valid datetimes", @reader.span_since(timezone_start))
+		};
+		let datetime = datetime.with_timezone(&Utc);
 
 		Ok(PublicDatetime::from(datetime))
 	}

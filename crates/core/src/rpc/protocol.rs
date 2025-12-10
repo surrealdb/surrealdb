@@ -14,10 +14,11 @@ use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
+use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
-	TopLevelExpr, UpdateStatement, UpsertStatement,
+	InsertStatement, KillStatement, Literal, LiveStatement, Model, Output, RelateStatement,
+	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
@@ -650,16 +651,15 @@ pub trait RpcProtocol {
 			x => Expr::from_public_value(x),
 		};
 
-		let (diff, fields) = if diff.unwrap_or_default().is_true() {
-			(true, Fields::none())
+		let fields = if diff.unwrap_or_default().is_true() {
+			LiveFields::Diff
 		} else {
-			(false, Fields::all())
+			LiveFields::Select(Fields::all())
 		};
 
 		// Specify the SQL query string
 		let sql = LiveStatement {
 			fields,
-			diff,
 			what,
 			cond: None,
 			fetch: None,
@@ -722,8 +722,8 @@ pub trait RpcProtocol {
 			limit: None,
 			start: None,
 			fetch: None,
-			version: None,
-			timeout: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 			tempfiles: false,
@@ -815,9 +815,9 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			ignore: false,
 			update: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -869,9 +869,9 @@ pub trait RpcProtocol {
 			what: vec![value_to_table(what)],
 			data,
 			output: Some(Output::After),
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
@@ -922,7 +922,7 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		};
@@ -976,7 +976,7 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		};
@@ -1093,7 +1093,7 @@ pub trait RpcProtocol {
 			},
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		}));
@@ -1154,7 +1154,7 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			uniq: false,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 		}));
 		// Specify the query parameters
@@ -1193,7 +1193,7 @@ pub trait RpcProtocol {
 			output: Some(Output::Before),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		}));
