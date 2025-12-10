@@ -7345,7 +7345,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.15.1"
-source = "git+https://github.com/surrealdb/surrealkv?branch=prefetch-partition#77c4e358374a2b1d50df308e7b6a54035a1e78b4"
+source = "git+https://github.com/surrealdb/surrealkv?branch=prefetch-partition#53668ae03a8a0ca7707da9b9e8a7dfc9fedad175"
 dependencies = [
  "arc-swap",
  "async-channel",
