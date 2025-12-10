@@ -281,8 +281,8 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Prepares a value for processing
-	pub(crate) async fn prepare_thing(
+	/// Prepares a RecordId for processing
+	pub(crate) async fn prepare_record_id(
 		&mut self,
 		planner: &mut QueryPlanner,
 		ctx: &StatementContext<'_>,
@@ -407,14 +407,14 @@ impl Iterator {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
 			Value::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
-			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+			Value::RecordId(v) => self.prepare_record_id(planner, stm_ctx, v).await?,
 			Value::Array(a) => {
 				for v in a.into_iter() {
 					match v {
 						Value::Table(v) => {
 							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?
 						}
-						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+						Value::RecordId(v) => self.prepare_record_id(planner, stm_ctx, v).await?,
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 						v => {
 							bail!(Error::InvalidStatementTarget {
@@ -422,6 +422,11 @@ impl Iterator {
 							})
 						}
 					}
+				}
+			}
+			Value::Object(o) => {
+				if let Some(id) = o.rid() {
+					self.prepare_record_id(planner, stm_ctx, id).await?;
 				}
 			}
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
