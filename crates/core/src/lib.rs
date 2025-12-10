@@ -4,6 +4,8 @@
 #![allow(clippy::mutable_key_type)]
 // Warn about explicit .into_iter() in for loops
 #![warn(clippy::explicit_into_iter_loop)]
+// Warn about unnecessary .to_owned() and .to_string() calls
+#![warn(clippy::unnecessary_to_owned)]
 
 //! # Surrealdb Core
 //!
