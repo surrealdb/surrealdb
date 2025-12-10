@@ -63,62 +63,27 @@
 /// ```
 #[macro_export]
 macro_rules! impl_events {
-	($type_name:ident on $field:ident for $event_set:ident) => {
+	($type_name:ident for $event_set:ident) => {
 		impl $type_name {
 			/// Get a receiver for a specific event type.
 			///
 			/// Returns a receiver that yields events of type E.
 			/// This gives you full control over the async event loop.
 			/// For a simpler callback-based API, see [`subscribe`](Self::subscribe).
-			pub fn receiver<E: $crate::utils::Event<$event_set>>(
+			pub fn subscribe<E: $crate::utils::Event<$event_set>>(
 				&self,
 			) -> tokio::sync::broadcast::Receiver<E> {
-				use $crate::utils::Subscribeable;
-				self.$field.subscribe()
+				$crate::utils::Subscribeable::subscribe::<E>(self)
 			}
 
-			/// Subscribe to an event type with a handler function.
+			/// Subscribe to the first event of a specific type.
 			///
-			/// Spawns a background task that calls the handler for each event.
-			/// Returns an unsubscribe function that stops the handler and cleans up the task.
-			///
-			/// The handler must return a Future. For synchronous handlers, wrap your code in `async move {}`.
-			///
-			/// # Platform Compatibility
-			///
-			/// On non-WASM platforms, the handler must be `Send + 'static` for thread safety.
-			/// On WASM, these bounds are not required as it runs in a single-threaded environment.
-			#[cfg(not(target_family = "wasm"))]
-			pub fn subscribe<E, F, Fut>(&self, _handler: F) -> Box<dyn FnOnce()>
-			where
-				E: $crate::utils::Event<$event_set>,
-				F: FnMut(E) -> Fut + Send + 'static,
-				Fut: std::future::Future<Output = ()> + Send + 'static,
-			{
-				// TODO: This needs a callback-based subscribe API
-				todo!("subscribe with callback")
-			}
-
-			/// Subscribe to an event type with a handler function.
-			///
-			/// Spawns a background task that calls the handler for each event.
-			/// Returns an unsubscribe function that stops the handler and cleans up the task.
-			///
-			/// The handler must return a Future. For synchronous handlers, wrap your code in `async move {}`.
-			///
-			/// # Platform Compatibility
-			///
-			/// On non-WASM platforms, the handler must be `Send + 'static` for thread safety.
-			/// On WASM, these bounds are not required as it runs in a single-threaded environment.
-			#[cfg(target_family = "wasm")]
-			pub fn subscribe<E, F, Fut>(&self, _handler: F) -> Box<dyn FnOnce()>
-			where
-				E: $crate::utils::Event<$event_set>,
-				F: FnMut(E) -> Fut + 'static,
-				Fut: std::future::Future<Output = ()> + 'static,
-			{
-				// TODO: This needs a callback-based subscribe API
-				todo!("subscribe with callback")
+			/// Returns a future that yields the first event of type E.
+			/// This is useful for waiting for the first event of a specific type.
+			pub fn subscribe_first<E: $crate::utils::Event<$event_set>>(
+				&self,
+			) -> std::pin::Pin<Box<dyn Future<Output = Result<E, tokio::sync::broadcast::error::RecvError>> + Send + '_>> {
+				$crate::utils::Subscribeable::subscribe_first::<E>(self)
 			}
 		}
 	};
@@ -308,8 +273,8 @@ macro_rules! impl_session_controls {
 
 #[macro_export]
 macro_rules! subscribe_first_of {
-    ( $receivable:expr => { $(($var:ident: $event:ty) $body:block)+ } ) => {{
-        $(let mut $var = $receivable.receiver::<$event>();)+
+    ( $provider:expr => { $(($var:ident: $event:ty) $body:block)+ } ) => {{
+        $(let mut $var = crate::utils::Subscribeable::subscribe::<$event>($provider);)+
         loop {
             tokio::select! {
                 $(Ok($var) = $var.recv() => $body,)+

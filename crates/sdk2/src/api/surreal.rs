@@ -11,7 +11,7 @@ pub struct Surreal {
 
 impl_queryable!(Surreal);
 impl_session_controls!(Surreal);
-// impl_events!(Surreal on self for SurrealEvents);
+impl_events!(Surreal for SurrealEvents);
 
 impl Subscribeable<SurrealEvents> for Surreal {
 	fn publisher(&self) -> &Publisher<SurrealEvents> {

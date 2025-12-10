@@ -5,12 +5,11 @@ use surrealdb_types::SurrealBridge;
 use url::Url;
 
 use crate::events::{
-	Connected, Connecting, EngineConnected, EngineDisconnected, EngineReconnecting,
-	Error, SurrealEvents,
+	Connected, Connecting, Disconnected, EngineConnected, EngineDisconnected, EngineError, EngineReconnecting, Error, Reconnecting, SurrealEvents
 };
 use crate::{impl_events, subscribe_first_of};
 use crate::utils::{
-	ConstructableEngine, Engine, Engines, Publisher, Subscribeable,
+	ConnectionStatus, ConstructableEngine, Engine, Engines, Event, Publisher, Subscribeable
 };
 
 /// Controller manages the connection for a Surreal client.
@@ -30,7 +29,7 @@ pub struct Controller {
 	status: Arc<ArcSwap<ConnectionStatus>>,
 }
 
-impl_events!(Controller on publisher for SurrealEvents);
+impl_events!(Controller for SurrealEvents);
 
 impl Controller {
 	pub fn new() -> Self {
@@ -42,8 +41,10 @@ impl Controller {
 		}
 	}
 
-	fn set_status(&self, status: ConnectionStatus) {
+	fn set_status(&self, event: impl Event<SurrealEvents> + Into<ConnectionStatus>) {
+		let status = event.clone().into();
 		self.status.store(Arc::new(status));
+		self.publisher.publish(event);
 	}
 
 	pub fn attach_engine<E: ConstructableEngine>(&mut self) {
@@ -60,16 +61,16 @@ impl Controller {
 		};
 
 		// Set the status to connecting
-		self.set_status(ConnectionStatus::Connecting);
-		self.publisher.publish(Connecting {});
+		self.set_status(Connecting {});
 		
 		// Construct the engine
 		let engine = constructor();
 
 		// Subscribe to engine events - each event type needs its own subscription
-		self.on_connected(engine.publisher().subscribe::<EngineConnected>());
-		self.on_reconnected(engine.publisher().subscribe::<EngineReconnecting>());
-		self.on_disconnected(engine.publisher().subscribe::<EngineDisconnected>());
+		self.on_engine_connected(engine.publisher().subscribe::<EngineConnected>());
+		self.on_engine_reconnecting(engine.publisher().subscribe::<EngineReconnecting>());
+		self.on_engine_disconnected(engine.publisher().subscribe::<EngineDisconnected>());
+		self.on_engine_error(engine.publisher().subscribe::<EngineError>());
 
 		// Store the engine
 		self.engine.store(Arc::new(Some(engine.clone())));
@@ -77,30 +78,6 @@ impl Controller {
 		engine.connect(parsed);
 
 		self.ready().await
-	}
-
-	fn on_connected(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineConnected>) {
-		tokio::spawn(async move {
-			while let Ok(event) = broadcast.recv().await {
-				eprintln!("Engine connected: {:?}", event);
-			}
-		});
-	}
-
-	fn on_reconnected(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineReconnecting>) {
-		tokio::spawn(async move {
-			while let Ok(event) = broadcast.recv().await {
-				eprintln!("Engine reconnecting: {:?}", event);
-			}
-		});
-	}
-
-	fn on_disconnected(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineDisconnected>) {
-		tokio::spawn(async move {
-			while let Ok(event) = broadcast.recv().await {
-				eprintln!("Engine disconnected: {:?}", event);
-			}
-		});
 	}
 
 	pub fn status(&self) -> ConnectionStatus {
@@ -115,13 +92,11 @@ impl Controller {
 			}
 			_ => {
 				subscribe_first_of!(self => {
-					(connected: Connected) {
-						self.set_status(ConnectionStatus::Connected(connected));
+					(_connected: Connected) {
 						return Ok(());
 					}
 					(error: Error) {
-						self.set_status(ConnectionStatus::Disconnected);
-						bail!("Connection failed: {}", error.message);
+						return Err(anyhow::anyhow!("Connection failed: {}", error.message));
 					}
 				})
 			}
@@ -140,33 +115,69 @@ impl Controller {
 			bail!("Not connected to a database. Call connect() first.");
 		}
 	}
+
+	pub async fn version(&self) -> Result<String> {
+		if let ConnectionStatus::Connected(connected) = self.status.load().as_ref() {
+			return Ok(connected.version.clone());
+		}
+
+		let bridge = self.bridge().await?;
+		bridge.version().await
+	}
+
+
+	/////////////////////////////////////////////
+	/////////// Engine event handlers ///////////
+	/////////////////////////////////////////////
+
+	fn on_engine_connected(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineConnected>) {
+		let this = self.clone();
+		tokio::spawn(async move {
+			while broadcast.recv().await.is_ok() {
+				match this.version().await {
+					Ok(version) => {
+						this.set_status(Connected { version });
+					}
+					Err(e) => {
+						this.set_status(Error { 
+							message: format!("Failed to get version: {}", e)
+						});
+					}
+				}
+			}
+		});
+	}
+
+	fn on_engine_reconnecting(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineReconnecting>) {
+		let this = self.clone();
+		tokio::spawn(async move {
+			while broadcast.recv().await.is_ok() {
+				this.set_status(Reconnecting {});
+			}
+		});
+	}
+
+	fn on_engine_disconnected(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineDisconnected>) {
+		let this = self.clone();
+		tokio::spawn(async move {
+			while broadcast.recv().await.is_ok() {
+				this.set_status(Disconnected {});
+			}
+		});
+	}
+
+	fn on_engine_error(&self, mut broadcast: tokio::sync::broadcast::Receiver<EngineError>) {
+		let this = self.clone();
+		tokio::spawn(async move {
+			while let Ok(error) = broadcast.recv().await {
+				this.set_status(Error { message: format!("Engine error: {}", error.message) });
+			}
+		});
+	}
 }
 
 impl Subscribeable<SurrealEvents> for Controller {
 	fn publisher(&self) -> &Publisher<SurrealEvents> {
 		&self.publisher
-	}
-}
-
-#[derive(Clone)]
-pub enum ConnectionStatus {
-	Disconnected,
-	Connecting,
-	Reconnecting,
-	Connected(Connected)
-}
-
-impl ConnectionStatus {
-	pub fn is_connected(&self) -> bool {
-		matches!(self, ConnectionStatus::Connected(_))
-	}
-	pub fn is_connecting(&self) -> bool {
-		matches!(self, ConnectionStatus::Connecting)
-	}
-	pub fn is_reconnecting(&self) -> bool {
-		matches!(self, ConnectionStatus::Reconnecting)
-	}
-	pub fn is_disconnected(&self) -> bool {
-		matches!(self, ConnectionStatus::Disconnected)
 	}
 }
