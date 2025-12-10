@@ -784,8 +784,8 @@ impl Value {
 			Kind::Range => self.can_cast_to::<Box<Range>>(),
 			Kind::Function(_, _) => self.can_cast_to::<Box<Closure>>(),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.can_cast_to_array_len(t, *l),
-				None => self.can_cast_to_array(t),
+				Some(l) => self.can_cast_to_set_len(t, *l),
+				None => self.can_cast_to_set(t),
 			},
 			Kind::Array(t, l) => match l {
 				Some(l) => self.can_cast_to_array_len(t, *l),
@@ -834,6 +834,20 @@ impl Value {
 	fn can_cast_to_array(&self, kind: &Kind) -> bool {
 		match self {
 			Value::Array(a) => a.iter().all(|x| x.can_cast_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_cast_to_set_len(&self, kind: &Kind, len: u64) -> bool {
+		match self {
+			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_cast_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_cast_to_set(&self, kind: &Kind) -> bool {
+		match self {
+			Value::Set(s) => s.iter().all(|x| x.can_cast_to_kind(kind)),
 			_ => false,
 		}
 	}
