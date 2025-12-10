@@ -12,12 +12,15 @@ use anyhow::bail;
 use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
+use dashmap::mapref::one::{Ref, RefMut};
+use dashmap::DashMap;
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
 use surrealdb_types::SurrealValue;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 use tracing::{instrument, trace};
 use uuid::Uuid;
@@ -128,6 +131,13 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Active sessions
+	// TODO: 
+	// - how do we do garbage collection? after X time of inactivity we just drop it?
+	// - how does a user securely get access to their session again? Do they contain a secret token?
+	sessions: Arc<LowMap<Session>>,
+	// Active transactions
+	transactions: Arc<LorMap<Transaction>>,
 }
 
 #[derive(Clone)]
@@ -647,6 +657,8 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			sessions: Arc::new(LowMap::new()),
+			transactions: Arc::new(LorMap::new()),
 		})
 	}
 
@@ -674,6 +686,8 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			sessions: self.sessions,
+			transactions: self.transactions,
 		}
 	}
 
@@ -777,6 +791,16 @@ impl Datastore {
 	/// Set specific capabilities for this Datastore
 	pub fn get_capabilities(&self) -> &Capabilities {
 		&self.capabilities
+	}
+
+	/// Set specific capabilities for this Datastore
+	pub fn get_sessions(&self) -> &Arc<LowMap<Session>> {
+		&self.sessions
+	}
+
+	/// Set specific capabilities for this Datastore
+	pub fn get_transactions(&self) -> &Arc<LorMap<Transaction>> {
+		&self.transactions
 	}
 
 	#[cfg(feature = "jwks")]
@@ -2549,4 +2573,179 @@ mod test {
 		//
 		Ok(())
 	}
+}
+
+// Lock on write map
+// Reads are free
+pub struct LowMap<T>(DashMap<uuid::Uuid, (Arc<Semaphore>, Arc<T>)>);
+
+impl<T> LowMap<T> {
+	pub fn new() -> Self {
+		Self(DashMap::new())
+	}
+
+	pub fn get(&self, id: &uuid::Uuid) -> Option<Arc<T>> {
+		self.0.get(id).map(|entry| entry.value().1.clone())
+	}
+
+	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LowMutGuard<'_, T>>> {
+		let Some(value) = self.0.get_mut(id) else {
+			return Ok(None);
+		};
+
+        let permit = value.0.clone().acquire_owned().await?;
+
+        Ok(Some(LowMutGuard::new(value, permit)))
+	}
+
+	pub async fn insert(&self, id: uuid::Uuid, value: Arc<T>) -> anyhow::Result<Option<Arc<T>>> {
+		// If entry exists, acquire its lock first to ensure exclusive access
+		let _permit = if let Some(entry) = self.0.get(&id) {
+			Some(entry.value().0.clone().acquire_owned().await?)
+		} else {
+			None
+		};
+
+		let lock = Arc::new(Semaphore::new(1));
+		Ok(self.0.insert(id, (lock, value)).map(|entry| entry.1.clone()))
+	}
+
+	pub async fn remove(&self, id: &uuid::Uuid) -> anyhow::Result<Option<Arc<T>>> {
+		// Acquire the lock first to ensure exclusive access
+		let _permit = if let Some(entry) = self.0.get(id) {
+			Some(entry.value().0.clone().acquire_owned().await?)
+		} else {
+			None
+		};
+
+		Ok(self.0.remove(id).map(|entry| entry.1.1.clone()))
+	}
+
+	pub fn keys(&self) -> impl Iterator<Item = uuid::Uuid> {
+		self.0.iter().map(|entry| entry.key().clone())
+	}
+}
+pub struct LowMutGuard<'a, T> {
+	value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
+	_permit: OwnedSemaphorePermit,
+}
+
+impl<'a, T> LowMutGuard<'a, T> {
+	pub fn new(value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
+		Self { value, _permit: permit }
+	}
+}
+
+impl<'a, T> std::ops::Deref for LowMutGuard<'a, T> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value.1
+    }
+}
+
+impl<'a, T> std::ops::DerefMut for LowMutGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut (*self.value).1
+    }
+}
+
+// Lock on read map
+pub struct LorMap<T>(DashMap<uuid::Uuid, (Arc<Semaphore>, Arc<T>)>);
+
+impl<T> LorMap<T> {
+	pub fn new() -> Self {
+		Self(DashMap::new())
+	}
+
+	pub async fn get(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorGuard<'_, T>>> {
+		let Some(value) = self.0.get(id) else {
+			return Ok(None);
+		};
+
+        let permit = value.0.clone().acquire_owned().await?;
+
+        Ok(Some(LorGuard::new(value, permit)))
+	}
+
+	pub async fn get_mut(&self, id: &uuid::Uuid) -> anyhow::Result<Option<LorMutGuard<'_, T>>> {
+		let Some(value) = self.0.get_mut(id) else {
+			return Ok(None);
+		};
+
+        let permit = value.0.clone().acquire_owned().await?;
+
+        Ok(Some(LorMutGuard::new(value, permit)))
+	}
+
+	pub async fn insert(&self, id: uuid::Uuid, value: Arc<T>) -> anyhow::Result<Option<Arc<T>>> {
+		// If entry exists, acquire its lock first to ensure exclusive access
+		let _permit = if let Some(entry) = self.0.get(&id) {
+			Some(entry.value().0.clone().acquire_owned().await?)
+		} else {
+			None
+		};
+
+		let lock = Arc::new(Semaphore::new(1));
+		Ok(self.0.insert(id, (lock, value)).map(|entry| entry.1.clone()))
+	}
+
+	pub async fn remove(&self, id: &uuid::Uuid) -> anyhow::Result<Option<Arc<T>>> {
+		// Acquire the lock first to ensure exclusive access
+		let _permit = if let Some(entry) = self.0.get(id) {
+			Some(entry.value().0.clone().acquire_owned().await?)
+		} else {
+			None
+		};
+
+		Ok(self.0.remove(id).map(|entry| entry.1.1.clone()))
+	}
+
+	pub fn keys(&self) -> impl Iterator<Item = uuid::Uuid> {
+		self.0.iter().map(|entry| entry.key().clone())
+	}
+}
+
+pub struct LorGuard<'a, T> {
+	value: Ref<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
+	_permit: OwnedSemaphorePermit,
+}
+
+impl<'a, T> LorGuard<'a, T> {
+	pub fn new(value: Ref<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
+		Self { value, _permit: permit }
+	}
+}
+
+impl<'a, T> std::ops::Deref for LorGuard<'a, T> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value.1
+    }
+}
+
+pub struct LorMutGuard<'a, T> {
+	value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>,
+	_permit: OwnedSemaphorePermit,
+}
+
+impl<'a, T> LorMutGuard<'a, T> {
+	pub fn new(value: RefMut<'a, uuid::Uuid, (Arc<Semaphore>, Arc<T>)>, permit: OwnedSemaphorePermit) -> Self {
+		Self { value, _permit: permit }
+	}
+}
+
+impl<'a, T> std::ops::Deref for LorMutGuard<'a, T> {
+    type Target = Arc<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value.1
+    }
+}
+
+impl<'a, T> std::ops::DerefMut for LorMutGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut (*self.value).1
+    }
 }

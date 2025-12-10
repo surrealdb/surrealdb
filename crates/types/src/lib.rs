@@ -11,6 +11,7 @@ mod traits;
 pub(crate) mod utils;
 mod value;
 mod variables;
+mod rpc;
 
 #[doc(hidden)]
 pub use anyhow;
