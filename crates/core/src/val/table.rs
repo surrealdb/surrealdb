@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -10,21 +9,7 @@ use crate::val::IndexFormat;
 
 /// A value type referencing a specific table.
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	PartialEq,
-	Ord,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::sql::Table")]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]

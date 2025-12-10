@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -12,21 +11,7 @@ use crate::expr::Expr;
 use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Array")]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Array(pub(crate) Vec<Value>);

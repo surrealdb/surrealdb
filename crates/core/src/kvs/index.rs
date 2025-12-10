@@ -277,7 +277,7 @@ impl IndexBuilder {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,

@@ -3010,15 +3010,15 @@ dependencies = [
 
 [[package]]
 name = "revision"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1afd502a7bd15659a0b81479de42a249afa2dd3bdcc689871d6da4b3d005018d"
+checksum = "151b506b552af29c020e79566c2b7c1e7ea783a8fb511c798c1d496a7dfea7e9"
 dependencies = [
  "bytes",
  "chrono",
  "geo 0.31.0",
  "regex",
- "revision-derive 0.15.0",
+ "revision-derive 0.16.0",
  "roaring",
  "rust_decimal",
  "uuid",
@@ -3037,9 +3037,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "400e8b48caaca9faa40f590f643c5c155d6c8700378e700de1bd8f453e11578d"
+checksum = "167fb4eca16dff8e47758811096c6b353c9d00d972dd074005d460cb3f21d192"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3591,9 +3591,9 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "storekey"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac0a0c60667da4e707563b1f1616534926d4a2508d6a7cdb26414a9103f63e1c"
+checksum = "bd9a94571bde7369ecaac47cec2e6844642d99166bd452fbd8def74b5b917b2f"
 dependencies = [
  "bytes",
  "storekey-derive",
@@ -3602,9 +3602,9 @@ dependencies = [
 
 [[package]]
 name = "storekey-derive"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7555a4e3498505187316766c9f4fc23d54ac1ee4455e6c931f87a6990efbb8ba"
+checksum = "6079d53242246522ec982de613c5c952cc7b1380ef2f8622fcdab9bfe73c0098"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3705,7 +3705,7 @@ dependencies = [
  "rayon",
  "reblessive",
  "regex",
- "revision 0.15.0",
+ "revision 0.16.0",
  "ring",
  "roaring",
  "rquickjs",
@@ -4542,13 +4542,13 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.18.1"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
+checksum = "e2e054861b4bd027cd373e18e8d8d8e6548085000e41290d95ce0c373a654b4a"
 dependencies = [
  "getrandom 0.3.4",
  "js-sys",
- "serde",
+ "serde_core",
  "wasm-bindgen",
 ]
 
