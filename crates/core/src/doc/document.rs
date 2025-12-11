@@ -290,7 +290,7 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// Return true if the document has been extracted by an iterator that already matched the
 	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
@@ -444,7 +444,8 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+	#[instrument(level = "trace", name = "Document::db", skip_all)]
+	pub(super) async fn db(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -473,7 +474,8 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<TableDefinition>> {
+	#[instrument(level = "trace", name = "Document::tb", skip_all)]
+	pub(super) async fn tb(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the record id
@@ -524,7 +526,8 @@ impl Document {
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<[TableDefinition]>> {
+	#[instrument(level = "trace", name = "Document::ft", skip_all)]
+	pub(super) async fn ft(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -553,7 +556,8 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	pub async fn ev(
+	#[instrument(level = "trace", name = "Document::ev", skip_all)]
+	pub(super) async fn ev(
 		&self,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -586,7 +590,8 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(
+	#[instrument(level = "trace", name = "Document::fd", skip_all)]
+	pub(super) async fn fd(
 		&self,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -617,7 +622,8 @@ impl Document {
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(
+	#[instrument(level = "trace", name = "Document::ix", skip_all)]
+	pub(super) async fn ix(
 		&self,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -650,7 +656,8 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	pub async fn lv(
+	#[instrument(level = "trace", name = "Document::lv", skip_all)]
+	pub(super) async fn lv(
 		&self,
 		ctx: &FrozenContext,
 		opt: &Options,

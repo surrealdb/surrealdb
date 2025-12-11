@@ -5,8 +5,8 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{FieldDefinition, Record, TableDefinition};
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -104,9 +104,13 @@ pub(crate) enum Workable {
 #[derive(Debug)]
 pub(crate) struct Processed {
 	/// Whether this document only fetched keys or just count
-	pub(crate) rs: RecordStrategy,
+	pub(crate) record_strategy: RecordStrategy,
 	/// Whether this document needs to have an ID generated
 	pub(crate) generate: Option<String>,
+	/// The table definition for this document, used in table scans
+	pub(crate) table: Option<Arc<TableDefinition>>,
+	/// The table fields for this document, used in table scans
+	pub(crate) table_fields: Option<Arc<[FieldDefinition]>>,
 	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
@@ -118,7 +122,7 @@ pub(crate) struct Processed {
 #[derive(Default)]
 pub(crate) struct Iterator {
 	/// Iterator status
-	run: Canceller,
+	canceller: Canceller,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -145,7 +149,7 @@ pub(crate) struct Iterator {
 impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
-			run: self.run.clone(),
+			canceller: self.canceller.clone(),
 			limit: self.limit,
 			start: self.start,
 			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
@@ -519,7 +523,7 @@ impl Iterator {
 		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = Context::new(ctx);
-		self.run = cancel_ctx.add_cancel();
+		self.canceller = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
@@ -933,7 +937,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processed,
 	) -> Result<()> {
-		let rs = pro.rs;
+		let rs = pro.record_strategy;
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
@@ -956,7 +960,7 @@ impl Iterator {
 			if let Operable::Count(count) = pro.val {
 				return Ok(count.into());
 			}
-			if matches!(pro.rs, RecordStrategy::KeysOnly) {
+			if matches!(pro.record_strategy, RecordStrategy::KeysOnly) {
 				return Ok(map! { "count".to_string() => Value::from(1) }.into());
 			}
 		}
@@ -982,13 +986,13 @@ impl Iterator {
 			}
 			Err(IgnoreError::Error(e)) => {
 				self.error = Some(e);
-				self.run.cancel();
+				self.canceller.cancel();
 				return;
 			}
 			Ok(v) => {
 				if let Err(e) = self.results.push(stk, ctx, opt, rs, v).await {
 					self.error = Some(e);
-					self.run.cancel();
+					self.canceller.cancel();
 					return;
 				}
 			}
@@ -997,10 +1001,10 @@ impl Iterator {
 		// We use equality here because results are appended one-by-one; once the
 		// threshold is reached, further work would be wasted as START/LIMIT
 		// post-processing (if any) already has enough input to produce the final output.
-		if let Some(l) = self.cancel_threshold
-			&& self.results.len() == l
+		if let Some(cancel_threshold) = self.cancel_threshold
+			&& self.results.len() == cancel_threshold
 		{
-			self.run.cancel()
+			self.canceller.cancel()
 		}
 	}
 }

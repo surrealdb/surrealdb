@@ -29,6 +29,6 @@ impl Document {
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
 		self.process_changefeeds(ctx, opt, stm).await?;
-		self.pluck(stk, ctx, opt, stm).await
+		self.pluck_generic(stk, ctx, opt, stm).await
 	}
 }

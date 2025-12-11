@@ -8,7 +8,7 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, Record, TableDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -24,6 +24,7 @@ use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 impl Iterable {
+	#[instrument(level = "trace", name = "Iterable::iterate", skip_all)]
 	pub(super) async fn iterate(
 		self,
 		stk: &mut Stk,
@@ -33,29 +34,37 @@ impl Iterable {
 		ite: &mut Iterator,
 		dis: Option<&mut SyncDistinct>,
 	) -> Result<()> {
-		if self.iteration_stage_check(ctx) {
-			let txn = ctx.tx();
-			let mut coll = ConcurrentCollector {
-				stk,
-				ctx,
-				opt,
-				txn: &txn,
-				stm,
-				ite,
-			};
-			if let Some(dis) = dis {
-				let mut coll = ConcurrentDistinctCollector {
-					coll,
-					dis,
-				};
-				coll.collect_iterable(ctx, opt, self).await?;
-			} else {
-				coll.collect_iterable(ctx, opt, self).await?;
-			}
+		if !self.iteration_stage_check(ctx) {
+			return Ok(());
 		}
+
+		let txn = ctx.tx();
+		let mut concurrent_collector = ConcurrentCollector {
+			stk,
+			ctx,
+			opt,
+			txn: &txn,
+			stm,
+			ite,
+		};
+
+		if let Some(dis) = dis {
+			let mut distinct_collector = ConcurrentDistinctCollector {
+				coll: concurrent_collector,
+				dis,
+			};
+			distinct_collector.collect_iterable(ctx, opt, self).await?;
+		} else {
+			concurrent_collector.collect_iterable(ctx, opt, self).await?;
+		}
+
 		Ok(())
 	}
 
+	/// Check if the iteration stage is valid for the iterable.
+	///
+	/// This is only false if the iterable is a table or index and the iteration stage is building a
+	/// bruteforce knn.
 	fn iteration_stage_check(&self, ctx: &FrozenContext) -> bool {
 		match self {
 			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _) => {
@@ -87,7 +96,7 @@ pub(super) enum Collected {
 	Value(Value),
 	Defer(RecordId),
 	Mergeable(String, Option<RecordIdKey>, Value),
-	KeyVal(Key, Val),
+	KeyVal(Arc<TableDefinition>, Arc<[FieldDefinition]>, Key, Val),
 	Count(usize),
 	IndexItem(IndexItemRecord),
 	IndexItemKey(IndexItemRecord),
@@ -146,7 +155,7 @@ impl Collected {
 			// Records with merge operations - applies data merging logic
 			Self::Mergeable(tb, id, o) => Self::process_mergeable(tb, id, o).await,
 			// Raw key-value pairs from storage layer
-			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
+			Self::KeyVal(tb, fields, key, val) => Ok(Self::process_key_val(tb, fields, key, val)?),
 			// Count aggregation results - no record processing needed
 			Self::Count(c) => Ok(Self::process_count(c)),
 			// Index scan results with values - includes pre-fetched data
@@ -191,8 +200,10 @@ impl Collected {
 		let val = Operable::Value(record);
 		// Process the record
 		Ok(Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val,
@@ -211,8 +222,10 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		let pro = Processed {
-			rs: RecordStrategy::KeysOnly,
+			record_strategy: RecordStrategy::KeysOnly,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val,
@@ -229,8 +242,10 @@ impl Collected {
 		};
 		// Process the record
 		let pro = Processed {
-			rs: RecordStrategy::KeysOnly,
+			record_strategy: RecordStrategy::KeysOnly,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(rid.into()),
 			ir: None,
 			val: Operable::Value(Record::new(Value::Null.into()).into_read_only()),
@@ -252,22 +267,28 @@ impl Collected {
 	) -> Result<Processed> {
 		let pro = match (rid_only, v) {
 			(true, RelateThrough::Table(v)) => Processed {
-				rs: RecordStrategy::KeysOnly,
+				record_strategy: RecordStrategy::KeysOnly,
 				generate: Some(v),
+				table: None,
+				table_fields: None,
 				rid: None,
 				ir: None,
 				val: Operable::Value(Default::default()),
 			},
 			(false, RelateThrough::Table(v)) => Processed {
-				rs: RecordStrategy::KeysAndValues,
+				record_strategy: RecordStrategy::KeysAndValues,
 				generate: Some(v),
+				table: None,
+				table_fields: None,
 				rid: None,
 				ir: None,
 				val: Operable::Relate(f, Default::default(), w, None),
 			},
 			(true, RelateThrough::RecordId(v)) => Processed {
-				rs: RecordStrategy::KeysOnly,
+				record_strategy: RecordStrategy::KeysOnly,
 				generate: None,
+				table: None,
+				table_fields: None,
 				rid: Some(v.into()),
 				ir: None,
 				val: Operable::Value(Default::default()),
@@ -278,8 +299,10 @@ impl Collected {
 				let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
 
 				Processed {
-					rs: RecordStrategy::KeysAndValues,
+					record_strategy: RecordStrategy::KeysAndValues,
 					generate: None,
+					table: None,
+					table_fields: None,
 					rid: Some(v.into()),
 					ir: None,
 					val,
@@ -309,8 +332,10 @@ impl Collected {
 		let val = Operable::Value(val);
 		// Process the document record
 		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(record_id.into()),
 			ir: None,
 			val,
@@ -323,8 +348,10 @@ impl Collected {
 	async fn process_yield(v: String) -> Result<Processed> {
 		// Pass the value through
 		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: Some(v),
+			table: None,
+			table_fields: None,
 			rid: None,
 			ir: None,
 			val: Operable::Value(Default::default()),
@@ -334,14 +361,16 @@ impl Collected {
 
 	#[instrument(level = "trace", skip_all)]
 	fn process_value(v: Value) -> Processed {
-		// Try to extract the id field if present and parse as Thing
+		// Try to extract the id field if present and parse as RecordId
 		let rid = match &v {
-			Value::RecordId(thing) => Some(Arc::new(thing.clone())),
+			Value::RecordId(rid) => Some(Arc::new(rid.clone())),
 			_ => None,
 		};
 		Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid,
 			ir: None,
 			val: Operable::Value(Record::new(v.into()).into_read_only()),
@@ -352,8 +381,10 @@ impl Collected {
 	async fn process_defer(v: RecordId) -> Result<Processed> {
 		// Process the document record
 		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(v.into()),
 			ir: None,
 			val: Operable::Value(Default::default()),
@@ -366,16 +397,20 @@ impl Collected {
 		// Process the document record
 		let pro = if let Some(id) = id {
 			Processed {
-				rs: RecordStrategy::KeysAndValues,
+				record_strategy: RecordStrategy::KeysAndValues,
 				generate: None,
+				table: None,
+				table_fields: None,
 				rid: Some(RecordId::new(tb, id).into()),
 				ir: None,
 				val: Operable::Insert(Default::default(), o.into()),
 			}
 		} else {
 			Processed {
-				rs: RecordStrategy::KeysOnly,
+				record_strategy: RecordStrategy::KeysOnly,
 				generate: Some(tb),
+				table: None,
+				table_fields: None,
 				rid: None,
 				ir: None,
 				val: Operable::Insert(Default::default(), o.into()),
@@ -386,7 +421,7 @@ impl Collected {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	fn process_key_val(key: Key, val: Val) -> Result<Processed> {
+	fn process_key_val(tb: Arc<TableDefinition>, fields: Arc<[FieldDefinition]>, key: Key, val: Val) -> Result<Processed> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
@@ -399,8 +434,10 @@ impl Collected {
 		let val = Operable::Value(val.into());
 		// Process the record
 		Ok(Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: Some(tb),
+			table_fields: Some(fields),
 			rid: Some(rid.into()),
 			ir: None,
 			val,
@@ -410,8 +447,10 @@ impl Collected {
 	#[instrument(level = "trace", skip_all)]
 	fn process_count(count: usize) -> Processed {
 		Processed {
-			rs: RecordStrategy::Count,
+			record_strategy: RecordStrategy::Count,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: None,
 			ir: None,
 			val: Operable::Count(count),
@@ -422,8 +461,10 @@ impl Collected {
 	fn process_index_item_key(i: IndexItemRecord) -> Processed {
 		let (t, v, ir) = i.consume();
 		Processed {
-			rs: RecordStrategy::KeysOnly,
+			record_strategy: RecordStrategy::KeysOnly,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
 			val: Operable::Value(
@@ -453,8 +494,10 @@ impl Collected {
 			txn.get_record(ns, db, &t.table, &t.key, None).await?
 		};
 		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
+			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
+			table: None,
+			table_fields: None,
 			rid: Some(t),
 			ir: Some(ir.into()),
 			val: Operable::Value(v),
@@ -552,79 +595,78 @@ pub(super) trait Collector {
 		Cow::Borrowed(ctx)
 	}
 
-	#[instrument(level = "trace", skip_all)]
+	#[instrument(level = "trace", name = "Collector::collect_iterable", skip(self, ctx, opt))]
 	async fn collect_iterable(
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
 		iterable: Iterable,
 	) -> Result<()> {
-		if !ctx.is_done(None).await? {
-			match iterable {
-				Iterable::Value(v) => {
-					if !v.is_nullish() {
-						return self.collect(Collected::Value(v)).await;
-					}
+		if ctx.is_done(None).await? {
+			return Ok(());
+		}
+
+		match iterable {
+			Iterable::Value(v) => {
+				if v.is_nullish() {
+					return Ok(());
 				}
-				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
-				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
-				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
-				Iterable::Lookup {
-					from,
-					kind,
-					what,
-				} => self.collect_lookup(ctx, opt, from, kind, what).await?,
-				// For Table and Range iterables, the RecordStrategy determines whether we
-				// collect only keys, keys+values, or just a count without materializing records.
-				Iterable::Range(tb, v, rs, sc) => match rs {
-					RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
+
+				return self.collect(Collected::Value(v)).await;
+			}
+			Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
+			Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
+			Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
+			Iterable::Lookup {
+				from,
+				kind,
+				what,
+			} => self.collect_lookup(ctx, opt, from, kind, what).await?,
+			// For Table and Range iterables, the RecordStrategy determines whether we
+			// collect only keys, keys+values, or just a count without materializing records.
+			Iterable::Range(tb, v, rs, sc) => match rs {
+				RecordStrategy::Count => self.collect_range_count(ctx, opt, &tb, v).await?,
+				RecordStrategy::KeysOnly => self.collect_range_keys(ctx, opt, &tb, v, sc).await?,
+				RecordStrategy::KeysAndValues => self.collect_range(ctx, opt, &tb, v, sc).await?,
+			},
+			Iterable::Table(table, rs, sc) => {
+				let ctx = Self::check_query_planner_context(ctx, &table);
+				match rs {
+					RecordStrategy::Count => self.collect_table_count(&ctx, opt, &table).await?,
 					RecordStrategy::KeysOnly => {
-						self.collect_range_keys(ctx, opt, &tb, v, sc).await?
+						self.collect_table_keys(&ctx, opt, &table, sc).await?
 					}
 					RecordStrategy::KeysAndValues => {
-						self.collect_range(ctx, opt, &tb, v, sc).await?
+						self.collect_table(&ctx, opt, &table, sc).await?
 					}
-				},
-				Iterable::Table(v, rs, sc) => {
-					let ctx = Self::check_query_planner_context(ctx, &v);
-					match rs {
-						RecordStrategy::Count => self.collect_table_count(&ctx, opt, &v).await?,
-						RecordStrategy::KeysOnly => {
-							self.collect_table_keys(&ctx, opt, &v, sc).await?
-						}
-						RecordStrategy::KeysAndValues => {
-							self.collect_table(&ctx, opt, &v, sc).await?
-						}
-					}
-				}
-				Iterable::Index(v, irf, rs) => {
-					if let Some(qp) = ctx.get_query_planner()
-						&& let Some(exe) = qp.get_query_executor(v.as_str())
-					{
-						// Attach the table-specific QueryExecutor to the Context to avoid
-						// per-record lookups in the QueryPlanner during index scans.
-						// This significantly reduces overhead inside tight iterator loops.
-						let mut ctx = Context::new(ctx);
-						ctx.set_query_executor(exe.clone());
-						let ctx = ctx.freeze();
-						return self.collect_index_items(&ctx, opt, irf, rs).await;
-					}
-					self.collect_index_items(ctx, opt, irf, rs).await?
-				}
-				Iterable::Mergeable(tb, id, o) => {
-					self.collect(Collected::Mergeable(tb, id, o)).await?
-				}
-				Iterable::Relatable(f, v, w, o) => {
-					self.collect(Collected::Relatable {
-						f,
-						v,
-						w,
-						o,
-					})
-					.await?
 				}
 			}
+			Iterable::Index(v, irf, rs) => {
+				if let Some(qp) = ctx.get_query_planner()
+					&& let Some(exe) = qp.get_query_executor(v.as_str())
+				{
+					// Attach the table-specific QueryExecutor to the Context to avoid
+					// per-record lookups in the QueryPlanner during index scans.
+					// This significantly reduces overhead inside tight iterator loops.
+					let mut ctx = Context::new(ctx);
+					ctx.set_query_executor(exe.clone());
+					let ctx = ctx.freeze();
+					return self.collect_index_items(&ctx, opt, irf, rs).await;
+				}
+				self.collect_index_items(ctx, opt, irf, rs).await?
+			}
+			Iterable::Mergeable(tb, id, o) => self.collect(Collected::Mergeable(tb, id, o)).await?,
+			Iterable::Relatable(f, v, w, o) => {
+				self.collect(Collected::Relatable {
+					f,
+					v,
+					w,
+					o,
+				})
+				.await?
+			}
 		}
+
 		Ok(())
 	}
 
@@ -686,20 +728,19 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		v: &str,
+		table: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
-		if db.strict {
-			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
-		}
+		let tb = txn.expect_tb(db.namespace_id, db.database_id, table).await?;
+		let fields = txn.all_tb_fields(db.namespace_id, db.database_id, table, opt.version).await?;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
-		let end = record::suffix(db.namespace_id, db.database_id, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, table)?;
+		let end = record::suffix(db.namespace_id, db.database_id, table)?;
 		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			r
@@ -718,7 +759,7 @@ pub(super) trait Collector {
 			}
 			// Parse the data from the store
 			let (k, v) = res?;
-			self.collect(Collected::KeyVal(k, v)).await?;
+			self.collect(Collected::KeyVal(Arc::clone(&tb), Arc::clone(&fields), k, v)).await?;
 			count += 1;
 		}
 		// Everything ok
@@ -832,16 +873,17 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		tb: &str,
+		table_name: &str,
 		r: RecordIdKeyRange,
 		sc: ScanDirection,
 	) -> Result<()> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-
-		// Get the transaction
 		let txn = ctx.tx();
+		let tb = txn.expect_tb(ns, db, table_name).await?;
+		let fields = txn.all_tb_fields(ns, db, table_name, opt.version).await?;
+
 		// Prepare
-		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
+		let (beg, end) = Self::range_prepare(ns, db, table_name, r).await?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -862,7 +904,7 @@ pub(super) trait Collector {
 			// Parse the data from the store
 			let (k, v) = res?;
 			// Collect
-			self.collect(Collected::KeyVal(k, v)).await?;
+			self.collect(Collected::KeyVal(Arc::clone(&tb), Arc::clone(&fields), k, v)).await?;
 			count += 1;
 		}
 		// Everything ok

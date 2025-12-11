@@ -324,16 +324,16 @@ impl Statement<'_> {
 		}
 	}
 
-	/// Returns any OMIT clause if specified
-	pub(crate) fn omit(&self) -> Option<&Vec<Idiom>> {
-		match self {
-			Statement::Select {
-				omit,
-				..
-			} => Some(omit),
-			_ => None,
-		}
-	}
+	// Returns any OMIT clause if specified
+	// pub(crate) fn omit(&self) -> Option<&Vec<Idiom>> {
+	// 	match self {
+	// 		Statement::Select {
+	// 			omit,
+	// 			..
+	// 		} => Some(omit),
+	// 		_ => None,
+	// 	}
+	// }
 
 	/// Returns any SET, CONTENT, or MERGE clause if specified
 	pub(crate) fn data(&self) -> Option<&Data> {

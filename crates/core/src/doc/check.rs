@@ -11,7 +11,7 @@ use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::err::Error;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{FlowResultExt as _, Part};
+use crate::expr::{FlowResultExt as _, Part, SelectStatement};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
@@ -94,12 +94,8 @@ impl Document {
 	/// If the user specifies a record directly
 	/// using a Record ID, and that record does not
 	/// exist, then this function will exit early.
-	pub(super) async fn check_record_exists(
-		&self,
-		_ctx: &FrozenContext,
-		_opt: &Options,
-		_stm: &Statement<'_>,
-	) -> Result<(), IgnoreError> {
+	#[instrument(level = "trace", name = "Document::check_record_exists", skip_all)]
+	pub(super) fn check_record_exists(&self) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() && self.current.doc.as_ref().is_none() {
 			return Err(IgnoreError::Ignore);
@@ -116,6 +112,7 @@ impl Document {
 	/// match the in and out values specified in the
 	/// statement, or present in any record which
 	/// is being updated.
+	#[instrument(level = "trace", name = "Document::check_data_fields", skip_all)]
 	pub(super) async fn check_data_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -199,6 +196,7 @@ impl Document {
 	/// the document. This ensures that records from
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
+	#[instrument(level = "trace", name = "Document::check_where_condition", skip_all)]
 	pub(super) async fn check_where_condition(
 		&mut self,
 		stk: &mut Stk,
@@ -207,32 +205,81 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if we have already processed a condition
-		if !self.is_condition_checked() {
-			// Check if a WHERE condition is specified
-			if let Some(cond) = stm.cond() {
-				// Process the permitted documents
-				let current = if self.reduced(stk, ctx, opt, Current).await? {
-					self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
-					&self.current_reduced
-				} else {
-					self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
-					&self.current
-				};
-				// Check if the expression is truthy
-				if !stk
-					.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
-					.await
-					.catch_return()?
-					.is_truthy()
-				{
-					// Ignore this document
-					return Err(IgnoreError::Ignore);
-				}
-			}
+		if self.is_condition_checked() {
+			return Ok(());
+		}
+
+		// Check if a WHERE condition is specified
+		let Some(cond) = stm.cond() else {
+			return Ok(());
+		};
+
+		// Process the permitted documents
+		let current = if self.reduced(stk, ctx, opt, Current).await? {
+			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+			&self.current_reduced
+		} else {
+			self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+			&self.current
+		};
+		// Check if the expression is truthy
+		if !stk
+			.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
+			.await
+			.catch_return()?
+			.is_truthy()
+		{
+			// Ignore this document
+			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
 		Ok(())
 	}
+
+	/// Checks that the `WHERE` condition on a query
+	/// matches before proceeding with processing
+	/// the document. This ensures that records from
+	/// a table, or from an index can be filtered out
+	/// before being included within the query output.
+	#[instrument(level = "trace", name = "Document::check_select_where_condition", skip_all)]
+	pub(super) async fn check_select_where_condition(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		stm: &SelectStatement,
+	) -> Result<(), IgnoreError> {
+		// Check if we have already processed a condition
+		if self.is_condition_checked() {
+			return Ok(());
+		}
+
+		// Check if a WHERE condition is specified
+		let Some(cond) = &stm.cond else {
+			return Ok(());
+		};
+		// Process the permitted documents
+		let current = if self.reduced(stk, ctx, opt, Current).await? {
+			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+			&self.current_reduced
+		} else {
+			self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+			&self.current
+		};
+		// Check if the expression is truthy
+		if !stk
+			.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
+			.await
+			.catch_return()?
+			.is_truthy()
+		{
+			// Ignore this document
+			return Err(IgnoreError::Ignore);
+		}
+		// Carry on
+		Ok(())
+	}
+
 	/// Checks the `PERMISSIONS` clause for viewing a
 	/// record, based on the `select` permissions for
 	/// the table that this record belongs to. This
@@ -241,7 +288,8 @@ impl Document {
 	/// This function is used when outputting a record,
 	/// ensuring that a user has the permission to view
 	/// the record after it has been updated or modified.
-	pub(super) async fn check_permissions_view(
+	#[instrument(level = "trace", name = "Document::check_output_permissions", skip_all)]
+	pub(super) async fn check_output_permissions(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -249,44 +297,50 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(Action::View)? {
-				// Get the table for this document
-				let table = self.tb(ctx, opt).await?;
-				// Get the correct document to check
-				let doc = match stm.is_delete() {
-					true => &self.initial,
-					false => &self.current,
-				};
-				// Process the table permissions
-				match &table.permissions.select {
-					Permission::None => return Err(IgnoreError::Ignore),
-					Permission::Full => (),
-					Permission::Specific(e) => {
-						// Disable permissions
-						let opt = &opt.new_with_perms(false);
-						// Process the PERMISSION clause
-						if !stk
-							.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
-							.await
-							.catch_return()?
-							.is_truthy()
-						{
-							return Err(IgnoreError::Ignore);
-						}
-					}
+		if self.id.is_none() {
+			return Ok(());
+		}
+
+		// Should we run permissions checks?
+		if !opt.check_perms(Action::View)? {
+			return Ok(());
+		}
+
+		// Get the table for this document
+		let table = self.tb(ctx, opt).await?;
+		// Get the correct document to check
+		let doc = match stm.is_delete() {
+			true => &self.initial,
+			false => &self.current,
+		};
+		// Process the table permissions
+		match &table.permissions.select {
+			Permission::None => return Err(IgnoreError::Ignore),
+			Permission::Full => (),
+			Permission::Specific(e) => {
+				// Disable permissions
+				let opt = &opt.new_with_perms(false);
+				// Process the PERMISSION clause
+				if !stk
+					.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
-		// Carry on
+
 		Ok(())
 	}
+
 	/// Checks the `PERMISSIONS` clause on the table
 	/// for this record, returning immediately if the
 	/// permissions are `NONE`. This function does not
 	/// check any custom advanced table permissions,
 	/// which should be checked at a later stage.
+	#[instrument(level = "trace", name = "Document::check_permissions_quick", skip_all)]
 	pub(super) async fn check_permissions_quick(
 		&self,
 		_stk: &mut Stk,
@@ -295,19 +349,22 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(stm.into())? {
-				// Get the table for this document
-				let table = self.tb(ctx, opt).await?;
-				// Get the permissions for this table
-				let perms = stm.permissions(&table, self.is_new());
-				// Exit early if permissions are NONE
-				if perms.is_none() {
-					return Err(IgnoreError::Ignore);
-				}
+		if self.id.is_none() {
+			return Ok(());
+		}
+
+		// Should we run permissions checks?
+		if opt.check_perms(stm.into())? {
+			// Get the table for this document
+			let table = self.tb(ctx, opt).await?;
+			// Get the permissions for this table
+			let perms = stm.permissions(&table, self.is_new());
+			// Exit early if permissions are NONE
+			if perms.is_none() {
+				return Err(IgnoreError::Ignore);
 			}
 		}
+
 		// Carry on
 		Ok(())
 	}
@@ -316,6 +373,7 @@ impl Document {
 	/// clauses and evaluating the expression. This
 	/// function checks and evaluates `FULL`, `NONE`,
 	/// and specific permissions clauses on the table.
+	#[instrument(level = "trace", name = "Document::check_permissions_table", skip_all)]
 	pub(super) async fn check_permissions_table(
 		&self,
 		stk: &mut Stk,
@@ -324,58 +382,63 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if this record exists
-		if self.id.is_some() {
-			// Should we run permissions checks?
-			if opt.check_perms(stm.into())? {
-				// Check that record authentication matches session
-				if opt.auth.is_record() {
-					let ns = opt.ns()?;
-					if opt.auth.level().ns() != Some(ns) {
-						return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
-							ns: ns.into(),
-						})));
-					}
-					let db = opt.db()?;
-					if opt.auth.level().db() != Some(db) {
-						return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
-							db: db.into(),
-						})));
-					}
-				}
-				// Get the table
-				let table = self.tb(ctx, opt).await?;
-				// Get the permission clause
-				let perms = stm.permissions(&table, self.is_new());
-				// Process the table permissions
-				match perms {
-					Permission::None => return Err(IgnoreError::Ignore),
-					Permission::Full => return Ok(()),
-					Permission::Specific(e) => {
-						// Disable permissions
-						let opt = &opt.new_with_perms(false);
-						// Process the PERMISSION clause
-						if !stk
-							.run(|stk| {
-								e.compute(
-									stk,
-									ctx,
-									opt,
-									Some(match stm.is_delete() {
-										true => &self.initial,
-										false => &self.current,
-									}),
-								)
-							})
-							.await
-							.catch_return()?
-							.is_truthy()
-						{
-							return Err(IgnoreError::Ignore);
-						}
-					}
+		if self.id.is_none() {
+			return Ok(());
+		}
+
+		// Should we run permissions checks?
+		if !opt.check_perms(stm.into())? {
+			return Ok(());
+		}
+
+		// Check that record authentication matches session
+		if opt.auth.is_record() {
+			let ns = opt.ns()?;
+			if opt.auth.level().ns() != Some(ns) {
+				return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
+					ns: ns.into(),
+				})));
+			}
+			let db = opt.db()?;
+			if opt.auth.level().db() != Some(db) {
+				return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
+					db: db.into(),
+				})));
+			}
+		}
+		// Get the table
+		let table = self.tb(ctx, opt).await?;
+		// Get the permission clause
+		let perms = stm.permissions(&table, self.is_new());
+		// Process the table permissions
+		match perms {
+			Permission::None => return Err(IgnoreError::Ignore),
+			Permission::Full => return Ok(()),
+			Permission::Specific(e) => {
+				// Disable permissions
+				let opt = &opt.new_with_perms(false);
+				// Process the PERMISSION clause
+				if !stk
+					.run(|stk| {
+						e.compute(
+							stk,
+							ctx,
+							opt,
+							Some(match stm.is_delete() {
+								true => &self.initial,
+								false => &self.current,
+							}),
+						)
+					})
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
+					return Err(IgnoreError::Ignore);
 				}
 			}
 		}
+
 		// Carry on
 		Ok(())
 	}

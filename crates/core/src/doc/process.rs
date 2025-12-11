@@ -15,7 +15,15 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pro: Processed,
+		Processed {
+			record_strategy,
+			generate,
+			table,
+			table_fields,
+			rid,
+			val,
+			ir,
+		}: Processed,
 	) -> Result<Value, IgnoreError> {
 		// Check current context
 		if ctx.is_done(None).await? {
@@ -23,7 +31,7 @@ impl Document {
 			return Err(IgnoreError::Ignore);
 		}
 		// Setup a new workable
-		let ins = match pro.val {
+		let ins = match val {
 			Operable::Value(v) => (v, Workable::Normal),
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
@@ -32,12 +40,13 @@ impl Document {
 			}
 		};
 		// Setup a new document
-		let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, false, pro.rs);
+		let mut doc = Document::new(rid, ir, generate, ins.0, ins.1, false, record_strategy);
 		// Process the statement
 		let res = match stm {
 			Statement::Select {
-				..
-			} => doc.select(stk, ctx, opt, stm).await?,
+				stmt,
+				omit,
+			} => doc.select(stk, ctx, opt, stmt, omit, table, table_fields).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,
 			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await?,

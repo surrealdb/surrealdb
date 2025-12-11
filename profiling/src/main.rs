@@ -49,10 +49,12 @@ async fn main() {
 
 	// Initialize tracing subscriber based on arguments
 	let trace_path = args.trace_root.canonicalize().unwrap();
-	let perfetto_path = trace_path.join(format!("{}_{}.pftrace", args.name, Utc::now().format("%Y%m%d%H%M%S")));
+	let perfetto_path =
+		trace_path.join(format!("{}_{}.pftrace", args.name, Utc::now().format("%Y%m%d%H%M%S")));
 
 	let file = std::fs::File::create(&perfetto_path).expect("Failed to create perfetto trace file");
-	let perfetto_layer = PerfettoLayer::new(std::sync::Mutex::new(file));
+	let perfetto_layer =
+		PerfettoLayer::new(std::sync::Mutex::new(file)).with_debug_annotations(true);
 
 	tracing_subscriber::registry()
 		.with(perfetto_layer)
@@ -61,7 +63,7 @@ async fn main() {
 
 	println!("Perfetto tracing enabled, writing to: {}", perfetto_path.display());
 
-	let mut results = db.query("SELECT * FROM person WHERE age > 50").await.unwrap();
+	let mut results = db.query("SELECT * FROM person").await.unwrap();
 
 	let results: Vec<Person> = results.take(0).unwrap();
 	assert_eq!(results.len(), 100);
