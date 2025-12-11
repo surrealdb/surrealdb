@@ -4,7 +4,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::args::Optional;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -92,7 +92,7 @@ pub fn contains((set, value): (Set, Value)) -> Result<Value> {
 
 /// Check if all elements in the set match a condition
 pub async fn all(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
@@ -117,7 +117,7 @@ pub async fn all(
 
 /// Check if any element in the set matches a condition
 pub async fn any(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
@@ -154,7 +154,7 @@ pub fn at((set, i): (Set, i64)) -> Result<Value> {
 
 /// Filter elements in the set that match a condition
 pub async fn filter(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, check): (Set, Value),
 ) -> Result<Value> {
 	Ok(match check {
@@ -177,7 +177,7 @@ pub async fn filter(
 
 /// Find the first element in the set matching a condition (in BTree order)
 pub async fn find(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, value): (Set, Value),
 ) -> Result<Value> {
 	Ok(match value {
@@ -209,7 +209,7 @@ pub fn flatten((set,): (Set,)) -> Result<Value> {
 
 /// Fold over the set with an accumulator
 pub async fn fold(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, init, mapper): (Set, Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -235,7 +235,7 @@ pub fn last((set,): (Set,)) -> Result<Value> {
 
 /// Map over the set elements, returning a new set
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -261,7 +261,7 @@ pub fn min((set,): (Set,)) -> Result<Value> {
 
 /// Reduce the set using a closure (uses first element as initial value)
 pub async fn reduce(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {

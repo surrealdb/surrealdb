@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
 use crate::val::RecordIdKey;
@@ -94,7 +94,7 @@ impl SeqDocIds {
 	/// * `Ok(Resolved::New(DocId))` - If a new document ID was created
 	pub(in crate::idx) async fn resolve_doc_id(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		id: RecordIdKey,
 	) -> Result<Resolved> {
 		let id_key = self.ikb.new_id_key(id.clone());
@@ -164,7 +164,7 @@ impl SeqDocIds {
 #[cfg(test)]
 mod tests {
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::seqdocids::{DocId, Resolved, SeqDocIds};
 	use crate::kvs::LockType::Optimistic;
@@ -177,7 +177,7 @@ mod tests {
 	const TEST_TB: &str = "test_tb";
 	const TEST_IX_ID: IndexId = IndexId(1);
 
-	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
+	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (FrozenContext, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
@@ -186,11 +186,11 @@ mod tests {
 		(ctx.freeze(), d)
 	}
 
-	async fn finish(ctx: Context) {
+	async fn finish(ctx: FrozenContext) {
 		ctx.tx().commit().await.unwrap();
 	}
 
-	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
+	async fn check_get_doc_key_id(ctx: &FrozenContext, d: &SeqDocIds, doc_id: DocId, key: &str) {
 		let tx = ctx.tx();
 		let id = RecordIdKey::String(key.into());
 		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id.clone()));

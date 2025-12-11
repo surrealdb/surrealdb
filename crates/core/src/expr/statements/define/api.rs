@@ -7,7 +7,7 @@ use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
 use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
@@ -27,7 +27,7 @@ impl DefineApiStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

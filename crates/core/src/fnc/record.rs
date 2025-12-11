@@ -1,7 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
@@ -9,7 +9,7 @@ use crate::expr::paths::ID;
 use crate::val::{RecordId, Value};
 
 pub async fn exists(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -33,7 +33,7 @@ pub mod is {
 	use reblessive::tree::Stk;
 
 	use crate::catalog::providers::TableProvider;
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::dbs::Options;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
@@ -55,7 +55,7 @@ pub mod is {
 	///
 	/// Returns `true` if the record is an edge, `false` otherwise
 	pub async fn edge(
-		(_stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+		(_stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 		(arg,): (Value,),
 	) -> Result<Value> {
 		match opt {

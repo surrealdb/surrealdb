@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{EventDefinition, TableDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -29,7 +29,7 @@ impl DefineEventStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {

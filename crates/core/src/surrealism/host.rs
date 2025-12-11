@@ -5,7 +5,7 @@ use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::kv::KVStore;
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt, FunctionCall};
@@ -15,13 +15,13 @@ use crate::val::convert_value_to_public_value;
 
 pub(crate) struct Host {
 	pub(crate) stk: TreeStack,
-	pub(crate) ctx: Context,
+	pub(crate) ctx: FrozenContext,
 	pub(crate) opt: Options,
 	pub(crate) doc: Option<CursorDoc>,
 }
 
 impl Host {
-	pub(crate) fn new(ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Self {
+	pub(crate) fn new(ctx: &FrozenContext, opt: &Options, doc: Option<&CursorDoc>) -> Self {
 		Self {
 			stk: TreeStack::new(),
 			ctx: ctx.clone(),
@@ -42,7 +42,7 @@ impl InvocationContext for Host {
 		let ctx = if vars.is_empty() {
 			self.ctx.clone()
 		} else {
-			let mut ctx = MutableContext::new(&self.ctx);
+			let mut ctx = Context::new(&self.ctx);
 			ctx.attach_public_variables(vars.into())?;
 			ctx.freeze()
 		};

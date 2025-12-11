@@ -19,7 +19,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
@@ -31,7 +31,7 @@ impl Document {
 	pub(super) async fn store_index_data(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
 		// Collect indexes or skip
@@ -76,7 +76,7 @@ impl Document {
 		db: &DatabaseDefinition,
 		tb: &TableDefinition,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		ix: &IndexDefinition,
 		o: Option<Vec<Value>>,
@@ -125,7 +125,7 @@ impl Document {
 	/// It will return: ["Tobie", "piano"]
 	pub(crate) async fn build_opt_values(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		ix: &IndexDefinition,
 		doc: &CursorDoc,

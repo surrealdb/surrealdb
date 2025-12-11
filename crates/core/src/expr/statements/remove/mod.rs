@@ -34,7 +34,7 @@ pub(crate) use sequence::RemoveSequenceStatement;
 pub(crate) use table::RemoveTableStatement;
 pub(crate) use user::RemoveUserStatement;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
@@ -64,7 +64,7 @@ impl RemoveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

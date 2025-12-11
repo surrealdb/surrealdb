@@ -6,7 +6,7 @@ use anyhow::Result;
 use tokio::sync::RwLock;
 
 use crate::catalog::{HnswParams, IndexId, TableId};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
 
@@ -23,7 +23,7 @@ impl Default for HnswIndexes {
 impl HnswIndexes {
 	pub(super) async fn get(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,

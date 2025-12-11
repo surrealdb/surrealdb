@@ -3,14 +3,14 @@ use std::str::FromStr;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt, Function, Idiom, Part};
 
 pub async fn exprs_to_fields(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &[Expr],
@@ -75,7 +75,7 @@ pub async fn exprs_to_fields(
 
 pub async fn expr_to_ident(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &Expr,
@@ -106,7 +106,7 @@ pub async fn expr_to_ident(
 
 pub async fn expr_to_optional_ident(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &Expr,
@@ -137,7 +137,7 @@ pub async fn expr_to_optional_ident(
 
 pub async fn expr_to_idiom(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &Expr,

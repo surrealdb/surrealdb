@@ -10,7 +10,7 @@ use reblessive::tree::Stk;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
@@ -27,7 +27,7 @@ impl Iterable {
 	pub(super) async fn iterate(
 		self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 		ite: &mut Iterator,
@@ -56,7 +56,7 @@ impl Iterable {
 		Ok(())
 	}
 
-	fn iteration_stage_check(&self, ctx: &Context) -> bool {
+	fn iteration_stage_check(&self, ctx: &FrozenContext) -> bool {
 		match self {
 			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage()
@@ -111,7 +111,7 @@ impl Collected {
 	/// source and use case.
 	pub(super) async fn process(
 		self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		rid_only: bool,
@@ -156,7 +156,7 @@ impl Collected {
 	}
 
 	async fn process_lookup(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
@@ -236,7 +236,7 @@ impl Collected {
 
 	#[expect(clippy::too_many_arguments)]
 	async fn process_relatable(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		f: RecordId,
@@ -286,7 +286,7 @@ impl Collected {
 	}
 
 	async fn process_record(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		record_id: RecordId,
@@ -420,7 +420,7 @@ impl Collected {
 	}
 
 	async fn process_index_item(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		i: IndexItemRecord,
@@ -451,7 +451,7 @@ impl Collected {
 
 pub(super) struct ConcurrentCollector<'a> {
 	stk: &'a mut Stk,
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	txn: &'a Transaction,
 	stm: &'a Statement<'a>,
@@ -516,7 +516,10 @@ pub(super) trait Collector {
 
 	fn iterator(&mut self) -> &mut Iterator;
 
-	fn check_query_planner_context<'b>(ctx: &'b Context, table: &'b str) -> Cow<'b, Context> {
+	fn check_query_planner_context<'b>(
+		ctx: &'b FrozenContext,
+		table: &'b str,
+	) -> Cow<'b, FrozenContext> {
 		if let Some(qp) = ctx.get_query_planner()
 			&& let Some(exe) = qp.get_query_executor(table)
 		{
@@ -526,7 +529,7 @@ pub(super) trait Collector {
 			//   every document.
 			// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
 			//   tight iteration loops.
-			let mut ctx = MutableContext::new(ctx);
+			let mut ctx = Context::new(ctx);
 			ctx.set_query_executor(exe.clone());
 			return Cow::Owned(ctx.freeze());
 		}
@@ -535,7 +538,7 @@ pub(super) trait Collector {
 
 	async fn collect_iterable(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		iterable: Iterable,
 	) -> Result<()> {
@@ -584,7 +587,7 @@ pub(super) trait Collector {
 						// Attach the table-specific QueryExecutor to the Context to avoid
 						// per-record lookups in the QueryPlanner during index scans.
 						// This significantly reduces overhead inside tight iterator loops.
-						let mut ctx = MutableContext::new(ctx);
+						let mut ctx = Context::new(ctx);
 						ctx.set_query_executor(exe.clone());
 						let ctx = ctx.freeze();
 						return self.collect_index_items(&ctx, opt, irf, rs).await;
@@ -610,7 +613,7 @@ pub(super) trait Collector {
 
 	async fn start_skip(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		mut rng: Range<Key>,
 		sc: ScanDirection,
@@ -662,7 +665,7 @@ pub(super) trait Collector {
 
 	async fn collect_table(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		v: &str,
 		sc: ScanDirection,
@@ -705,7 +708,7 @@ pub(super) trait Collector {
 
 	async fn collect_table_keys(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		v: &str,
 		sc: ScanDirection,
@@ -749,7 +752,12 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
-	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
+	async fn collect_table_count(
+		&mut self,
+		ctx: &FrozenContext,
+		opt: &Options,
+		v: &str,
+	) -> Result<()> {
 		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
@@ -799,7 +807,7 @@ pub(super) trait Collector {
 
 	async fn collect_range(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
@@ -840,7 +848,7 @@ pub(super) trait Collector {
 
 	async fn collect_range_keys(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
@@ -880,7 +888,7 @@ pub(super) trait Collector {
 
 	async fn collect_range_count(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		tb: &str,
 		r: RecordIdKeyRange,
@@ -901,7 +909,7 @@ pub(super) trait Collector {
 
 	async fn collect_lookup(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		from: RecordId,
 		kind: LookupKind,
@@ -974,7 +982,7 @@ pub(super) trait Collector {
 
 	async fn collect_index_items(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		irf: IteratorRef,
 		rs: RecordStrategy,
@@ -1010,7 +1018,7 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_key(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
@@ -1032,7 +1040,7 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_key_value(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {
@@ -1054,7 +1062,7 @@ pub(super) trait Collector {
 
 	async fn collect_index_item_count(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		txn: &Transaction,
 		mut iterator: ThingIterator,
 	) -> Result<()> {

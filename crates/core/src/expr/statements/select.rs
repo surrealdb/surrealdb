@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -74,7 +74,7 @@ impl SelectStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		parent_doc: Option<&CursorDoc>,
 	) -> Result<Value> {

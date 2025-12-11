@@ -12,7 +12,7 @@ use super::middleware::invoke;
 use super::response::{ApiResponse, ResponseInstruction};
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::sql::expression::convert_public_value_to_internal;
@@ -60,7 +60,7 @@ impl ApiInvocation {
 
 	pub async fn invoke_with_transaction(
 		self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		api: &ApiDefinition,
 		body: ApiBody,
@@ -74,7 +74,7 @@ impl ApiInvocation {
 	pub async fn invoke_with_context(
 		self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		api: &ApiDefinition,
 		body: ApiBody,
@@ -126,7 +126,7 @@ impl ApiInvocation {
 		let opt = opt.new_with_perms(false);
 
 		// Edit the context
-		let mut ctx = MutableContext::new_isolated(ctx);
+		let mut ctx = Context::new_isolated(ctx);
 
 		// Set the request variable
 		let vars = self.vars(body_public)?;

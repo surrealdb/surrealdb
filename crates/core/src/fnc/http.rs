@@ -1,23 +1,23 @@
 use anyhow::Result;
 
 use super::args::Optional;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::val::Value;
 
 #[cfg(not(feature = "http"))]
-pub async fn head(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
+pub async fn head(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn get(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
+pub async fn get(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
 pub async fn put(
-	_: &Context,
+	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
@@ -25,7 +25,7 @@ pub async fn put(
 
 #[cfg(not(feature = "http"))]
 pub async fn post(
-	_: &Context,
+	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
@@ -33,14 +33,14 @@ pub async fn post(
 
 #[cfg(not(feature = "http"))]
 pub async fn patch(
-	_: &Context,
+	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
-pub async fn delete(_: &Context, (_, _): (Value, Optional<Value>)) -> Result<Value> {
+pub async fn delete(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
 	anyhow::bail!(Error::HttpDisabled)
 }
 
@@ -74,14 +74,20 @@ fn try_as_opts(
 }
 
 #[cfg(feature = "http")]
-pub async fn head(ctx: &Context, (uri, Optional(opts)): (Value, Optional<Value>)) -> Result<Value> {
+pub async fn head(
+	ctx: &FrozenContext,
+	(uri, Optional(opts)): (Value, Optional<Value>),
+) -> Result<Value> {
 	let uri = try_as_uri("http::head", uri)?;
 	let opts = try_as_opts("http::head", "The second argument should be an object.", opts)?;
 	crate::fnc::util::http::head(ctx, uri, opts).await
 }
 
 #[cfg(feature = "http")]
-pub async fn get(ctx: &Context, (uri, Optional(opts)): (Value, Optional<Value>)) -> Result<Value> {
+pub async fn get(
+	ctx: &FrozenContext,
+	(uri, Optional(opts)): (Value, Optional<Value>),
+) -> Result<Value> {
 	let uri = try_as_uri("http::get", uri)?;
 	let opts = try_as_opts("http::get", "The second argument should be an object.", opts)?;
 	crate::fnc::util::http::get(ctx, uri, opts).await
@@ -89,7 +95,7 @@ pub async fn get(ctx: &Context, (uri, Optional(opts)): (Value, Optional<Value>))
 
 #[cfg(feature = "http")]
 pub async fn put(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(uri, Optional(body), Optional(opts)): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	let uri = try_as_uri("http::put", uri)?;
@@ -99,7 +105,7 @@ pub async fn put(
 
 #[cfg(feature = "http")]
 pub async fn post(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(uri, Optional(body), Optional(opts)): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	let uri = try_as_uri("http::post", uri)?;
@@ -109,7 +115,7 @@ pub async fn post(
 
 #[cfg(feature = "http")]
 pub async fn patch(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(uri, Optional(body), Optional(opts)): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
 	let uri = try_as_uri("http::patch", uri)?;
@@ -119,7 +125,7 @@ pub async fn patch(
 
 #[cfg(feature = "http")]
 pub async fn delete(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(uri, Optional(opts)): (Value, Optional<Value>),
 ) -> Result<Value> {
 	let uri = try_as_uri("http::delete", uri)?;

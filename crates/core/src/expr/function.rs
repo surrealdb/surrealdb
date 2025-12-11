@@ -5,7 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::{ControlFlow, FlowResult, FlowResultExt as _};
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -75,7 +75,7 @@ impl Function {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
@@ -123,7 +123,7 @@ impl Function {
 				)?;
 				// Compute the function arguments
 				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx);
+				let mut ctx = Context::new_isolated(ctx);
 				// Process the function arguments
 				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
 					ctx.add_value(
@@ -237,7 +237,7 @@ impl FunctionCall {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -256,7 +256,7 @@ impl FunctionCall {
 
 async fn check_perms(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	name: &str,

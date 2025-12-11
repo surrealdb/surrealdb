@@ -53,7 +53,7 @@ pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
 pub mod distance {
 	use anyhow::Result;
 
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
@@ -77,7 +77,7 @@ pub mod distance {
 	}
 
 	pub fn knn(
-		(ctx, doc): (&Context, Option<&CursorDoc>),
+		(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
 		(Optional(knn_ref),): (Optional<Value>,),
 	) -> Result<Value> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {

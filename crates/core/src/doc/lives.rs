@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition, SubscriptionFields};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{MessageBroker, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -28,7 +28,7 @@ impl Document {
 	pub(super) async fn process_table_lives(
 		&mut self,
 		_stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -143,7 +143,7 @@ impl Document {
 		// use for processing this LIVE query statement.
 		// This ensures that we are using the session
 		// of the user who created the LIVE query.
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 		// Set the current transaction on the new LIVE
 		// query context to prevent unreachable behaviour
 		// and ensure that queries can be executed.
@@ -318,7 +318,7 @@ impl Document {
 	async fn lq_check(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		live_subscription: &SubscriptionDefinition,
 		doc: &CursorDoc,
@@ -343,7 +343,7 @@ impl Document {
 	async fn lq_allow(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?

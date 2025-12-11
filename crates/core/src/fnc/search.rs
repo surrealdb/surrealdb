@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 
 use super::args::Optional;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -16,7 +16,7 @@ use crate::idx::ft::highlighter::HighlightParams;
 use crate::val::{Array, Number, Object, Value};
 
 pub async fn analyze(
-	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),
+	(stk, ctx, opt): (&mut Stk, &FrozenContext, Option<&Options>),
 	(az, val): (Value, Value),
 ) -> Result<Value> {
 	if let (Some(opt), Value::String(az), Value::String(val)) = (opt, az, val) {
@@ -30,7 +30,7 @@ pub async fn analyze(
 }
 
 pub async fn score(
-	(ctx, doc): (&Context, Option<&CursorDoc>),
+	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
 	(match_ref,): (Value,),
 ) -> Result<Value> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
@@ -40,7 +40,7 @@ pub async fn score(
 }
 
 pub async fn highlight(
-	(ctx, doc): (&Context, Option<&CursorDoc>),
+	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
 	(prefix, suffix, match_ref, Optional(partial)): (Value, Value, Value, Optional<bool>),
 ) -> Result<Value> {
 	if let Some((exe, doc, thg)) = get_execution_context(ctx, doc) {
@@ -57,7 +57,7 @@ pub async fn highlight(
 }
 
 pub async fn offsets(
-	(ctx, doc): (&Context, Option<&CursorDoc>),
+	(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
 	(match_ref, Optional(partial)): (Value, Optional<bool>),
 ) -> Result<Value> {
 	if let Some((exe, _, thg)) = get_execution_context(ctx, doc) {
@@ -141,7 +141,7 @@ impl Ord for RrfDoc {
 /// RETURN search::rrf([$vector_results, $text_results], 10, 60);
 /// ```
 pub async fn rrf(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
@@ -332,7 +332,7 @@ enum LinearNorm {
 /// RETURN search::linear([$vector_results, $text_results], [1.0, 1.0], 10, 'zscore');
 /// ```
 pub async fn linear(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	(results, weights, limit, norm): (Array, Array, i64, String),
 ) -> Result<Value> {
 	let limit = if limit < 1 {

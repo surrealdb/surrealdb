@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 
 use super::FlowResultExt as _;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -55,7 +55,7 @@ impl Fetch {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		idioms: &mut Vec<Idiom>,
 	) -> Result<()> {

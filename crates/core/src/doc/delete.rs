@@ -1,7 +1,7 @@
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::val::Value;
@@ -10,7 +10,7 @@ impl Document {
 	pub(super) async fn delete(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {

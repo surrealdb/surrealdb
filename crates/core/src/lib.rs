@@ -2,6 +2,9 @@
 #![allow(deprecated)]
 // This triggers because we have regex's in or Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
+// Increased to support #[instrument] on complex async functions. Those are compiled out in release
+// builds.
+#![recursion_limit = "256"]
 
 //! # Surrealdb Core
 //!
