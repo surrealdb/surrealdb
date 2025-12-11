@@ -11,7 +11,7 @@ value = "false"
 [[test.results]]
 value = "[{ enabled: false, id: a:1 }]"
 
-**/
+*/
 
 LET $a = CREATE ONLY a:1 SET enabled = true;
 // Has id field but is not a record. However, check for SELECT happens first so no lookup takes place.
