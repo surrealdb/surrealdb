@@ -2,13 +2,13 @@
 [test]
 reason = "Inside fn prepare_computed() for a value that is not a Table or RecordID, the next arm of the match statement will check if the statement is a SELECT. If it is not a SELECT statement, it will only then check to see if it is an object and use fn rid() in that case to look for an id, followed by fn prepare_record_id."
 
-[test.results]
+[[test.results]]
 value = "NONE"
 
-[test.results]
+[[test.results]]
 value = "false"
 
-[test.results]
+[[test.results]]
 value = "[{ enabled: false, id: a:1 }]"
 
 **/
