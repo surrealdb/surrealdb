@@ -74,10 +74,10 @@ pub(super) static SURREALKV_BLOCK_CACHE_CAPACITY: LazyLock<u64> =
 			Some(limits) => limits.total_memory,
 			None => system.total_memory(),
 		};
-		// Divide the total memory by 4 for block cache
-		let memory = memory.saturating_div(4);
-		// Subtract 512 MiB from the memory size
-		let memory = memory.saturating_sub(512 * 1024 * 1024);
+		// Divide the total memory by 2
+		let memory = memory.saturating_div(2);
+		// Subtract 1 GiB from the memory size
+		let memory = memory.saturating_sub(1024 * 1024 * 1024);
 		// Take the larger of 16MiB or available memory
 		max(memory, 16 * 1024 * 1024)
 	});
