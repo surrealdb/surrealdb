@@ -260,8 +260,8 @@ impl<'a> TreeBuilder<'a> {
 					group,
 					exp: exp.clone(),
 					io,
-					left: left.clone(),
-					right: right.clone(),
+					left,
+					right,
 				};
 				self.resolved_expressions.insert(exp, re.clone());
 				Ok(re.into())

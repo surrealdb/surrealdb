@@ -52,7 +52,7 @@ impl SurrealismCache {
 			}
 		};
 
-		Ok(value.runtime.clone())
+		Ok(value.runtime)
 	}
 }
 

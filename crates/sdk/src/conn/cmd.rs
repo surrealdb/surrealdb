@@ -171,7 +171,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "commit",
-				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid::from(txn))]))),
 				txn: None,
 			},
 			Command::Rollback {
@@ -179,7 +179,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "cancel",
-				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid::from(txn))]))),
 				txn: None,
 			},
 			Command::Revoke {
@@ -259,7 +259,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
+				params: Some(Value::from_t(vec![Value::Uuid(Uuid::from(uuid))])),
 				txn: None,
 			},
 			Command::Run {

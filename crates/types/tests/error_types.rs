@@ -180,7 +180,7 @@ fn test_i8_underflow() {
 fn test_u64_success() {
 	// This should work
 	let value = Value::Number(Number::Int(i64::MAX));
-	let result: Result<u64, _> = value.clone().into_t();
+	let result: Result<u64, _> = value.into_t();
 
 	assert!(result.is_ok());
 }

@@ -17,7 +17,7 @@ fn array_intersect(first: Array, other: Array) -> Array {
 	};
 	let mut out = Array::with_capacity(len);
 	let mut other = VecDeque::from(other.into_vec());
-	for v in first.into_iter() {
+	for v in first {
 		if let Some(pos) = other.iter().position(|w| v == *w) {
 			other.remove(pos);
 			out.push(v);

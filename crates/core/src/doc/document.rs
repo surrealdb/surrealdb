@@ -226,7 +226,7 @@ impl Document {
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_reduced: CursorDoc::new(id, ir, val),
 			record_strategy: rs,
 			input_data: None,
 		}
@@ -457,15 +457,13 @@ impl Document {
 				let key = cache::ds::Lookup::Db(ns, db);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
 						let val = txn.get_or_add_db(Some(ctx), ns, db).await?;
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
 			_ => txn.get_or_add_db(Some(ctx), ns, db).await,
@@ -500,9 +498,8 @@ impl Document {
 								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table).await?
 							}
 						};
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val.try_into_type()
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
 			}
@@ -537,16 +534,14 @@ impl Document {
 				let key = cache::ds::Lookup::Fts(ns, db, &tb.name, tb.cache_tables_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fts(),
 					None => {
 						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Fts(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fts(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
 		}
@@ -570,16 +565,15 @@ impl Document {
 				let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_evs(),
 					None => {
 						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Evs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_evs(),
+
 			// No cache is present on the context
 			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
 		}
@@ -634,16 +628,14 @@ impl Document {
 				let key = cache::ds::Lookup::Ixs(ns, db, &tb.name, tb.cache_indexes_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_ixs(),
 					None => {
 						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Ixs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_ixs(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
 		}
@@ -669,15 +661,13 @@ impl Document {
 				let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, version);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_lvs(),
 					None => {
 						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Lvs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_lvs()
 			}
 			// No cache is present on the context
 			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,

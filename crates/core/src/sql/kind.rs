@@ -761,7 +761,7 @@ mod tests {
 	fn test_kind_either() {
 		let kinds =
 			vec![Kind::Table(vec!["users".to_string()]), Kind::Table(vec!["posts".to_string()])];
-		let either = Kind::either(kinds.clone());
+		let either = Kind::either(kinds);
 		assert!(matches!(either, Kind::Either(_)));
 		if let Kind::Either(inner) = either {
 			assert_eq!(inner.len(), 2);

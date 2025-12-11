@@ -183,7 +183,7 @@ pub(crate) async fn run_router(
 				let session_clone = session.clone();
 				let live_queries_clone = live_queries.clone();
 				tokio::spawn(async move {
-					let id = notification.id.0;
+					let id = notification.id.into_inner();
 					if let Some(sender) = live_queries_clone.read().await.get(&id)
 
 						&& sender.send(Ok(notification)).await.is_err() {

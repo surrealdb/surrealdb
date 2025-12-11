@@ -96,7 +96,7 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes)))
+				Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
@@ -105,7 +105,7 @@ impl ApiBody {
 					Some(super::format::JSON) => json::decode(&bytes),
 					Some(super::format::CBOR) => cbor::decode(&bytes),
 					Some(super::format::FLATBUFFERS) => flatbuffers::decode(&bytes),
-					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
+					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes))),
 				};
 
 				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))

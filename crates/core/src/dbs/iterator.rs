@@ -409,7 +409,7 @@ impl Iterator {
 			Value::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => {
-				for v in a.into_iter() {
+				for v in a {
 					match v {
 						Value::Table(v) => {
 							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?

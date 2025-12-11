@@ -1546,7 +1546,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	let changes = a.get("changes").unwrap().clone().clone();
+	let changes = a.get("changes").unwrap().clone();
 	assert_eq!(
 		changes,
 		surrealdb::parse::value(

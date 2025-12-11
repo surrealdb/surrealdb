@@ -141,7 +141,7 @@ fn test_enum_tagged_variant_lowercase() {
 	assert_eq!(value, Value::Object(object! { foo: Value::Object(object! {}) }));
 
 	// from_value
-	let converted = EnumTaggedVariantLowercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedVariantLowercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedVariantLowercase::Foo);
 
 	// kind_of
@@ -173,7 +173,7 @@ fn test_enum_tagged_variant_uppercase() {
 	assert_eq!(value, Value::Object(object! { FOO: Value::Object(object! {}) }));
 
 	// from_value
-	let converted = EnumTaggedVariantUppercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedVariantUppercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedVariantUppercase::Foo);
 
 	// kind_of

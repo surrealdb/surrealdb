@@ -60,7 +60,7 @@ impl From<Duration> for crate::types::PublicDuration {
 
 impl From<crate::types::PublicDuration> for Duration {
 	fn from(value: crate::types::PublicDuration) -> Self {
-		Self(value.inner())
+		Self(value.into_inner())
 	}
 }
 

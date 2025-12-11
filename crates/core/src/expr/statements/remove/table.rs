@@ -67,8 +67,7 @@ impl RemoveTableStatement {
 
 		if !fts.is_empty() {
 			let mut message =
-				format!("Cannot delete table `{name}` on which a view is defined, table(s) `")
-					.to_string();
+				format!("Cannot delete table `{name}` on which a view is defined, table(s) `");
 			for (idx, f) in fts.iter().enumerate() {
 				if idx != 0 {
 					message.push_str("`, `")

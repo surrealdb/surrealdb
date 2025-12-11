@@ -224,7 +224,7 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table: table.clone(),
+				table,
 				referencing_field,
 			},
 			LookupSubject::Range {
@@ -247,7 +247,7 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table: table.clone(),
+				table,
 				referencing_field,
 			},
 			crate::expr::lookup::LookupSubject::Range {

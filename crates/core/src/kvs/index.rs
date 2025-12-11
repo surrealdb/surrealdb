@@ -120,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.clone().into());
+				o.insert("error".to_string(), error.into());
 				"error"
 			}
 		};
@@ -588,7 +588,7 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
 				return Ok(());
 			}

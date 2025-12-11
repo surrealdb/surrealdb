@@ -107,7 +107,7 @@ mod tests {
 			Offset::new(0, 11, 13, 22),
 			Offset::new(1, 1, 3, 4),
 		]);
-		let v: Val = o.clone().kv_encode_value().unwrap();
+		let v: Val = o.kv_encode_value().unwrap();
 		let o2 = OffsetRecords::kv_decode_value(v).unwrap();
 		assert_eq!(o, o2)
 	}

@@ -167,7 +167,7 @@ fn test_enum_tagged_with_tag_variant_lowercase() {
 	);
 
 	// from_value
-	let converted = EnumTaggedWithTagAndContentLowercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedWithTagAndContentLowercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedWithTagAndContentLowercase::Foo);
 
 	// kind_of
@@ -207,7 +207,7 @@ fn test_enum_tagged_with_tag_variant_uppercase() {
 	);
 
 	// from_value
-	let converted = EnumTaggedWithTagAndContentUppercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedWithTagAndContentUppercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedWithTagAndContentUppercase::Foo);
 
 	// kind_of

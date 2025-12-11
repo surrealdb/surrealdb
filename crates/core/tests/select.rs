@@ -969,7 +969,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 	let empty_array = syn::value("[]").unwrap();
 
-	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+	for ((level, role), (ns, db), should_succeed, msg) in tests {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{

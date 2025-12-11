@@ -68,7 +68,7 @@ pub async fn process_fns(
 								Some(Kind::Record(ts)) if ts.is_empty() => {
 									// record (no specific table) - interface type, needs
 									// .with_type()
-									field_val.with_type(rid.table.clone())
+									field_val.with_type(rid.table)
 								}
 								_ => {
 									// record<foo> - concrete type, no .with_type() needed

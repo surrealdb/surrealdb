@@ -401,7 +401,7 @@ pub async fn process_tbs(
 					match res {
 						Value::RecordId(t) => {
 							// Generic _get returns interface type "record", needs .with_type()
-							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table.clone())))
+							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table)))
 						}
 						_ => Ok(None),
 					}
@@ -453,7 +453,7 @@ fn make_table_field_resolver(
 						let field_val = match field_kind {
 							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
 								// Interface or union type, needs .with_type()
-								field_val.with_type(rid.table.clone())
+								field_val.with_type(rid.table)
 							}
 							_ => {
 								// Concrete type, no .with_type() needed
@@ -468,7 +468,7 @@ fn make_table_field_resolver(
 							Some(Kind::Either(ks)) if ks.len() != 1 => {}
 							_ => {}
 						}
-						let out = sql_value_to_gql_value(v.clone())
+						let out = sql_value_to_gql_value(v)
 							.map_err(|_| "SQL to GQL translation failed")?;
 						Ok(Some(FieldValue::value(out)))
 					}
