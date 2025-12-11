@@ -1209,9 +1209,9 @@ impl DatabaseProvider for Transaction {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
 				let key = crate::key::database::ml::new(ns, db, ml, vn);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::MlNotFound {
-					name: ml.to_owned(),
-				})?;
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
 				let val = Arc::new(val);
 				let entry = cache::tx::Entry::Any(val.clone());
 				self.cache.insert(qey, entry);
