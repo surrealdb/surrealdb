@@ -1,74 +1,150 @@
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use arc_swap::ArcSwap;
 use dashmap::DashMap;
+use parking_lot::{Mutex, MutexGuard};
 use surrealdb_types::Variables;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// ConnectionState holds the URL and all sessions.
-/// When the URL changes, a new ConnectionState is created, dropping all sessions.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ConnectionState {
     pub url: String,
-    pub root_session: Arc<RwLock<SessionState>>,
-    pub sessions: DashMap<Uuid, Arc<RwLock<SessionState>>>,
+    root_session: Arc<SessionContainer>,
+    sessions: DashMap<Uuid, Arc<SessionContainer>>,
+}
+
+impl Default for ConnectionState {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            root_session: Arc::new(SessionContainer::new(SessionState::default())),
+            sessions: DashMap::new(),
+        }
+    }
 }
 
 impl ConnectionState {
     pub fn new(url: String, root_session: SessionState) -> Self {
         Self {
             url,
-            root_session: Arc::new(RwLock::new(root_session)),
+            root_session: Arc::new(SessionContainer::new(root_session)),
             sessions: DashMap::new(),
         }
     }
 
-    /// Get a session state for reading (completely lock-free).
-    ///
-    /// Returns a cloned Arc of the current session state snapshot.
-    pub fn get_session(&self, session_id: Option<Uuid>) -> Arc<RwLock<SessionState>> {
+    /// Lock-free read
+    pub fn get_session(&self, session_id: Option<Uuid>) -> Arc<SessionState> {
+        self.container(session_id).load()
+    }
+
+    /// Exclusive write access - commits on drop
+    pub fn get_session_mut(&self, session_id: Option<Uuid>) -> SessionWriteGuard {
+        SessionContainer::write(self.container(session_id))
+    }
+
+    fn container(&self, session_id: Option<Uuid>) -> Arc<SessionContainer> {
         match session_id {
             None => self.root_session.clone(),
-            Some(id) => match self.sessions.get(&id) {
-                Some(entry) => entry.value().clone(),
-                None => {
-                    let session = Arc::new(RwLock::new(SessionState::default()));
-                    self.sessions.insert(id, session.clone());
-                    session
-                }
-            }
+            Some(id) => self.sessions
+                .entry(id)
+                .or_insert_with(|| Arc::new(SessionContainer::new(SessionState::new(Some(id)))))
+                .clone()
         }
     }
 
     pub fn new_session(&self) -> Uuid {
         let uuid = Uuid::now_v7();
-        self.sessions.insert(uuid, Arc::new(RwLock::new(SessionState::default())));
+        self.sessions.insert(uuid, Arc::new(SessionContainer::new(SessionState::new(Some(uuid)))));
         uuid
     }
 
-    /// Create or update a session
-    pub async fn upsert_session(&self, session_id: Option<Uuid>, state: SessionState) {
-        if let Some(id) = session_id {
-            self.sessions.insert(id, Arc::new(RwLock::new(state)));
-        } else {
-            let mut root = self.root_session.write().await;
-            *root = state;
+    pub fn fork_session(&self, session_id: Option<Uuid>) -> Uuid {
+        let mut session = (*self.get_session(session_id)).clone();
+        let uuid = Uuid::now_v7();
+        session.id = Some(uuid);
+        self.sessions.insert(uuid, Arc::new(SessionContainer::new(session)));
+        uuid
+    }
+
+    pub fn remove_session(&self, session_id: Uuid) -> Option<Arc<SessionState>> {
+        self.sessions.remove(&session_id).map(|(_, c)| c.load())
+    }
+
+    pub fn list_sessions(&self) -> Vec<Uuid> {
+        self.sessions.iter().map(|e| *e.key()).collect()
+    }
+
+    pub fn all_sessions(&self) -> Vec<Arc<SessionState>> {
+        let mut sessions = vec![self.root_session.load()];
+        sessions.extend(self.sessions.iter().map(|e| e.value().load()));
+        sessions
+    }
+}
+
+// --- Internal ---
+
+struct SessionContainer {
+    state: ArcSwap<SessionState>,
+    write_lock: Mutex<()>,
+}
+
+impl SessionContainer {
+    fn new(state: SessionState) -> Self {
+        Self {
+            state: ArcSwap::from_pointee(state),
+            write_lock: Mutex::new(()),
         }
     }
 
-    /// Remove a session
-    pub fn remove_session(&self, session_id: Uuid) -> Option<Arc<RwLock<SessionState>>> {
-        self.sessions.remove(&session_id).map(|(_, v)| v)
+    fn load(&self) -> Arc<SessionState> {
+        self.state.load_full()
     }
 
-    /// List all session IDs
-    pub fn list_sessions(&self) -> Vec<Uuid> {
-        self.sessions.iter().map(|entry| *entry.key()).collect()
+    fn write(container: Arc<Self>) -> SessionWriteGuard {
+        // SAFETY: We hold the Arc, so the container lives as long as the guard.
+        // We need to acquire the lock before creating the guard.
+        let guard = unsafe { &*Arc::as_ptr(&container) }.write_lock.lock();
+        let state = (*container.state.load_full()).clone();
+        SessionWriteGuard {
+            container,
+            state: Some(state),
+            _guard: guard,
+        }
     }
+}
 
-    pub fn all_sessions(&self) -> Vec<Arc<RwLock<SessionState>>> {
-        let mut sessions = vec![self.root_session.clone()];
-        sessions.extend(self.sessions.iter().map(|entry| entry.value().clone()));
-        sessions
+pub struct SessionWriteGuard {
+    container: Arc<SessionContainer>,
+    state: Option<SessionState>,
+    // MutexGuard is tied to the Mutex inside container, which lives in the Arc
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl SessionWriteGuard {
+    /// Discard changes without committing
+    pub fn abort(mut self) {
+        self.state = None;
+    }
+}
+
+impl Deref for SessionWriteGuard {
+    type Target = SessionState;
+    fn deref(&self) -> &Self::Target {
+        self.state.as_ref().unwrap()
+    }
+}
+
+impl DerefMut for SessionWriteGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.state.as_mut().unwrap()
+    }
+}
+
+impl Drop for SessionWriteGuard {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.take() {
+            self.container.state.store(Arc::new(state));
+        }
     }
 }
 
@@ -80,4 +156,15 @@ pub struct SessionState {
     pub refresh_token: Option<String>,
     pub access_token: Option<String>,
     pub variables: Variables,
+}
+
+impl SessionState {
+    pub fn new(id: Option<Uuid>) -> Self {
+        Self { id, ..Default::default() }
+    }
+
+    pub fn reset(&mut self) {
+        let id = self.id.take();
+        *self = Self { id, ..Default::default() };
+    }
 }

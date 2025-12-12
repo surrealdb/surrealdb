@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use arc_swap::{ArcSwap, Guard};
 use bytes::Bytes;
 use futures::Stream;
+use semver::Version;
 use uuid::Uuid;
 use std::sync::Arc;
 use surrealdb_types::{ExportConfig, Nullable, QueryChunk, SurrealBridge, Tokens, Value, Variables};
@@ -135,19 +136,27 @@ impl Controller {
 		SurrealSession::new(self.clone(), uuid)
 	}
 
+	pub async fn fork_session(&self, session_id: Option<Uuid>) -> Result<SurrealSession> {
+		let uuid = self.state().fork_session(session_id);
+		let session = self.state().get_session(Some(uuid));
+		self.prepare_session(&session).await?;
+		Ok(SurrealSession::new(self.clone(), uuid))
+	}
+}
+
+impl Controller {
 	pub async fn health(&self) -> Result<()> {
 		let bridge = self.bridge()?;
 		bridge.health().await
 	}
 
-	pub async fn version(&self) -> Result<String> {
+	pub async fn version(&self) -> Result<Version> {
 		// We cache the version upon connection
 		if let ConnectionStatus::Connected(connected) = self.status.load().as_ref() {
 			return Ok(connected.version.clone());
+		} else {
+			bail!("Not connected to a database. Call connect() first.");
 		}
-
-		let bridge = self.bridge()?;
-		bridge.version().await
 	}
 
 	pub async fn drop_session(&self, session_id: Uuid) -> Result<()> {
@@ -160,7 +169,10 @@ impl Controller {
 	pub async fn reset_session(&self, session_id: Option<Uuid>) -> Result<()> {
 		let bridge = self.bridge()?;
 		bridge.reset_session(session_id).await?;
-		self.state().upsert_session(session_id, SessionState::default()).await;
+		
+		let mut session = self.state().get_session_mut(session_id);
+		session.reset();
+		
 		Ok(())
 	}
 
@@ -173,15 +185,16 @@ impl Controller {
 	pub async fn r#use(&self, session_id: Option<Uuid>, ns: Nullable<String>, db: Nullable<String>) -> Result<(Option<String>, Option<String>)> {
 		// Requirements
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 		
 		// Execute the request
 		let (ns, db) = bridge.r#use(session_id.clone(), ns, db).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
-		session.namespace = ns.clone();
-		session.database = db.clone();
+		{
+			let mut session = self.state().get_session_mut(session_id.clone());
+			session.namespace = ns.clone();
+			session.database = db.clone();
+		}
 
 		// Publish the event
 		self.publisher.publish(Using { 
@@ -196,13 +209,12 @@ impl Controller {
 
 	pub async fn set_variable(&self, session_id: Option<Uuid>, name: String, value: Value) -> Result<()> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		bridge.set_variable(session_id, name.clone(), value.clone()).await?;
+		bridge.set_variable(session_id.clone(), name.clone(), value.clone()).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
+		let mut session = self.state().get_session_mut(session_id);
 		session.variables.insert(name, value);
 
 		// Ok
@@ -211,13 +223,12 @@ impl Controller {
 
 	pub async fn drop_variable(&self, session_id: Option<Uuid>, name: String) -> Result<()> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		bridge.drop_variable(session_id, name.clone()).await?;
+		bridge.drop_variable(session_id.clone(), name.clone()).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
+		let mut session = self.state().get_session_mut(session_id);
 		session.variables.remove(&name);
 
 		// Ok
@@ -248,18 +259,19 @@ impl Controller {
 	// Authentication
 	pub async fn signup(&self, session_id: Option<Uuid>, params: Variables) -> Result<Tokens> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		let tokens = bridge.signup(session_id, params).await?;
+		let tokens = bridge.signup(session_id.clone(), params).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
-		if let Some(refresh) = &tokens.refresh {
-			session.refresh_token = Some(refresh.clone());
-		}
-		if let Some(access) = &tokens.access {
-			session.access_token = Some(access.clone());
+		{
+			let mut session = self.state().get_session_mut(session_id);
+			if let Some(refresh) = &tokens.refresh {
+				session.refresh_token = Some(refresh.clone());
+			}
+			if let Some(access) = &tokens.access {
+				session.access_token = Some(access.clone());
+			}
 		}
 
 		// Ok
@@ -268,18 +280,19 @@ impl Controller {
 
 	pub async fn signin(&self, session_id: Option<Uuid>, params: Variables) -> Result<Tokens> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		let tokens = bridge.signin(session_id, params).await?;
+		let tokens = bridge.signin(session_id.clone(), params).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
-		if let Some(access) = &tokens.access {
-			session.access_token = Some(access.clone());
-		}
-		if let Some(refresh) = &tokens.refresh {
-			session.refresh_token = Some(refresh.clone());
+		{
+			let mut session = self.state().get_session_mut(session_id);
+			if let Some(access) = &tokens.access {
+				session.access_token = Some(access.clone());
+			}
+			if let Some(refresh) = &tokens.refresh {
+				session.refresh_token = Some(refresh.clone());
+			}
 		}
 
 		// Ok
@@ -288,13 +301,12 @@ impl Controller {
 
 	pub async fn authenticate(&self, session_id: Option<Uuid>, token: String) -> Result<()> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		bridge.authenticate(session_id, token.clone()).await?;
+		bridge.authenticate(session_id.clone(), token.clone()).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
+		let mut session = self.state().get_session_mut(session_id);
 		session.access_token = Some(token);
 
 		// Ok
@@ -303,18 +315,19 @@ impl Controller {
 
 	pub async fn refresh(&self, session_id: Option<Uuid>, tokens: Tokens) -> Result<Tokens> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		let tokens = bridge.refresh(session_id, tokens).await?;
+		let tokens = bridge.refresh(session_id.clone(), tokens).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
-		if let Some(access) = &tokens.access {
-			session.access_token = Some(access.clone());
-		}
-		if let Some(refresh) = &tokens.refresh {
-			session.refresh_token = Some(refresh.clone());
+		{
+			let mut session = self.state().get_session_mut(session_id);
+			if let Some(access) = &tokens.access {
+				session.access_token = Some(access.clone());
+			}
+			if let Some(refresh) = &tokens.refresh {
+				session.refresh_token = Some(refresh.clone());
+			}
 		}
 
 		// Ok
@@ -328,13 +341,12 @@ impl Controller {
 
 	pub async fn invalidate(&self, session_id: Option<Uuid>) -> Result<()> {
 		let bridge = self.bridge()?;
-		let state = self.state().get_session(session_id.clone());
 
 		// Execute the request
-		bridge.invalidate(session_id).await?;
+		bridge.invalidate(session_id.clone()).await?;
 
 		// Update the session state
-		let mut session = state.write().await;
+		let mut session = self.state().get_session_mut(session_id);
 		session.access_token = None;
 		session.refresh_token = None;
 
@@ -379,29 +391,38 @@ impl Controller {
 
 	async fn prepare_connection(&self) -> Result<()> {
 		let bridge = self.bridge()?;
-		let version = bridge.version().await?;
+		let version: Version = bridge.version()
+			.await?
+			.parse()
+			.map_err(|e| anyhow::anyhow!("Invalid version: {}", e))?;
 
 		for session in self.state().all_sessions() {
-			let session = session.read().await;
-
-			// Restore the namespace and database
-			if session.namespace.is_some() {
-				bridge.r#use(
-					session.id, 
-					session.namespace.clone().into(), 
-					session.database.clone().into()
-				).await?;
-			}
-
-			// Restore the variables
-			for (name, value) in session.variables.iter() {
-				bridge.set_variable(session.id, name.clone(), value.clone()).await?;
-			}
-
-			// TODO restore auth
+			self.prepare_session(&session).await?;
 		}
 
 		self.set_status(Connected { version });
+		Ok(())
+	}
+
+	async fn prepare_session(&self, session: &SessionState) -> Result<()> {
+		let bridge = self.bridge()?;
+
+		// Restore the namespace and database
+		if session.namespace.is_some() {
+			bridge.r#use(
+				session.id, 
+				session.namespace.clone().into(), 
+				session.database.clone().into()
+			).await?;
+		}
+
+		// Restore the variables
+		for (name, value) in session.variables.iter() {
+			bridge.set_variable(session.id, name.clone(), value.clone()).await?;
+		}
+
+		// TODO restore auth
+
 		Ok(())
 	}
 

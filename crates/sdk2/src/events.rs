@@ -1,4 +1,5 @@
 use crate::event_set;
+use semver::Version;
 use uuid::Uuid;
 
 event_set! {
@@ -19,7 +20,7 @@ event_set! {
 	pub SurrealEvents extends SessionEvents {
 		Connecting {}
 		Connected {
-			version: String,
+			version: Version,
 		}
 		Reconnecting {}
 		Disconnected {}

@@ -14,7 +14,7 @@ async fn test_example() {
 
 	let surreal = Surreal::new().attach_engine::<EmbeddedSurrealEngine>();
     surreal.connect("memory://").await.unwrap();
-    surreal.r#use().namespace("test").database("test").await.unwrap();
+    surreal.use_ns("test").use_db("test").await.unwrap();
     surreal.query("CREATE user:1 SET name = 'John Doe'").await.unwrap();
     let user = surreal.query("SELECT * FROM user:1").await.unwrap();
     let user: User = user.first().unwrap().clone().into_t().unwrap();

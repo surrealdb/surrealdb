@@ -1,38 +1,7 @@
 use anyhow::Result;
 use surrealdb_types::Nullable;
 
-use crate::method::{Executable, Request};
-
-#[derive(Clone)]
-pub struct Use;
-
-impl Request<Use> {
-	pub fn namespace<T: Into<NullableString>>(self, namespace: T) -> Request<UseNamespaceDatabase> {
-		let namespace: NullableString = namespace.into();
-		Request::new(
-			&self,
-			UseNamespaceDatabase {
-				namespace: namespace.into(),
-				database: Nullable::None,
-			},
-		)
-	}
-
-	pub fn database<T: Into<NullableString>>(self, database: T) -> Request<UseNamespaceDatabase> {
-		let database: NullableString = database.into();
-		Request::new(
-			&self,
-			UseNamespaceDatabase {
-				namespace: Nullable::None,
-				database: database.into(),
-			},
-		)
-	}
-
-	pub async fn default(self) -> Result<(Option<String>, Option<String>)> {
-		self.controller.r#use(self.session_id, Nullable::None, Nullable::None).await
-	}
-}
+use crate::{api::SurrealContext, method::{Executable, Request}};
 
 #[derive(Clone)]
 pub struct UseNamespaceDatabase {
@@ -40,14 +9,32 @@ pub struct UseNamespaceDatabase {
 	pub(crate) database: Nullable<String>,
 }
 
+impl UseNamespaceDatabase {
+	pub(crate) fn req_from_namespace<C: SurrealContext + ?Sized,T: Into<NullableString>>(ctx: &C, namespace: T) -> Request<Self> {
+		let namespace: NullableString = namespace.into();
+		Request::new(ctx, Self {
+			namespace: namespace.into(),
+			database: Nullable::None,
+		})
+	}
+
+	pub(crate) fn req_from_database<C: SurrealContext + ?Sized,T: Into<NullableString>>(ctx: &C, database: T) -> Request<Self> {
+		let database: NullableString = database.into();
+		Request::new(ctx, Self {
+			namespace: Nullable::None,
+			database: database.into(),
+		})
+	}
+}
+
 impl Request<UseNamespaceDatabase> {
-	pub fn namespace<T: Into<NullableString>>(mut self, namespace: T) -> Self {
+	pub fn use_ns<T: Into<NullableString>>(mut self, namespace: T) -> Self {
 		let namespace: NullableString = namespace.into();
 		self.inner.namespace = namespace.into();
 		self
 	}
 
-	pub fn database<T: Into<NullableString>>(mut self, database: T) -> Self {
+	pub fn use_db<T: Into<NullableString>>(mut self, database: T) -> Self {
 		let database: NullableString = database.into();
 		self.inner.database = database.into();
 		self
@@ -66,6 +53,19 @@ impl Executable for UseNamespaceDatabase {
 					req.inner.database.clone().into(),
 				)
 				.await
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct UseDefaults;
+
+impl Executable for UseDefaults {
+	type Output = (Option<String>, Option<String>);
+
+	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
+		async move {
+			req.controller.r#use(req.session_id, Nullable::None, Nullable::None).await
 		}
 	}
 }

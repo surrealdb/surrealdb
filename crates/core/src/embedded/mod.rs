@@ -52,6 +52,22 @@ impl EmbeddedSurrealEngine {
             None => self.default_session().await,
         }
     }
+
+    /// Gets or creates a session with mutable access.
+    async fn get_or_create_session_mut(&self, session_id: Uuid) -> Result<LowMutGuard<'_, Session>> {
+        if self.sessions.get(&session_id).is_none() {
+            self.sessions.insert(session_id, Arc::new(Session::default())).await?;
+        }
+        self.sessions.get_mut(&session_id).await?.ok_or_else(|| anyhow::anyhow!("Failed to acquire session"))
+    }
+
+    /// Gets or creates a session with read-only access.
+    async fn get_or_create_session(&self, session_id: Uuid) -> Result<Arc<Session>> {
+        if self.sessions.get(&session_id).is_none() {
+            self.sessions.insert(session_id, Arc::new(Session::default())).await?;
+        }
+        self.sessions.get(&session_id).ok_or_else(|| anyhow::anyhow!("Failed to acquire session"))
+    }
 }
 
 impl ConstructableEngine for EmbeddedSurrealEngine {
@@ -187,10 +203,8 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn begin_transaction(&self, session_id: Option<Uuid>) -> Result<Uuid> {
         let session_id = self.resolve_session(session_id).await?;
-        if self.sessions.get(&session_id).is_none() {
         // TODO transactions should live under sessions probably
-            bail!("Session not found");
-        };
+        let _ = self.get_or_create_session(session_id).await?;
 
         let tx = self.ds()?.transaction(TransactionType::Write, LockType::Optimistic).await?;
         let id = Uuid::now_v7();
@@ -200,10 +214,8 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn commit_transaction(&self, session_id: Option<Uuid>, transaction_id: Uuid) -> Result<()> {
         let session_id = self.resolve_session(session_id).await?;
-        if self.sessions.get(&session_id).is_none() {
-            // TODO transactions should live under sessions probably
-            bail!("Session not found");
-        };
+        // TODO transactions should live under sessions probably
+        let _ = self.get_or_create_session(session_id).await?;
 
         let Some(tx) = self.transactions.remove(&transaction_id).await? else {
             bail!("Transaction not found");
@@ -215,10 +227,8 @@ impl SurrealBridge for EmbeddedSurrealEngine {
     
     async fn cancel_transaction(&self, session_id: Option<Uuid>, transaction_id: Uuid) -> Result<()> {
         let session_id = self.resolve_session(session_id).await?;
-        if self.sessions.get(&session_id).is_none() {
-            // TODO transactions should live under sessions probably
-            bail!("Session not found");
-        };
+        // TODO transactions should live under sessions probably
+        let _ = self.get_or_create_session(session_id).await?;
 
         let Some(tx) = self.transactions.remove(&transaction_id).await? else {
             bail!("Transaction not found");
@@ -230,18 +240,14 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn list_transactions(&self, session_id: Option<Uuid>) -> Result<Vec<Uuid>> {
         let session_id = self.resolve_session(session_id).await?;
-        if self.sessions.get(&session_id).is_none() {
-            bail!("Session not found");
-        };
+        let _ = self.get_or_create_session(session_id).await?;
 
         Ok(self.transactions.keys().collect())
     }
 
     async fn signup(&self, session_id: Option<Uuid>, params: PublicVariables) -> Result<PublicTokens> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(mut session) = self.sessions.get_mut(&session_id).await? else {
-            bail!("Session not found");
-        };
+        let mut session = self.get_or_create_session_mut(session_id).await?;
 
         let mut new = session.as_ref().clone();
 
@@ -254,9 +260,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn signin(&self, session_id: Option<Uuid>, params: PublicVariables) -> Result<PublicTokens> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(mut session) = self.sessions.get_mut(&session_id).await? else {
-            bail!("Session not found");
-        };
+        let mut session = self.get_or_create_session_mut(session_id).await?;
 
         let mut new = session.as_ref().clone();
 
@@ -269,9 +273,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn authenticate(&self, session_id: Option<Uuid>, token: String) -> Result<()> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(mut session) = self.sessions.get_mut(&session_id).await? else {
-            bail!("Session not found");
-        };
+        let mut session = self.get_or_create_session_mut(session_id).await?;
 
         let mut new = session.as_ref().clone();
 
@@ -284,9 +286,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn refresh(&self, session_id: Option<Uuid>, tokens: PublicTokens) -> Result<PublicTokens> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(mut session) = self.sessions.get_mut(&session_id).await? else {
-            bail!("Session not found");
-        };
+        let mut session = self.get_or_create_session_mut(session_id).await?;
 
         let mut new = session.as_ref().clone();
         let token: Token = tokens.try_into()?;
@@ -306,9 +306,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn invalidate(&self, session_id: Option<Uuid>) -> Result<()> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(mut session) = self.sessions.get_mut(&session_id).await? else {
-            bail!("Session not found");
-        };
+        let mut session = self.get_or_create_session_mut(session_id).await?;
 
         let mut new = session.as_ref().clone();
         crate::iam::clear::clear(&mut new)?;
@@ -319,9 +317,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn export(&self, session_id: Option<Uuid>, config: crate::types::ExportConfig) -> Result<std::pin::Pin<Box<dyn Stream<Item = Bytes> + Send>>> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(session) = self.sessions.get(&session_id) else {
-            bail!("Session not found");
-        };
+        let session = self.get_or_create_session(session_id).await?;
 
         let (chn, rcv) = crate::channel::bounded(1);
         self.ds()?.export_with_config(session.as_ref(), chn, config).await?.await?;
@@ -331,9 +327,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn import(&self, session_id: Option<Uuid>, sql: std::pin::Pin<Box<dyn Stream<Item = anyhow::Result<Bytes>> + Send>>) -> Result<()> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(session) = self.sessions.get(&session_id) else {
-            bail!("Session not found");
-        };
+        let session = self.get_or_create_session(session_id).await?;
 
         self.ds()?.import_stream(session.as_ref(), sql).await?;
         Ok(())
@@ -341,9 +335,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
     async fn query(&self, session_id: Option<Uuid>, txn: Option<Uuid>, query: String, vars: PublicVariables) -> Result<std::pin::Pin<Box<dyn Stream<Item = QueryChunk> + Send>>> {
         let session_id = self.resolve_session(session_id).await?;
-        let Some(session) = self.sessions.get(&session_id) else {
-            bail!("Session not found");
-        };
+        let session = self.get_or_create_session(session_id).await?;
 
         let res = if let Some(txn_id) = txn {
             let Some(tx) = self.transactions.get(&txn_id).await? else {

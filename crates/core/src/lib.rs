@@ -78,7 +78,6 @@ pub(crate) mod types {
 		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Set as PublicSet,
 		SurrealValue, Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
 		Variables as PublicVariables, ExportConfig, Tokens as PublicTokens,
-		Session as PublicSession,
 	};
 }
 

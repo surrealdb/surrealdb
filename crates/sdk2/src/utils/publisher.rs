@@ -70,6 +70,35 @@ pub trait Subscribeable<ES: EventSet> {
 		let mut rx = self.subscribe::<E>();
 		Box::pin(async move { rx.recv().await })
 	}
+
+	fn pipe<E, TargetES>(&self, to_publisher: Publisher<TargetES>)
+	where
+		E: Event<ES> + Event<TargetES> + Send + 'static,
+		TargetES: EventSet + Send + Sync,
+	{
+		let mut rx = self.subscribe::<E>();
+		tokio::spawn(async move {
+			while let Ok(event) = rx.recv().await {
+				to_publisher.publish(event);
+			}
+		});
+	}
+
+	fn pipe_filtered<E, TargetES, F>(&self, to_publisher: Publisher<TargetES>, filter: F)
+	where
+		E: Event<ES> + Event<TargetES> + Send + 'static,
+		TargetES: EventSet + Send + Sync,
+		F: Fn(&E) -> bool + Send + 'static,
+	{
+		let mut rx = self.subscribe::<E>();
+		tokio::spawn(async move {
+			while let Ok(event) = rx.recv().await {
+				if filter(&event) {
+					to_publisher.publish(event);
+				}
+			}
+		});
+	}
 }
 
 impl<ES: EventSet> Subscribeable<ES> for Publisher<ES> {

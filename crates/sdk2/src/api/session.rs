@@ -3,7 +3,9 @@ use uuid::Uuid;
 
 use crate::api::SurrealContext;
 use crate::controller::Controller;
+use crate::events::Auth;
 use crate::events::SessionEvents;
+use crate::events::Using;
 use crate::impl_events;
 use crate::impl_queryable;
 use crate::impl_session_controls;
@@ -41,18 +43,26 @@ impl SurrealContext for SurrealSession {
 
 impl SurrealSession {
 	pub fn new(controller: Controller, session_id: Uuid) -> Self {
-		Self {
+		let this = Self {
 			controller,
 			session_id,
 			publisher: Publisher::new(16),
-		}
+		};
+		this.pipe_controller_events();
+		this
 	}
 
-	pub fn fork_session(&self) -> Result<Self> {
-		todo!()
-	}
+	fn pipe_controller_events(&self) {
+		let session_id = self.session_id;
 
-	pub fn close_session(&self) -> Result<Self> {
-		todo!()
+		// Pipe Auth events, filtered to this session only
+		self.controller.pipe_filtered::<Auth, _, _>(self.publisher.clone(), move |e| {
+			e.session_id.is_some_and(|id| id == session_id)
+		});
+
+		// Pipe Using events, filtered to this session only
+		self.controller.pipe_filtered::<Using, _, _>(self.publisher.clone(), move |e| {
+			e.session_id.is_some_and(|id| id == session_id)
+		});
 	}
 }

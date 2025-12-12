@@ -228,48 +228,48 @@ macro_rules! impl_session_controls {
 				crate::api::SessionControls::begin_transaction(self).await
 			}
 
-			pub fn r#use(&self) -> crate::method::Request<crate::method::Use> {
-				crate::api::SessionControls::r#use(self)
+			pub fn use_ns<T: Into<crate::method::NullableString>>(&self, namespace: T) -> crate::method::Request<crate::method::UseNamespaceDatabase> {
+				crate::api::SessionControls::use_ns(self, namespace)
 			}
 
-			pub fn set(&self) -> anyhow::Result<()> {
-				crate::api::SessionControls::set(self)
+			pub fn use_db<T: Into<crate::method::NullableString>>(&self, database: T) -> crate::method::Request<crate::method::UseNamespaceDatabase> {
+				crate::api::SessionControls::use_db(self, database)
 			}
 
-			pub fn unset(&self) -> anyhow::Result<()> {
-				crate::api::SessionControls::unset(self)
+			pub fn use_defaults(&self) -> crate::method::Request<crate::method::UseDefaults> {
+				crate::api::SessionControls::use_defaults(self)
 			}
 
-			pub fn signup(&self) -> anyhow::Result<Self> {
-				crate::api::SessionControls::signup(self)
+			pub async fn set<N: Into<String>, V: surrealdb_types::SurrealValue>(&self, name: N, value: V) -> anyhow::Result<()> {
+				crate::api::SessionControls::set(self, name, value).await
 			}
 
-			pub fn signin(&self) -> anyhow::Result<Self> {
-				crate::api::SessionControls::signin(self)
+			pub async fn unset<N: Into<String>>(&self, name: N) -> anyhow::Result<()> {
+				crate::api::SessionControls::unset(self, name).await
 			}
 
-			pub fn authenticate(&self) -> anyhow::Result<Self> {
-				crate::api::SessionControls::authenticate(self)
+			pub async fn signup(&self, credentials: crate::auth::AccessRecordAuth) -> anyhow::Result<crate::auth::Tokens> {
+				crate::api::SessionControls::signup(self, credentials).await
 			}
 
-			pub fn invalidate(&self) -> anyhow::Result<Self> {
-				crate::api::SessionControls::invalidate(self)
+			pub async fn signin(&self, credentials: crate::auth::AccessRecordAuth) -> anyhow::Result<crate::auth::Tokens> {
+				crate::api::SessionControls::signin(self, credentials).await
+			}
+
+			pub async fn authenticate<T: Into<crate::auth::Tokens>>(&self, tokens: T) -> anyhow::Result<crate::auth::Tokens> {
+				crate::api::SessionControls::authenticate(self, tokens).await
+			}
+
+			pub async fn invalidate(&self) -> anyhow::Result<()> {
+				crate::api::SessionControls::invalidate(self).await
+			}
+
+			pub async fn fork_session(&self) -> anyhow::Result<crate::api::SurrealSession> {
+				crate::api::SessionControls::fork_session(self).await
 			}
 		}
 	};
 }
-
-// #[macro_export]
-// macro_rules! subscribe_first {
-//     { $(if let $var:ident = $subscribe:expr => $body:block)+ } => {
-//         $(let mut $var = $subscribe;)+
-//         loop {
-//             tokio::select! {
-//                 $(Ok($var) = $var.recv() => $body,)+
-//             }
-//         }
-//     };
-// }
 
 #[macro_export]
 macro_rules! subscribe_first_of {

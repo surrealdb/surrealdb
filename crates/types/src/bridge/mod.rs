@@ -446,17 +446,29 @@ impl ExportTableConfig {
 	}
 }
 
+/// A three-state value that distinguishes between absent, explicitly null, and present values.
+///
+/// This is useful for update operations where:
+/// - `None` means "don't change this field" (absent from the request)
+/// - `Null` means "set this field to null" (explicitly nullify)
+/// - `Some(T)` means "set this field to this value"
 #[derive(Clone, Copy, SurrealValue)]
 #[surreal(untagged)]
 pub enum Nullable<T: Clone + SurrealValue> {
+    /// The value is absent (not provided). Typically means "leave unchanged".
     #[surreal(value = none)]
     None,
+    /// The value is explicitly null. Typically means "clear/unset this field".
     #[surreal(value = null)]
     Null,
+    /// The value is present.
     Some(T),
 }
 
 impl<T: Clone + SurrealValue> Nullable<T> {
+    /// Maps a `Nullable<T>` to `Nullable<U>` by applying a function to the contained value.
+    ///
+    /// `None` and `Null` variants are preserved unchanged.
     pub fn map<U, F>(self, f: F) -> Nullable<U>
     where
         F: FnOnce(T) -> U,
