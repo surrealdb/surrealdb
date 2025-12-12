@@ -6385,6 +6385,7 @@ dependencies = [
  "dashmap",
  "futures",
  "parking_lot",
+ "pin-project-lite",
  "semver",
  "surrealdb-core",
  "surrealdb-types",

@@ -22,6 +22,7 @@ bytes.workspace = true
 dashmap.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
+pin-project-lite.workspace = true
 semver.workspace = true
 surrealdb-types.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros"] }

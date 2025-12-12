@@ -80,7 +80,7 @@ impl Request<Select> {
 
 	pub async fn collect(self) -> Result<Vec<surrealdb_types::Value>> {
 		let (sql, vars) = self.inner.build();
-		Request::new(&self, Query::new(sql)).vars(vars).collect().await
+		Request::new(&self, Query::new(sql)).bind(vars).collect().await
 	}
 }
 
