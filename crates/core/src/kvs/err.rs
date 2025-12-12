@@ -67,6 +67,9 @@ pub enum Error {
 	/// There was an unknown internal error
 	#[error("There was an internal error: {0}")]
 	Internal(String),
+
+	#[error("The storage layer does not support compaction requests.")]
+	CompactionNotSupported,
 }
 
 impl Error {

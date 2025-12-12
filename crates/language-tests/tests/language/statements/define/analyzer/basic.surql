@@ -2,6 +2,7 @@
 [env]
 # Extra timeout due to file reading.
 timeout = 8000
+context-timeout = 8000
 
 [test]
 

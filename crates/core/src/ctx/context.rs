@@ -53,7 +53,7 @@ pub struct Context {
 	// An optional parent context.
 	parent: Option<FrozenContext>,
 	// An optional deadline.
-	deadline: Option<Instant>,
+	deadline: Option<(Instant, Duration)>,
 	// An optional slow log configuration used by the executor to log statements
 	// that exceed a given duration threshold. This configuration is propagated
 	// from the datastore into the context for the lifetime of a request.
@@ -385,10 +385,10 @@ impl Context {
 
 	/// Add a deadline to the context. If the current deadline is sooner than
 	/// the provided deadline, this method does nothing.
-	pub(crate) fn add_deadline(&mut self, deadline: Instant) {
+	pub(crate) fn add_deadline(&mut self, deadline: Instant, duration: Duration) {
 		match self.deadline {
-			Some(current) if current < deadline => (),
-			_ => self.deadline = Some(deadline),
+			Some((current, _)) if current < deadline => (),
+			_ => self.deadline = Some((deadline, duration)),
 		}
 	}
 
@@ -398,7 +398,7 @@ impl Context {
 	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
 		match Instant::now().checked_add(timeout) {
 			Some(deadline) => {
-				self.add_deadline(deadline);
+				self.add_deadline(deadline, timeout);
 				Ok(())
 			}
 			None => Err(Error::InvalidTimeout(timeout.as_secs())),
@@ -441,7 +441,7 @@ impl Context {
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub(crate) fn timeout(&self) -> Option<Duration> {
-		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
+		self.deadline.map(|(v, _)| v.saturating_duration_since(Instant::now()))
 	}
 
 	/// Returns the slow log configuration, if any, attached to this context.
@@ -532,10 +532,11 @@ impl Context {
 			if ALLOC.is_beyond_threshold() {
 				bail!(Error::QueryBeyondMemoryThreshold);
 			}
-			if let Some(deadline) = self.deadline
-				&& deadline <= Instant::now()
+			let now = Instant::now();
+			if let Some((deadline, timeout)) = self.deadline
+				&& deadline <= now
 			{
-				return Ok(Some(Reason::Timedout));
+				return Ok(Some(Reason::Timedout(timeout.into())));
 			}
 		}
 		if let Some(ctx) = &self.parent {
@@ -581,9 +582,21 @@ impl Context {
 	}
 
 	/// Check if the context is not ok to continue, because it timed out.
-	pub(crate) async fn is_timedout(&self) -> Result<bool> {
+	pub(crate) async fn is_timedout(&self) -> Result<Option<Duration>> {
 		yield_now!();
-		Ok(matches!(self.done(true)?, Some(Reason::Timedout)))
+		if let Some(Reason::Timedout(d)) = self.done(true)? {
+			Ok(Some(d.0))
+		} else {
+			Ok(None)
+		}
+	}
+
+	pub(crate) async fn expect_not_timedout(&self) -> Result<()> {
+		if let Some(d) = self.is_timedout().await? {
+			bail!(Error::QueryTimedout(d.into()))
+		} else {
+			Ok(())
+		}
 	}
 
 	#[cfg(storage)]
@@ -609,7 +622,7 @@ impl Context {
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
 		crate::ctx::cancellation::Cancellation::new(
-			self.deadline,
+			self.deadline.map(|(deadline, _)| deadline),
 			std::iter::successors(Some(self), |ctx| ctx.parent.as_ref().map(|c| c.as_ref()))
 				.map(|ctx| ctx.cancelled.clone())
 				.collect(),
@@ -894,7 +907,7 @@ mod tests {
 		// Should detect timeout
 		let result = ctx.done(true);
 		assert!(result.is_ok());
-		assert_eq!(result.unwrap(), Some(Reason::Timedout));
+		assert!(matches!(result.unwrap(), Some(Reason::Timedout(_))));
 	}
 
 	#[tokio::test]

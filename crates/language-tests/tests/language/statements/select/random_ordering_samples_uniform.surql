@@ -1,8 +1,9 @@
 /**
 [env]
 imports = ["harness/assert.surql"]
-# This tast can take a bit longer so give it a longer timeout.
+# This test can take a bit longer, so give it a longer timeout.
 timeout = 8000
+context-timeout = 8000
 
 [test]
 reason = "Check that ORDER BY RAND() returns  uniform samples"

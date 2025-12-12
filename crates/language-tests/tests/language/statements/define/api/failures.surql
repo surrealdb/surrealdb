@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout"
+error = "The query was not executed because it exceeded the timeout: 1ns"
 
 [[test.results]]
 value = "NONE"

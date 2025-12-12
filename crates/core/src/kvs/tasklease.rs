@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, thread_rng};
@@ -90,6 +92,7 @@ impl LeaseHandler {
 
 		// Loop until we have a successful allocation or reach max backoff
 		// We use exponential backoff with a maximum limit to prevent infinite retries
+		let start = Instant::now();
 		while tempo < MAX_BACKOFF {
 			match self.check_lease().await {
 				Ok(r) => return Ok(r),
@@ -105,7 +108,7 @@ impl LeaseHandler {
 			tempo *= 2;
 		}
 		// If we've reached maximum backoff without success, time out the operation
-		bail!(Error::QueryTimedout)
+		bail!(Error::QueryTimedout(start.elapsed().into()))
 	}
 
 	/// Attempts to maintain the current lease by checking and potentially

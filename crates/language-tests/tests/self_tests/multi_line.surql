@@ -11,6 +11,7 @@ database = "test"
 # Also takes true or false for the default or disabled timeout
 # Defaults to 1 second.
 timeout = 1000
+context-timeout = 1000
 # Whether this test must be run on it's own without other tests running at the same time.
 sequential = false
 # Allows you to define a file to run first, use to for example load some records before running queries.

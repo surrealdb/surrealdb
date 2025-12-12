@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
+use crate::cnf::dynamic::DynamicConfiguration;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
@@ -47,6 +48,8 @@ pub struct Options {
 	pub(crate) version: Option<u64>,
 	/// Optional message broker for live notifications
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
+	/// Configuration parameters that can be dynamically changed
+	dynamic_configuration: DynamicConfiguration,
 }
 
 #[derive(Clone, Debug)]
@@ -70,9 +73,8 @@ pub trait MessageBroker: Send + Sync + Debug {
 }
 
 impl Options {
-	/// Create a new Options object
-	pub fn new(id: Uuid) -> Options {
-		Options {
+	pub(crate) fn new(id: Uuid, dynamic_configuration: DynamicConfiguration) -> Self {
+		Self {
 			id,
 			ns: None,
 			db: None,
@@ -85,10 +87,9 @@ impl Options {
 			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			dynamic_configuration,
 		}
 	}
-
-	// --------------------------------------------------
 
 	/// Specify which Namespace should be used for
 	/// code which uses this `Options` object.
@@ -185,6 +186,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			perms: self.perms,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -197,6 +199,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			perms,
 			..*self
 		}
@@ -210,6 +213,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -223,6 +227,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			import,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -235,6 +240,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			broker: Some(sender),
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -264,6 +270,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			dive: self.dive - cost as u32,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		})
 	}
@@ -400,6 +407,14 @@ impl Options {
 			}
 		}
 	}
+
+	/// Returns the handle to runtime‑adjustable configuration toggles.
+	///
+	/// Currently this includes the global query timeout, which can be modified
+	/// via `ALTER SYSTEM QUERY_TIMEOUT ...`.
+	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
+		&self.dynamic_configuration
+	}
 }
 
 #[cfg(test)]
@@ -412,7 +427,8 @@ mod tests {
 	fn is_allowed() {
 		// With auth disabled
 		{
-			let opts = Options::new(Uuid::new_v4()).with_auth_enabled(false);
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+				.with_auth_enabled(false);
 
 			// When no NS is provided and it targets the NS base, it should return an error
 			opts.is_allowed(Action::View, ResourceKind::Any, &Base::Ns).unwrap_err();
@@ -439,7 +455,7 @@ mod tests {
 
 		// With auth enabled
 		{
-			let opts = Options::new(Uuid::new_v4())
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
 				.with_auth_enabled(true)
 				.with_auth(Auth::for_root(Role::Owner).into());
 

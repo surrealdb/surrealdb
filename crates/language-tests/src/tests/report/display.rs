@@ -198,7 +198,7 @@ impl TestReport {
 				writeln!(f, "> Test failed to run, returning an error before the test could run.")?;
 				f.indent(|f| writeln!(f, "- Error: {e}"))
 			}
-			TestError::Paniced(e) => {
+			TestError::Panicked(e) => {
 				writeln!(f, "> Test failed, tests caused a panic to occur")?;
 				f.indent(|f| writeln!(f, "- Panic payload: {e}"))
 			}
