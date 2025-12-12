@@ -105,12 +105,3 @@ impl<T: Clone> Future for Promise<T> {
 		}
 	}
 }
-
-async fn test() {
-	let promise = Promise::new();
-
-	promise.resolve(123);
-
-	let result = promise.await?;
-	assert_eq!(result, Ok(123));
-}

@@ -48,7 +48,7 @@ where
 	#[inline]
 	async fn signin<T: Into<AuthParams>>(&self, credentials: T) -> Result<Tokens> {
 		let params: AuthParams = credentials.into();
-		self.controller().signup(self.session_id(), params.into_vars()).await
+		self.controller().signin(self.session_id(), params.into_vars()).await
 	}
 
 	#[inline]
