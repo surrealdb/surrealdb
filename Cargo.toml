@@ -60,7 +60,7 @@ revision = { version = "0.15.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
-surrealkv = { git = "https://github.com/surrealdb/surrealkv", branch = "range-fix" }
+surrealkv = { git = "https://github.com/surrealdb/surrealkv", branch = "fix-wal-replay-all-segments" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }

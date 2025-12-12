@@ -7345,7 +7345,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.15.1"
-source = "git+https://github.com/surrealdb/surrealkv?branch=range-fix#3548d31539eb7dd6b202d0c482e4dcebd4948b13"
+source = "git+https://github.com/surrealdb/surrealkv?branch=fix-wal-replay-all-segments#90e4554d1bd7e5b3407633da46ae5f52d38f1bd8"
 dependencies = [
  "arc-swap",
  "async-channel",
