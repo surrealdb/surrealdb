@@ -43,7 +43,7 @@ impl<R> SurrealContext for Request<R> {
 }
 
 impl<R> Request<R> {
-	pub fn new(ctx: &(impl SurrealContext + ?Sized), inner: R) -> Self {
+	pub(crate) fn new(ctx: &(impl SurrealContext + ?Sized), inner: R) -> Self {
 		Self {
 			controller: ctx.controller().clone(),
 			session_id: ctx.session_id(),

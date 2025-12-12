@@ -13,7 +13,7 @@ async fn main() {
 	let surreal = Surreal::new();
 	surreal.connect("ws://localhost:8000").await.unwrap();
 	surreal.query("SELECT * FROM user").var("name", "John Doe").await.unwrap();
-	surreal.r#use().default().await.unwrap();
+	surreal.r#use().namespace(()).await.unwrap();
 	surreal
 		.select(RecordId::new("user", 123))
 		.fields(vec!["name", "email"])

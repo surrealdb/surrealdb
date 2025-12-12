@@ -6381,8 +6381,12 @@ version = "3.0.0-alpha.16"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "bytes",
+ "dashmap",
  "futures",
  "parking_lot",
+ "semver",
+ "surrealdb-core",
  "surrealdb-types",
  "tokio",
  "url",

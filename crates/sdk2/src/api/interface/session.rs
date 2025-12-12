@@ -9,8 +9,7 @@ where
 {
 	#[inline]
 	async fn begin_transaction(&self) -> Result<SurrealTransaction> {
-		let bridge = self.controller().bridge().await?;
-		let tx_id = bridge.begin_transaction(self.session_id()).await?;
+		let tx_id = self.controller().begin_transaction(self.session_id()).await?;
 		Ok(SurrealTransaction::new(self.controller().clone(), self.session_id(), tx_id))
 	}
 

@@ -34,12 +34,10 @@ impl SurrealTransaction {
 	}
 
 	pub async fn commit(self) -> Result<()> {
-		let bridge = self.controller.bridge().await?;
-		bridge.commit_transaction(self.session_id(), self.tx_id).await
+		self.controller().commit_transaction(self.session_id(), self.tx_id).await
 	}
 
 	pub async fn cancel(self) -> Result<()> {
-		let bridge = self.controller.bridge().await?;
-		bridge.cancel_transaction(self.session_id(), self.tx_id).await
+		self.controller().cancel_transaction(self.session_id(), self.tx_id).await
 	}
 }

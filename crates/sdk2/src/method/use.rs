@@ -30,8 +30,7 @@ impl Request<Use> {
 	}
 
 	pub async fn default(self) -> Result<(Option<String>, Option<String>)> {
-		let bridge = self.controller.bridge().await?;
-		bridge.r#use(self.session_id, Nullable::None, Nullable::None).await
+		self.controller.r#use(self.session_id, Nullable::None, Nullable::None).await
 	}
 }
 
@@ -60,8 +59,7 @@ impl Executable for UseNamespaceDatabase {
 
 	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
 		async move {
-			let bridge = req.controller.bridge().await?;
-			bridge
+			req.controller
 				.r#use(
 					req.session_id,
 					req.inner.namespace.clone().into(),

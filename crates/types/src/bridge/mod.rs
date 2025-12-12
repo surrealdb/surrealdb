@@ -95,18 +95,6 @@ pub trait SurrealBridge: requirements::BridgeRequirements {
 
     // Sessions
     
-    /// Creates a new session and returns its unique identifier.
-    ///
-    /// A session maintains state including the current namespace/database context,
-    /// variables, authentication, and active transactions. Sessions must be explicitly
-    /// dropped when no longer needed.
-    async fn new_session(&self) -> Result<Uuid>;
-    
-    /// Retrieves session information by session ID.
-    ///
-    /// Returns `None` if the session does not exist.
-    async fn get_session(&self, session_id: Option<Uuid>) -> Result<Option<Session>>;
-    
     /// Drops a session and releases all associated resources.
     ///
     /// This will cancel any active transactions and clear session state.

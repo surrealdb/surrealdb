@@ -1,6 +1,6 @@
 use anyhow::Result;
 use surrealdb_types::{SurrealValue, Variables};
-
+use futures::StreamExt;
 use crate::method::{Executable, Request};
 
 #[derive(Clone)]
@@ -39,13 +39,12 @@ impl Request<Query> {
 	}
 
 	pub async fn collect(self) -> Result<Vec<surrealdb_types::Value>> {
-		let bridge = self.controller.bridge().await?;
-		let mut stream = bridge
+		self.controller.ready().await?;
+		let mut stream = self.controller
 			.query(self.session_id, self.tx_id, self.inner.query, self.inner.variables)
 			.await?;
 
 		let mut results = Vec::new();
-		use futures::StreamExt;
 		while let Some(chunk) = stream.next().await {
 			if let Some(values) = chunk.result {
 				results.extend(values);

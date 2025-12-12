@@ -1,11 +1,14 @@
 use crate::event_set;
+use uuid::Uuid;
 
 event_set! {
 	pub SessionEvents {
 		Auth {
+			session_id: Option<Uuid>,
 			token: Option<String>,
 		}
 		Using {
+			session_id: Option<Uuid>,
 			namespace: Option<String>,
 			database: Option<String>,
 		}

@@ -49,8 +49,6 @@ impl Surreal {
 	}
 
     pub async fn new_session(&self) -> Result<SurrealSession> {
-        let bridge = self.controller.bridge().await?;
-        let session_id = bridge.new_session().await?;
-        Ok(SurrealSession::new(self.controller.clone(), session_id))
+        Ok(self.controller().new_session())
     }
 }

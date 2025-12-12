@@ -4,13 +4,12 @@ use bytes::Bytes;
 use dashmap::{mapref::one::{Ref, RefMut}, DashMap};
 use anyhow::{bail, Result};
 use futures::{Stream, StreamExt};
-use sdk2::{events::{EngineConnected, EngineDisconnected, EngineError, EngineEvents}, utils::{ConstructableEngine, Engine, Publisher}};
+use sdk2::{events::{EngineConnected, EngineDisconnected, EngineError, EngineEvents}, utils::{ConnectionState, ConstructableEngine, Engine, Publisher}};
 use surrealdb_types::{Nullable, QueryChunk, QueryResponseKind, QueryStats, QueryType, SurrealBridge};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use url::Url;
 use uuid::Uuid;
 use crate::{dbs::Session, iam::Token, kvs::{Datastore, LockType, Transaction, TransactionType}};
-use crate::types::{PublicDuration, PublicNotification, PublicSession, PublicTokens, PublicValue, PublicVariables};
+use crate::types::{PublicDuration, PublicNotification, PublicTokens, PublicValue, PublicVariables};
 
 #[derive(Clone)]
 pub struct EmbeddedSurrealEngine {
@@ -70,10 +69,10 @@ impl Engine for EmbeddedSurrealEngine {
         &self.publisher
     }
 
-    fn connect(&self, url: Url) {
+    fn connect(&self, state: Arc<ConnectionState>) {
         let this = self.clone();
         tokio::spawn(async move {
-            match Datastore::new(url.as_str()).await {
+            match Datastore::new(state.url.as_ref()).await {
                 Ok(ds) => {
                     this.datastore.store(Arc::new(Some(Arc::new(ds))));
                     this.publisher.publish(EngineConnected {});
@@ -103,26 +102,6 @@ impl SurrealBridge for EmbeddedSurrealEngine {
     async fn version(&self) -> Result<String> {
         // TODO: datastore doesnt expose version. Should we include this in the build process?
         Ok("0.0.0".to_string())
-    }
-
-    async fn new_session(&self) -> Result<Uuid> {
-        let id = Uuid::now_v7();
-        self.sessions.insert(id, Arc::new(Session::default())).await?;
-        Ok(id)
-    }
-
-    async fn get_session(&self, session_id: Option<Uuid>) -> Result<Option<PublicSession>> {
-        let session_id = self.resolve_session(session_id).await?;
-        let Some(session) = self.sessions.get(&session_id) else {
-            return Ok(None);
-        };
-
-        Ok(Some(PublicSession {
-            id: session_id,
-            ns: session.ns.clone(),
-            db: session.db.clone(),
-            variables: session.variables.clone(),
-        }))
     }
 
     async fn drop_session(&self, session_id: Uuid) -> Result<()> {

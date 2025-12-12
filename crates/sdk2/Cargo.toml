@@ -18,14 +18,18 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 arc-swap = "1.7.1"
+bytes.workspace = true
+dashmap.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
+semver.workspace = true
 surrealdb-types.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros"] }
 url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"]}
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [lints]

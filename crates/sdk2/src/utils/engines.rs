@@ -1,9 +1,8 @@
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 use surrealdb_types::SurrealBridge;
-use url::Url;
 
 use crate::events::EngineEvents;
-use crate::utils::Publisher;
+use crate::utils::{ConnectionState, Publisher};
 
 #[derive(Clone)]
 pub(crate) struct Engines {
@@ -50,7 +49,7 @@ impl Engines {
 }
 
 pub trait Engine: SurrealBridge {
-	fn connect(&self, url: Url);
+	fn connect(&self, state: Arc<ConnectionState>);
 	fn disconnect(&self);
 	fn publisher(&self) -> &Publisher<EngineEvents>;
 }
