@@ -1,6 +1,6 @@
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::parameterize::expr_to_optional_ident;
@@ -25,7 +25,7 @@ impl DefaultConfig {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> anyhow::Result<crate::catalog::DefaultConfig> {

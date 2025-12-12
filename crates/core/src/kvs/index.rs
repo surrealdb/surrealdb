@@ -22,7 +22,7 @@ use crate::catalog::{
 	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -120,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.clone().into());
+				o.insert("error".to_string(), error.into());
 				"error"
 			}
 		};
@@ -167,7 +167,7 @@ impl IndexBuilder {
 	#[allow(clippy::too_many_arguments)]
 	fn start_building(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -195,7 +195,7 @@ impl IndexBuilder {
 
 	pub(crate) async fn build(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: Options,
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
@@ -234,7 +234,7 @@ impl IndexBuilder {
 	pub(crate) async fn consume(
 		&self,
 		db: &DatabaseDefinition,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ix: &IndexDefinition,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
@@ -332,7 +332,7 @@ impl QueueSequences {
 }
 
 struct Building {
-	ctx: Context,
+	ctx: FrozenContext,
 	opt: Options,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -348,7 +348,7 @@ struct Building {
 
 impl Building {
 	fn new(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tf: TransactionFactory,
 		opt: Options,
 		ns: NamespaceId,
@@ -358,7 +358,7 @@ impl Building {
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 		Ok(Self {
-			ctx: MutableContext::new_concurrent(ctx).freeze(),
+			ctx: Context::new_concurrent(ctx).freeze(),
 			opt,
 			ns,
 			db,
@@ -383,7 +383,7 @@ impl Building {
 
 	async fn maybe_consume(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
@@ -426,13 +426,13 @@ impl Building {
 			.await
 	}
 
-	async fn new_write_tx_ctx(&self) -> Result<Context> {
+	async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
 			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
 			.await?
 			.into();
-		let mut ctx = MutableContext::new(&self.ctx);
+		let mut ctx = Context::new(&self.ctx);
 		ctx.set_transaction(tx);
 		Ok(ctx.freeze())
 	}
@@ -580,7 +580,7 @@ impl Building {
 
 	async fn index_initial_batch(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tx: &Transaction,
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
@@ -588,7 +588,7 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
 				return Ok(());
 			}
@@ -655,7 +655,7 @@ impl Building {
 
 	async fn index_appending_range(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tx: &Transaction,
 		range: Range<u32>,
 		initial: usize,

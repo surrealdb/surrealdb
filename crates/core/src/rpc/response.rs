@@ -68,7 +68,7 @@ impl SurrealValue for DbResult {
 		match self {
 			DbResult::Query(v) => {
 				let converted: Vec<PublicValue> = v.into_iter().map(|x| x.into_value()).collect();
-				PublicValue::Array(PublicArray::from_values(converted))
+				PublicValue::Array(PublicArray::from(converted))
 			}
 			DbResult::Live(v) => PublicValue::Object(object! {
 				id: PublicValue::Uuid(v.id),
@@ -84,9 +84,8 @@ impl SurrealValue for DbResult {
 		match value {
 			PublicValue::Array(arr) => {
 				let results = arr
-					.inner()
-					.iter()
-					.cloned()
+					.into_inner()
+					.into_iter()
 					.map(QueryResult::from_value)
 					.collect::<anyhow::Result<Vec<_>>>()?;
 				Ok(DbResult::Query(results))
@@ -94,7 +93,7 @@ impl SurrealValue for DbResult {
 			PublicValue::Object(obj) => {
 				// Check if this is a Live result
 				if obj.get("id").is_some() && obj.get("action").is_some() {
-					let mut obj = obj.inner().clone();
+					let mut obj = obj.into_inner();
 					let id = obj.remove("id").context("Missing id")?;
 					let action = obj.remove("action").context("Missing action")?;
 					let record = obj.remove("record").unwrap_or(PublicValue::None);
@@ -258,7 +257,7 @@ impl SurrealValue for DbResultError {
 				let message = obj.remove("message").context("Missing message")?;
 				Ok(DbResultError::from_code(code.into_int()?, message.into_string()?))
 			}
-			PublicValue::String(s) => Ok(DbResultError::Thrown(s.clone())),
+			PublicValue::String(s) => Ok(DbResultError::Thrown(s)),
 			other => anyhow::bail!("Expected object for DbResultError, got {}", other.to_sql()),
 		}
 	}

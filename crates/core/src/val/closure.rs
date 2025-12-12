@@ -6,7 +6,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -36,12 +36,12 @@ impl Closure {
 	pub(crate) async fn invoke(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
 	) -> Result<Value> {
-		let mut ctx = MutableContext::new_isolated(ctx);
+		let mut ctx = Context::new_isolated(ctx);
 		ctx.attach_variables(self.captures.clone())?;
 
 		// check for missing arguments.

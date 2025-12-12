@@ -276,7 +276,7 @@ impl Complement<Array> for Array {
 		for i in other.iter() {
 			set.insert(i);
 		}
-		for v in self.into_iter() {
+		for v in self {
 			if !set.contains(&v) {
 				out.push(v)
 			}
@@ -295,7 +295,7 @@ impl Difference<Array> for Array {
 	fn difference(self, other: Array) -> Array {
 		let mut out = Array::with_capacity(self.len() + other.len());
 		let mut other = VecDeque::from(other.0);
-		for v in self.into_iter() {
+		for v in self {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 			} else {
@@ -316,7 +316,7 @@ pub(crate) trait Flatten<T> {
 impl Flatten<Array> for Array {
 	fn flatten(self) -> Array {
 		let mut out = Array::with_capacity(self.len());
-		for v in self.into_iter() {
+		for v in self {
 			match v {
 				Value::Array(mut a) => out.append(&mut a),
 				_ => out.push(v),
@@ -335,7 +335,7 @@ pub(crate) trait Intersect<T> {
 impl Intersect<Self> for Array {
 	fn intersect(self, mut other: Self) -> Self {
 		let mut out = Self::new();
-		for v in self.0.into_iter() {
+		for v in self.0 {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 				out.push(v);

@@ -9,7 +9,7 @@ use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId, TableDefinition, TableId,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
@@ -41,7 +41,7 @@ impl IndexStores {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tb: TableId,
 		ix: &IndexDefinition,
 		p: &HnswParams,

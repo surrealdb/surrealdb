@@ -3,7 +3,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{RecordType, Relation, TableType};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
@@ -13,7 +13,7 @@ use crate::expr::paths::{IN, OUT};
 impl Document {
 	pub(super) async fn store_edges_data(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {

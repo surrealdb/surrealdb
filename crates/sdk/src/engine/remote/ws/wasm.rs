@@ -366,7 +366,7 @@ async fn router_handle_response(
 									state.live_queries.remove(&live_query_id);
 									let kill = {
 										let request = Command::Kill {
-											uuid: live_query_id.0,
+											uuid: live_query_id.into_inner(),
 										}
 										.into_router_request(None)
 										.into_value();

@@ -200,7 +200,7 @@ impl InfoStructure for ApiConfigDefinition {
 								.map(|x| Value::String(x.to_sql()))
 								.collect();
 
-							(m.name.clone(), Value::Array(Array(value)))
+							(m.name, Value::Array(Array(value)))
 						})
 						.collect(),
 				))

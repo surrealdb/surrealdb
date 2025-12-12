@@ -310,7 +310,7 @@ fn test_test_optional() {
 	let converted = TestOptionalNoOption::from_value(value.clone()).unwrap();
 	assert_eq!(converted.id, 1);
 
-	let optional_value = TestOptional::from_value(value.clone()).unwrap();
+	let optional_value = TestOptional::from_value(value).unwrap();
 	assert_eq!(optional_value.id, 1);
 	assert_eq!(optional_value.name, None);
 }

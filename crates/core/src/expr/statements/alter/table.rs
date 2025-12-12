@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
@@ -57,7 +57,7 @@ impl AlterTableStatement {
 	/// - May write table definition metadata
 	/// - May compact the underlying storage if `compact` is true
 	/// - May create relation helper fields when switching to `RELATION`
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB

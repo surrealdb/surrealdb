@@ -6,7 +6,7 @@ impl Value {
 			Value::Array(v) => {
 				let mut res = Vec::with_capacity(v.len());
 
-				for v in v.into_iter() {
+				for v in v {
 					match v {
 						Value::Array(x) => {
 							for x in x {

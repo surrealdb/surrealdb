@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -66,7 +66,7 @@ pub(crate) fn clean_iteration(v: Value) -> Value {
 
 pub(crate) async fn compute_idiom_recursion(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	rec: Recursion<'_>,

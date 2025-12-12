@@ -22,7 +22,7 @@ use crate::catalog::{FullTextParams, Scoring};
 /// - Efficient term frequency tracking
 /// - Document length normalization
 /// - Compaction of index data
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
@@ -194,7 +194,7 @@ impl FullTextIndex {
 	pub(crate) async fn remove_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		content: Vec<Value>,
@@ -248,7 +248,7 @@ impl FullTextIndex {
 	/// This method assumes that remove_content has been called previously,
 	/// as it does not remove the content (terms) but only removes the doc_id
 	/// reference.
-	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
+	pub(crate) async fn remove_doc(&self, ctx: &FrozenContext, doc_id: DocId) -> Result<()> {
 		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
 
@@ -260,7 +260,7 @@ impl FullTextIndex {
 	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		content: Vec<Value>,
@@ -359,7 +359,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		query_string: String,
 	) -> Result<QueryTerms> {
@@ -395,7 +395,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn matches_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		qt: &QueryTerms,
 		bo: BooleanOperator,
@@ -633,7 +633,7 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
-	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
+	pub(in crate::idx) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
@@ -948,7 +948,7 @@ mod tests {
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::cnf::dynamic::DynamicConfiguration;
-	use crate::ctx::{Context, MutableContext};
+	use crate::ctx::{Context, FrozenContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
@@ -962,7 +962,7 @@ mod tests {
 
 	#[derive(Clone)]
 	struct TestContext {
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		nid: Uuid,
 		start: Arc<Instant>,
@@ -1036,13 +1036,8 @@ mod tests {
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
-				FullTextIndex::with_analyzer(
-					ctx.get_index_stores(),
-					az.clone(),
-					ikb.clone(),
-					&ft_params,
-				)
-				.unwrap(),
+				FullTextIndex::with_analyzer(ctx.get_index_stores(), az, ikb.clone(), &ft_params)
+					.unwrap(),
 			);
 			let start = Arc::new(Instant::now());
 			Self {
@@ -1062,7 +1057,7 @@ mod tests {
 		}
 
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
-			let mut ctx = MutableContext::new(&self.ctx);
+			let mut ctx = Context::new(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
 			let ctx = ctx.freeze();

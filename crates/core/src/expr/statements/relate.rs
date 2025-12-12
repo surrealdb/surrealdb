@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -31,7 +31,7 @@ impl RelateStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -40,7 +40,7 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Check if there is a timeout
-		let ctx_store: Context;
+		let ctx_store: FrozenContext;
 		let ctx = match stk
 			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
 			.await
@@ -48,7 +48,7 @@ impl RelateStatement {
 			.cast_to::<Option<Duration>>()?
 		{
 			Some(timeout) => {
-				let mut new_ctx = MutableContext::new(ctx);
+				let mut new_ctx = Context::new(ctx);
 				new_ctx.add_timeout(timeout.0)?;
 				ctx_store = new_ctx.freeze();
 				&ctx_store

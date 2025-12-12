@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{TableDefinition, ViewDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -35,7 +35,7 @@ impl RemoveTableStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -67,8 +67,7 @@ impl RemoveTableStatement {
 
 		if !fts.is_empty() {
 			let mut message =
-				format!("Cannot delete table `{name}` on which a view is defined, table(s) `")
-					.to_string();
+				format!("Cannot delete table `{name}` on which a view is defined, table(s) `");
 			for (idx, f) in fts.iter().enumerate() {
 				if idx != 0 {
 					message.push_str("`, `")

@@ -23,7 +23,7 @@ use surrealdb_types::ToSql;
 use trice::Instant;
 
 use crate::catalog::{Permission, Permissions};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::expr::visit::{Visit, Visitor};
 
 #[derive(Clone)]
@@ -48,7 +48,7 @@ struct Inner {
 pub(crate) struct ParamVisitor<'a> {
 	params: String,
 	slow_log: &'a SlowLog,
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 }
 
 impl Visitor for ParamVisitor<'_> {
@@ -135,7 +135,7 @@ impl SlowLog {
 	///   suitable for log processing.
 	pub(crate) fn check_log<S: SlowLogVisit + ToSql>(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		start: &Instant,
 		stm: &S,
 	) {
@@ -151,7 +151,7 @@ impl SlowLog {
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
 	}
 
-	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &Context, stm: &S) -> String {
+	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &FrozenContext, stm: &S) -> String {
 		let mut visitor = ParamVisitor {
 			params: String::new(),
 			slow_log: self,

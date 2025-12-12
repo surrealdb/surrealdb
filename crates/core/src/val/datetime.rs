@@ -45,7 +45,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl From<surrealdb_types::Datetime> for Datetime {
 	fn from(v: surrealdb_types::Datetime) -> Self {
-		Self(v.inner())
+		Self(v.into_inner())
 	}
 }
 

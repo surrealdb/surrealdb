@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::convert::Infallible;
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::expr::Param;
 use crate::expr::visit::{Visit, Visitor};
 use crate::sql::expression::convert_public_value_to_internal;
@@ -12,13 +12,13 @@ use crate::val::{Object, Value};
 /// A visitor pass which will capture the value of parameters in the visited expression from the
 /// context.
 pub(crate) struct ParameterCapturePass<'a, 'b> {
-	pub context: &'a Context,
+	pub context: &'a FrozenContext,
 	pub captures: &'b mut Variables,
 }
 
 impl ParameterCapturePass<'_, '_> {
 	pub fn capture<V: for<'a, 'b> Visit<ParameterCapturePass<'a, 'b>>>(
-		context: &Context,
+		context: &FrozenContext,
 		v: &V,
 	) -> Variables {
 		let mut captures = Variables::new();

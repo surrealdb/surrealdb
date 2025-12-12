@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::catalog::providers::DatabaseProvider;
 #[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 use crate::catalog::{ModuleExecutable, ModuleName};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
@@ -19,7 +19,7 @@ pub(crate) struct RemoveModuleStatement {
 
 impl RemoveModuleStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Module, &Base::Db)?;
 		// Get the transaction

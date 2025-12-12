@@ -2,7 +2,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::FieldDefinition;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -13,7 +13,7 @@ impl Document {
 	pub(super) async fn computed_fields(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc_kind: DocKind,
 	) -> anyhow::Result<()> {
@@ -41,7 +41,7 @@ impl Document {
 
 	pub(super) async fn computed_fields_inner(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		fields: &[FieldDefinition],

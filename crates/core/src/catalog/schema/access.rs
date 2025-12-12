@@ -116,7 +116,7 @@ impl InfoStructure for JwtAccess {
 		Value::from(map! {
 			"verify".to_string() => match self.verify {
 				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"url".to_string() => v.url.clone().into(),
+					"url".to_string() => v.url.into(),
 				}),
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){

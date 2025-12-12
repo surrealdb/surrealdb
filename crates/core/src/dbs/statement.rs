@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::cond::Cond;
@@ -531,10 +531,10 @@ impl Statement<'_> {
 	pub(crate) async fn setup_timeout<'a>(
 		&self,
 		stk: &mut Stk,
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Cow<'a, Context>> {
+	) -> Result<Cow<'a, FrozenContext>> {
 		if let Some(t) = self.timeout() {
 			let Some(x) = stk
 				.run(|stk| t.compute(stk, ctx, opt, doc))
@@ -544,7 +544,7 @@ impl Statement<'_> {
 			else {
 				return Ok(Cow::Borrowed(ctx));
 			};
-			let mut ctx = MutableContext::new(ctx);
+			let mut ctx = Context::new(ctx);
 			ctx.add_timeout(x.0)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
@@ -555,12 +555,12 @@ impl Statement<'_> {
 	pub(crate) fn setup_query_planner<'a>(
 		&self,
 		planner: QueryPlanner,
-		ctx: Cow<'a, Context>,
-	) -> Cow<'a, Context> {
+		ctx: Cow<'a, FrozenContext>,
+	) -> Cow<'a, FrozenContext> {
 		// Add query executors if any
 		if planner.has_executors() {
 			// Create a new context
-			let mut ctx = MutableContext::new(&ctx);
+			let mut ctx = Context::new(&ctx);
 			ctx.set_query_planner(planner);
 			Cow::Owned(ctx.freeze())
 		} else {
@@ -570,7 +570,7 @@ impl Statement<'_> {
 
 	pub(crate) async fn from_select<'a>(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		stmt: &'a SelectStatement,
