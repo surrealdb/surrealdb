@@ -42,9 +42,6 @@ impl Datastore {
 		// Configure the maximum value log file size
 		info!(target: TARGET, "Setting value log max file size: {}", *cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
 		let builder = builder.with_vlog_max_file_size(*cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
-		// Configure the value log cache capacity
-		info!(target: TARGET, "Setting value log cache capacity: {}", *cnf::SURREALKV_VLOG_CACHE_CAPACITY);
-		let builder = builder.with_vlog_cache_capacity(*cnf::SURREALKV_VLOG_CACHE_CAPACITY);
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);

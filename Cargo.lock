@@ -7345,7 +7345,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.15.1"
-source = "git+https://github.com/surrealdb/surrealkv?branch=fix-wal-replay-all-segments#90e4554d1bd7e5b3407633da46ae5f52d38f1bd8"
+source = "git+https://github.com/surrealdb/surrealkv?branch=remove-vlog-cache#228c16109b8484d4e63ad9fb3a89ac0c8a1be623"
 dependencies = [
  "arc-swap",
  "async-channel",
