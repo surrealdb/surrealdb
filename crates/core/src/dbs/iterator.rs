@@ -955,7 +955,7 @@ impl Iterator {
 				return Ok(count.into());
 			}
 			if matches!(pro.rs, RecordStrategy::KeysOnly) {
-				return Ok(map! { "count".to_string() => Value::from(1) }.into());
+				return Ok(Value::from(map! { "count".to_string() => Value::from(1) }));
 			}
 		}
 		// Otherwise, we process the document

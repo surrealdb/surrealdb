@@ -161,14 +161,26 @@ impl Value {
 							break;
 						}
 
-						stk.scope(|scope| {
-							let futs = x
-								.iter_mut()
-								.map(|(_, v)| scope.run(|stk| v.fetch(stk, ctx, opt, next_path)));
-							try_join_all(futs)
-						})
-						.await?;
-						return Ok(());
+					let entries: Vec<_> = x.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+					let mut results = Vec::new();
+					
+					stk.scope(|scope| {
+						let futs = entries
+							.into_iter()
+							.map(|(k, mut v)| {
+								scope.run(move |stk| async move {
+									v.fetch(stk, ctx, opt, next_path).await?;
+									Ok::<_, anyhow::Error>((k, v))
+								})
+							});
+						try_join_all(futs)
+					})
+					.await?
+					.into_iter()
+					.for_each(|r| results.push(r));
+					
+					*x = results.into_iter().collect();
+					return Ok(());
 					}
 					Value::Array(x) => {
 						let next_path = iter.as_slice();

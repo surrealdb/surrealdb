@@ -25,7 +25,14 @@ impl Value {
 						}
 						_ => {
 							let path = path.next();
-							v.iter_mut().for_each(|(_, v)| v.cut(path));
+							*v = v
+								.iter()
+								.map(|(k, v)| {
+									let mut v = v.clone();
+									v.cut(path);
+									(k.clone(), v)
+								})
+								.collect();
 						}
 					},
 					x => {

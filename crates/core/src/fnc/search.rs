@@ -245,8 +245,8 @@ pub async fn rrf(
 		// This combines fields like 'distance' from vector search and 'ft_score' from
 		// full-text search
 		let mut obj = Object::default();
-		for mut o in doc.2 {
-			obj.append(&mut o.0);
+		for o in doc.2 {
+			obj.0.extend(o.0);
 		}
 		// Add the document ID back (was removed during processing) and the computed RRF
 		// score
@@ -516,8 +516,8 @@ pub async fn linear(
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID
 		let mut obj = Object::default();
-		for mut o in doc.2 {
-			obj.append(&mut o.0);
+		for o in doc.2 {
+			obj.0.extend(o.0);
 		}
 		// Add the document ID and the computed linear score
 		obj.insert("id".to_string(), doc.1);

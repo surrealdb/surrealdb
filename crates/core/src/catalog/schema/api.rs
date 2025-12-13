@@ -81,13 +81,13 @@ impl ToSql for ApiDefinition {
 
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
-		Value::from(Object(map! {
+		Value::from(map! {
 			"path".to_string() => self.path.to_string().into(),
 			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		}))
+		})
 	}
 }
 

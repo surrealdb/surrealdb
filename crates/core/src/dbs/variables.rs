@@ -81,7 +81,7 @@ impl FromIterator<(String, Value)> for Variables {
 
 impl From<Object> for Variables {
 	fn from(obj: Object) -> Self {
-		Self(obj.0)
+		Self(obj.0.into_iter().collect())
 	}
 }
 

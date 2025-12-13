@@ -1,4 +1,4 @@
-use std::collections::btree_map::Entry;
+use imbl::ordmap::Entry;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -176,13 +176,25 @@ impl Value {
 							.await?;
 						}
 						Value::Object(v) => {
+							let entries: Vec<_> =
+								v.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+							let mut results = Vec::new();
+
 							stk.scope(|scope| {
-								let futs = v.iter_mut().map(|(_, v)| {
-									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
+								let futs = entries.into_iter().map(|(k, mut v)| {
+									let val = val.clone();
+									scope.run(move |stk| async move {
+										v.set(stk, ctx, opt, path, val).await?;
+										Ok::<_, anyhow::Error>((k, v))
+									})
 								});
 								try_join_all_buffered(futs)
 							})
-							.await?;
+							.await?
+							.into_iter()
+							.for_each(|r| results.push(r));
+
+							*v = results.into_iter().collect();
 						}
 						_ => (),
 					};

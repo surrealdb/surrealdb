@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
-
 use anyhow::{Result, bail};
+use imbl::OrdMap;
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
@@ -20,7 +19,7 @@ pub fn entries((object,): (Object,)) -> Result<Value> {
 }
 
 pub fn from_entries((array,): (Array,)) -> Result<Value> {
-	let mut obj: BTreeMap<String, Value> = BTreeMap::default();
+	let mut obj: OrdMap<String, Value> = OrdMap::default();
 
 	for v in array.iter() {
 		match v {

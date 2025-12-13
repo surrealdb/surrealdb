@@ -25,7 +25,17 @@ fn clean_none(v: &mut Value) -> bool {
 	match v {
 		Value::None => false,
 		Value::Object(o) => {
-			o.retain(|_, v| clean_none(v));
+			*o = o
+				.iter()
+				.filter_map(|(k, v)| {
+					let mut v = v.clone();
+					if clean_none(&mut v) {
+						Some((k.clone(), v))
+					} else {
+						None
+					}
+				})
+				.collect();
 			true
 		}
 		Value::Array(x) => {

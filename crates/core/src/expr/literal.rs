@@ -116,7 +116,7 @@ impl Literal {
 					let v = stk.run(|stk| i.value.compute(stk, ctx, opt, doc)).await?;
 					map.insert(i.key.clone(), v);
 				}
-				Value::Object(Object(map))
+				Value::Object(Object(map.into()))
 			}
 			Literal::Duration(duration) => Value::Duration(*duration),
 			Literal::Datetime(datetime) => Value::Datetime(datetime.clone()),

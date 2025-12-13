@@ -3,6 +3,8 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
+use imbl::OrdMap;
+use imbl::shared_ptr::DefaultSharedPtr;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -17,7 +19,7 @@ use crate::val::{IndexFormat, RecordId, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
+pub(crate) struct Object(pub(crate) OrdMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
@@ -27,13 +29,13 @@ impl From<BTreeMap<&str, Value>> for Object {
 
 impl From<BTreeMap<String, Value>> for Object {
 	fn from(v: BTreeMap<String, Value>) -> Self {
-		Self(v)
+		Self(v.into_iter().collect())
 	}
 }
 
 impl FromIterator<(String, Value)> for Object {
 	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
-		Self(BTreeMap::from_iter(iter))
+		Self(OrdMap::from_iter(iter))
 	}
 }
 
@@ -78,7 +80,7 @@ impl From<crate::types::PublicObject> for Object {
 }
 
 impl Deref for Object {
-	type Target = BTreeMap<String, Value>;
+	type Target = OrdMap<String, Value>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -92,7 +94,7 @@ impl DerefMut for Object {
 
 impl IntoIterator for Object {
 	type Item = (String, Value);
-	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	type IntoIter = imbl::ordmap::ConsumingIter<String, Value, DefaultSharedPtr>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}

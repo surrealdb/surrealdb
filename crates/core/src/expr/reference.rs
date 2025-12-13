@@ -20,10 +20,9 @@ impl ToSql for Reference {
 
 impl InfoStructure for Reference {
 	fn structure(self) -> Value {
-		map! {
+		Value::from(map! {
 			"on_delete" => self.on_delete.structure(),
-		}
-		.into()
+		})
 	}
 }
 

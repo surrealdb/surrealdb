@@ -51,6 +51,7 @@ pub(crate) enum Operation {
 }
 
 impl Operation {
+	/// Converts a value to a JSON path.
 	fn value_to_jsonpath(val: &Value) -> Vec<String> {
 		val.to_raw_string()
 			.trim_start_matches('/')
@@ -69,7 +70,7 @@ impl Operation {
 			res.into()
 		}
 
-		let res = match self {
+		Object::from(match self {
 			Operation::Add {
 				path,
 				value,
@@ -151,8 +152,7 @@ impl Operation {
 					"value".to_owned() => value,
 				}
 			}
-		};
-		Object(res)
+		})
 	}
 
 	/// Returns the operaton encoded in the object, or an error if the object

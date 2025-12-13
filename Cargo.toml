@@ -51,17 +51,18 @@ affinitypool = "0.4.0"
 dmp = "0.2.3"
 indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.16.0", features = [
+revision = { version = "0.17.0", features = [
     "bytes",
     "chrono",
     "geo",
+    "imbl",
     "roaring",
     "regex",
     "rust_decimal",
-    "specialised",
+    "specialised-vectors",
     "uuid",
 ] }
-storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
+storekey = { version = "0.11.0", features = ["bytes", "uuid", "imbl"] }
 surrealkv = "0.15.1"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
@@ -119,6 +120,7 @@ hex = "0.4.3"
 http = "1.1.0"
 hyper = "=1.6.0"
 humantime = "2.3.0"
+imbl = "6.1.0"
 indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
