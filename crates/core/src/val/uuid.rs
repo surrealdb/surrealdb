@@ -56,11 +56,6 @@ impl Uuid {
 		Self(uuid::Uuid::max())
 	}
 
-	/// Convert the Uuid to a raw String
-	pub fn to_raw(self) -> String {
-		self.0.to_string()
-	}
-
 	/// Generate a new UUID from a slice
 	pub fn from_slice(slice: &[u8]) -> Result<Self, uuid::Error> {
 		Ok(Self(uuid::Uuid::from_slice(slice)?))

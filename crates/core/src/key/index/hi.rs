@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::val::{IndexFormat, RecordIdKey};
+use crate::val::{IndexFormat, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
@@ -15,7 +15,7 @@ pub(crate) struct Hi<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -33,7 +33,13 @@ impl crate::kvs::KVKey for Hi<'_> {
 }
 
 impl<'a> Hi<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		id: RecordIdKey,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

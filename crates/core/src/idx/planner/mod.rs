@@ -13,10 +13,10 @@ use std::sync::atomic::{self, AtomicU8};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
+use crate::doc::NsDbTbCtx;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
@@ -25,6 +25,7 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
+use crate::val::TableName;
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.
@@ -90,7 +91,7 @@ impl<'a> StatementContext<'a> {
 		})
 	}
 
-	pub(crate) async fn check_table_permission(&self, tb: &str) -> Result<GrantedPermission> {
+	pub(crate) async fn check_table_permission(&self, tb: &TableName) -> Result<GrantedPermission> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
@@ -226,13 +227,13 @@ impl<'a> StatementContext<'a> {
 
 pub(crate) struct QueryPlanner {
 	/// There is one executor per table
-	executors: HashMap<String, QueryExecutor>,
+	executors: HashMap<TableName, QueryExecutor>,
 	requires_distinct: bool,
 	fallbacks: Vec<String>,
 	iteration_workflow: Vec<IterationStage>,
 	iteration_index: AtomicU8,
 	ordering_indexes: Vec<IteratorRef>,
-	granted_permissions: HashMap<String, GrantedPermission>,
+	granted_permissions: HashMap<TableName, GrantedPermission>,
 	any_specific_permission: bool,
 }
 
@@ -255,14 +256,14 @@ impl QueryPlanner {
 	pub(crate) async fn check_table_permission(
 		&mut self,
 		ctx: &StatementContext<'_>,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<GrantedPermission> {
 		if ctx.is_perm {
 			if let Some(p) = self.granted_permissions.get(tb) {
 				return Ok(*p);
 			}
 			let p = ctx.check_table_permission(tb).await?;
-			self.granted_permissions.insert(tb.to_string(), p);
+			self.granted_permissions.insert(tb.clone(), p);
 			if matches!(p, GrantedPermission::Specific) {
 				self.any_specific_permission = true;
 			}
@@ -273,24 +274,24 @@ impl QueryPlanner {
 
 	pub(crate) async fn add_iterables(
 		&mut self,
-		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		ctx: &StatementContext<'_>,
-		t: String,
+		stm_ctx: &StatementContext<'_>,
+		doc_ctx: NsDbTbCtx,
+		t: &TableName,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
 		let mut is_table_iterator = false;
 
-		let tree = Tree::build(stk, ctx, &t).await?;
+		let tree = Tree::build(stk, stm_ctx, &t).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(
-			db,
+			&doc_ctx,
 			stk,
-			ctx.ctx,
-			ctx.opt,
-			&t,
+			stm_ctx.ctx,
+			stm_ctx.opt,
+			t.clone(),
 			tree.index_map.options,
 			tree.knn_brute_force_expressions,
 			tree.knn_condition,
@@ -307,14 +308,14 @@ impl QueryPlanner {
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
 		};
-		match PlanBuilder::build(ctx, p).await? {
+		match PlanBuilder::build(stm_ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let is_order = io.is_order();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it, rs);
+				self.add(doc_ctx.clone(), t.clone(), Some(ir), exe, it, rs);
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
@@ -323,30 +324,30 @@ impl QueryPlanner {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(Some(exp), io);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie =
 						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}
 				self.requires_distinct = true;
-				self.add(t.clone(), None, exe, it, rs);
+				self.add(doc_ctx.clone(), t.clone(), None, exe, it, rs);
 			}
 			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
-				self.add(t.clone(), Some(ir), exe, it, keys_only);
+				self.add(doc_ctx.clone(), t.clone(), Some(ir), exe, it, keys_only);
 			}
 			Plan::TableIterator(reason, rs, sc) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it, rs);
-				it.ingest(Iterable::Table(t.clone(), rs, sc));
+				self.add(doc_ctx.clone(), t.clone(), None, exe, it, rs);
+				it.ingest(Iterable::Table(doc_ctx.clone(), t.clone(), rs, sc));
 				is_table_iterator = true;
 			}
 		}
@@ -360,7 +361,8 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: String,
+		doc_ctx: NsDbTbCtx,
+		tb: TableName,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
@@ -368,14 +370,14 @@ impl QueryPlanner {
 	) {
 		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf, rs));
+			it.ingest(Iterable::Index(doc_ctx, tb, irf, rs));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {
 		!self.executors.is_empty()
 	}
 
-	pub(crate) fn get_query_executor(&self, tb: &str) -> Option<&QueryExecutor> {
+	pub(crate) fn get_query_executor(&self, tb: &TableName) -> Option<&QueryExecutor> {
 		self.executors.get(tb)
 	}
 

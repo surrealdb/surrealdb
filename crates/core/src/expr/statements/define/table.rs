@@ -29,7 +29,7 @@ use crate::expr::{
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
-use crate::val::{Array, Number, RecordId, RecordIdKey, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineTableStatement {
@@ -75,7 +75,8 @@ impl DefineTableStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 
 		// Process the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
+		let name =
+			TableName::new(expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?);
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
@@ -88,7 +89,7 @@ impl DefineTableStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::TbAlreadyExists {
-							name: name.clone(),
+							name: name.clone().into_string(),
 						});
 					}
 				}
@@ -210,7 +211,7 @@ impl DefineTableStatement {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		view: &ViewDefinition,
 	) -> Result<()> {
 		match view {
@@ -258,9 +259,9 @@ impl DefineTableStatement {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		fields: &Fields,
-		tables: &[String],
+		tables: &[TableName],
 		condition: Option<&Expr>,
 	) -> Result<()> {
 		let select = SelectStatement {
@@ -311,10 +312,10 @@ impl DefineTableStatement {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		analysis: &AggregationAnalysis,
 		condition: Option<&Expr>,
-		tables: &[String],
+		tables: &[TableName],
 	) -> Result<()> {
 		// To initialize the materialized aggregate view we not only need to initialize records in
 		// the view but also find the AggregationStat values.
@@ -686,7 +687,7 @@ impl DefineTableStatement {
 			tx.put_record(ns, db, view_table_name, &key, record.clone(), None).await?;
 
 			let id = Arc::new(RecordId {
-				table: view_table_name.to_owned(),
+				table: view_table_name.clone(),
 				key,
 			});
 			Document::run_triggers(stk, ctx, opt, id, doc::Action::Create, None, Some(record))
@@ -717,7 +718,7 @@ impl DefineTableStatement {
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
-						what: tb.name.clone(),
+						table: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -733,7 +734,7 @@ impl DefineTableStatement {
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.clone(),
+						table: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},

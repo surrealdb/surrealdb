@@ -162,7 +162,7 @@ use crate::val::{Datetime, Value};
 }, 35)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
-	what: "what".to_string(),
+	table: "what".to_string(),
 	field_kind: None,
 	readonly: false,
 	flexible: false,

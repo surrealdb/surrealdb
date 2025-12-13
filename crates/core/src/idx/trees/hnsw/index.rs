@@ -83,7 +83,7 @@ impl HnswIndex {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
-			docs: HnswDocs::new(tx, ikb.table().to_string(), ikb.clone()).await?,
+			docs: HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
 	}

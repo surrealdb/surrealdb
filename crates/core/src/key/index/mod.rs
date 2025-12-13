@@ -39,9 +39,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::{Array, IndexFormat, RecordId, RecordIdKey};
+use crate::val::{Array, IndexFormat, RecordId, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -49,7 +50,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -58,7 +59,7 @@ struct Prefix<'a> {
 impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -83,7 +84,7 @@ struct PrefixIds<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -102,7 +103,7 @@ impl crate::kvs::KVKey for PrefixIds<'_> {
 }
 
 impl<'a> PrefixIds<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, fd: &'a Array) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, fd: &'a Array) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -128,7 +129,7 @@ pub(crate) struct Index<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -157,7 +158,7 @@ impl<'a> Index<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		fd: &'a Array,
 		id: Option<&'a RecordIdKey>,
@@ -178,13 +179,18 @@ impl<'a> Index<'a> {
 		}
 	}
 
-	fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, ix: IndexId) -> Result<Vec<u8>> {
+	fn prefix(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> Result<Vec<u8>> {
 		Prefix::new(ns, db, tb, ix).encode_key()
 	}
 
 	/// Start of the index keyspace: prefix + 0x00. Used as the lower bound
 	/// when iterating all entries for a given index.
-	pub fn prefix_beg(ns: NamespaceId, db: DatabaseId, tb: &str, ix: IndexId) -> Result<Vec<u8>> {
+	pub fn prefix_beg(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0x00]); // lower sentinel for entire index keyspace
 		Ok(beg)
@@ -192,7 +198,12 @@ impl<'a> Index<'a> {
 
 	/// End of the index keyspace: prefix + 0xFF. Used as the upper bound (exclusive)
 	/// when iterating all entries for a given index.
-	pub fn prefix_end(ns: NamespaceId, db: DatabaseId, tb: &str, ix: IndexId) -> Result<Vec<u8>> {
+	pub fn prefix_end(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix(ns, db, tb, ix)?;
 		beg.extend_from_slice(&[0xff]); // upper sentinel for entire index keyspace (exclusive)
 		Ok(beg)
@@ -204,7 +215,7 @@ impl<'a> Index<'a> {
 	fn prefix_ids(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 		fd: &Array,
 	) -> Result<Vec<u8>> {
@@ -219,7 +230,7 @@ impl<'a> Index<'a> {
 	pub fn prefix_ids_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 		fd: &Array,
 	) -> Result<Vec<u8>> {
@@ -236,7 +247,7 @@ impl<'a> Index<'a> {
 	pub fn prefix_ids_end(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 		fd: &Array,
 	) -> Result<Vec<u8>> {
@@ -252,7 +263,7 @@ impl<'a> Index<'a> {
 	pub fn prefix_ids_composite_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 		fd: &Array,
 	) -> Result<Vec<u8>> {
@@ -268,7 +279,7 @@ impl<'a> Index<'a> {
 	pub fn prefix_ids_composite_end(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 		fd: &Array,
 	) -> Result<Vec<u8>> {

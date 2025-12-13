@@ -82,7 +82,7 @@ impl ToSql for AlterTableStatement {
 impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
 	fn from(v: AlterTableStatement) -> Self {
 		crate::expr::statements::alter::AlterTableStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
@@ -96,7 +96,7 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
 	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
 		AlterTableStatement {
-			name: v.name,
+			name: v.name.into_string(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),

@@ -68,7 +68,7 @@ impl<'a> IndexOperation<'a> {
 			db,
 			tb,
 			ix,
-			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
+			ikb: IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id),
 			o,
 			n,
 			rid,

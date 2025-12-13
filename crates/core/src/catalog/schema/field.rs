@@ -7,7 +7,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::{self, DefineFieldStatement};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -24,7 +24,7 @@ pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.
 	pub(crate) name: Idiom,
-	pub(crate) what: String,
+	pub(crate) table: TableName,
 	// TODO: Optionally also be a seperate type from expr::Kind
 	pub(crate) field_kind: Option<Kind>,
 	pub(crate) flexible: bool,
@@ -48,7 +48,7 @@ impl FieldDefinition {
 		DefineFieldStatement {
 			kind: sql::statements::define::DefineKind::Default,
 			name: Expr::Idiom(self.name.clone()).into(),
-			what: sql::Expr::Idiom(sql::Idiom::field(self.what.clone())),
+			what: sql::Expr::Table(self.table.clone().into_string()),
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			flexible: self.flexible,
 			readonly: self.readonly,
@@ -84,7 +84,7 @@ impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"what".to_string() => Value::from(self.what.clone()),
+			"what".to_string() => Value::from(self.table.clone()),
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"flexible".to_string(), if self.flexible => true.into(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),

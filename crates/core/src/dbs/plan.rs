@@ -104,19 +104,19 @@ impl ExplainItem {
 
 	fn new_iter(ctx: &FrozenContext, iter: &Iterable) -> Self {
 		match iter {
-			Iterable::Value(v) => Self {
+			Iterable::Value(doc_ctx, v) => Self {
 				name: "Iterate Value".into(),
 				details: vec![("value", v.to_owned())],
 			},
-			Iterable::Yield(t) => Self {
+			Iterable::GenerateRecordId(doc_ctx, t) => Self {
 				name: "Iterate Yield".into(),
 				details: vec![("table", t.clone().into())],
 			},
-			Iterable::Thing(t) => Self {
+			Iterable::RecordId(doc_ctx, t) => Self {
 				name: "Iterate Thing".into(),
 				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
-			Iterable::Defer(t) => Self {
+			Iterable::Defer(doc_ctx, t) => Self {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
@@ -134,7 +134,7 @@ impl ExplainItem {
 					details: vec![("from", Value::RecordId(from.clone()))],
 				},
 			},
-			Iterable::Table(t, rs, sc) => Self {
+			Iterable::Table(doc_ctx, t, rs, sc) => Self {
 				name: match rs {
 					RecordStrategy::Count => "Iterate Table Count",
 					RecordStrategy::KeysOnly => "Iterate Table Keys",
@@ -146,7 +146,7 @@ impl ExplainItem {
 					("direction", sc.to_string().into()),
 				],
 			},
-			Iterable::Range(tb, r, rs, sc) => Self {
+			Iterable::Range(doc_ctx, tb, r, rs, sc) => Self {
 				name: match rs {
 					RecordStrategy::Count => "Iterate Range Count",
 					RecordStrategy::KeysOnly => "Iterate Range Keys",
@@ -154,24 +154,23 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					//TODO: Properly handle possible null byte.
-					("table", Value::String(tb.clone())),
+					("table", Value::Table(tb.clone())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},
-			Iterable::Mergeable(tb, None, v) => Self {
+			Iterable::Mergeable(doc_ctx, tb, None, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("table", Value::String(tb.to_owned())), ("value", v.to_owned())],
+				details: vec![("table", Value::Table(tb.clone())), ("value", v.to_owned())],
 			},
-			Iterable::Mergeable(tb, Some(id), v) => Self {
+			Iterable::Mergeable(doc_ctx, tb, Some(id), v) => Self {
 				name: "Iterate Mergeable".into(),
 				details: vec![
 					("thing", Value::RecordId(RecordId::new(tb.to_owned(), id.to_owned()))),
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Relatable(t1, t2, t3, None) => Self {
+			Iterable::Relatable(doc_ctx, t1, t2, t3, None) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
@@ -179,7 +178,7 @@ impl ExplainItem {
 					("thing-3", Value::RecordId(t3.to_owned())),
 				],
 			},
-			Iterable::Relatable(t1, t2, t3, Some(v)) => Self {
+			Iterable::Relatable(doc_ctx, t1, t2, t3, Some(v)) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
@@ -188,10 +187,10 @@ impl ExplainItem {
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::String(t.clone()))];
+			Iterable::Index(doc_ctx, t, ir, rs) => {
+				let mut details = vec![("table", Value::Table(t.clone()))];
 				if let Some(qp) = ctx.get_query_planner()
-					&& let Some(exe) = qp.get_query_executor(t.as_str())
+					&& let Some(exe) = qp.get_query_executor(t)
 				{
 					details.push(("plan", exe.explain(*ir)));
 				}

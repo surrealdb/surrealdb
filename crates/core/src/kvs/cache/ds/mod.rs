@@ -9,6 +9,7 @@ pub(crate) use lookup::Lookup;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::val::TableName;
 
 pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 
@@ -41,7 +42,7 @@ impl DatastoreCache {
 	}
 
 	/// Clear the cache entry for a table
-	pub(crate) fn clear_tb(&self, ns: NamespaceId, db: DatabaseId, tb: &str) {
+	pub(crate) fn clear_tb(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
 		let key = Lookup::Tb(ns, db, tb);
 		self.cache.remove(&key);
 	}
@@ -55,7 +56,7 @@ impl DatastoreCache {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Uuid> {
 		// Get the live-queries cache version
 		let key = Lookup::Lvv(ns, db, tb);
@@ -71,7 +72,7 @@ impl DatastoreCache {
 		Ok(version)
 	}
 
-	pub(crate) fn new_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &str) {
+	pub(crate) fn new_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
 		let key = Lookup::Lvv(ns, db, tb);
 		self.insert(key, Entry::Lvv(Uuid::now_v7()));
 	}

@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
+use crate::val::TableName;
 
 pub mod key;
 pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
@@ -19,7 +20,7 @@ pub(crate) struct RecordIdLit {
 impl From<RecordIdLit> for crate::expr::RecordIdLit {
 	fn from(v: RecordIdLit) -> Self {
 		crate::expr::RecordIdLit {
-			table: v.table,
+			table: TableName::new(v.table),
 			key: v.key.into(),
 		}
 	}
@@ -28,7 +29,7 @@ impl From<RecordIdLit> for crate::expr::RecordIdLit {
 impl From<crate::expr::RecordIdLit> for RecordIdLit {
 	fn from(v: crate::expr::RecordIdLit) -> Self {
 		RecordIdLit {
-			table: v.table,
+			table: v.table.into_string(),
 			key: v.key.into(),
 		}
 	}

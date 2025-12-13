@@ -7,8 +7,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct TableKey<'a> {
 	__: u8,
 	_a: u8,
@@ -18,12 +20,12 @@ pub(crate) struct TableKey<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 }
 
 impl_kv_key_storekey!(TableKey<'_> => TableDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableKey<'_> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> TableKey<'_> {
 	TableKey::new(ns, db, tb)
 }
 
@@ -46,7 +48,7 @@ impl Categorise for TableKey<'_> {
 }
 
 impl<'a> TableKey<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -71,7 +73,7 @@ mod tests {
 		let val = TableKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&TableName::new("testtb"),
 		);
 		let enc = TableKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tbtesttb\0");

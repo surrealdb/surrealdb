@@ -5,11 +5,11 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
-use crate::catalog::providers::TableProvider;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
-use crate::doc::{Action, CursorDoc, Document};
+use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbCtx};
 use crate::err::Error;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
@@ -18,7 +18,7 @@ use crate::expr::{
 };
 use crate::idx::planner::RecordStrategy;
 use crate::key;
-use crate::val::{Array, Number, RecordId, RecordIdKey, TryAdd, TryMul, TryPow, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
 
 struct Recalculation {
 	function: String,
@@ -90,7 +90,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		table_name: &str,
+		table_name: &TableName,
 		view: &ViewDefinition,
 		action: Action,
 	) -> Result<()> {
@@ -149,7 +149,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
 		condition: &Option<Expr>,
 		action: Action,
@@ -312,7 +312,7 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -375,7 +375,7 @@ impl Document {
 		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
 
 		let id = Arc::new(RecordId {
-			table: view_table_name.to_string(),
+			table: view_table_name.to_string().into(),
 			key,
 		});
 
@@ -393,7 +393,7 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -423,7 +423,7 @@ impl Document {
 			tx.del(&k).await?;
 
 			let id = RecordId {
-				table: view_table_name.to_string(),
+				table: view_table_name.to_string().into(),
 				key,
 			};
 			Self::run_triggers(stk, ctx, opt, id.into(), Action::Delete, Some(record.into()), None)
@@ -607,7 +607,7 @@ impl Document {
 				})),
 				// FROM ONLY table
 				only: true,
-				what: vec![Expr::Table(table_name.clone())],
+				what: vec![Expr::Table(table_name.clone().into())],
 				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
 				cond: condition.map(Cond),
 				// GROUP ALL
@@ -686,7 +686,7 @@ impl Document {
 		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
 
 		let id = RecordId {
-			table: view_table_name.to_string(),
+			table: view_table_name.to_string().into(),
 			key,
 		};
 		Self::run_triggers(
@@ -710,7 +710,7 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 		group: Vec<Value>,
-		view_table_name: &str,
+		view_table_name: &TableName,
 		aggr: &AggregationAnalysis,
 	) -> Result<()> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -986,7 +986,7 @@ impl Document {
 				})),
 				// FROM ONLY table
 				only: true,
-				what: vec![Expr::Table(table_name.clone())],
+				what: vec![Expr::Table(table_name.clone().into())],
 				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
 				cond: condition.map(Cond),
 				// GROUP ALL
@@ -1065,7 +1065,7 @@ impl Document {
 		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
 
 		let id = RecordId {
-			table: view_table_name.to_owned(),
+			table: view_table_name.to_owned().into(),
 			key,
 		};
 		Self::run_triggers(
@@ -1096,9 +1096,18 @@ impl Document {
 		// statement query and just run events immediatly.
 		// Updating views prevents premissions from being run anyway so there shouldn't be a
 		// probelm.
-		//
+		// 
 		// Generate a document so that we can run the events.
+
+		let txn = ctx.tx();
+		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
+
 		let mut document = Document {
+			doc_ctx: DocumentContext::NsDbCtx(NsDbCtx {
+				ns,
+				db,
+			}),
 			r#gen: None,
 			retry: false,
 			extras: Workable::Normal,

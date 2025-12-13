@@ -14,20 +14,16 @@ impl Parser<'_> {
 	) -> ParseResult<InsertStatement> {
 		let relation = self.eat(t!("RELATION"));
 		let ignore = self.eat(t!("IGNORE"));
-		let into = if self.eat(t!("INTO")) {
-			let r = match self.peek().kind {
-				t!("$param") => {
-					let param = self.next_token_value()?;
-					Expr::Param(param)
-				}
-				_ => {
-					let table = self.parse_ident()?;
-					Expr::Table(table)
-				}
-			};
-			Some(r)
-		} else {
-			None
+		let _ = self.eat(t!("INTO"));
+		let into = match self.peek().kind {
+			t!("$param") => {
+				let param = self.next_token_value()?;
+				Expr::Param(param)
+			}
+			_ => {
+				let table = self.parse_ident()?;
+				Expr::Table(table)
+			}
 		};
 
 		let data = self.parse_insert_values(stk).await?;

@@ -12,11 +12,11 @@ use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterTableStatement {
-	pub name: String,
+	pub name: TableName,
 	pub if_exists: bool,
 	pub(crate) schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,

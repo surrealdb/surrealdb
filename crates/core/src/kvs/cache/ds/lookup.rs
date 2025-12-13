@@ -3,13 +3,14 @@ use uuid::Uuid;
 
 use super::key::Key;
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::val::TableName;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
 	/// A cache key for a database
 	Db(&'a str, &'a str),
 	/// A cache key for a table
-	Tb(NamespaceId, DatabaseId, &'a str),
+	Tb(NamespaceId, DatabaseId, &'a TableName),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for fields (on a table)
@@ -21,7 +22,7 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for live queries version (on a table)
-	Lvv(NamespaceId, DatabaseId, &'a str),
+	Lvv(NamespaceId, DatabaseId, &'a TableName),
 }
 
 impl Equivalent<Key> for Lookup<'_> {

@@ -144,6 +144,7 @@ async fn select_all(
 	let (ns, db) = check_ns_db(&session).map_err(ResponseError)?;
 
 	// Check if the table exists
+	let table = TableName::new(table);
 	ds.ensure_tb_exists(&ns, &db, &table).await.map_err(ResponseError)?;
 
 	// Specify the request statement

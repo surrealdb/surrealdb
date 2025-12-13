@@ -8,12 +8,13 @@ use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct View {
 	pub(crate) materialize: bool,
 	pub(crate) expr: Fields,
-	pub(crate) what: Vec<String>,
+	pub(crate) what: Vec<TableName>,
 	pub(crate) cond: Option<Cond>,
 	pub(crate) group: Option<Groups>,
 }

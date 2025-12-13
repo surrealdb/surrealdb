@@ -26,8 +26,10 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Tt<'a> {
 	__: u8,
 	_a: u8,
@@ -35,7 +37,7 @@ pub(crate) struct Tt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -77,7 +79,7 @@ impl<'a> Tt<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		term: &'a str,
 		doc_id: DocId,
@@ -124,7 +126,7 @@ impl<'a> Tt<'a> {
 	pub(crate) fn term_range(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		term: &'a str,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
@@ -154,7 +156,7 @@ impl<'a> Tt<'a> {
 	pub(crate) fn terms_range(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
@@ -171,6 +173,7 @@ impl<'a> Tt<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct TtTermPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -178,7 +181,7 @@ struct TtTermPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -190,7 +193,7 @@ struct TtTermPrefix<'a> {
 impl_kv_key_storekey!(TtTermPrefix<'_> => String);
 
 impl<'a> TtTermPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, term: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, term: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -210,6 +213,7 @@ impl<'a> TtTermPrefix<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct TtTermsPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -217,7 +221,7 @@ struct TtTermsPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -228,7 +232,7 @@ struct TtTermsPrefix<'a> {
 impl_kv_key_storekey!(TtTermsPrefix<'_> => String);
 
 impl<'a> TtTermsPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

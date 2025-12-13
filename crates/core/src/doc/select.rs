@@ -3,7 +3,7 @@ use std::sync::Arc;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
-use crate::catalog::{FieldDefinition, Permission, TableDefinition};
+use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
@@ -21,14 +21,13 @@ impl Document {
 		opt: &Options,
 		stmt: &SelectStatement,
 		omit: &[Idiom],
-		table: Option<Arc<TableDefinition>>,
-		table_fields: Option<Arc<[FieldDefinition]>>,
 	) -> Result<Value, IgnoreError> {
 		self.check_record_exists()?;
-		check_select_permissions_quick(opt, table.as_ref())?;
+		check_select_permissions_quick(opt, self.doc_ctx.tb().ok())?;
 		self.check_select_where_condition(stk, ctx, opt, stmt).await?;
-		check_select_permissions_table(stk, ctx, opt, table.as_ref(), &self.current).await?;
-		self.pluck_select(stk, ctx, opt, stmt, omit, table_fields.as_ref()).await
+		check_select_permissions_table(stk, ctx, opt, self.doc_ctx.tb().ok(), &self.current)
+			.await?;
+		self.pluck_select(stk, ctx, opt, stmt, omit).await
 	}
 }
 

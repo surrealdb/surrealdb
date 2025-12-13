@@ -33,31 +33,27 @@ use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct Inner {
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: String,
+	tb: TableName,
 	ix: IndexId,
 }
 
 impl IndexKeyBase {
-	pub fn new(
-		ns: impl Into<NamespaceId>,
-		db: impl Into<DatabaseId>,
-		tb: &str,
-		ix: impl Into<IndexId>,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: TableName, ix: IndexId) -> Self {
 		Self(Arc::new(Inner {
-			ns: ns.into(),
-			db: db.into(),
-			tb: tb.to_string(),
-			ix: ix.into(),
+			ns,
+			db,
+			tb,
+			ix,
 		}))
 	}
 
@@ -171,7 +167,7 @@ impl IndexKeyBase {
 		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
-	pub(crate) fn table(&self) -> &str {
+	pub(crate) fn table(&self) -> &TableName {
 		&self.0.tb
 	}
 

@@ -174,7 +174,7 @@ tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
 tokio-util = "0.7.11"
-tracing = { version = "0.1.43", features = ["release_max_level_debug"] }
+tracing = { version = "0.1.43", features = [] }
 ulid = "1.1.0"
 unicase = "2.7.0"
 url = "2.5.0"
@@ -418,3 +418,4 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
+panic = 'unwind'

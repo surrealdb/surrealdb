@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::catalog::Record;
 use crate::ctx::FrozenContext;
-use crate::dbs::{Operable, Options, Processed, Statement, Workable};
+use crate::dbs::{Operable, Options, Processable, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
@@ -15,15 +15,14 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		Processed {
+		Processable {
+			doc_ctx,
 			record_strategy,
 			generate,
-			table,
-			table_fields,
 			rid,
 			val,
 			ir,
-		}: Processed,
+		}: Processable,
 	) -> Result<Value, IgnoreError> {
 		// Check current context
 		if ctx.is_done(None).await? {
@@ -40,13 +39,14 @@ impl Document {
 			}
 		};
 		// Setup a new document
-		let mut doc = Document::new(rid, ir, generate, ins.0, ins.1, false, record_strategy);
+		let mut doc =
+			Document::new(doc_ctx, rid, ir, generate, ins.0, ins.1, false, record_strategy);
 		// Process the statement
 		let res = match stm {
 			Statement::Select {
 				stmt,
 				omit,
-			} => doc.select(stk, ctx, opt, stmt, omit, table, table_fields).await?,
+			} => doc.select(stk, ctx, opt, stmt, omit).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,
 			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await?,

@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
+use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
@@ -111,10 +111,16 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new();
 
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
+		let (ns, db) = ctx.expect_ns_db(&opt).await?;
+		let doc_ctx = NsDbCtx {
+			ns: Arc::clone(&ns),
+			db: Arc::clone(&db),
+		};
+
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
-			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, w).await?;
+			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
 		}
 
 		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {

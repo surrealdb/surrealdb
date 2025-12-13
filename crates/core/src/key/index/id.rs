@@ -44,7 +44,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::val::{IndexFormat, RecordIdKey};
+use crate::val::{IndexFormat, RecordIdKey, TableName};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
@@ -55,7 +55,7 @@ pub(crate) struct Id<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -80,7 +80,13 @@ impl Categorise for Id<'_> {
 
 impl<'a> Id<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		id: RecordIdKey,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

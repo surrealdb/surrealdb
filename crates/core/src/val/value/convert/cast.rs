@@ -12,7 +12,7 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
+	Range, RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -355,7 +355,7 @@ impl Cast for String {
 			Value::Null => Ok("NULL".into()),
 			Value::None => Ok("NONE".into()),
 			Value::String(x) => Ok(x),
-			Value::Uuid(x) => Ok(x.to_raw()),
+			Value::Uuid(x) => Ok(x.to_string()),
 			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			x => Ok(x.to_sql()),
@@ -687,7 +687,7 @@ impl Cast for RecordId {
 	}
 }
 
-impl Cast for crate::val::Table {
+impl Cast for crate::val::TableName {
 	fn can_cast(v: &Value) -> bool {
 		matches!(v, Value::Table(_) | Value::String(_))
 	}
@@ -695,7 +695,7 @@ impl Cast for crate::val::Table {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Table(x) => Ok(x),
-			Value::String(x) => Ok(crate::val::Table::new(x)),
+			Value::String(x) => Ok(crate::val::TableName::new(x)),
 			from => Err(CastError::InvalidKind {
 				from,
 				into: "table".to_string(),
@@ -852,7 +852,7 @@ impl Value {
 		}
 	}
 
-	fn can_cast_to_table(&self, val: &[String]) -> bool {
+	fn can_cast_to_table(&self, val: &[TableName]) -> bool {
 		match self {
 			Value::Table(t) => t.is_table_type(val),
 			Value::String(_) => true, // Strings can be cast to tables
@@ -860,7 +860,7 @@ impl Value {
 		}
 	}
 
-	fn can_cast_to_record(&self, val: &[String]) -> bool {
+	fn can_cast_to_record(&self, val: &[TableName]) -> bool {
 		match self {
 			Value::RecordId(t) => t.is_table_type(val),
 			_ => false,
@@ -913,7 +913,9 @@ impl Value {
 				None => self.cast_to_array(t).map(Value::from),
 			},
 			Kind::Table(t) => match t.is_empty() {
-				true => self.cast_to::<String>().map(|s| Value::Table(crate::val::Table::new(s))),
+				true => {
+					self.cast_to::<String>().map(|s| Value::Table(crate::val::TableName::new(s)))
+				}
 				false => self.cast_to_table(t).map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
@@ -961,12 +963,12 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Table of a certain type
-	fn cast_to_table(self, val: &[String]) -> Result<crate::val::Table, CastError> {
+	fn cast_to_table(self, val: &[TableName]) -> Result<crate::val::TableName, CastError> {
 		match self {
 			Value::Table(v) if v.is_table_type(val) => Ok(v),
 			Value::String(v) => {
 				// Check if the string is a valid table name and matches the allowed types
-				let table = crate::val::Table::new(v.clone());
+				let table = crate::val::TableName::new(v.clone());
 				if table.is_table_type(val) {
 					Ok(table)
 				} else {
@@ -1004,42 +1006,45 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Record of a certain type
-	fn cast_to_record(self, val: &[String]) -> Result<RecordId, CastError> {
+	fn cast_to_record(self, val: &[TableName]) -> Result<RecordId, CastError> {
+		let expected_kind = || -> String {
+			let mut kind = "record<".to_string();
+			for (idx, t) in val.iter().enumerate() {
+				if idx != 0 {
+					kind.push('|');
+				}
+				kind.push_str(t.as_str())
+			}
+			kind.push('>');
+			kind
+		};
+
 		match self {
 			Value::RecordId(v) if v.is_table_type(val) => Ok(v),
-			Value::String(v) => match syn::record_id(v.as_str()) {
-				Ok(x) if x.is_table_type(val) => Ok(x.into()),
-				_ => {
-					let mut kind = "record<".to_string();
-					for (idx, t) in val.iter().enumerate() {
-						if idx != 0 {
-							kind.push('|');
-						}
-						kind.push_str(t.as_str())
+			Value::String(v) => {
+				let record_id = match syn::record_id(v.as_str()) {
+					Ok(x) => RecordId::from(x),
+					Err(e) => {
+						return Err(CastError::InvalidKind {
+							from: Value::String(v),
+							into: expected_kind(),
+						});
 					}
-					kind.push('>');
+				};
 
-					Err(CastError::InvalidKind {
+				if !record_id.is_table_type(val) {
+					return Err(CastError::InvalidKind {
 						from: Value::String(v),
-						into: kind,
-					})
+						into: expected_kind(),
+					});
 				}
-			},
-			x => {
-				let mut kind = "record<".to_string();
-				for (idx, t) in val.iter().enumerate() {
-					if idx != 0 {
-						kind.push('|');
-					}
-					kind.push_str(t.as_str())
-				}
-				kind.push('>');
 
-				Err(CastError::InvalidKind {
-					from: x,
-					into: kind,
-				})
+				Ok(record_id)
 			}
+			x => Err(CastError::InvalidKind {
+				from: x,
+				into: expected_kind(),
+			}),
 		}
 	}
 
@@ -1199,7 +1204,7 @@ mod tests {
 	#[test]
 	fn test_cast_table_to_table() {
 		// Test casting table value to table type
-		let value = Value::Table(crate::val::Table::new("users".to_string()));
+		let value = Value::Table(crate::val::TableName::new("users".to_string()));
 		let kind = Kind::Table(vec!["users".to_string()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1213,12 +1218,12 @@ mod tests {
 		assert!(value.can_cast_to_kind(&kind));
 
 		// Table value can cast to table type
-		let value = Value::Table(crate::val::Table::new("users".to_string()));
+		let value = Value::Table(crate::val::TableName::new("users".to_string()));
 		let kind = Kind::Table(vec!["users".to_string()]);
 		assert!(value.can_cast_to_kind(&kind));
 
 		// Table value cannot cast to wrong table type
-		let value = Value::Table(crate::val::Table::new("posts".to_string()));
+		let value = Value::Table(crate::val::TableName::new("posts".to_string()));
 		let kind = Kind::Table(vec!["users".to_string()]);
 		assert!(!value.can_cast_to_kind(&kind));
 	}

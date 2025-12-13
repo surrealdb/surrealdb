@@ -41,7 +41,7 @@ impl From<AlterIndexStatement> for crate::expr::statements::alter::AlterIndexSta
 	fn from(v: AlterIndexStatement) -> Self {
 		crate::expr::statements::alter::AlterIndexStatement {
 			name: v.name,
-			table: v.table,
+			table: v.table.into(),
 			if_exists: v.if_exists,
 			prepare_remove: v.prepare_remove,
 			comment: v.comment.into(),
@@ -52,7 +52,7 @@ impl From<crate::expr::statements::alter::AlterIndexStatement> for AlterIndexSta
 	fn from(v: crate::expr::statements::alter::AlterIndexStatement) -> Self {
 		AlterIndexStatement {
 			name: v.name,
-			table: v.table,
+			table: v.table.into_string(),
 			if_exists: v.if_exists,
 			prepare_remove: v.prepare_remove,
 			comment: v.comment.into(),

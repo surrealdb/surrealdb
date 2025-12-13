@@ -1,14 +1,17 @@
+use std::sync::Arc;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::CursorDoc;
+use crate::doc::{CursorDoc, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Duration, RecordId, RecordIdKey, Table};
+use crate::val::{Duration, RecordId, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RelateStatement {
@@ -139,14 +142,27 @@ impl RelateStatement {
 			};
 			out
 		};
+
+		let txn = ctx.tx();
+		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
+		
 		//
 		for f in from.iter() {
+			let tb = txn.expect_tb(db.namespace_id, db.database_id, &f.table).await?;
+			let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &f.table, opt.version).await?;
+			let doc_ctx = NsDbTbCtx {
+				ns: Arc::clone(&ns),
+				db: Arc::clone(&db),
+				tb,
+				fields,
+			};
 			for t in to.iter() {
 				let through =
 					stk.run(|stk| self.through.compute(stk, ctx, opt, doc)).await.catch_return()?;
 
 				let through = RelateThrough::try_from(through)?;
-				i.ingest(Iterable::Relatable(f.clone(), through, t.clone(), None));
+				i.ingest(Iterable::Relatable(doc_ctx.clone(), f.clone(), through, t.clone(), None));
 			}
 		}
 
@@ -178,11 +194,11 @@ impl RelateStatement {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RelateThrough {
 	RecordId(RecordId),
-	Table(String),
+	Table(TableName),
 }
 
-impl From<(String, Option<RecordIdKey>)> for RelateThrough {
-	fn from((table, id): (String, Option<RecordIdKey>)) -> Self {
+impl From<(TableName, Option<RecordIdKey>)> for RelateThrough {
+	fn from((table, id): (TableName, Option<RecordIdKey>)) -> Self {
 		if let Some(id) = id {
 			RelateThrough::RecordId(RecordId::new(table, id))
 		} else {
@@ -196,7 +212,7 @@ impl TryFrom<Value> for RelateThrough {
 	fn try_from(value: Value) -> Result<Self> {
 		match value {
 			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
-			Value::Table(table) => Ok(RelateThrough::Table(table.into_string())),
+			Value::Table(table) => Ok(RelateThrough::Table(table.clone())),
 			_ => bail!(Error::RelateStatementOut {
 				value: value.to_sql()
 			}),
@@ -208,7 +224,7 @@ impl From<RelateThrough> for Value {
 	fn from(v: RelateThrough) -> Self {
 		match v {
 			RelateThrough::RecordId(id) => Value::RecordId(id),
-			RelateThrough::Table(table) => Value::Table(Table::new(table)),
+			RelateThrough::Table(table) => Value::Table(table),
 		}
 	}
 }

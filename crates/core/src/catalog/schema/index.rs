@@ -12,7 +12,7 @@ use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::define::DefineKind;
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, Number, TableName, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -56,7 +56,7 @@ impl From<u32> for IndexId {
 pub struct IndexDefinition {
 	pub(crate) index_id: IndexId,
 	pub(crate) name: String,
-	pub(crate) table_name: String,
+	pub(crate) table_name: TableName,
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
@@ -73,7 +73,7 @@ impl IndexDefinition {
 		sql::DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			what: sql::Expr::Idiom(sql::Idiom::field(self.table_name.clone())),
+			what: sql::Expr::Table(self.table_name.clone().into_string()),
 			cols: self.cols.iter().cloned().map(|x| sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
 			comment: self

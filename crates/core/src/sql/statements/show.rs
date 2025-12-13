@@ -2,6 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 use crate::types::PublicDatetime;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -59,7 +60,7 @@ impl ToSql for ShowStatement {
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table,
+			table: v.table.map(TableName::new),
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -69,7 +70,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table,
+			table: v.table.map(TableName::into_string),
 			since: v.since.into(),
 			limit: v.limit,
 		}

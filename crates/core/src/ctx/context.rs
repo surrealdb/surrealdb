@@ -22,7 +22,7 @@ use crate::buc::manager::BucketsManager;
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -311,6 +311,29 @@ impl Context {
 		Ok(ns_def.namespace_id)
 	}
 
+	pub(crate) async fn expect_ns(&self, opt: &Options) -> Result<Arc<NamespaceDefinition>> {
+		let ns = opt.ns()?;
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
+		Ok(ns_def)
+	}
+
+	pub(crate) async fn expect_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+		let ns = opt.ns()?;
+		let db = opt.db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
+		Ok(db_def)
+	}
+
 	/// Get the namespace and database ids for the current context.
 	/// If the namespace or database does not exist, it will be try to be
 	/// created based on the `strict` option.
@@ -332,6 +355,15 @@ impl Context {
 			return Ok(None);
 		};
 		Ok(Some((db_def.namespace_id, db_def.database_id)))
+	}
+
+	pub(crate) async fn expect_ns_db(
+		&self,
+		opt: &Options,
+	) -> Result<(Arc<NamespaceDefinition>, Arc<DatabaseDefinition>)> {
+		let ns = self.expect_ns(opt).await?;
+		let db = self.expect_db(opt).await?;
+		Ok((ns, db))
 	}
 
 	/// Get the namespace and database ids for the current context.

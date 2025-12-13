@@ -32,7 +32,7 @@ impl Document {
 				ctx.tx().changefeed_buffer_record_change(
 					ns,
 					db,
-					tbv.name.as_str(),
+					&tbv.name,
 					id.as_ref(),
 					self.initial.doc.clone(),
 					self.current.doc.clone(),

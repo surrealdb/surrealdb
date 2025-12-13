@@ -10,10 +10,10 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub(in crate::idx) struct HnswDocs {
-	tb: String,
+	tb: TableName,
 	ikb: IndexKeyBase,
 	state_updated: bool,
 	state: HnswDocsState,
@@ -29,7 +29,7 @@ pub(crate) struct HnswDocsState {
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
 		tx: &Transaction,
-		tb: String,
+		tb: TableName,
 		ikb: IndexKeyBase,
 	) -> Result<Self> {
 		let state_key = ikb.new_hd_root_key();

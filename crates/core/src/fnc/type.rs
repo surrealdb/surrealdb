@@ -12,7 +12,7 @@ use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Set, Table, Uuid, Value,
+	RecordIdKeyRange, Set, TableName, Uuid, Value,
 };
 
 /// Returns the type of the value as a string.
@@ -125,11 +125,15 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 }
 
 pub fn table((val,): (Value,)) -> Result<Value> {
-	let strand = match val {
+	let table_name = match val {
+		Value::Table(t) => t,
 		Value::RecordId(t) => t.table,
-		v => v.into_raw_string(),
+		Value::String(t) => TableName::new(t),
+		v => bail!(Error::TbInvalid {
+			value: v.into_raw_string(),
+		}),
 	};
-	Ok(Value::Table(Table::new(strand)))
+	Ok(Value::Table(table_name))
 }
 
 pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
@@ -173,7 +177,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.into_raw_string(),
+			table: TableName::new(arg1.into_raw_string()),
 		})),
 
 		(arg1, None) => arg1
@@ -192,7 +196,7 @@ pub mod is {
 	use anyhow::Result;
 
 	use crate::fnc::args::Optional;
-	use crate::val::{Geometry, Value};
+	use crate::val::{Geometry, TableName, Value};
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
@@ -284,7 +288,10 @@ pub mod is {
 
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[tb]).into(),
+			Some(tb) => {
+				let tb = TableName::new(tb);
+				arg.is_record_type(&[tb]).into()
+			},
 			None => arg.is_record().into(),
 		};
 		Ok(res)

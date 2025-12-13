@@ -60,3 +60,9 @@ impl From<String> for Table {
 		Table::new(s)
 	}
 }
+
+impl From<Table> for String {
+	fn from(value: Table) -> Self {
+		value.0
+	}
+}

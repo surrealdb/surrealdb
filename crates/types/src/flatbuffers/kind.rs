@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
-use crate::{Duration, GeometryKind, Kind, KindLiteral};
+use crate::{Duration, GeometryKind, Kind, KindLiteral, Table};
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -416,7 +416,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing table kind"));
 				};
 				let tables = if let Some(tables) = table.tables() {
-					tables.iter().map(|t| t.to_string()).collect::<Vec<_>>()
+					tables.iter().map(|t| Table::from(t)).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};
@@ -427,7 +427,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing record kind"));
 				};
 				let tables = if let Some(tables) = record.tables() {
-					tables.iter().map(|t| t.to_string()).collect::<Vec<_>>()
+					tables.iter().map(|t| Table::from(t)).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};
@@ -660,10 +660,10 @@ mod tests {
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
-	#[case::table(Kind::Table(vec!["test_table".to_string()]))]
+	#[case::table(Kind::Table(vec!["test_table".into()]))]
 	#[case::table_empty(Kind::Table(vec![]))]
-	#[case::table_multiple(Kind::Table(vec!["users".to_string(), "posts".to_string()]))]
-	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
+	#[case::table_multiple(Kind::Table(vec!["users".into(), "posts".into()]))]
+	#[case::record(Kind::Record(vec!["test_table".into()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]

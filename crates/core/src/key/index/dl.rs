@@ -23,8 +23,10 @@ use crate::idx::ft::DocLength;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Dl<'a> {
 	__: u8,
 	_a: u8,
@@ -32,7 +34,7 @@ pub(crate) struct Dl<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -63,7 +65,7 @@ impl<'a> Dl<'a> {
 	/// * `tb` - Table identifier
 	/// * `ix` - Index identifier
 	/// * `id` - The document ID whose length is being stored
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, id: DocId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

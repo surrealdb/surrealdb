@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
+use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
 use crate::expr::{Cond, Explain, Expr, Literal, Output, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -60,23 +62,32 @@ impl DeleteStatement {
 		let mut planner = QueryPlanner::new();
 
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
+
+		let (ns, db) = ctx.expect_ns_db(opt).await?;
+		let doc_ctx = NsDbCtx {
+			ns: Arc::clone(&ns),
+			db: Arc::clone(&db),
+		};
+
 		// Loop over the delete targets
 		for w in self.what.iter() {
-			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
-				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
-					let Ok(Error::InvalidStatementTarget {
-						value,
-					}) = e.downcast()
-					else {
-						unreachable!()
-					};
-					anyhow::Error::new(Error::DeleteStatement {
-						value,
-					})
-				} else {
-					e
-				}
-			})?;
+			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
+				|e| {
+					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
+						let Ok(Error::InvalidStatementTarget {
+							value,
+						}) = e.downcast()
+						else {
+							unreachable!()
+						};
+						anyhow::Error::new(Error::DeleteStatement {
+							value,
+						})
+					} else {
+						e
+					}
+				},
+			)?;
 		}
 		CursorDoc::update_parent(&ctx, doc, async |ctx| {
 			// Attach the query planner to the context

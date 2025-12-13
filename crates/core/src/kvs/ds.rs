@@ -78,7 +78,7 @@ use crate::sql::Ast;
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::convert_value_to_public_value;
+use crate::val::{TableName, convert_value_to_public_value};
 use crate::{CommunityComposer, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -1387,7 +1387,7 @@ impl Datastore {
 							let ft = FullTextIndex::new(
 								&self.index_stores,
 								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
+								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
 								p,
 							)
 							.await?;
@@ -2220,7 +2220,7 @@ impl Datastore {
 	/// Get a table by name.
 	///
 	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
-	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &TableName) -> Result<()> {
 		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
 
 		tx.expect_tb_by_name(ns, db, tb).await?;

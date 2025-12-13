@@ -7,10 +7,11 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 /// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Ii<'a> {
 	__: u8,
 	_a: u8,
@@ -18,7 +19,7 @@ pub(crate) struct Ii<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -36,7 +37,7 @@ impl Categorise for Ii<'_> {
 }
 
 impl<'a> Ii<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: DocId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, id: DocId) -> Self {
 		Ii {
 			__: b'/',
 			_a: b'*',

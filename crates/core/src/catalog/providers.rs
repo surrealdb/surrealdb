@@ -15,7 +15,7 @@ use crate::catalog::{
 use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::err::Error;
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -104,6 +104,9 @@ pub(crate) trait NamespaceProvider {
 pub(crate) trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
+
+	// /// Retrieve a specific database definition.
+	// async fn get_db(&self, ns: NamespaceId, db: DatabaseId) -> Result<Arc<DatabaseDefinition>>;
 
 	/// Retrieve a specific database definition.
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>>;
@@ -307,7 +310,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[TableDefinition]>>;
 
 	/// Retrieve a specific table definition.
@@ -315,7 +318,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: &str,
 		db: &str,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
 	/// Retrieve a specific table definition returning an error if it does not exist.
@@ -323,7 +326,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: &str,
 		db: &str,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
 		match self.get_tb_by_name(ns, db, tb).await? {
 			Some(val) => Ok(val),
@@ -335,13 +338,12 @@ pub(crate) trait TableProvider {
 
 	/// Get or add a table with a default configuration, only if we are in
 	/// dynamic mode.
-	async fn get_or_add_tb_upwards(
+	async fn get_or_add_tb(
 		&self,
 		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
-		tb: &str,
-		upwards: bool,
+		tb: &TableName,
 	) -> Result<Arc<TableDefinition>>;
 
 	/// Get the next namespace id.
@@ -361,17 +363,17 @@ pub(crate) trait TableProvider {
 	) -> Result<Arc<TableDefinition>>;
 
 	/// Delete a table definition.
-	async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()>;
+	async fn del_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()>;
 
 	/// Clear a table definition.
-	async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()>;
+	async fn clr_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()>;
 
 	/// Retrieve all event definitions for a specific table.
 	async fn all_tb_events(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>>;
 
 	/// Retrieve all field definitions for a specific table.
@@ -379,7 +381,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<[catalog::FieldDefinition]>>;
 
@@ -388,7 +390,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::IndexDefinition]>>;
 
 	/// Retrieve all live definitions for a specific table.
@@ -396,7 +398,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>>;
 
 	/// Retrieve a specific table definition.
@@ -404,7 +406,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
 	/// Retrieve a specific table definition returning an error if it does not exist.
@@ -412,7 +414,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
 		match self.get_tb(ns, db, tb).await? {
 			Some(val) => Ok(val),
@@ -427,7 +429,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ev: &str,
 	) -> Result<Arc<catalog::EventDefinition>>;
 
@@ -436,7 +438,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>>;
 
@@ -445,7 +447,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &catalog::FieldDefinition,
 	) -> Result<()>;
 
@@ -454,7 +456,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
 
@@ -463,7 +465,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
 
@@ -472,7 +474,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<Arc<catalog::IndexDefinition>> {
 		self.get_tb_index(ns, db, tb, ix).await?.ok_or_else(|| {
@@ -488,19 +490,24 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &catalog::IndexDefinition,
 	) -> Result<()>;
 
-	async fn del_tb_index(&self, ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str)
-	-> Result<()>;
+	async fn del_tb_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: &str,
+	) -> Result<()>;
 
 	/// Fetch a specific record value.
 	async fn get_record(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Record>>;
@@ -510,7 +517,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<bool>;
 
@@ -521,7 +528,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -534,7 +541,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -545,7 +552,7 @@ pub(crate) trait TableProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<()>;
 }
@@ -820,28 +827,5 @@ pub(crate) trait CatalogProvider:
 		db: &str,
 	) -> Result<Arc<DatabaseDefinition>> {
 		self.get_or_add_db_upwards(ctx, ns, db, true).await
-	}
-
-	/// Get or add a table with a default configuration, only if we are in
-	/// dynamic mode.
-	async fn get_or_add_tb(
-		&self,
-		ctx: Option<&Context>,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ctx, ns, db, tb, false).await
-	}
-
-	/// Ensures that a table, database, and namespace are all fully defined.
-	async fn ensure_ns_db_tb(
-		&self,
-		ctx: Option<&Context>,
-		ns: &str,
-		db: &str,
-		tb: &str,
-	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ctx, ns, db, tb, true).await
 	}
 }

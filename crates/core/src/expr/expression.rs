@@ -24,7 +24,7 @@ use crate::expr::{
 };
 use crate::fnc;
 use crate::types::PublicValue;
-use crate::val::{Array, Range, Table, Value};
+use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
@@ -32,7 +32,7 @@ pub(crate) enum Expr {
 	Param(Param),
 	Idiom(Idiom),
 	// Maybe move into Literal?
-	Table(String),
+	Table(TableName),
 	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
@@ -168,7 +168,7 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::Table(t) => Expr::Table(t.into_string()),
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into()),
 			surrealdb_types::Value::RecordId(RecordId {
 				table,
 				key,
@@ -194,7 +194,7 @@ impl Expr {
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: table.into_string(),
+					table: table.into(),
 					key: key_lit,
 				}))
 			}
@@ -343,7 +343,7 @@ impl Expr {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(Table::new(ident.clone()))),
+			Expr::Table(ident) => Ok(Value::Table(ident.clone())),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -713,7 +713,7 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.clone(),
+			Expr::Table(ident) => ident.clone().into_string(),
 			_ => self.to_sql(),
 		}
 	}

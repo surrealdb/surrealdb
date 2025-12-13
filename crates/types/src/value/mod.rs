@@ -603,9 +603,7 @@ impl Value {
 			Kind::String => self.is_string(),
 			Kind::Uuid => self.is_uuid(),
 			Kind::Regex => matches!(self, Value::Regex(_)),
-			Kind::Table(table) => {
-				self.is_table_and(|t| table.is_empty() || table.contains(&t.to_string()))
-			}
+			Kind::Table(table) => self.is_table_and(|t| table.is_empty() || table.contains(&t)),
 			Kind::Record(table) => self.is_record_and(|r| r.is_table_type(table)),
 			Kind::Geometry(kinds) => {
 				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))
@@ -1275,18 +1273,18 @@ mod tests {
 	)]
 	#[case::table(
 		Value::Table("test".into()),
-		vec![Kind::Table(vec!["test".to_string()]), Kind::Table(vec![]), Kind::Any],
+		vec![Kind::Table(vec!["test".into()]), Kind::Table(vec![]), Kind::Any],
 		vec![Kind::None, Kind::Null]
 	)]
 	#[case::record(
 		Value::RecordId(RecordId::new("test", "key")),
-		vec![Kind::Record(vec!["test".to_string()]), Kind::Record(vec![]), Kind::Any],
-		vec![Kind::None, Kind::Null, Kind::Record(vec!["other".to_string()])]
+		vec![Kind::Record(vec!["test".into()]), Kind::Record(vec![]), Kind::Any],
+		vec![Kind::None, Kind::Null, Kind::Record(vec!["other".into()])]
 	)]
 	#[case::record_multi_table(
 		Value::RecordId(RecordId::new("user", "id")),
-		vec![Kind::Record(vec!["user".to_string(), "admin".to_string()]), Kind::Any],
-		vec![Kind::Record(vec!["post".to_string(), "comment".to_string()])]
+		vec![Kind::Record(vec!["user".into(), "admin".into()]), Kind::Any],
+		vec![Kind::Record(vec!["post".into(), "comment".into()])]
 	)]
 	#[case::geometry_point(
 		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),

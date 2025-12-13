@@ -180,7 +180,7 @@ mod tests {
 	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (FrozenContext, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
+		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB.into(), TEST_IX_ID);
 		ctx.set_transaction(tx.into());
 		let d = SeqDocIds::new(ikb);
 		(ctx.freeze(), d)
@@ -389,7 +389,7 @@ mod tests {
 				let id = crate::key::index::id::Id::new(
 					TEST_NS_ID,
 					TEST_DB_ID,
-					TEST_TB,
+					&TEST_TB.into(),
 					TEST_IX_ID,
 					RecordIdKey::String(id.into()),
 				);

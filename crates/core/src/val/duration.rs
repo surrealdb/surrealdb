@@ -86,10 +86,7 @@ impl Duration {
 	pub fn new(secs: u64, nanos: u32) -> Duration {
 		time::Duration::new(secs, nanos).into()
 	}
-	/// Convert the Duration to a raw String
-	pub fn to_raw(self) -> String {
-		self.to_string()
-	}
+
 	/// Get the total number of nanoseconds
 	pub fn nanos(&self) -> u128 {
 		self.0.as_nanos()

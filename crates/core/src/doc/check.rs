@@ -258,6 +258,7 @@ impl Document {
 		let Some(cond) = &stm.cond else {
 			return Ok(());
 		};
+
 		// Process the permitted documents
 		let current = if self.reduced(stk, ctx, opt, Current).await? {
 			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;

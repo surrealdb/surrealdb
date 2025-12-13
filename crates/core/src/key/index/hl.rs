@@ -6,8 +6,10 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,
@@ -15,7 +17,7 @@ pub(crate) struct Hl<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -31,7 +33,7 @@ impl<'a> Hl<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		layer: u16,
 		chunk: u32,

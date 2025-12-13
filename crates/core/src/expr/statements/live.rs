@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use crate::catalog::providers::CatalogProvider;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
@@ -105,7 +105,7 @@ impl LiveStatement {
 				// Ensure that the table definition exists
 				{
 					let (ns, db) = opt.ns_db()?;
-					txn.ensure_ns_db_tb(Some(ctx), ns, db, &tb).await?;
+					txn.expect_tb_by_name(ns, db, &tb).await?;
 				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, live_query_id);
@@ -114,7 +114,7 @@ impl LiveStatement {
 					&NodeLiveQuery {
 						ns,
 						db,
-						tb: tb.to_string(),
+						tb: tb.clone(),
 					},
 				)
 				.await?;

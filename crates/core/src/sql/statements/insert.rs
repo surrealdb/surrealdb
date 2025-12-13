@@ -5,7 +5,7 @@ use crate::sql::{Data, Expr, Literal, Output};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InsertStatement {
-	pub into: Option<Expr>,
+	pub into: Expr,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -17,22 +17,6 @@ pub struct InsertStatement {
 	pub version: Expr,
 }
 
-impl Default for InsertStatement {
-	fn default() -> Self {
-		Self {
-			into: Default::default(),
-			data: Default::default(),
-			ignore: Default::default(),
-			update: Default::default(),
-			output: Default::default(),
-			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
-			relation: Default::default(),
-			version: Expr::Literal(Literal::None),
-		}
-	}
-}
-
 impl ToSql for InsertStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("INSERT");
@@ -42,9 +26,7 @@ impl ToSql for InsertStatement {
 		if self.ignore {
 			f.push_str(" IGNORE");
 		}
-		if let Some(into) = &self.into {
-			write_sql!(f, fmt, " INTO {}", CoverStmts(into));
-		}
+		write_sql!(f, fmt, " INTO {}", CoverStmts(&self.into));
 		write_sql!(f, fmt, " {}", self.data);
 		if let Some(ref v) = self.update {
 			write_sql!(f, fmt, " {v}");
@@ -67,7 +49,7 @@ impl ToSql for InsertStatement {
 impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 	fn from(v: InsertStatement) -> Self {
 		crate::expr::statements::InsertStatement {
-			into: v.into.map(Into::into),
+			into: v.into.into(),
 			data: v.data.into(),
 			ignore: v.ignore,
 			update: v.update.map(Into::into),
@@ -83,7 +65,7 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 	fn from(v: crate::expr::statements::InsertStatement) -> Self {
 		InsertStatement {
-			into: v.into.map(Into::into),
+			into: v.into.into(),
 			data: v.data.into(),
 			ignore: v.ignore,
 			update: v.update.map(Into::into),

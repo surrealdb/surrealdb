@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum AlterDefault {
@@ -27,7 +27,7 @@ pub(crate) enum AlterDefault {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterFieldStatement {
 	pub name: Idiom,
-	pub what: String,
+	pub what: TableName,
 	pub if_exists: bool,
 	pub kind: AlterKind<Kind>,
 	pub flexible: AlterKind<()>,

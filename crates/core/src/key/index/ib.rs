@@ -39,8 +39,10 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Ib<'a> {
 	__: u8,
 	_a: u8,
@@ -48,7 +50,7 @@ pub(crate) struct Ib<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -69,7 +71,7 @@ impl<'a> Ib<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		start: i64,
 	) -> Self {
@@ -93,7 +95,7 @@ impl<'a> Ib<'a> {
 	pub(crate) fn new_range(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 	) -> anyhow::Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode_key()?;

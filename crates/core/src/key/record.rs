@@ -7,7 +7,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "()")]
@@ -18,24 +18,29 @@ pub(crate) struct RecordKey<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
 
 impl_kv_key_storekey!(RecordKey<'_> => Record);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> RecordKey<'a> {
+pub fn new<'a>(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'a TableName,
+	id: &RecordIdKey,
+) -> RecordKey<'a> {
 	RecordKey::new(ns, db, tb, id.to_owned())
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
 	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"*\xff");
 	Ok(k)
@@ -48,7 +53,7 @@ impl Categorise for RecordKey<'_> {
 }
 
 impl<'a> RecordKey<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: RecordIdKey) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',

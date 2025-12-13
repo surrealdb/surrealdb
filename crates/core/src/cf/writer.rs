@@ -7,17 +7,17 @@ use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::TableMutations;
 use crate::doc::CursorRecord;
 use crate::kvs::KVValue;
-use crate::val::RecordId;
+use crate::val::{RecordId, TableName};
 
 // PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).
 // The timestamp will be provided at commit time via Transaction::current_timestamp().
-type PreparedWrite = (NamespaceId, DatabaseId, Arc<str>, crate::kvs::Val);
+type PreparedWrite = (NamespaceId, DatabaseId, TableName, crate::kvs::Val);
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ChangeKey {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: Arc<str>,
+	pub tb: TableName,
 }
 
 /// Writer is a helper for writing table mutations to a transaction.
@@ -40,20 +40,18 @@ impl Writer {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		dt: &TableDefinition,
 	) {
-		// Convert table name to Arc<str> once
-		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: Arc::clone(&tb),
+				tb: tb.clone(),
 			})
-			.or_insert_with(|| TableMutations::new(tb));
+			.or_insert_with(|| TableMutations::new(tb.clone()));
 		// Push the table change to the entry
 		entry.push_table_change(dt.to_owned());
 	}
@@ -64,23 +62,21 @@ impl Writer {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: RecordId,
 		previous: CursorRecord,
 		current: CursorRecord,
 		store_difference: bool,
 	) {
-		// Convert table name to Arc<str> once
-		let tb: Arc<str> = Arc::from(tb);
 		// Get or create the entry for the change key
 		let mut entry = self
 			.buffer
 			.entry(ChangeKey {
 				ns,
 				db,
-				tb: Arc::clone(&tb),
+				tb: tb.clone(),
 			})
-			.or_insert_with(|| TableMutations::new(tb));
+			.or_insert_with(|| TableMutations::new(tb.clone()));
 		// Push the record change to the entry
 		entry.push_record_change(id, previous, current, store_difference);
 	}
@@ -137,7 +133,7 @@ mod tests {
 	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction};
-	use crate::val::{RecordId, RecordIdKey, Value};
+	use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 	const DONT_STORE_PREVIOUS: bool = false;
 
@@ -154,12 +150,12 @@ mod tests {
 		//
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.ensure_ns_db_tb(None, NS, DB, TB).await.unwrap();
+		let tb = tx.expect_tb_by_name(NS, DB, &&TableName::new(TB.to_owned())).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_a = RecordId {
-			table: TB.to_owned(),
+			table: TableName::new(TB.to_owned()),
 			key: RecordIdKey::String("A".to_owned()),
 		};
 		let value_a: Value = "a".into();
@@ -177,7 +173,7 @@ mod tests {
 
 		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_c = RecordId {
-			table: TB.to_owned(),
+			table: TableName::new(TB.to_owned()),
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c: Value = "c".into();
@@ -194,7 +190,7 @@ mod tests {
 
 		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_b = RecordId {
-			table: TB.to_owned(),
+			table: TableName::new(TB.to_owned()),
 			key: RecordIdKey::String("B".to_owned()),
 		};
 		let value_b: Value = "b".into();
@@ -208,7 +204,7 @@ mod tests {
 			DONT_STORE_PREVIOUS,
 		);
 		let record_c2 = RecordId {
-			table: TB.to_owned(),
+			table: TableName::new(TB.to_owned()),
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c2: Value = "c2".into();
@@ -266,7 +262,7 @@ mod tests {
 		let ds = init(false).await;
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.ensure_ns_db_tb(None, NS, DB, TB).await.unwrap();
+		let tb = tx.expect_tb_by_name(NS, DB, &TableName::new(TB.to_owned())).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Record first change with timestamp ~5
@@ -320,7 +316,7 @@ mod tests {
 		id: String,
 	) -> RecordId {
 		let record_id = RecordId {
-			table: tb.name.clone(),
+			table: tb.name.clone().into(),
 			key: RecordIdKey::String(id),
 		};
 		let value_a: Value = "a".into();
@@ -358,7 +354,7 @@ mod tests {
 			comment: None,
 			strict: false,
 		};
-		let mut tb_def = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string());
+		let mut tb_def = TableDefinition::new(namespace_id, database_id, table_id, TableName::new(TB.to_owned()));
 		tb_def.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10 * 60),
 			store_diff,

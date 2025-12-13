@@ -26,7 +26,7 @@ use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::val::{CastError, CoerceError, RecordId, Value};
+use crate::val::{CastError, CoerceError, RecordId, TableName, Value};
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
@@ -295,7 +295,7 @@ pub(crate) enum Error {
 	/// The requested table does not exist
 	#[error("The table '{name}' does not exist")]
 	TbNotFound {
-		name: String,
+		name: TableName,
 	},
 
 	/// The requested api does not exist

@@ -50,7 +50,7 @@ impl Document {
 		_stm: &Statement<'_>,
 	) -> Result<()> {
 		// Get the table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = Arc::clone(self.tb(ctx, opt).await?);
 		// This table is schemafull
 		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via
@@ -146,7 +146,7 @@ impl Document {
 							!tb.schemafull,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone(),
+								table: tb.name.clone().into_string(),
 								field: current_doc_field_idiom.clone(),
 							}
 						);
@@ -162,7 +162,7 @@ impl Document {
 							!tb.schemafull,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone(),
+								table: tb.name.clone().into_string(),
 								field: current_doc_field_idiom.clone(),
 							}
 						);
