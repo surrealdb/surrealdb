@@ -91,7 +91,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Dl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 16);
+		let tb = TableName::from("testtb");
+		let val = Dl::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 16);
 		let enc = Dl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

@@ -63,11 +63,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Gr::new(
-			"testac",
-			"testgr",
-		);
+		let val = Gr::new("testac", "testgr");
 		let enc = Gr::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0!grtestgr\0");
 	}

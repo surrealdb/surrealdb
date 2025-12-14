@@ -146,11 +146,12 @@ impl RelateStatement {
 		let txn = ctx.tx();
 		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
 		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
-		
+
 		//
 		for f in from.iter() {
 			let tb = txn.expect_tb(db.namespace_id, db.database_id, &f.table).await?;
-			let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &f.table, opt.version).await?;
+			let fields =
+				txn.all_tb_fields(ns.namespace_id, db.database_id, &f.table, opt.version).await?;
 			let doc_ctx = NsDbTbCtx {
 				ns: Arc::clone(&ns),
 				db: Arc::clone(&db),

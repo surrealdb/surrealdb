@@ -110,7 +110,8 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(
 			ib_range.start,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\0\0\0\0\0\0\0\0"

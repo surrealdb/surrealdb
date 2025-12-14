@@ -848,7 +848,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(4));
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut h =

@@ -2,7 +2,6 @@ use core::f64;
 use std::collections::BTreeMap;
 
 use reblessive::Stk;
-use surrealdb_types::Table;
 
 use super::basic::NumberToken;
 use super::mac::unexpected;

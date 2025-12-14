@@ -170,7 +170,7 @@ mod tests {
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::RecordIdKey;
+	use crate::val::{RecordIdKey, TableName};
 
 	const TEST_NS_ID: NamespaceId = NamespaceId(1);
 	const TEST_DB_ID: DatabaseId = DatabaseId(1);
@@ -385,17 +385,18 @@ mod tests {
 		{
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
+			let tb = TableName::from(TEST_TB);
 			for id in ["Foo", "Bar", "Hello", "World"] {
 				let id = crate::key::index::id::Id::new(
 					TEST_NS_ID,
 					TEST_DB_ID,
-					&TEST_TB.into(),
+					&tb,
 					TEST_IX_ID,
 					RecordIdKey::String(id.into()),
 				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
-			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
+			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB.into(), TEST_IX_ID);
 			for doc_id in 0..=3 {
 				assert_eq!(SeqDocIds::get_id(&ikb, &tx, doc_id).await.unwrap(), None);
 			}

@@ -68,7 +68,7 @@ impl Iterable {
 	/// bruteforce knn.
 	fn iteration_stage_check(&self, ctx: &FrozenContext) -> bool {
 		match self {
-			Iterable::Table(doc_ctx, tb, _, _) | Iterable::Index(doc_ctx, tb, _, _) => {
+			Iterable::Table(_doc_ctx, tb, _, _) | Iterable::Index(_doc_ctx, tb, _, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage()
 					&& let Some(qp) = ctx.get_query_planner()
 					&& let Some(exe) = qp.get_query_executor(tb)
@@ -123,7 +123,6 @@ impl Collectable {
 	#[instrument(level = "trace", name = "Collectable::prepare", skip_all)]
 	pub(super) async fn prepare(
 		self,
-		ctx: &FrozenContext,
 		opt: &Options,
 		txn: &Transaction,
 		rid_only: bool,
@@ -131,7 +130,7 @@ impl Collectable {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Lookup(doc_ctx, kind, key) => {
-				Self::process_lookup(ctx, opt, doc_ctx, txn, kind, key, rid_only).await
+				Self::process_lookup(doc_ctx, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
@@ -144,10 +143,10 @@ impl Collectable {
 				v,
 				w,
 				o,
-			} => Self::process_relatable(ctx, opt, doc_ctx, txn, f, v, w, o, rid_only).await,
+			} => Self::process_relatable(doc_ctx, txn, f, v, w, o, rid_only).await,
 			// Direct record ID references - standard record processing
 			Self::RecordId(doc_ctx, record_id) => {
-				Self::process_record(ctx, opt, doc_ctx, txn, record_id, rid_only).await
+				Self::process_record(opt, doc_ctx, txn, record_id, rid_only).await
 			}
 			// Table identifiers - used for table-level operations
 			Self::GenerateRecordId(doc_ctx, table) => Self::process_yield(doc_ctx, table).await,
@@ -165,7 +164,7 @@ impl Collectable {
 			Self::Count(doc_ctx, c) => Ok(Self::process_count(doc_ctx, c)),
 			// Index scan results with values - includes pre-fetched data
 			Self::IndexItem(doc_ctx, i) => {
-				Self::process_index_item(ctx, opt, doc_ctx, txn, i, rid_only).await
+				Self::process_index_item(doc_ctx, txn, i, rid_only).await
 			}
 			// Index scan results key-only - lightweight index processing
 			Self::IndexItemKey(doc_ctx, i) => Ok(Self::process_index_item_key(doc_ctx, i)),
@@ -174,8 +173,6 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
-		ctx: &FrozenContext,
-		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		txn: &Transaction,
 		kind: LookupKind,
@@ -202,7 +199,7 @@ impl Collectable {
 				.await?
 		};
 		let rid = RecordId {
-			table: ft.into_owned().into(),
+			table: ft.into_owned(),
 			key: fk.into_owned(),
 		};
 		// Parse the data from the store
@@ -223,7 +220,7 @@ impl Collectable {
 		let key = record::RecordKey::decode_key(&key)?;
 		let val = Record::new(Value::Null.into());
 		let rid = RecordId {
-			table: key.tb.into_owned().into(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Create a new operable value
@@ -244,7 +241,7 @@ impl Collectable {
 	async fn process_table_key(doc_ctx: NsDbTbCtx, key: Key) -> Result<Processable> {
 		let key = record::RecordKey::decode_key(&key)?;
 		let rid = RecordId {
-			table: key.tb.into_owned().into(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Process the record
@@ -259,11 +256,8 @@ impl Collectable {
 		Ok(pro)
 	}
 
-	#[expect(clippy::too_many_arguments)]
 	#[instrument(level = "trace", skip_all)]
 	async fn process_relatable(
-		ctx: &FrozenContext,
-		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		txn: &Transaction,
 		f: RecordId,
@@ -325,7 +319,6 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_record(
-		ctx: &FrozenContext,
 		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		txn: &Transaction,
@@ -441,7 +434,7 @@ impl Collectable {
 		let key = record::RecordKey::decode_key(&key)?;
 		let mut val = Record::kv_decode_value(val)?;
 		let rid = RecordId {
-			table: key.tb.into_owned().into(),
+			table: key.tb.into_owned(),
 			key: key.id,
 		};
 		// Inject the id field into the document
@@ -489,8 +482,6 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_index_item(
-		ctx: &FrozenContext,
-		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		txn: &Transaction,
 		i: IndexItemRecord,
@@ -537,7 +528,7 @@ impl Collector for ConcurrentCollector<'_> {
 			return Ok(());
 		}
 
-		let pro = collectable.prepare(self.ctx, self.opt, self.txn, false).await?;
+		let pro = collectable.prepare(self.opt, self.txn, false).await?;
 		self.ite.process(self.stk, self.ctx, self.opt, self.stm, pro).await?;
 
 		Ok(())
@@ -560,7 +551,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
 		let pro =
-			collectable.prepare(self.coll.ctx, self.coll.opt, self.coll.txn, skippable).await?;
+			collectable.prepare(self.coll.opt, self.coll.txn, skippable).await?;
 		if self.dis.check_already_processed(&pro) {
 			return Ok(());
 		}
@@ -652,7 +643,7 @@ pub(super) trait Collector {
 			// collect only keys, keys+values, or just a count without materializing records.
 			Iterable::Range(doc_ctx, tb, v, rs, sc) => match rs {
 				RecordStrategy::Count => {
-					self.collect_range_count(ctx, opt, doc_ctx, &tb, v).await?
+					self.collect_range_count(ctx, doc_ctx, &tb, v).await?
 				}
 				RecordStrategy::KeysOnly => {
 					self.collect_range_keys(ctx, opt, doc_ctx, &tb, v, sc).await?
@@ -685,9 +676,9 @@ pub(super) trait Collector {
 					let mut ctx = Context::new(ctx);
 					ctx.set_query_executor(exe.clone());
 					let ctx = ctx.freeze();
-					return self.collect_index_items(&ctx, opt, doc_ctx, irf, rs).await;
+					return self.collect_index_items(&ctx, doc_ctx, irf, rs).await;
 				}
-				self.collect_index_items(ctx, opt, doc_ctx, irf, rs).await?
+				self.collect_index_items(ctx, doc_ctx, irf, rs).await?
 			}
 			Iterable::Mergeable(doc_ctx, tb, id, o) => {
 				self.collect(Collectable::Mergeable(doc_ctx, tb, id, o)).await?
@@ -773,8 +764,8 @@ pub(super) trait Collector {
 		let db = doc_ctx.db.database_id;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, &table)?;
-		let end = record::suffix(ns, db, &table)?;
+		let beg = record::prefix(ns, db, table)?;
+		let end = record::suffix(ns, db, table)?;
 
 		// Optionally skip keys
 		let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? else {
@@ -981,7 +972,6 @@ pub(super) trait Collector {
 	async fn collect_range_count(
 		&mut self,
 		ctx: &FrozenContext,
-		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		tb: &TableName,
 		r: RecordIdKeyRange,
@@ -1079,7 +1069,6 @@ pub(super) trait Collector {
 	async fn collect_index_items(
 		&mut self,
 		ctx: &FrozenContext,
-		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		irf: IteratorRef,
 		rs: RecordStrategy,

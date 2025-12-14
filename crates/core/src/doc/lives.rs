@@ -350,7 +350,7 @@ impl Document {
 		// Live queries are always
 		if opt.check_perms(crate::iam::Action::View)? {
 			// Get the table
-			let tb = self.tb(ctx, opt).await?;
+			let tb = self.tb().await?;
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(IgnoreError::Ignore),

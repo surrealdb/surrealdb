@@ -59,12 +59,12 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
+		let tb = TableName::from("testtb");
 		let val = IndexIdGeneratorStateKey::new(
 			NamespaceId(123),
 			DatabaseId(234),
-		"testtb",
-		Uuid::from_u128(15)
+			&tb,
+			Uuid::from_u128(15),
 		);
 		let enc = IndexIdGeneratorStateKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!is\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0F");

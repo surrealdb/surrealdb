@@ -307,7 +307,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let binding = RecordIdKey::String("testid".into());
 		let other_binding = RecordIdKey::String("otherid".into());
 		let tb: TableName = "testtb".into();

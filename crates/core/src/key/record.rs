@@ -80,11 +80,11 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
+		let tb = TableName::from("testtb");
 		let val = RecordKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			RecordIdKey::String("testid".to_owned()),
 		);
 		let enc = RecordKey::encode_key(&val).unwrap();
@@ -96,14 +96,16 @@ mod tests {
 		let id1 = "foo:['test']";
 		let record_id = syn::record_id(id1).expect("Failed to parse the ID");
 		let id1 = record_id.key.into();
-		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), "testtb", id1);
+		let tb = TableName::from("testtb");
+		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), &tb, id1);
 		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x06test\0\0");
 
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let record_id = syn::record_id(id2).expect("Failed to parse the ID");
 		let id2 = record_id.key.into();
-		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), "testtb", id2);
+		let tb = TableName::from("testtb");
+		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), &tb, id2);
 		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x09\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x00");
 	}

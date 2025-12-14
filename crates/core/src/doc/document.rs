@@ -54,15 +54,6 @@ pub(crate) struct NsDbTbCtx {
 	pub(crate) fields: Arc<[FieldDefinition]>,
 }
 
-impl NsDbTbCtx {
-	pub(crate) fn ns_db_ctx(&self) -> NsDbCtx {
-		NsDbCtx {
-			ns: Arc::clone(&self.ns),
-			db: Arc::clone(&self.db),
-		}
-	}
-}
-
 #[derive(Clone, Debug)]
 pub(crate) enum DocumentContext {
 	NsDbCtx(NsDbCtx),
@@ -70,13 +61,6 @@ pub(crate) enum DocumentContext {
 }
 
 impl DocumentContext {
-	pub(crate) fn ns(&self) -> &Arc<NamespaceDefinition> {
-		match self {
-			DocumentContext::NsDbCtx(ctx) => &ctx.ns,
-			DocumentContext::NsDbTbCtx(ctx) => &ctx.ns,
-		}
-	}
-
 	pub(crate) fn db(&self) -> &Arc<DatabaseDefinition> {
 		match self {
 			DocumentContext::NsDbCtx(ctx) => &ctx.db,
@@ -553,8 +537,6 @@ impl Document {
 	#[instrument(level = "trace", name = "Document::tb", skip_all)]
 	pub(super) async fn tb(
 		&self,
-		ctx: &FrozenContext,
-		opt: &Options,
 	) -> Result<&Arc<TableDefinition>> {
 		self.doc_ctx.tb()
 	}
@@ -569,7 +551,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -603,7 +585,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -647,7 +629,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -681,7 +663,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context

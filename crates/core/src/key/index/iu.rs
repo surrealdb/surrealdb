@@ -178,10 +178,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = IndexCountKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			Some((
 				Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
@@ -196,15 +197,9 @@ mod tests {
 
 	#[test]
 	fn compacted_key() {
-		let val = IndexCountKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			None,
-			true,
-			65535,
-		);
+		let tb = TableName::from("testtb");
+		let val =
+			IndexCountKey::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), None, true, 65535);
 		let enc = IndexCountKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\0\0\0\0\xff\xff",
@@ -214,7 +209,8 @@ mod tests {
 
 	#[test]
 	fn range() {
-		let r = IndexCountKey::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let r = IndexCountKey::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(
 			r.start, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\0",
 			"start"

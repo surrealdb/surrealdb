@@ -33,7 +33,7 @@ impl TableName {
 	}
 
 	pub fn is_table_type(&self, tables: &[TableName]) -> bool {
-		tables.is_empty() || tables.contains(&self)
+		tables.is_empty() || tables.contains(self)
 	}
 }
 

@@ -199,10 +199,11 @@ mod tests {
 
 	#[test]
 	fn key_with_ids() {
+		let tb = TableName::from("testtb");
 		let val = Dc::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			129,
 			Uuid::from_u128(1),
@@ -214,13 +215,15 @@ mod tests {
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,

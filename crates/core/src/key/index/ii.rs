@@ -63,7 +63,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ii::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 1);
+		let tb = TableName::from("testtb");
+		let val = Ii::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 1);
 		let enc = Ii::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

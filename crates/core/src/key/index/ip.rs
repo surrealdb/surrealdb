@@ -68,10 +68,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = Ip::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			RecordIdKey::String("id".into()),
 		);

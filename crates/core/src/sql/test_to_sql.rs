@@ -44,7 +44,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
-#[case::value_record_id(Value::RecordId(RecordId::new("table".to_string(), "123".to_string())), "table:`123`", "table:`123`")]
+#[case::value_record_id(Value::RecordId(RecordId::new("table".into(), "123".to_string())), "table:`123`", "table:`123`")]
 #[case::value_regex(Value::Regex("hello".parse().unwrap()), "/hello/", "/hello/")]
 // Expression: Literals
 #[case::expr_lit_none(Expr::Literal(Literal::None), "NONE", "NONE")]
@@ -143,7 +143,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Relate
 #[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), uniq: false, data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
 // Expression: Insert
-#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, relation: false, version: Expr::Literal(Literal::None)})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
+#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Expr::Table("user".to_string()), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, relation: false, version: Expr::Literal(Literal::None)})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
 // Expression: Define
 #[case::expr_define(
 	Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement::default()))),

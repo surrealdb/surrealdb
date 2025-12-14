@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};

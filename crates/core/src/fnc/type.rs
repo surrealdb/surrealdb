@@ -291,7 +291,7 @@ pub mod is {
 			Some(tb) => {
 				let tb = TableName::new(tb);
 				arg.is_record_type(&[tb]).into()
-			},
+			}
 			None => arg.is_record().into(),
 		};
 		Ok(res)

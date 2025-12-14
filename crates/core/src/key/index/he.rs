@@ -62,14 +62,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = He::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			7
-		);
+		let tb = TableName::from("testtb");
+		let val = He::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7);
 		let enc = He::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

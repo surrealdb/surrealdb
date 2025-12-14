@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -22,7 +22,6 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::syn::expr;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -202,26 +201,26 @@ impl Iterator {
 		match val {
 			Expr::Mock(mock) => self.prepare_mock(ctx, opt, stm_ctx, doc_ctx, mock).await?,
 			Expr::Table(table_name) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, &doc_ctx, table_name).await?
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 			}
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
 					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, &doc_ctx, val)
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
 						.await;
 				}
 
 				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, &doc_ctx, val)
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
 						.await;
 				};
 
 				let Part::Lookup(ref lookup) = x[1] else {
 					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, &doc_ctx, val)
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
 						.await;
 				};
 
@@ -247,7 +246,16 @@ impl Iterator {
 						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
 					// idiom matches the Edges pattern.
-					self.prepare_lookup(ctx, opt, stm_ctx.stm, doc_ctx, from, lookup.kind.clone(), what).await?;
+					self.prepare_lookup(
+						ctx,
+						opt,
+						stm_ctx.stm,
+						doc_ctx,
+						from,
+						lookup.kind.clone(),
+						what,
+					)
+					.await?;
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
@@ -260,6 +268,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_table(
 		&mut self,
 		ctx: &FrozenContext,
@@ -404,6 +413,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_lookup(
 		&mut self,
 		ctx: &FrozenContext,
@@ -434,8 +444,16 @@ impl Iterator {
 		}
 
 		let txn = ctx.tx();
-		let tb = txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?;
-		let fields = txn.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table, opt.version).await?;
+		let tb =
+			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?;
+		let fields = txn
+			.all_tb_fields(
+				doc_ctx.ns.namespace_id,
+				doc_ctx.db.database_id,
+				&from.table,
+				opt.version,
+			)
+			.await?;
 
 		let doc_ctx = NsDbTbCtx {
 			ns: Arc::clone(&doc_ctx.ns),
@@ -501,7 +519,7 @@ impl Iterator {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
 			Value::Table(table_name) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, &doc_ctx, &table_name).await?
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table_name).await?
 			}
 			Value::RecordId(rid) => {
 				self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, rid).await?
@@ -510,7 +528,7 @@ impl Iterator {
 				for v in array.into_iter() {
 					match v {
 						Value::Table(table) => {
-							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &doc_ctx, &table)
+							self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table)
 								.await?
 						}
 						Value::RecordId(rid) => {
@@ -556,7 +574,7 @@ impl Iterator {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(ctx, opt, stm_ctx, doc_ctx, v).await?,
 				Expr::Table(table_name) => {
-					self.prepare_table(ctx, opt, stk, planner, stm_ctx, &doc_ctx, table_name)
+					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name)
 						.await?
 				}
 				Expr::Idiom(x) => {
@@ -601,7 +619,17 @@ impl Iterator {
 							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
 						// idiom matches the Edges pattern.
-						return self.prepare_lookup(ctx, opt, stm_ctx.stm, doc_ctx, from, lookup.kind.clone(), what).await;
+						return self
+							.prepare_lookup(
+								ctx,
+								opt,
+								stm_ctx.stm,
+								doc_ctx,
+								from,
+								lookup.kind.clone(),
+								what,
+							)
+							.await;
 					}
 
 					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
@@ -792,7 +820,7 @@ impl Iterator {
 		// START must apply to the filtered set. Therefore, disallow with WHERE
 		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			if let Some(Iterable::Index(doc_ctx, t, irf, _)) = self.entries.first() {
+			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
 						if exe.is_iterator_expression(*irf, &cond.0) {
@@ -816,7 +844,7 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
-		if let Some(Iterable::Index(doc_ctx, _, irf, _)) = self.entries.first()
+		if let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
 			&& qp.is_order(irf)
 		{
@@ -852,7 +880,7 @@ impl Iterator {
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
 		if self.entries.len() == 1
-			&& let Some(Iterable::Index(doc_ctx, _, irf, _)) = self.entries.first()
+			&& let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
 			&& qp.is_order(irf)
 		{

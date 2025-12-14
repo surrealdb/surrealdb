@@ -22,12 +22,12 @@ pub(crate) struct Ft<'a> {
 	_d: u8,
 	_e: u8,
 	_f: u8,
-	pub ft: Cow<'a, str>,
+	pub ft: Cow<'a, TableName>,
 }
 
 impl_kv_key_storekey!(Ft<'_> => TableDefinition);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ft: &'a str) -> Ft<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ft: &'a TableName) -> Ft<'a> {
 	Ft::new(ns, db, tb, ft)
 }
 
@@ -50,7 +50,7 @@ impl Categorise for Ft<'_> {
 }
 
 impl<'a> Ft<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ft: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ft: &'a TableName) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -73,26 +73,24 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Ft::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			"testft",
-		);
+		let tb = TableName::from("testtb");
+		let ft = TableName::from("testft");
+		let val = Ft::new(NamespaceId(1), DatabaseId(2), &tb, &ft);
 		let enc = Ft::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fttestft\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ft\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ft\xff");
 	}
 }

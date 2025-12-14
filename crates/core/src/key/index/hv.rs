@@ -64,7 +64,8 @@ mod tests {
 	#[test]
 	fn test_key() {
 		let test = |vec: SerializedVector, expected: &[u8], info: &str| {
-			let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
+			let tb = TableName::from("testtb");
+			let val = Hv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &vec);
 			let enc = Hv::encode_key(&val).unwrap();
 			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
 		};

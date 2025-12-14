@@ -150,7 +150,8 @@ mod tests {
 	#[test]
 	fn cf_key() {
 		let ts1 = 12345u64.to_ts_bytes();
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, &TableName::new("test"));
+		let tb = TableName::from("test");
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
 		assert_eq!(
@@ -162,7 +163,7 @@ mod tests {
 		);
 
 		let ts2 = 12346u64.to_ts_bytes();
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, "test");
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

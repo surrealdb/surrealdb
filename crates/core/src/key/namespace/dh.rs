@@ -71,10 +71,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = DatabaseIdGeneratorBatchKey::new(
-			NamespaceId(123), 42
-		);
+		let val = DatabaseIdGeneratorBatchKey::new(NamespaceId(123), 42);
 		let enc = DatabaseIdGeneratorBatchKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x7B!dh\x80\0\0\0\0\0\0\x2A");
 	}

@@ -110,8 +110,14 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = IndexCompactionKey::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed("testtb"), IndexId(3), Uuid::from_u128(1), Uuid::from_u128(2));
+		let val = IndexCompactionKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Owned(TableName::from("testtb")),
+			IndexId(3),
+			Uuid::from_u128(1),
+			Uuid::from_u128(2),
+		);
 		let enc = IndexCompactionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}

@@ -54,7 +54,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hs::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let tb = TableName::from("testtb");
+		let val = Hs::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3));
 		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

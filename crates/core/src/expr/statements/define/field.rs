@@ -6,7 +6,7 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
@@ -165,7 +165,7 @@ impl DefineFieldStatement {
 			}
 		}
 
-		let tb = txn.get_or_add_tb(Some(ctx), &ns_name, &db_name, &definition.table).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
 
 		// Process the statement
 		txn.put_tb_field(ns, db, &tb.name, &definition).await?;

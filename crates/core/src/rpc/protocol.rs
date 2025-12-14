@@ -23,7 +23,6 @@ use crate::sql::{
 use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
 };
-use crate::val::TableName;
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {

@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use revision::revisioned;
 

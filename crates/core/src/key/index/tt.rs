@@ -256,10 +256,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = Tt::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			"term",
 			129,
@@ -273,8 +274,9 @@ mod tests {
 
 	#[test]
 	fn term_range() {
+		let tb = TableName::from("testtb");
 		let (beg, end) =
-			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term").unwrap();
+			Tt::term_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term").unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
@@ -284,8 +286,8 @@ mod tests {
 
 	#[test]
 	fn terms_range() {
-		let (beg, end) =
-			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let (beg, end) = Tt::terms_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\0");
 		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\xff");
 	}

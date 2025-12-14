@@ -73,26 +73,23 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Fd::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			"testfd",
-		);
+		let tb = TableName::from("testtb");
+		let val = Fd::new(NamespaceId(1), DatabaseId(2), &tb, "testfd");
 		let enc = Fd::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fdtestfd\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fd\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fd\xff");
 	}
 }

@@ -100,21 +100,16 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let tb = TableName::from("testtb");
+		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3));
 		let enc = HdRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hd");
 	}
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Hd::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			7
-		);
+		let tb = TableName::from("testtb");
+		let val = Hd::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7);
 		let enc = Hd::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

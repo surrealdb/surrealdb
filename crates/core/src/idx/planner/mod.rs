@@ -283,7 +283,7 @@ impl QueryPlanner {
 	) -> Result<()> {
 		let mut is_table_iterator = false;
 
-		let tree = Tree::build(stk, stm_ctx, &t).await?;
+		let tree = Tree::build(stk, stm_ctx, t).await?;
 
 		let is_knn = !tree.knn_expressions.is_empty();
 		let mut exe = InnerQueryExecutor::new(

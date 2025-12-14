@@ -1,6 +1,6 @@
 use std::ops::Bound;
 
-use surrealdb_types::{SqlFormat, Table, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::order::Ordering;

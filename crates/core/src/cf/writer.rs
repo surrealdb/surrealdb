@@ -1,4 +1,3 @@
-use std::sync::Arc;
 
 use anyhow::Result;
 use dashmap::DashMap;
@@ -122,7 +121,7 @@ mod tests {
 	use std::time::Duration;
 
 	use crate::catalog::providers::{
-		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
+		DatabaseProvider, NamespaceProvider, TableProvider,
 	};
 	use crate::catalog::{
 		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
@@ -150,12 +149,13 @@ mod tests {
 		//
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.expect_tb_by_name(NS, DB, &&TableName::new(TB.to_owned())).await.unwrap();
+		let tb_name = TableName::new(TB.to_owned());
+		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_a = RecordId {
-			table: TableName::new(TB.to_owned()),
+			table: tb_name.clone(),
 			key: RecordIdKey::String("A".to_owned()),
 		};
 		let value_a: Value = "a".into();
@@ -173,7 +173,7 @@ mod tests {
 
 		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_c = RecordId {
-			table: TableName::new(TB.to_owned()),
+			table: tb_name.clone(),
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c: Value = "c".into();
@@ -190,7 +190,7 @@ mod tests {
 
 		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_b = RecordId {
-			table: TableName::new(TB.to_owned()),
+			table: tb_name.clone(),
 			key: RecordIdKey::String("B".to_owned()),
 		};
 		let value_b: Value = "b".into();
@@ -204,7 +204,7 @@ mod tests {
 			DONT_STORE_PREVIOUS,
 		);
 		let record_c2 = RecordId {
-			table: TableName::new(TB.to_owned()),
+			table: tb_name.clone(),
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c2: Value = "c2".into();
@@ -262,7 +262,8 @@ mod tests {
 		let ds = init(false).await;
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.expect_tb_by_name(NS, DB, &TableName::new(TB.to_owned())).await.unwrap();
+		let tb_name = TableName::new(TB.to_owned());
+		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Record first change with timestamp ~5
@@ -316,7 +317,7 @@ mod tests {
 		id: String,
 	) -> RecordId {
 		let record_id = RecordId {
-			table: tb.name.clone().into(),
+			table: tb.name.clone(),
 			key: RecordIdKey::String(id),
 		};
 		let value_a: Value = "a".into();
@@ -354,7 +355,12 @@ mod tests {
 			comment: None,
 			strict: false,
 		};
-		let mut tb_def = TableDefinition::new(namespace_id, database_id, table_id, TableName::new(TB.to_owned()));
+		let mut tb_def = TableDefinition::new(
+			namespace_id,
+			database_id,
+			table_id,
+			TableName::new(TB.to_owned()),
+		);
 		tb_def.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10 * 60),
 			store_diff,

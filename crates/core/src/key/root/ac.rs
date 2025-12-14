@@ -59,7 +59,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let val = RootAccessKey::new("testac");
 		let enc = RootAccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!actestac\x00");

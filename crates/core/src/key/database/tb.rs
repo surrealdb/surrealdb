@@ -69,12 +69,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = TableKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&TableName::new("testtb"),
-		);
+		let tb = TableName::from("testtb");
+		let val = TableKey::new(NamespaceId(1), DatabaseId(2), &tb);
 		let enc = TableKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!tbtesttb\0");
 	}

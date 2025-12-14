@@ -112,13 +112,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = IndexDefinitionKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			"testix",
-		);
+		let tb = TableName::from("testtb");
+		let val = IndexDefinitionKey::new(NamespaceId(1), DatabaseId(2), &tb, "testix");
 		let enc = IndexDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ixtestix\0");
 	}

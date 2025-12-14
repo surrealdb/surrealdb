@@ -6,7 +6,7 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{Index, IndexDefinition, TableDefinition, TableId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;

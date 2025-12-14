@@ -24,12 +24,10 @@ impl Document {
 	/// table type is `ANY` or `NORMAL`.
 	pub(super) async fn check_table_type(
 		&mut self,
-		ctx: &FrozenContext,
-		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		// Get the table for this document
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Determine the type of statement
 		match stm {
 			Statement::Create(_) => {
@@ -308,7 +306,7 @@ impl Document {
 		}
 
 		// Get the table for this document
-		let table = self.tb(ctx, opt).await?;
+		let table = self.tb().await?;
 		// Get the correct document to check
 		let doc = match stm.is_delete() {
 			true => &self.initial,
@@ -344,8 +342,6 @@ impl Document {
 	#[instrument(level = "trace", name = "Document::check_permissions_quick", skip_all)]
 	pub(super) async fn check_permissions_quick(
 		&self,
-		_stk: &mut Stk,
-		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
@@ -357,9 +353,9 @@ impl Document {
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into())? {
 			// Get the table for this document
-			let table = self.tb(ctx, opt).await?;
+			let table = self.tb().await?;
 			// Get the permissions for this table
-			let perms = stm.permissions(&table, self.is_new());
+			let perms = stm.permissions(table, self.is_new());
 			// Exit early if permissions are NONE
 			if perms.is_none() {
 				return Err(IgnoreError::Ignore);
@@ -408,9 +404,9 @@ impl Document {
 			}
 		}
 		// Get the table
-		let table = self.tb(ctx, opt).await?;
+		let table = self.tb().await?;
 		// Get the permission clause
-		let perms = stm.permissions(&table, self.is_new());
+		let perms = stm.permissions(table, self.is_new());
 		// Process the table permissions
 		match perms {
 			Permission::None => return Err(IgnoreError::Ignore),

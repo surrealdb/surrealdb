@@ -34,7 +34,7 @@ impl Document {
 
 		let table_fields = self.doc_ctx.fd()?;
 
-		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), &table_fields, doc).await?;
+		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), table_fields, doc).await?;
 
 		Ok(())
 	}

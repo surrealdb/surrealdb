@@ -18,7 +18,7 @@ impl Document {
 			return Ok(());
 		}
 		// Check if the table is a view
-		if self.tb(ctx, opt).await?.drop {
+		if self.tb().await?.drop {
 			return Ok(());
 		}
 		// Get the record id

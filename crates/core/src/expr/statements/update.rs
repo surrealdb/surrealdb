@@ -4,6 +4,7 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
@@ -65,7 +66,10 @@ impl UpdateStatement {
 		let mut planner = QueryPlanner::new();
 
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
-		let (ns, db) = ctx.expect_ns_db(opt).await?;
+
+		let txn = ctx.tx();
+		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
 		let doc_ctx = NsDbCtx {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),

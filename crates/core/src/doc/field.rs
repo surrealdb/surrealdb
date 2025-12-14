@@ -50,7 +50,7 @@ impl Document {
 		_stm: &Statement<'_>,
 	) -> Result<()> {
 		// Get the table
-		let tb = Arc::clone(self.tb(ctx, opt).await?);
+		let tb = Arc::clone(self.tb().await?);
 		// This table is schemafull
 		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via

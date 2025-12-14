@@ -92,10 +92,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = Is::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);

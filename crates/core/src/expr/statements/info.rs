@@ -331,7 +331,7 @@ impl InfoStatement {
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_views(ns, db, &tb).await?.into_iter() {
+							for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone().into_string(), v.to_sql().into());
 							}
 							out.into()

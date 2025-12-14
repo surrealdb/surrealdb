@@ -83,9 +83,10 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-		let val = Lq::new(NamespaceId(1), DatabaseId(2), "testtb", live_query_id);
+		let live_query_id =
+			Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+		let tb = TableName::from("testtb");
+		let val = Lq::new(NamespaceId(1), DatabaseId(2), &tb, live_query_id);
 		let enc = Lq::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -95,13 +96,15 @@ mod tests {
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!lq\x00")
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
 	}
 }

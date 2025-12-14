@@ -528,7 +528,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			PublicDuration::from_secs(1),
 		))))),
 		TopLevelExpr::Expr(Expr::Insert(Box::new(InsertStatement {
-			into: Some(Expr::Param(Param::new("foo".to_owned()))),
+			into: Expr::Param(Param::new("foo".to_owned())),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(Idiom(vec![Part::Field("a".to_owned())]), Expr::Literal(Literal::Integer(1))),

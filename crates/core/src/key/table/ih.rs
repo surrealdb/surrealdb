@@ -79,21 +79,16 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = IndexIdGeneratorBatchKey::new(
-			NamespaceId(123),
-			DatabaseId(234),
-			"testtb",
-			15
-		);
+		let tb = TableName::from("testtb");
+		let val = IndexIdGeneratorBatchKey::new(NamespaceId(123), DatabaseId(234), &tb, 15);
 		let enc = IndexIdGeneratorBatchKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\x80\0\0\0\0\0\0\x0F");
 	}
 
 	#[test]
 	fn range() {
-		let r =
-			IndexIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let r = IndexIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234), &tb).unwrap();
 		assert_eq!(r.start, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\0\0\0\0\0\0\0\0");
 		assert_eq!(r.end, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}

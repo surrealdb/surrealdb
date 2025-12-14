@@ -16,7 +16,7 @@ use crate::expr::{
 use crate::iam::Auth;
 use crate::kvs::KVValue;
 use crate::kvs::version::MajorVersion;
-use crate::val::{Datetime, Value};
+use crate::val::{Datetime, TableName, Value};
 
 /// This test is used to ensure that
 #[rstest]
@@ -40,7 +40,7 @@ use crate::val::{Datetime, Value};
 	namespace_id: NamespaceId(123),
 	database_id: DatabaseId(456),
 	table_id: TableId(789),
-	name: "test".to_string(),
+	name: TableName::from("test"),
 	drop: false,
 	schemafull: false,
 	view: Some(ViewDefinition::Select {
@@ -48,7 +48,7 @@ use crate::val::{Datetime, Value};
 			expr: Expr::Literal(Literal::String("expr".to_string())),
 			alias: Some(Idiom::from_str("field[0]").unwrap()),
 		})]),
-		tables: vec!["what".to_string()],
+		tables: vec![TableName::from("what")],
 		condition: Some(Expr::Literal(Literal::String("cond".to_string()))),
 		groups: Some(Groups::default()),
 	}),
@@ -155,14 +155,14 @@ use crate::val::{Datetime, Value};
 }), 7)]
 #[case::event(EventDefinition {
 	name: "test".to_string(),
-	target_table: "test".to_string(),
+	target_table: TableName::from("test"),
 	when: Expr::Literal(Literal::String("when".to_string())),
 	then: vec![Expr::Literal(Literal::String("then".to_string()))],
 	comment: Some("comment".to_string()),
 }, 35)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
-	table: "what".to_string(),
+	table: TableName::from("what"),
 	field_kind: None,
 	readonly: false,
 	flexible: false,
@@ -189,7 +189,7 @@ use crate::val::{Datetime, Value};
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
 	name: "test".to_string(),
-	table_name: "what".to_string(),
+	table_name: TableName::from("what"),
 	cols: vec![Idiom::from_str("field[0]").unwrap()],
 	index: Index::Idx,
 	comment: Some("comment".to_string()),

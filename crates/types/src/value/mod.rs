@@ -603,7 +603,7 @@ impl Value {
 			Kind::String => self.is_string(),
 			Kind::Uuid => self.is_uuid(),
 			Kind::Regex => matches!(self, Value::Regex(_)),
-			Kind::Table(table) => self.is_table_and(|t| table.is_empty() || table.contains(&t)),
+			Kind::Table(table) => self.is_table_and(|t| table.is_empty() || table.contains(t)),
 			Kind::Record(table) => self.is_record_and(|r| r.is_table_type(table)),
 			Kind::Geometry(kinds) => {
 				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))

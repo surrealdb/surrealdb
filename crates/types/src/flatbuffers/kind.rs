@@ -416,7 +416,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing table kind"));
 				};
 				let tables = if let Some(tables) = table.tables() {
-					tables.iter().map(|t| Table::from(t)).collect::<Vec<_>>()
+					tables.iter().map(Table::from).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};
@@ -427,7 +427,7 @@ impl FromFlatbuffers for Kind {
 					return Err(anyhow::anyhow!("Missing record kind"));
 				};
 				let tables = if let Some(tables) = record.tables() {
-					tables.iter().map(|t| Table::from(t)).collect::<Vec<_>>()
+					tables.iter().map(Table::from).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};

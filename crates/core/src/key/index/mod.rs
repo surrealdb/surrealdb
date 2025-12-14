@@ -296,10 +296,10 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let fd: Array = vec!["testfd1", "testfd2"].into();
 		let id = RecordIdKey::String("testid".into());
-		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &fd, Some(&id));
+		let tb = TableName::from("testtb");
+		let val = Index::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -310,7 +310,8 @@ mod tests {
 	#[test]
 	fn key_none() {
 		let fd: Array = vec!["testfd1", "testfd2"].into();
-		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &fd, None);
+		let tb = TableName::from("testtb");
+		let val = Index::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &fd, None);
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -321,28 +322,18 @@ mod tests {
 	#[test]
 	fn check_composite() {
 		let fd: Array = vec!["testfd1"].into();
-
-		let enc = Index::prefix_ids_composite_beg(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			&fd,
-		)
-		.unwrap();
+		let tb = TableName::from("testtb");
+		let enc =
+			Index::prefix_ids_composite_beg(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &fd)
+				.unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\x00"
 		);
 
-		let enc = Index::prefix_ids_composite_end(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			&fd,
-		)
-		.unwrap();
+		let enc =
+			Index::prefix_ids_composite_end(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &fd)
+				.unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\xff"

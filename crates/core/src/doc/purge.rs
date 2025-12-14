@@ -151,7 +151,7 @@ impl Document {
 					// Reject the delete operation, as indicated by the reference
 					ReferenceDeleteStrategy::Reject => {
 						let record = RecordId {
-							table: ref_key.ft.into_owned().into(),
+							table: ref_key.ft.into_owned(),
 							key: ref_key.fk.into_owned(),
 						};
 
@@ -160,7 +160,7 @@ impl Document {
 					// Delete the remote record which referenced this record
 					ReferenceDeleteStrategy::Cascade => {
 						let record_id = RecordId {
-							table: ref_key.ft.into_owned().into(),
+							table: ref_key.ft.into_owned(),
 							key: ref_key.fk.into_owned(),
 						};
 
@@ -179,7 +179,7 @@ impl Document {
 					ReferenceDeleteStrategy::Unset => {
 						let opt = opt.clone().with_perms(false);
 						let record = RecordId {
-							table: ref_key.ft.into_owned().into(),
+							table: ref_key.ft.into_owned(),
 							key: ref_key.fk.into_owned(),
 						};
 
@@ -235,7 +235,7 @@ impl Document {
 						let reference = Value::from(rid.clone());
 						// Value for the document is the remote record
 						let this = RecordId {
-							table: ref_key.ft.into_owned().into(),
+							table: ref_key.ft.into_owned(),
 							key: ref_key.fk.into_owned(),
 						};
 

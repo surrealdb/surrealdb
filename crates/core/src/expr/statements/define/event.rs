@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{EventDefinition, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -62,7 +62,7 @@ impl DefineEventStatement {
 		}
 
 		// Ensure the table exists
-		let tb = txn.get_or_add_tb(Some(ctx), &ns_name, &db_name, &target_table).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table).await?;
 
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, _doc))

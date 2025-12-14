@@ -155,8 +155,8 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		self.check_permissions_quick(stk, ctx, opt, stm).await?;
-		self.check_table_type(ctx, opt, stm).await?;
+		self.check_permissions_quick(opt, stm).await?;
+		self.check_table_type(stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.process_merge_data().await?;
 		self.store_edges_data(ctx, opt, stm).await?;
@@ -181,8 +181,8 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		self.check_permissions_quick(stk, ctx, opt, stm).await?;
-		self.check_table_type(ctx, opt, stm).await?;
+		self.check_permissions_quick(opt, stm).await?;
+		self.check_table_type(stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.process_record_data(stk, ctx, opt, stm).await?;

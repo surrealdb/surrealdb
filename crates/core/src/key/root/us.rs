@@ -59,7 +59,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let val = Us::new("testuser");
 		let enc = Us::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ustestuser\x00");
