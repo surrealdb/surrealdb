@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+pub use surrealdb_types_derive::write_sql;
+
 use crate as surrealdb_types;
 use crate::utils::escape::QuoteStr;
 
@@ -147,8 +149,6 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 		}
 	}
 }
-
-pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
 	#[inline]

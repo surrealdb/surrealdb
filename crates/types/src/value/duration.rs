@@ -42,8 +42,8 @@ impl Duration {
 		Self(d)
 	}
 
-	/// Get the inner std::time::Duration
-	pub fn inner(&self) -> std::time::Duration {
+	/// Convert into the inner std::time::Duration
+	pub fn into_inner(self) -> std::time::Duration {
 		self.0
 	}
 

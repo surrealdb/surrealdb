@@ -10,9 +10,9 @@ use crate::sql::{SqlFormat, ToSql};
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct File {
 	/// The bucket name where the file is stored
-	pub(crate) bucket: String,
+	pub bucket: String,
 	/// The key/identifier for the file within the bucket
-	pub(crate) key: String,
+	pub key: String,
 }
 
 impl File {
@@ -83,9 +83,11 @@ mod arb {
 			];
 
 			let mut bucket = String::new();
-			bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+			// Forward slash is not allowed in the bucket name so we exclude it by limiting the
+			// range.
+			bucket.push(CHAR[u.int_in_range(0u8..=54)? as usize] as char);
 			for _ in 0..u.arbitrary_len::<u8>()? {
-				bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+				bucket.push(CHAR[u.int_in_range(0u8..=54)? as usize] as char);
 			}
 			let mut key = "/".to_string();
 			for _ in 0..u.arbitrary_len::<u8>()? {

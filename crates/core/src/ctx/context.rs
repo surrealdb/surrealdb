@@ -47,11 +47,11 @@ use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
-pub type Context = Arc<MutableContext>;
+pub type FrozenContext = Arc<Context>;
 
-pub struct MutableContext {
+pub struct Context {
 	// An optional parent context.
-	parent: Option<Context>,
+	parent: Option<FrozenContext>,
 	// An optional deadline.
 	deadline: Option<Instant>,
 	// An optional slow log configuration used by the executor to log statements
@@ -94,21 +94,21 @@ pub struct MutableContext {
 	surrealism_cache: Option<Arc<SurrealismCache>>,
 }
 
-impl Default for MutableContext {
+impl Default for Context {
 	fn default() -> Self {
-		MutableContext::background()
+		Context::background()
 	}
 }
 
-impl From<Transaction> for MutableContext {
+impl From<Transaction> for Context {
 	fn from(txn: Transaction) -> Self {
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 		ctx.set_transaction(Arc::new(txn));
 		ctx
 	}
 }
 
-impl Debug for MutableContext {
+impl Debug for Context {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.debug_struct("Context")
 			.field("parent", &self.parent)
@@ -119,7 +119,7 @@ impl Debug for MutableContext {
 	}
 }
 
-impl MutableContext {
+impl Context {
 	/// Creates a new empty background context.
 	pub(crate) fn background() -> Self {
 		Self {
@@ -148,8 +148,8 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a frozen parent context.
-	pub(crate) fn new(parent: &Context) -> Self {
-		MutableContext {
+	pub(crate) fn new(parent: &FrozenContext) -> Self {
+		Context {
 			values: HashMap::default(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
@@ -177,7 +177,7 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is isolated, and values specified on
 	/// any parent contexts will not be accessible.
-	pub(crate) fn new_isolated(parent: &Context) -> Self {
+	pub(crate) fn new_isolated(parent: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
@@ -206,7 +206,7 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
-	pub(crate) fn new_concurrent(from: &Context) -> Self {
+	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: None,
@@ -245,7 +245,7 @@ impl MutableContext {
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
-	) -> Result<MutableContext> {
+	) -> Result<Context> {
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -276,12 +276,12 @@ impl MutableContext {
 	}
 
 	/// Freezes this context, allowing it to be used as a parent context.
-	pub(crate) fn freeze(self) -> Context {
+	pub(crate) fn freeze(self) -> FrozenContext {
 		Arc::new(self)
 	}
 
 	/// Unfreezes this context, allowing it to be edited and configured.
-	pub(crate) fn unfreeze(ctx: Context) -> Result<MutableContext> {
+	pub(crate) fn unfreeze(ctx: FrozenContext) -> Result<Context> {
 		let Some(x) = Arc::into_inner(ctx) else {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
@@ -628,27 +628,25 @@ impl MutableContext {
 
 	/// Attach variables to the context.
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
-		for (key, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+		for (name, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(Error::InvalidParam {
-					name: key.clone(),
+					name,
 				});
 			}
-			self.add_value(key, val.into());
+			self.add_value(name, Arc::new(val));
 		}
 		Ok(())
 	}
 
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
-		for (key, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+		for (name, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(Error::InvalidParam {
-					name: key.clone(),
+					name,
 				});
 			}
-
-			let internal_val = convert_public_value_to_internal(val);
-			self.add_value(key, Arc::new(internal_val));
+			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
 		}
 		Ok(())
 	}
@@ -836,7 +834,7 @@ mod tests {
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	use crate::ctx::MutableContext;
+	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
@@ -849,7 +847,7 @@ mod tests {
 		let cap = Capabilities::all().without_network_targets(Targets::Some(
 			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
 		));
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 		ctx.capabilities = cap.into();
 		let ctx = ctx.freeze();
 		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
@@ -862,7 +860,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_cancellation_priority() {
 		// Test that cancellation is detected even when a deadline is set and exceeded
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 
 		// Set a deadline in the past (already exceeded)
 		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
@@ -884,7 +882,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_deadline_detection() {
 		// Test that deadline timeout is detected when context is not cancelled
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 
 		// Set a very short timeout
 		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
@@ -902,7 +900,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_no_deadline() {
 		// Test that a context without deadline or cancellation returns None
-		let ctx = MutableContext::background();
+		let ctx = Context::background();
 		let ctx = ctx.freeze();
 
 		// Should return None (ok to continue)
@@ -914,7 +912,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_adaptive_backoff() {
 		// Test the adaptive back-off strategy in is_done()
-		let ctx = MutableContext::background();
+		let ctx = Context::background();
 		let ctx = ctx.freeze();
 
 		// Test that early iterations trigger deep checks (1, 2, 4, 8, 16, 32)
@@ -941,7 +939,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_with_none() {
 		// Test that is_done(None) always performs a deep check
-		let ctx = MutableContext::background();
+		let ctx = Context::background();
 		let ctx = ctx.freeze();
 
 		// Should perform deep check and return Ok(false) since no cancellation/timeout
@@ -953,7 +951,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_detects_cancellation() {
 		// Test that is_done detects cancellation
-		let mut ctx = MutableContext::background();
+		let mut ctx = Context::background();
 		let canceller = ctx.add_cancel();
 		canceller.cancel();
 		let ctx = ctx.freeze();
@@ -991,7 +989,7 @@ mod tests {
 		// Error::QueryBeyondMemoryThreshold before checking the deadline.
 		// This ensures memory violations are always detected before timeout errors.
 
-		let ctx = MutableContext::background();
+		let ctx = Context::background();
 		let ctx = ctx.freeze();
 
 		// With no memory pressure, deadline not set, and no cancellation:
@@ -1039,7 +1037,7 @@ mod tests {
 		// Give the allocator tracking time to register the allocation
 		tokio::time::sleep(Duration::from_millis(10)).await;
 
-		let ctx = MutableContext::background();
+		let ctx = Context::background();
 		let ctx = ctx.freeze();
 
 		// The memory threshold check should detect that we've exceeded the limit

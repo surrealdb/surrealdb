@@ -9,6 +9,7 @@ use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
@@ -56,17 +57,18 @@ impl ApiDefinition {
 		res
 	}
 
-	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
-		crate::sql::statements::DefineApiStatement {
-			kind: crate::sql::statements::define::DefineKind::Default,
-			path: crate::sql::Expr::Literal(crate::sql::Literal::String(self.path.to_string())),
+	fn to_sql_definition(&self) -> sql::statements::DefineApiStatement {
+		sql::statements::DefineApiStatement {
+			kind: sql::statements::define::DefineKind::Default,
+			path: sql::Expr::Literal(sql::Literal::String(self.path.to_string())),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }
@@ -145,8 +147,8 @@ pub struct ApiActionDefinition {
 impl_kv_value_revisioned!(ApiActionDefinition);
 
 impl ApiActionDefinition {
-	pub fn to_sql_action(&self) -> crate::sql::statements::define::ApiAction {
-		crate::sql::statements::define::ApiAction {
+	pub fn to_sql_action(&self) -> sql::statements::define::ApiAction {
+		sql::statements::define::ApiAction {
 			methods: self.methods.clone(),
 			action: self.action.clone().into(),
 			config: self.config.to_sql_config(),
@@ -176,8 +178,8 @@ pub struct ApiConfigDefinition {
 
 impl ApiConfigDefinition {
 	/// Convert the API config definition into a SQL config.
-	pub fn to_sql_config(&self) -> crate::sql::statements::define::config::api::ApiConfig {
-		crate::sql::statements::define::config::api::ApiConfig {
+	pub fn to_sql_config(&self) -> sql::statements::define::config::api::ApiConfig {
+		sql::statements::define::config::api::ApiConfig {
 			middleware: self.middleware.iter().map(|mw| mw.to_sql_middleware()).collect(),
 			permissions: self.permissions.clone().into(),
 		}
@@ -198,7 +200,7 @@ impl InfoStructure for ApiConfigDefinition {
 								.map(|x| Value::String(x.to_sql()))
 								.collect();
 
-							(m.name.clone(), Value::Array(Array(value)))
+							(m.name, Value::Array(Array(value)))
 						})
 						.collect(),
 				))
@@ -238,8 +240,8 @@ pub(crate) struct MiddlewareDefinition {
 }
 
 impl MiddlewareDefinition {
-	fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
-		crate::sql::statements::define::config::api::Middleware {
+	fn to_sql_middleware(&self) -> sql::statements::define::config::api::Middleware {
+		sql::statements::define::config::api::Middleware {
 			name: self.name.clone(),
 			args: self
 				.args
@@ -248,7 +250,7 @@ impl MiddlewareDefinition {
 				.map(|v| {
 					let public_val: crate::types::PublicValue =
 						v.try_into().expect("value conversion should succeed");
-					crate::sql::Expr::from_public_value(public_val)
+					sql::Expr::from_public_value(public_val)
 				})
 				.collect(),
 		}

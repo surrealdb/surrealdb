@@ -55,7 +55,9 @@ yanked = "warn"
 # A list of security advisory identifiers to ignore.
 # TODOs:
 # - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
-ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0118"]
+# - for RUSTSEC-2025-0134, rustls-pemfile is unmaintained (archived) but pulled in transitively
+#   by tonic and axum-server. Upstream crates need to migrate to rustls-pki-types.
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0118", "RUSTSEC-2025-0134"]
 
 # --------------------------------------------------
 # LICENSES

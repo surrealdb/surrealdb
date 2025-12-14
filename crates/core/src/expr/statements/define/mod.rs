@@ -37,7 +37,7 @@ pub(crate) use sequence::DefineSequenceStatement;
 pub(crate) use table::DefineTableStatement;
 pub(crate) use user::DefineUserStatement;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
@@ -76,7 +76,7 @@ impl DefineStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

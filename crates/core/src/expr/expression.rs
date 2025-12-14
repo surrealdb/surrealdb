@@ -6,7 +6,7 @@ use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -140,31 +140,28 @@ impl Expr {
 			},
 			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s)),
 			surrealdb_types::Value::Bytes(b) => {
-				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.inner().clone())))
+				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.into_inner())))
 			}
 			surrealdb_types::Value::Duration(d) => {
-				Expr::Literal(Literal::Duration(crate::val::Duration(d.inner())))
+				Expr::Literal(Literal::Duration(crate::val::Duration(d.into_inner())))
 			}
-			surrealdb_types::Value::Datetime(dt) => {
-				Expr::Literal(Literal::Datetime(crate::val::Datetime(dt.inner())))
+			surrealdb_types::Value::Datetime(d) => {
+				Expr::Literal(Literal::Datetime(crate::val::Datetime(d.into_inner())))
 			}
-			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
-			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
-				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-			)),
+			surrealdb_types::Value::Uuid(u) => {
+				Expr::Literal(Literal::Uuid(crate::val::Uuid(u.into_inner())))
+			}
+			surrealdb_types::Value::Array(a) => {
+				Expr::Literal(Literal::Array(a.into_iter().map(Expr::from_public_value).collect()))
+			}
 			surrealdb_types::Value::Set(s) => {
-				// Convert set to array for literal representation since there's no set literal
-				// syntax
-				Expr::Literal(Literal::Array(
-					s.iter().cloned().map(Expr::from_public_value).collect(),
-				))
+				Expr::Literal(Literal::Array(s.into_iter().map(Expr::from_public_value).collect()))
 			}
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
-				o.inner()
-					.iter()
+				o.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k.clone(),
-						value: Expr::from_public_value(v.clone()),
+						key: k,
+						value: Expr::from_public_value(v),
 					})
 					.collect(),
 			)),
@@ -177,17 +174,16 @@ impl Expr {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
-						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
+						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
 					}
-					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-						a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-					),
+					surrealdb_types::RecordIdKey::Array(a) => {
+						RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
+					}
 					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
-						o.inner()
-							.iter()
+						o.into_iter()
 							.map(|(k, v)| ObjectEntry {
-								key: k.clone(),
-								value: Expr::from_public_value(v.clone()),
+								key: k,
+								value: Expr::from_public_value(v),
 							})
 							.collect(),
 					),
@@ -199,13 +195,12 @@ impl Expr {
 				}))
 			}
 			surrealdb_types::Value::Geometry(g) => Expr::Literal(Literal::Geometry(g.into())),
-			surrealdb_types::Value::File(f) => Expr::Literal(Literal::File(crate::val::File::new(
-				f.bucket().to_string(),
-				f.key().to_string(),
-			))),
+			surrealdb_types::Value::File(f) => {
+				Expr::Literal(Literal::File(crate::val::File::new(f.bucket, f.key)))
+			}
 			surrealdb_types::Value::Range(r) => Expr::from(*r),
 			surrealdb_types::Value::Regex(r) => {
-				Expr::Literal(Literal::Regex(crate::val::Regex(r.0)))
+				Expr::Literal(Literal::Regex(crate::val::Regex(r.into_inner())))
 			}
 		}
 	}
@@ -214,7 +209,7 @@ impl Expr {
 impl From<surrealdb_types::Range> for Expr {
 	fn from(r: surrealdb_types::Range) -> Self {
 		use std::ops::Bound;
-		match (r.start, r.end) {
+		match r.into_inner() {
 			// Unbounded range: ..
 			(Bound::Unbounded, Bound::Unbounded) => Expr::Literal(Literal::UnboundedRange),
 			// Prefix ranges: ..end or ..=end
@@ -330,7 +325,7 @@ impl Expr {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -446,7 +441,7 @@ impl Expr {
 
 	async fn compute_prefix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		op: &PrefixOperator,
@@ -476,7 +471,7 @@ impl Expr {
 
 	async fn compute_postfix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
@@ -527,7 +522,7 @@ impl Expr {
 
 	async fn compute_binary(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
@@ -723,24 +718,8 @@ impl Expr {
 	#[allow(dead_code)]
 	fn needs_parentheses(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
+			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
+			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Throw(_)
@@ -761,6 +740,24 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
 		}
 	}
 }

@@ -166,7 +166,7 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
-			assert!(output.contains("[1, 2, 3]"), "missing success in {output}");
+			assert!(output.contains("{1, 2, 3}"), "missing success in {output}");
 		}
 
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");

@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, Data, DatabaseDefinition, Permission, Record, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Workable};
 use crate::doc::alter::ComputedData;
 use crate::expr::{Base, FlowResultExt as _};
@@ -46,12 +46,12 @@ pub(crate) struct CursorDoc {
 impl CursorDoc {
 	/// Updates the `"parent"` doc field for statements with a meaning full
 	/// document.
-	pub async fn update_parent<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
+	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
 	where
-		F: AsyncFnOnce(Cow<Context>) -> R,
+		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
 	{
 		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = MutableContext::new(ctx);
+			let mut new_ctx = Context::new(ctx);
 			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
 			Cow::Owned(new_ctx.freeze())
 		} else {
@@ -226,7 +226,7 @@ impl Document {
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_reduced: CursorDoc::new(id, ir, val),
 			record_strategy: rs,
 			input_data: None,
 		}
@@ -338,7 +338,7 @@ impl Document {
 	pub(crate) async fn reduced(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		permitted: Permitted,
 	) -> Result<bool> {
@@ -385,7 +385,7 @@ impl Document {
 	pub(crate) async fn compute_reduced_target(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		full: &CursorDoc,
 	) -> Result<CursorDoc> {
@@ -407,7 +407,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = MutableContext::new(ctx);
+						let mut ctx = Context::new(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
@@ -444,7 +444,7 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+	pub async fn db(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -457,15 +457,13 @@ impl Document {
 				let key = cache::ds::Lookup::Db(ns, db);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
 						let val = txn.get_or_add_db(Some(ctx), ns, db).await?;
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
 			_ => txn.get_or_add_db(Some(ctx), ns, db).await,
@@ -473,7 +471,7 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
+	pub async fn tb(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the record id
@@ -500,9 +498,8 @@ impl Document {
 								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table).await?
 							}
 						};
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val.try_into_type()
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
 			}
@@ -524,7 +521,7 @@ impl Document {
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
+	pub async fn ft(&self, ctx: &FrozenContext, opt: &Options) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
@@ -537,16 +534,14 @@ impl Document {
 				let key = cache::ds::Lookup::Fts(ns, db, &tb.name, tb.cache_tables_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fts(),
 					None => {
 						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Fts(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fts(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
 		}
@@ -555,7 +550,7 @@ impl Document {
 	/// Get the events for this document
 	pub async fn ev(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
@@ -570,16 +565,15 @@ impl Document {
 				let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_evs(),
 					None => {
 						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Evs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_evs(),
+
 			// No cache is present on the context
 			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
 		}
@@ -588,7 +582,7 @@ impl Document {
 	/// Get the fields for this document
 	pub async fn fd(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		// Get the NS + DB
@@ -619,7 +613,7 @@ impl Document {
 	/// Get the indexes for this document
 	pub async fn ix(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
@@ -634,16 +628,14 @@ impl Document {
 				let key = cache::ds::Lookup::Ixs(ns, db, &tb.name, tb.cache_indexes_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_ixs(),
 					None => {
 						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Ixs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_ixs(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
 		}
@@ -652,7 +644,7 @@ impl Document {
 	// Get the lives for this document
 	pub async fn lv(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
@@ -669,15 +661,13 @@ impl Document {
 				let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, version);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_lvs(),
 					None => {
 						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Lvs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_lvs()
 			}
 			// No cache is present on the context
 			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,

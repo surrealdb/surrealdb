@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -25,7 +25,12 @@ impl ToSql for ApiConfig {
 					}
 					EscapeKwFreeIdent(s).fmt_sql(f, fmt);
 				}
-				write_sql!(f, fmt, "({})", Fmt::pretty_comma_separated(m.args.iter()));
+				write_sql!(
+					f,
+					fmt,
+					"({})",
+					Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts))
+				);
 			}
 		}
 

@@ -14,7 +14,7 @@ use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
 
 use crate::cnf::SURREALDB_USER_AGENT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::syn;
@@ -176,7 +176,7 @@ async fn decode_response(res: Response) -> Result<PublicValue> {
 }
 
 async fn request(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	method: Method,
 	uri: String,
 	body: Option<Value>,
@@ -269,16 +269,16 @@ async fn request(
 	}
 }
 
-pub async fn head(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn head(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn get(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
 pub async fn put(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
@@ -287,7 +287,7 @@ pub async fn put(
 }
 
 pub async fn post(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
@@ -296,7 +296,7 @@ pub async fn post(
 }
 
 pub async fn patch(
-	ctx: &Context,
+	ctx: &FrozenContext,
 	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
@@ -304,6 +304,6 @@ pub async fn patch(
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn delete(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

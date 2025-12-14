@@ -7,7 +7,7 @@ use reblessive::tree::Stk;
 use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err;
@@ -25,7 +25,7 @@ fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 /// Allows you to control a specific bucket in the context of the current user
 pub(crate) struct BucketController<'a> {
 	stk: &'a mut Stk,
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc>,
 
@@ -50,7 +50,7 @@ impl<'a> BucketController<'a> {
 	/// Returns an error if the bucket doesn't exist or connection fails.
 	pub(crate) async fn new(
 		stk: &'a mut Stk,
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &'a Options,
 		doc: Option<&'a CursorDoc>,
 		buc: &str,
@@ -89,7 +89,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -108,7 +108,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put_if_not_exists(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -122,7 +122,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.head(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -136,7 +136,7 @@ impl<'a> BucketController<'a> {
 			.store
 			.get(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?
 		{
 			Some(v) => v,
 			None => return Ok(None),
@@ -155,7 +155,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.delete(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -170,7 +170,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -189,7 +189,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -205,7 +205,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -224,7 +224,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
 
 		Ok(())
 	}
@@ -235,7 +235,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.exists(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -248,7 +248,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.list(opts)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e.clone()))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -291,7 +291,7 @@ impl<'a> BucketController<'a> {
 					let opt = &self.opt.new_with_perms(false);
 
 					// Add $action, $file and $target to context
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("action", Value::from(op.to_string()).into());
 					if let Some(key) = key {
 						ctx.add_value(

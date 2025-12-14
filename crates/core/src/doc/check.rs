@@ -4,7 +4,7 @@ use surrealdb_types::ToSql;
 
 use super::IgnoreError;
 use crate::catalog::Permission;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
@@ -24,7 +24,7 @@ impl Document {
 	/// table type is `ANY` or `NORMAL`.
 	pub(super) async fn check_table_type(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -96,7 +96,7 @@ impl Document {
 	/// exist, then this function will exit early.
 	pub(super) async fn check_record_exists(
 		&self,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
@@ -119,7 +119,7 @@ impl Document {
 	pub(super) async fn check_data_fields(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -202,7 +202,7 @@ impl Document {
 	pub(super) async fn check_where_condition(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
@@ -244,7 +244,7 @@ impl Document {
 	pub(super) async fn check_permissions_view(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
@@ -290,7 +290,7 @@ impl Document {
 	pub(super) async fn check_permissions_quick(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
@@ -319,7 +319,7 @@ impl Document {
 	pub(super) async fn check_permissions_table(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {

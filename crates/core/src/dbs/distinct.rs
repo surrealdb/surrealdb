@@ -2,7 +2,7 @@ use std::default::Default;
 
 use radix_trie::Trie;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Processed;
 use crate::kvs::Key;
 
@@ -16,7 +16,7 @@ pub(crate) struct SyncDistinct {
 }
 
 impl SyncDistinct {
-	pub(super) fn new(ctx: &Context) -> Option<Self> {
+	pub(super) fn new(ctx: &FrozenContext) -> Option<Self> {
 		if let Some(pla) = ctx.get_query_planner()
 			&& pla.requires_distinct()
 		{

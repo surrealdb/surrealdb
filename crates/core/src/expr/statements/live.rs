@@ -4,8 +4,8 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
-use crate::ctx::Context;
+use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -14,11 +14,16 @@ use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LiveFields {
+	Diff,
+	Select(Fields),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
-	pub fields: Fields,
-	pub diff: bool,
+	pub fields: LiveFields,
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -29,7 +34,7 @@ impl LiveStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -38,14 +43,16 @@ impl LiveStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Get the Node ID
-		let nid = opt.id()?;
+		let nid = opt.id();
 
 		let mut vars = Variables::new();
 		let mut pass = ParameterCapturePass {
 			context: ctx,
 			captures: &mut vars,
 		};
-		let _ = self.fields.visit(&mut pass);
+		if let LiveFields::Select(x) = &self.fields {
+			let _ = x.visit(&mut pass);
+		};
 		let _ = self.what.visit(&mut pass);
 		if let Some(cond) = &self.cond {
 			let _ = cond.0.visit(&mut pass);
@@ -56,12 +63,16 @@ impl LiveStatement {
 			}
 		}
 
+		let fields = match &self.fields {
+			LiveFields::Diff => SubscriptionFields::Diff,
+			LiveFields::Select(x) => SubscriptionFields::Select(x.clone()),
+		};
+
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
 			id: self.id,
 			node: self.node,
-			fields: self.fields.clone(),
-			diff: self.diff,
+			fields,
 			what: self.what.clone(),
 			cond: self.cond.clone().map(|c| c.0),
 			fetch: self.fetch.clone(),

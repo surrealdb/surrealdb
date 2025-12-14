@@ -146,8 +146,16 @@ impl Parser<'_> {
 			t!("!") | t!("+") | t!("-") => Some(BindingPower::Prefix),
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
-				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
+				let peek = self.peek_whitespace1();
+				if peek.kind == t!("-") {
+					let recover = self.recent_span();
+					if self.peek2().kind == TokenKind::Digits {
+						self.backup_after(recover);
+						return Some(BindingPower::Prefix);
+					}
+					return None;
+				}
+				if matches!(peek.kind, t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)
@@ -195,12 +203,12 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
 						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
-						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
+						Numeric::Integer(i) => {
+							Expr::Literal(Literal::Integer(i.into_int(self.recent_span())?))
+						}
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Positive,
@@ -233,13 +241,13 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
-						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
-						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
-						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+						Numeric::Float(f) => Expr::Literal(Literal::Float(-f)),
+						Numeric::Integer(i) => {
+							Expr::Literal(Literal::Integer(i.into_neg_int(self.recent_span())?))
+						}
+						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(-d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
 							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
@@ -315,7 +323,14 @@ impl Parser<'_> {
 		} else {
 			NearestNeighbor::KTree(amount)
 		};
-		self.expect_closing_delimiter(t!("|>"), token.span)?;
+		if !self.eat(t!("|")) || !self.eat_whitespace(t!(">")) {
+			bail!("Unexpected token `{}` expected delimiter `|>`",
+				self.peek().kind,
+				@self.recent_span(),
+				@token.span=> "expected this delimiter to close"
+			);
+		}
+
 		Ok(res)
 	}
 
@@ -326,29 +341,25 @@ impl Parser<'_> {
 				| BinaryOperator::NotEqual
 				| BinaryOperator::AllEqual
 				| BinaryOperator::AnyEqual
+				| BinaryOperator::LessThan
+				| BinaryOperator::LessThanEqual
+				| BinaryOperator::MoreThan
+				| BinaryOperator::MoreThanEqual
+				| BinaryOperator::Matches(_)
 				| BinaryOperator::Contain
 				| BinaryOperator::NotContain
-				| BinaryOperator::NotInside
 				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
 				| BinaryOperator::ContainNone
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
 				| BinaryOperator::AllInside
 				| BinaryOperator::AnyInside
 				| BinaryOperator::NoneInside
 				| BinaryOperator::Outside
 				| BinaryOperator::Intersects
-				| BinaryOperator::Inside
 				| BinaryOperator::NearestNeighbor(_)
 		)
-	}
-
-	fn expr_is_relation(expr: &Expr) -> bool {
-		match expr {
-			Expr::Binary {
-				op,
-				..
-			} => Self::operator_is_relation(op),
-			_ => false,
-		}
 	}
 
 	fn expr_is_range(expr: &Expr) -> bool {
@@ -467,13 +478,12 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),
 		};
-		let before = self.recent_span();
 		let rhs_covered = self.peek().kind == t!("(");
 		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		let is_relation = Self::operator_is_relation(&operator);
-		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
-			let span = before.covers(self.recent_span());
+		if !lhs_prime && is_relation && BindingPower::for_expr(&lhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
@@ -486,19 +496,19 @@ impl Parser<'_> {
 				| BinaryOperator::RangeInclusive
 		);
 		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		if !rhs_covered && is_relation && Self::expr_is_relation(&rhs) {
-			let span = before.covers(self.recent_span());
+		if !rhs_covered && is_relation && BindingPower::for_expr(&rhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
@@ -818,7 +828,7 @@ mod test {
 				right: Box::new(one.clone()),
 			}),
 			op: BinaryOperator::Subtract,
-			right: Box::new(one.clone()),
+			right: Box::new(one),
 		};
 		assert_eq!(expected, out);
 	}

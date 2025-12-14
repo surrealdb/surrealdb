@@ -940,9 +940,9 @@ mod tests {
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
-	use crate::sql::Ast;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Literal};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1101,9 +1101,9 @@ mod tests {
 						.to_string(),
 				),
 				roles: vec!["nonexistent".to_owned()],
-				token_duration: None,
-				session_duration: None,
-				comment: None,
+				token_duration: Expr::Literal(Literal::None),
+				session_duration: Expr::Literal(Literal::None),
+				comment: Expr::Literal(Literal::None),
 			};
 
 			let ast = Ast {
@@ -1238,8 +1238,8 @@ mod tests {
 	#[case::with_generic_id(vec!["user:2k9qnabxuxh8k4d5gfto"], None, "secret", false)]
 	#[case::with_numeric_ids(vec!["user:1", "user:2", "user:100", "user:10000000"], None, "secret", false)]
 	#[case::with_alphanumeric_ids(vec!["user:username", "user:username1", "user:username10", "user:username100"], None, "secret", false)]
-	#[case::with_ids_including_special_characters(vec!["user:⟨user.name⟩", "user:⟨user.name1⟩", "user:⟨user.name10⟩", "user:⟨user.name100⟩"], None, "secret", false)]
-	#[case::with_uuid_ids(vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"], None, "secret", false)]
+	#[case::with_ids_including_special_characters(vec!["user:`user.name`", "user:`user.name1`", "user:`user.name10`", "user:`user.name100`"], None, "secret", false)]
+	#[case::with_uuid_ids(vec!["user:`83149446-95f5-4c0d-9f42-136e7b272456`"], None, "secret", false)]
 	#[tokio::test]
 	async fn test_token_record(
 		#[case] ids: Vec<&'static str>,

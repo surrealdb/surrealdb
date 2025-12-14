@@ -1,0 +1,34 @@
+name: 'Check format'
+description: 'Run cargo format check'
+
+inputs:
+  save-cache:
+    description: 'Whether to save the cargo cache'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Lookup the nightly toolchain
+      id: info
+      shell: bash
+      run: |
+        set -x
+        echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        toolchain: ${{ steps.info.outputs.toolchain }}
+        components: rustfmt
+        save-cache: ${{ inputs.save-cache }}
+
+    - name: Install tools
+      uses: ./.github/actions/install-tools
+
+    - name: Check format
+      shell: bash
+      run: cargo make ci-fmt
+
+

@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err;
@@ -15,7 +15,7 @@ impl Document {
 	pub(super) async fn insert(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &InsertStatement,
 	) -> Result<Value, IgnoreError> {
@@ -151,7 +151,7 @@ impl Document {
 	async fn insert_create(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
@@ -177,7 +177,7 @@ impl Document {
 	async fn insert_update(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {

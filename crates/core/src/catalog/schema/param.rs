@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
@@ -26,12 +27,14 @@ impl ParamDefinition {
 			value: {
 				let public_val: crate::types::PublicValue =
 					self.value.clone().try_into().expect("value conversion should succeed");
-				crate::sql::Expr::from_public_value(public_val)
+				sql::Expr::from_public_value(public_val)
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+
 			permissions: self.permissions.clone().into(),
 		}
 	}

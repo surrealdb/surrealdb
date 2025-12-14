@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{ParamDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -17,7 +17,7 @@ pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -26,7 +26,7 @@ impl DefineParamStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -59,6 +59,11 @@ impl DefineParamStatement {
 			txn.get_or_add_db(Some(ctx), ns, db).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 		// Process the statement
 		txn.put_db_param(
 			db.namespace_id,
@@ -66,7 +71,7 @@ impl DefineParamStatement {
 			&ParamDefinition {
 				value,
 				name: self.name.clone(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				comment,
 				permissions: self.permissions.clone(),
 			},
 		)

@@ -4,22 +4,21 @@ use std::ops::Bound;
 use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordIdKeyRange {
@@ -180,10 +179,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::sql::Id")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum RecordIdKey {
@@ -378,7 +374,7 @@ impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
-			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRid(v)),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v)),
 			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
 			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
 			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
@@ -388,10 +384,7 @@ impl ToSql for RecordIdKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::RecordId")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordId {
@@ -435,7 +428,7 @@ impl RecordId {
 	pub(crate) async fn select_document(
 		self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> anyhow::Result<Option<Object>> {
@@ -475,6 +468,6 @@ impl From<crate::types::PublicRecordId> for RecordId {
 
 impl ToSql for RecordId {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeRid(&self.table), self.key)
+		write_sql!(f, sql_fmt, "{}:{}", EscapeRidKey(&self.table), self.key)
 	}
 }

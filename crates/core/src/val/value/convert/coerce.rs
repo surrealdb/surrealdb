@@ -8,7 +8,6 @@ use surrealdb_types::ToSql;
 
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
-use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
 	RecordId, Regex, Set, SqlNone, Uuid, Value,
@@ -52,7 +51,7 @@ impl fmt::Display for CoerceError {
 				len,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found an collection of length `{len}`")
+				write!(f, "Expected `{into}` but found a collection of length `{len}`")
 			}
 		}
 	}
@@ -286,6 +285,22 @@ impl Coerce for Point<f64> {
 	}
 }
 
+impl<T: Coerce + HasKind> Coerce for Option<T> {
+	fn can_coerce(v: &Value) -> bool {
+		if let Value::None = v {
+			return true;
+		}
+		T::can_coerce(v)
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::None => Ok(None),
+			x => Ok(Some(T::coerce(x)?)),
+		}
+	}
+}
+
 impl<T: Coerce + HasKind> Coerce for Vec<T> {
 	fn can_coerce(v: &Value) -> bool {
 		let Value::Array(a) = v else {
@@ -453,8 +468,8 @@ impl Value {
 			Kind::Range => self.can_coerce_to::<Box<Range>>(),
 			Kind::Function(_, _) => self.can_coerce_to::<Box<Closure>>(),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.can_coerce_to_array_len(t, *l),
-				None => self.can_coerce_to_array(t),
+				Some(l) => self.can_coerce_to_set_len(t, *l),
+				None => self.can_coerce_to_set(t),
 			},
 			Kind::Array(t, l) => match l {
 				Some(l) => self.can_coerce_to_array_len(t, *l),
@@ -505,6 +520,20 @@ impl Value {
 	fn can_coerce_to_array(&self, kind: &Kind) -> bool {
 		match self {
 			Value::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_coerce_to_set_len(&self, kind: &Kind, len: u64) -> bool {
+		match self {
+			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_coerce_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_coerce_to_set(&self, kind: &Kind) -> bool {
+		match self {
+			Value::Set(s) => s.iter().all(|x| x.can_coerce_to_kind(kind)),
 			_ => false,
 		}
 	}
@@ -758,29 +787,22 @@ impl Value {
 			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
-	/// Try to coerce this value to an `Array` of a certain type, unique values
-	pub(crate) fn coerce_to_set_kind(self, kind: &Kind) -> Result<Array, CoerceError> {
-		self.coerce_to::<Array>()?
-			.uniq()
+	/// Try to coerce this value to a `Set` of a certain type
+	pub(crate) fn coerce_to_set_kind(self, kind: &Kind) -> Result<Set, CoerceError> {
+		self.coerce_to::<Set>()?
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Array, CoerceError>>()
+			.collect::<Result<Set, CoerceError>>()
 			.with_element_of(|| format!("set<{}>", kind.to_sql()))
 	}
 
-	/// Try to coerce this value to an `Array` of a certain type, unique values,
-	/// and length
-	pub(crate) fn coerce_to_set_kind_len(
-		self,
-		kind: &Kind,
-		len: u64,
-	) -> Result<Array, CoerceError> {
+	/// Try to coerce this value to a `Set` of a certain type and length
+	pub(crate) fn coerce_to_set_kind_len(self, kind: &Kind, len: u64) -> Result<Set, CoerceError> {
 		let array = self
-			.coerce_to::<Array>()?
-			.uniq()
+			.coerce_to::<Set>()?
 			.into_iter()
 			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Array, CoerceError>>()
+			.collect::<Result<Set, CoerceError>>()
 			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
 		if array.len() as u64 != len {

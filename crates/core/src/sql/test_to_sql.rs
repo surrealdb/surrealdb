@@ -5,6 +5,7 @@ use surrealdb_types::ToSql;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::statements::access::{AccessStatementGrant, Subject};
 use crate::sql::statements::alter::AlterKind;
+use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
@@ -43,7 +44,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
-#[case::value_record_id(Value::RecordId(RecordId::new("table".to_string(), "123".to_string())), "table:⟨123⟩", "table:⟨123⟩")]
+#[case::value_record_id(Value::RecordId(RecordId::new("table".to_string(), "123".to_string())), "table:`123`", "table:`123`")]
 #[case::value_regex(Value::Regex("hello".parse().unwrap()), "/hello/", "/hello/")]
 // Expression: Literals
 #[case::expr_lit_none(Expr::Literal(Literal::None), "NONE", "NONE")]
@@ -80,7 +81,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_lit_record_id(Expr::Literal(Literal::RecordId(RecordIdLit {
     table: "table".to_string(),
     key: RecordIdKeyLit::Number(123)
-})), "table:123", "table:123")]
+})), "`table`:123", "`table`:123")]
 #[case::expr_lit_regex(Expr::Literal(Literal::Regex("hello".parse().unwrap())), "/hello/", "/hello/")]
 // Expression: Params
 #[case::expr_param(Expr::Param(Param::new("x".to_string())), "$x", "$x")]
@@ -132,17 +133,17 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             Expr::Literal(Literal::Integer(3)),
         ]))))], close: None })), "IF true {\n\t1;\n\t2;\n} ELSE IF false { 3 }", "IF true {\n\n\t1;\n\t2;\n} ELSE IF false { 3 }")]
 // Expression: Select
-#[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: None, timeout: None, parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
+#[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: Expr::Literal(Literal::None), timeout: Expr::Literal(Literal::None), parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
 // Expression: Create
-#[case::expr_create(Expr::Create(Box::new(CreateStatement { only: false, what: vec![Expr::Table("user".to_string())], data: None, output: None, timeout: None, parallel: false, version: None })), "CREATE user", "CREATE user")]
+#[case::expr_create(Expr::Create(Box::new(CreateStatement { only: false, what: vec![Expr::Table("user".to_string())], data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, version: Expr::Literal(Literal::None) })), "CREATE user", "CREATE user")]
 // Expression: Update
-#[case::expr_update(Expr::Update(Box::new(UpdateStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: None, parallel: false, explain: None })), "UPDATE user", "UPDATE user")]
+#[case::expr_update(Expr::Update(Box::new(UpdateStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None })), "UPDATE user", "UPDATE user")]
 // Expression: Delete
-#[case::expr_delete(Expr::Delete(Box::new(DeleteStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, output: None, timeout: None, parallel: false, explain: None })), "DELETE user", "DELETE user")]
+#[case::expr_delete(Expr::Delete(Box::new(DeleteStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None })), "DELETE user", "DELETE user")]
 // Expression: Relate
-#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), uniq: false, data: None, output: None, timeout: None, parallel: false })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
+#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), uniq: false, data: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
 // Expression: Insert
-#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: None, parallel: false, relation: false, version: None })), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
+#[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, relation: false, version: Expr::Literal(Literal::None)})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
 // Expression: Define
 #[case::expr_define(
 	Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement::default()))),
@@ -158,7 +159,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Rebuild
 #[case::expr_rebuild(Expr::Rebuild(Box::new(RebuildStatement::Index(RebuildIndexStatement { name: "idx".to_string(), what: "user".to_string(), if_exists: false, concurrently: false }))), "REBUILD INDEX idx ON user", "REBUILD INDEX idx ON user")]
 // Expression: Upsert
-#[case::expr_upsert(Expr::Upsert(Box::new(UpsertStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: None, parallel: false, explain: None })), "UPSERT user", "UPSERT user")]
+#[case::expr_upsert(Expr::Upsert(Box::new(UpsertStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None })), "UPSERT user", "UPSERT user")]
 // Expression: Alter
 #[case::expr_alter(Expr::Alter(Box::new(AlterStatement::Table(AlterTableStatement { name: "user".to_string(), if_exists: false, schemafull: AlterKind::None, permissions: None, changefeed: AlterKind::None, comment: AlterKind::None, kind: None }))), "ALTER TABLE user", "ALTER TABLE user")]
 // Expression: Info
@@ -235,8 +236,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             limit: None,
             start: None,
             fetch: None,
-            version: None,
-            timeout: None,
+            version: Expr::Literal(Literal::None),
+            timeout: Expr::Literal(Literal::None),
             parallel: false,
             explain: None,
             tempfiles: false
@@ -258,9 +259,9 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
                             what: vec![Expr::Table("active_users".to_string())],
                             data: Some(Data::ContentExpression(Expr::Param(Param::new("user".to_string())))),
                             output: None,
-                            timeout: None,
+                            timeout: Expr::Literal(Literal::None),
                             parallel: false,
-                            version: None
+                            version: Expr::Literal(Literal::None)
                         }))
                     ])))
                 )],
@@ -268,8 +269,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             }))
         ])
     })),
-    "FOR $user IN SELECT * FROM users { IF user.active = true { CREATE active_users CONTENT $user } }",
-    "FOR $user IN SELECT * FROM users {\n\n\tIF user.active = true\n\t{ CREATE active_users CONTENT $user }\n}"
+    "FOR $user IN (SELECT * FROM users) { IF user.active = true { CREATE active_users CONTENT $user } }",
+    "FOR $user IN (SELECT * FROM users) {\n\n\tIF user.active = true\n\t{ CREATE active_users CONTENT $user }\n}"
 )]
 #[case::deeply_nested_object(
     Expr::Literal(Literal::Object(vec![
@@ -325,8 +326,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
         subject: Subject::Record(RecordIdLit { table: "user".to_string(), key: RecordIdKeyLit::Number(123) }),
     }))), "ACCESS user GRANT FOR RECORD user:123", "ACCESS user GRANT FOR RECORD user:123")]
 #[case::top_level_kill(TopLevelExpr::Kill(KillStatement { id: Expr::Param(Param::new("id".to_string())) }), "KILL $id", "KILL $id")]
-#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::all(), diff: false, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
-#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::none(), diff: true, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
+#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Select(Fields::all()), what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
+#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Diff, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
 #[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("ns".to_string())), Expr::Idiom(Idiom::field("db".to_string())))), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]

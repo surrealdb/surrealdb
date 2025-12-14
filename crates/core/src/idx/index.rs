@@ -20,7 +20,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::{
 	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Cond, Part};
@@ -34,7 +34,7 @@ use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) struct IndexOperation<'a> {
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -51,7 +51,7 @@ pub(crate) struct IndexOperation<'a> {
 impl<'a> IndexOperation<'a> {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -226,7 +226,7 @@ impl<'a> IndexOperation<'a> {
 			self.db,
 			&self.ix.table_name,
 			self.ix.index_id,
-			Some((self.opt.id()?, uuid::Uuid::now_v7())),
+			Some((self.opt.id(), uuid::Uuid::now_v7())),
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
@@ -290,7 +290,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
-		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
+		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()).await
 	}
 
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {

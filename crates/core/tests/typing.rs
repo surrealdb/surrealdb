@@ -77,7 +77,7 @@ async fn strict_typing_inline() -> Result<()> {
 				age: 18,
 				enabled: true,
 				name: 'Tobie Morgan Hitchcock',
-				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
+				scores: {1.0, 2.0, 3.0, 4.0, 5.0},
 			}
 		]",
 	)
@@ -107,7 +107,7 @@ async fn strict_typing_inline() -> Result<()> {
 				age: 18,
 				enabled: true,
 				name: 'Tobie Morgan Hitchcock',
-				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
+				scores: {1.0, 2.0, 3.0, 4.0, 5.0},
 			}
 		]",
 	)
@@ -117,7 +117,7 @@ async fn strict_typing_inline() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert_eq!(
 		tmp.unwrap_err().to_string(),
-		"Expected `array<float,5>` buf found an collection of length `10`"
+		"Expected `array<float,5>` but found a collection of length `10`"
 	);
 	//
 	Ok(())
@@ -130,10 +130,10 @@ async fn strict_typing_defined() -> Result<()> {
 		DEFINE FIELD enabled ON person TYPE bool | int;
 		DEFINE FIELD name ON person TYPE string;
 		DEFINE FIELD scores ON person TYPE set<float, 5>;
-		UPSERT person:test SET age = NONE, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPSERT person:test SET age = 18, enabled = NONE, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPSERT person:test SET age = 18, enabled = true, name = NONE, scored = [1,1,2,2,3,3,4,4,5,5];
-		UPSERT person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = [1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = NONE, enabled = NONE, name = NONE, scores = <set>[1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = NONE, name = NONE, scores = <set>[1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = true, name = NONE, scores = <set>[1,1,2,2,3,3,4,4,5,5];
+		UPSERT person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = <set>[1,1,2,2,3,3,4,4,5,5];
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -179,7 +179,7 @@ async fn strict_typing_defined() -> Result<()> {
 				age: 18,
 				enabled: true,
 				name: 'Tobie Morgan Hitchcock',
-				scores: [1.0, 2.0, 3.0, 4.0, 5.0],
+				scores: {1.0, 2.0, 3.0, 4.0, 5.0},
 			}
 		]",
 	)

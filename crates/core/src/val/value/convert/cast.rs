@@ -10,7 +10,6 @@ use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
-use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
 	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
@@ -61,7 +60,7 @@ impl fmt::Display for CastError {
 				len,
 				into,
 			} => {
-				write!(f, "Expected `{into}` buf found an collection of length `{len}`")
+				write!(f, "Expected `{into}` but found a collection of length `{len}`")
 			}
 			CastError::RangeSizeLimit {
 				value,
@@ -467,7 +466,7 @@ impl Cast for Bytes {
 
 				let mut res = Vec::new();
 
-				for v in x.0.into_iter() {
+				for v in x.0 {
 					// Condition checked above
 					let x = v.clone().cast_to::<i64>().expect("value checked to be castable above");
 					// TODO: Fix truncation.
@@ -487,7 +486,7 @@ impl Cast for Bytes {
 impl Cast for Array {
 	fn can_cast(v: &Value) -> bool {
 		match v {
-			Value::Array(_) | Value::Bytes(_) => true,
+			Value::Array(_) | Value::Bytes(_) | Value::Set(_) => true,
 			Value::Range(r) => r.can_coerce_to_typed::<i64>(),
 			_ => false,
 		}
@@ -496,6 +495,7 @@ impl Cast for Array {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Array(x) => Ok(x),
+			Value::Set(s) => Ok(s.into_iter().collect()),
 			Value::Range(range) => {
 				if !range.can_coerce_to_typed::<i64>() {
 					return Err(CastError::InvalidKind {
@@ -704,6 +704,22 @@ impl Cast for crate::val::Table {
 	}
 }
 
+impl<T: Cast> Cast for Option<T> {
+	fn can_cast(v: &Value) -> bool {
+		if let Value::None = v {
+			return true;
+		}
+		T::can_cast(v)
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::None => Ok(None),
+			x => T::cast(x).map(Some),
+		}
+	}
+}
+
 macro_rules! impl_direct {
 	($($name:ident => $inner:ty $(= $kind:ident)?),*$(,)?) => {
 		$(
@@ -768,8 +784,8 @@ impl Value {
 			Kind::Range => self.can_cast_to::<Box<Range>>(),
 			Kind::Function(_, _) => self.can_cast_to::<Box<Closure>>(),
 			Kind::Set(t, l) => match l {
-				Some(l) => self.can_cast_to_array_len(t, *l),
-				None => self.can_cast_to_array(t),
+				Some(l) => self.can_cast_to_set_len(t, *l),
+				None => self.can_cast_to_set(t),
 			},
 			Kind::Array(t, l) => match l {
 				Some(l) => self.can_cast_to_array_len(t, *l),
@@ -818,6 +834,20 @@ impl Value {
 	fn can_cast_to_array(&self, kind: &Kind) -> bool {
 		match self {
 			Value::Array(a) => a.iter().all(|x| x.can_cast_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_cast_to_set_len(&self, kind: &Kind, len: u64) -> bool {
+		match self {
+			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_cast_to_kind(kind)),
+			_ => false,
+		}
+	}
+
+	fn can_cast_to_set(&self, kind: &Kind) -> bool {
+		match self {
+			Value::Set(s) => s.iter().all(|x| x.can_cast_to_kind(kind)),
 			_ => false,
 		}
 	}
@@ -1057,40 +1087,37 @@ impl Value {
 			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique values
-	pub(crate) fn cast_to_set_type(self, kind: &Kind) -> Result<Array, CastError> {
+	/// Try to convert this value to a `Set` of a certain type
+	pub(crate) fn cast_to_set_type(self, kind: &Kind) -> Result<Set, CastError> {
 		let array = self.cast_to::<Array>()?;
 
-		let array = array
+		let set = array
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
-			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
-			.uniq();
+			.collect::<Result<Set, CastError>>()
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
-		Ok(array)
+		Ok(set)
 	}
 
-	/// Try to convert this value to an `Array` of a certain type, unique
-	/// values, and length
-	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Array, CastError> {
+	/// Try to convert this value to a `Set` of a certain type and length
+	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Set, CastError> {
 		let array = self.cast_to::<Array>()?;
 
-		let array = array
+		let set = array
 			.into_iter()
 			.map(|value| value.cast_to_kind(kind))
-			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))?
-			.uniq();
+			.collect::<Result<Set, CastError>>()
+			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
 
-		if (array.len() as u64) != len {
+		if (set.len() as u64) != len {
 			return Err(CastError::InvalidLength {
-				len: array.len(),
+				len: set.len(),
 				into: format!("set<{},{}>", kind.to_sql(), len),
 			});
 		}
 
-		Ok(array)
+		Ok(set)
 	}
 
 	pub(crate) fn cast_to_file_buckets(self, buckets: &[String]) -> Result<File, CastError> {

@@ -36,6 +36,30 @@ impl Range {
 			end: Bound::Unbounded,
 		}
 	}
+
+	/// Returns the start bound of the range.
+	pub fn start(&self) -> Bound<&Value> {
+		self.start.as_ref()
+	}
+
+	/// Returns the upper bound of the range.
+	pub fn end(&self) -> Bound<&Value> {
+		self.end.as_ref()
+	}
+
+	/// Convert into the inner bounds
+	pub fn into_inner(self) -> (Bound<Value>, Bound<Value>) {
+		(self.start, self.end)
+	}
+}
+
+impl From<(Bound<Value>, Bound<Value>)> for Range {
+	fn from((start, end): (Bound<Value>, Bound<Value>)) -> Self {
+		Range {
+			start,
+			end,
+		}
+	}
 }
 
 impl<T: SurrealValue> From<std::ops::Range<T>> for Range {

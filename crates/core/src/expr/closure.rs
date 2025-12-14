@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use anyhow::Result;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::ParameterCapturePass;
 use crate::expr::{Expr, Kind, Param};
 use crate::val::{Closure, Value};
@@ -27,7 +27,7 @@ impl Ord for ClosureExpr {
 }
 
 impl ClosureExpr {
-	pub(crate) async fn compute(&self, ctx: &Context) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext) -> Result<Value> {
 		let captures = ParameterCapturePass::capture(ctx, &self.body);
 
 		Ok(Value::Closure(Box::new(Closure {

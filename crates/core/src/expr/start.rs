@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -17,7 +17,7 @@ impl Start {
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u32> {

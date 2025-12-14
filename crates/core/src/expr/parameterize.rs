@@ -3,14 +3,14 @@ use std::str::FromStr;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResultExt, Function, Idiom};
+use crate::expr::{Expr, FlowResultExt, Function, Idiom, Part};
 
 pub async fn exprs_to_fields(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &[Expr],
@@ -75,49 +75,76 @@ pub async fn exprs_to_fields(
 
 pub async fn expr_to_ident(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &Expr,
 	into: &str,
 ) -> Result<String> {
-	match expr {
-		crate::expr::Expr::Idiom(x) if x.is_field(None) => {
-			let Some(crate::expr::Part::Field(x)) = x.first() else {
-				fail!("Expected a field idiom");
-			};
-
-			Ok(x.clone())
-		}
-		x => match stk
-			.run(|stk| x.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-			.coerce_to::<String>()
-		{
-			Err(crate::val::value::CoerceError::InvalidKind {
-				from,
-				..
-			}) => Err(crate::val::value::CoerceError::InvalidKind {
-				from,
-				into: into.to_string(),
-			}),
-			x => x,
-		}
-		.map_err(anyhow::Error::from),
+	if let Expr::Idiom(Idiom(x)) = expr
+		&& let [Part::Field(x)] = x.as_slice()
+	{
+		return Ok(x.clone());
 	}
+	match stk
+		.run(|stk| expr.compute(stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.coerce_to::<String>()
+	{
+		Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			..
+		}) => Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			into: into.to_string(),
+		}),
+		x => x,
+	}
+	.map_err(anyhow::Error::from)
+}
+
+pub async fn expr_to_optional_ident(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	expr: &Expr,
+	into: &str,
+) -> Result<Option<String>> {
+	if let Expr::Idiom(Idiom(x)) = expr
+		&& let [Part::Field(x)] = x.as_slice()
+	{
+		return Ok(Some(x.clone()));
+	}
+	match stk
+		.run(|stk| expr.compute(stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.coerce_to::<Option<String>>()
+	{
+		Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			..
+		}) => Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			into: into.to_string(),
+		}),
+		x => x,
+	}
+	.map_err(anyhow::Error::from)
 }
 
 pub async fn expr_to_idiom(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	expr: &Expr,
 	into: &str,
 ) -> Result<Idiom> {
 	match expr {
-		crate::expr::Expr::Idiom(x) => Ok(x.clone()),
+		Expr::Idiom(x) => Ok(x.clone()),
 		x => {
 			let raw = match stk
 				.run(|stk| x.compute(stk, ctx, opt, doc))

@@ -898,7 +898,7 @@ pub(super) mod tests {
 		assert_eq!(q.peek_first(), None);
 		assert_eq!(q.peek_last_dist(), None);
 
-		let mut q = DoublePriorityQueue::from(2.0, 2).clone();
+		let mut q = DoublePriorityQueue::from(2.0, 2);
 		q.push(3.0, 4);
 		q.push(3.0, 3);
 		q.push(1.0, 1);

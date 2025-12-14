@@ -11,13 +11,13 @@ use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -43,7 +43,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -61,7 +61,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -71,7 +71,7 @@ impl DefineFieldStatement {
 	pub(crate) async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::FieldDefinition> {
@@ -82,6 +82,12 @@ impl DefineFieldStatement {
 				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
 			}
 		}
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
@@ -100,7 +106,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			reference: self.reference.clone(),
 		})
 	}
@@ -109,7 +115,7 @@ impl DefineFieldStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -416,7 +422,7 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: NamespaceId,
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,
@@ -479,7 +485,7 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn validate_flexible_restrictions(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: NamespaceId,
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,

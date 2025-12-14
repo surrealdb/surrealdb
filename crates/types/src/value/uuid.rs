@@ -11,12 +11,11 @@ use crate::sql::{SqlFormat, ToSql};
 ///
 /// A UUID (Universally Unique Identifier) is a 128-bit identifier that is unique across space and
 /// time. This type wraps the `uuid::Uuid` type.
-
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Uuid(pub uuid::Uuid);
+pub struct Uuid(pub(crate) ::uuid::Uuid);
 
 impl ToSql for Uuid {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
@@ -62,14 +61,9 @@ impl Uuid {
 		Self(uuid::Uuid::max())
 	}
 
-	/// Convert the Uuid to a raw String
-	pub fn to_raw(&self) -> String {
-		self.0.to_string()
-	}
-
-	/// Convert a slice to a UUID
-	pub fn from_slice(slice: &[u8]) -> Result<Self, uuid::Error> {
-		Ok(Self(uuid::Uuid::from_slice(slice)?))
+	/// Convert into the inner uuid::Uuid
+	pub fn into_inner(self) -> uuid::Uuid {
+		self.0
 	}
 }
 

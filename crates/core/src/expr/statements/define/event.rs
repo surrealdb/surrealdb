@@ -5,12 +5,12 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{EventDefinition, TableDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -21,7 +21,7 @@ pub(crate) struct DefineEventStatement {
 	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl DefineEventStatement {
@@ -29,14 +29,13 @@ impl DefineEventStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
 		let target_table =
 			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?;
-		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
 
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
@@ -66,6 +65,12 @@ impl DefineEventStatement {
 			txn.get_or_add_tb(Some(ctx), ns, db, &target_table).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, _doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		// Process the statement
 		let key = crate::key::table::ev::new(ns, db, &target_table, &name);
 		txn.set(
@@ -75,7 +80,7 @@ impl DefineEventStatement {
 				target_table: target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
-				comment: comment.clone(),
+				comment,
 			},
 			None,
 		)

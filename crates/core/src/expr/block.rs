@@ -5,7 +5,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::ToSql;
 
 use super::FlowResult;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::info::InfoStructure;
@@ -57,12 +57,12 @@ impl Block {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Duplicate context
-		let mut ctx = Some(MutableContext::new(ctx).freeze());
+		let mut ctx = Some(Context::new(ctx).freeze());
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {

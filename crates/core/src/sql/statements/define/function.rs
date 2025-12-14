@@ -1,8 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::EscapeKwFreeIdent;
-use crate::sql::{Block, Expr, Kind, Permission};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent};
+use crate::sql::{Block, Expr, Kind, Literal, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,7 +11,7 @@ pub(crate) struct DefineFunctionStatement {
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -41,8 +41,8 @@ impl ToSql for DefineFunctionStatement {
 			write_sql!(f, fmt, "-> {v} ");
 		}
 		self.block.fmt_sql(f, fmt);
-		if let Some(ref v) = self.comment {
-			write_sql!(f, fmt, " COMMENT {}", v);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		let fmt = fmt.increment();
 		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
@@ -56,7 +56,7 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 			name: v.name,
 			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}
@@ -70,7 +70,7 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 			name: v.name,
 			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}

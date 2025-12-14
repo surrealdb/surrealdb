@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +95,13 @@ impl ToSql for Part {
 			Part::Graph(v) => v.fmt_sql(f, fmt),
 			Part::Value(v) => write_sql!(f, fmt, "[{v}]"),
 			Part::Method(v, a) => {
-				write_sql!(f, fmt, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+				write_sql!(
+					f,
+					fmt,
+					".{}({})",
+					EscapeKwFreeIdent(v),
+					Fmt::comma_separated(a.iter().map(CoverStmts))
+				)
 			}
 			Part::Destructure(v) => {
 				f.push_str(".{");
@@ -112,16 +118,20 @@ impl ToSql for Part {
 					f.push_str(" }");
 				}
 			}
-			Part::Optional => f.push('?'),
+			Part::Optional => f.push_str(".?"),
 			Part::Recurse(v, nest, instruction) => {
 				write_sql!(f, fmt, ".{{{v}");
 				if let Some(instruction) = instruction {
 					write_sql!(f, fmt, "+{instruction}");
 				}
-				f.push_str("}}");
+				f.push('}');
 
 				if let Some(nest) = nest {
-					write_sql!(f, fmt, "({nest})");
+					f.push('(');
+					for p in nest.0.iter() {
+						p.fmt_sql(f, fmt);
+					}
+					f.push(')');
 				}
 			}
 			Part::Doc => f.push('@'),

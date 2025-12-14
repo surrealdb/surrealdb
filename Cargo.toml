@@ -19,7 +19,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-alpha.16"
+version = "3.0.0-alpha.17"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -34,32 +34,34 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0-alpha.16", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-alpha.16", path = "crates/core", default-features = false }
-surrealdb-macros = { version = "=3.0.0-alpha.16", path = "crates/macros" }
-surrealdb-server = { version = "=3.0.0-alpha.16", path = "crates/server", default-features = false }
-surrealdb-types = { version = "=3.0.0-alpha.16", path = "crates/types" }
-surrealdb-types-derive = { version = "=3.0.0-alpha.16", path = "crates/types-derive" }
-surrealism = { version = "=0.1.3", path = "crates/surrealism/surrealism" }
-surrealism-cli = { version = "=0.1.3", path = "crates/surrealism/surrealism-cli" }
-surrealism-macros = { version = "=0.1.3", path = "crates/surrealism/surrealism-macros", default-features = false }
-surrealism-runtime = { version = "=0.1.3", path = "crates/surrealism/surrealism-runtime" }
-surrealism-types = { version = "=0.1.3", path = "crates/surrealism/surrealism-types", default-features = false }
+surrealdb = { version = "=3.0.0-alpha.17", path = "crates/sdk" }
+surrealdb-core = { version = "=3.0.0-alpha.17", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0-alpha.17", path = "crates/macros" }
+surrealdb-server = { version = "=3.0.0-alpha.17", path = "crates/server", default-features = false }
+surrealdb-types = { version = "=3.0.0-alpha.17", path = "crates/types" }
+surrealdb-types-derive = { version = "=3.0.0-alpha.17", path = "crates/types-derive" }
+surrealism = { version = "=0.1.4", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=0.1.4", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=0.1.4", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "=0.1.4", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=0.1.4", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.4.0"
 dmp = "0.2.3"
 indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.15.0", features = [
+revision = { version = "0.16.0", features = [
+    "bytes",
     "chrono",
     "geo",
     "roaring",
     "regex",
     "rust_decimal",
+    "specialised",
     "uuid",
 ] }
-storekey = { version = "0.10.0", features = ["bytes", "uuid"] }
+storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.16.0"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
@@ -122,6 +124,7 @@ jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
+mimalloc = "0.1.48"
 nanoid = "0.4.0"
 native-tls = "0.2.11"
 ndarray = "=0.16.1"
@@ -170,7 +173,7 @@ tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
 tokio-util = "0.7.11"
-tracing = "0.1.40"
+tracing = { version = "0.1.43", features = ["release_max_level_debug"] }
 ulid = "1.1.0"
 unicase = "2.7.0"
 url = "2.5.0"
@@ -228,6 +231,8 @@ default = [
     "scripting",
     "http",
     "surrealism",
+    "graphql",
+    "cli",
 ]
 
 allocator = ["surrealdb-server/allocator"]
@@ -242,6 +247,10 @@ storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
+# GraphQL API support
+graphql = ["surrealdb-server/graphql"]
+# Interactive SQL CLI support
+cli = ["surrealdb-server/cli"]
 
 [dependencies]
 # workspace internal dependencies
@@ -252,7 +261,6 @@ surrealdb = { workspace = true, features = [
 ] }
 surrealdb-core.workspace = true
 surrealdb-server.workspace = true
-surrealdb-types.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { version = "0.27.1", features = ["signal", "user"] }
@@ -353,6 +361,11 @@ debug_assert_with_mut_call = "warn"
 # https://rust-lang.github.io/rust-clippy/master/#disallowed_methods
 disallowed_methods = "warn"
 
+# Checks for explicit `.into_iter()` calls in for loops when the loop already implicitly calls it.
+# Removing the explicit call makes the code more concise and idiomatic.
+# https://rust-lang.github.io/rust-clippy/master/#explicit_into_iter_loop
+explicit_into_iter_loop = "warn"
+
 # Checks for impls of `From<..>` that contain `panic!()` or `unwrap()`
 # TryFrom should be used if there’s a possibility of failure.
 # https://rust-lang.github.io/rust-clippy/master/#fallible_impl_from
@@ -373,11 +386,36 @@ implicit_clone = "warn"
 # https://rust-lang.github.io/rust-clippy/master/#inefficient_to_string
 inefficient_to_string = "warn"
 
+# Checks for large types being passed by value instead of by reference.
+# Passing large types by value causes unnecessary copies and memory overhead on the stack.
+# https://rust-lang.github.io/rust-clippy/master/#large_types_passed_by_value
+large_types_passed_by_value = "warn"
+
 # Checks for whole number float literals that cannot be represented as the underlying type without loss.
 # If the value was intended to be exact, it will not be. This may be especially surprising when the lost precision
 # is to the left of the decimal point.
 # https://rust-lang.github.io/rust-clippy/master/#lossy_float_literal
 lossy_float_literal = "warn"
+
+# Checks for usage of `.as_ref().cloned()` and suggests `.cloned()` instead.
+# Using `.cloned()` directly is more concise and easier to read.
+# https://rust-lang.github.io/rust-clippy/master/#option_as_ref_cloned
+option_as_ref_cloned = "warn"
+
+# Checks for unnecessary calls to `.clone()` on values that are already owned or about to be dropped.
+# Redundant clones waste memory and CPU cycles without providing any benefit.
+# https://rust-lang.github.io/rust-clippy/master/#redundant_clone
+redundant_clone = "warn"
+
+# Checks for usage of `.contains()` followed by `.insert()` on `HashSet` or `BTreeSet`.
+# Using a single `.insert()` call and checking its return value is more efficient as it avoids double lookup.
+# https://rust-lang.github.io/rust-clippy/master/#set_contains_or_insert
+set_contains_or_insert = "warn"
+
+# Checks for unnecessary calls to `to_owned()`, `to_string()` and other similar conversion methods
+# that result in unnecessary allocations when a reference would suffice.
+# https://rust-lang.github.io/rust-clippy/master/#unnecessary_to_owned
+unnecessary_to_owned = "warn"
 
 # Checks for functions that are declared `async` but have no `.await`s inside of them.
 # Async functions with no async code create overhead, both mentally and computationally.

@@ -31,7 +31,9 @@ impl Parser<'_> {
 				let v = self.next_token_value()?;
 				match v {
 					NumberToken::Float(f) => Ok(Expr::Literal(Literal::Float(f))),
-					NumberToken::Integer(i) => Ok(Expr::Literal(Literal::Integer(i))),
+					NumberToken::Integer(i) => {
+						Ok(Expr::Literal(Literal::Integer(i.into_int(token.span)?)))
+					}
 					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
 				}
 			}
@@ -39,9 +41,12 @@ impl Parser<'_> {
 			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
+				self.last_span = value.span;
 				let v = match value.value {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
-					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
+					compound::Numeric::Integer(x) => {
+						Expr::Literal(Literal::Integer(x.into_int(value.span)?))
+					}
 					compound::Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
 					compound::Numeric::Duration(x) => {
 						Expr::Literal(Literal::Duration(PublicDuration::from(x)))
@@ -101,7 +106,7 @@ impl Parser<'_> {
 						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 				} else {
-					unexpected!(self, token, "expected either a `<-` or a future")
+					unexpected!(self, token, "`<-`, `<->` or `<~`")
 				}
 			}
 			t!("r\"") | t!("r'") => {
@@ -508,7 +513,12 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		let peek = self.peek();
 		let res = match peek.kind {
-			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
+			TokenKind::NaN
+			| TokenKind::Infinity
+			| TokenKind::Digits
+			| TokenKind::Glued(Glued::Number)
+			| t!("+")
+			| t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
 					let number_span = self.peek().span;
 					let number = self.next_token_value::<Numeric>()?;
@@ -520,12 +530,8 @@ impl Parser<'_> {
 							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
 								@number_span => "Coordinate numbers can't be NaN or a decimal");
 						}
-						Numeric::Float(x) if x.is_nan() => {
-							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
-								@number_span => "Coordinate numbers can't be NaN or a decimal");
-						}
 						Numeric::Float(x) => x,
-						Numeric::Integer(x) => x as f64,
+						Numeric::Integer(x) => x.into_int(number_span)? as f64,
 					};
 
 					let y = self.next_token_value::<f64>()?;
@@ -640,7 +646,7 @@ mod tests {
 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
-			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN CREATE x SET y = 1",
+			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1)",
 			out.to_sql()
 		)
 	}

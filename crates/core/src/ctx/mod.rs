@@ -25,7 +25,7 @@
 // used, copied, modified, or distributed except according to those terms.
 
 pub use self::canceller::Canceller;
-pub use self::context::{Context, MutableContext};
+pub use self::context::{Context, FrozenContext};
 
 pub mod cancellation;
 pub mod canceller;

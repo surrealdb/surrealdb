@@ -19,7 +19,7 @@ impl Subject {
 	pub fn id(&self) -> String {
 		match self {
 			Subject::Record(id) => id.to_sql(),
-			Subject::User(name) => name.clone(),
+			Subject::User(n) => n.clone(),
 		}
 	}
 }

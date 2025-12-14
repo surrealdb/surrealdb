@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 use crate::catalog::base::Base;
 use crate::catalog::providers::{DatabaseProvider, RootProvider};
 use crate::catalog::{ConfigDefinition, GraphQLConfig};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -44,7 +44,7 @@ impl ConfigInner {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<ConfigDefinition> {
@@ -63,7 +63,7 @@ impl DefineConfigStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

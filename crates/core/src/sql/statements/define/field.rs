@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 
@@ -42,7 +43,6 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -55,7 +55,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -73,7 +73,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -81,48 +81,45 @@ impl Default for DefineFieldStatement {
 
 impl ToSql for DefineFieldStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		use surrealdb_types::write_sql;
 		f.push_str("DEFINE FIELD");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		if let Some(ref v) = self.field_kind {
 			write_sql!(f, sql_fmt, " TYPE {}", v);
 			if self.flexible {
 				f.push_str(" FLEXIBLE");
 			}
 		}
-
 		match self.default {
 			DefineDefault::None => {}
 			DefineDefault::Always(ref expr) => {
-				write_sql!(f, sql_fmt, " DEFAULT ALWAYS {expr}");
+				write_sql!(f, sql_fmt, " DEFAULT ALWAYS {}", CoverStmts(expr));
 			}
 			DefineDefault::Set(ref expr) => {
-				write_sql!(f, sql_fmt, " DEFAULT {expr}");
+				write_sql!(f, sql_fmt, " DEFAULT {}", CoverStmts(expr));
 			}
 		}
-
 		if self.readonly {
 			f.push_str(" READONLY");
 		}
 		if let Some(ref v) = self.value {
-			write_sql!(f, sql_fmt, " VALUE {v}");
+			write_sql!(f, sql_fmt, " VALUE {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.assert {
-			write_sql!(f, sql_fmt, " ASSERT {v}");
+			write_sql!(f, sql_fmt, " ASSERT {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.computed {
-			write_sql!(f, sql_fmt, " COMPUTED {v}");
+			write_sql!(f, sql_fmt, " COMPUTED {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.reference {
 			write_sql!(f, sql_fmt, " REFERENCE {v}");
 		}
-		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {v}");
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		if sql_fmt.is_pretty() {
 			f.push('\n');
@@ -130,7 +127,6 @@ impl ToSql for DefineFieldStatement {
 		} else {
 			f.push(' ');
 		}
-
 		self.permissions.fmt_sql(f, sql_fmt);
 	}
 }
@@ -149,7 +145,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}
@@ -170,7 +166,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}

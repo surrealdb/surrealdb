@@ -7,7 +7,6 @@ use anyhow::{Result, anyhow};
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -17,8 +16,7 @@ use crate::syn;
 use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::Datetime")]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Datetime(pub DateTime<Utc>);
 
@@ -47,7 +45,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl From<surrealdb_types::Datetime> for Datetime {
 	fn from(v: surrealdb_types::Datetime) -> Self {
-		Self(v.inner())
+		Self(v.into_inner())
 	}
 }
 

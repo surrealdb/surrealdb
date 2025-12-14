@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -57,7 +58,7 @@ impl ToSql for Data {
 						f.push_str(", ");
 					}
 					write_sql!(f, sql_fmt, "{} {} ", arg.place, arg.operator);
-					arg.value.fmt_sql(f, sql_fmt);
+					CoverStmts(&arg.value).fmt_sql(f, sql_fmt);
 				}
 			}
 			Self::UnsetExpression(v) => {
@@ -102,18 +103,19 @@ impl ToSql for Data {
 						if j > 0 {
 							f.push_str(", ");
 						}
-						expr.fmt_sql(f, sql_fmt);
+						CoverStmts(expr).fmt_sql(f, sql_fmt);
 					}
 					f.push(')');
 				}
 			}
 			Self::UpdateExpression(v) => {
+				f.push_str("ON DUPLICATE KEY UPDATE ");
 				for (i, arg) in v.iter().enumerate() {
 					if i > 0 {
 						f.push_str(", ");
 					}
 					write_sql!(f, sql_fmt, "{} {} ", arg.place, arg.operator);
-					arg.value.fmt_sql(f, sql_fmt);
+					CoverStmts(&arg.value).fmt_sql(f, sql_fmt);
 				}
 			}
 		}

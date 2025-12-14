@@ -6,14 +6,14 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{self, FieldDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
-use crate::expr::kind::Kind;
+use crate::expr::kind::{Kind, KindLiteral};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
@@ -45,7 +45,7 @@ impl Document {
 	/// nested fields or array values are untouched.
 	pub(super) async fn cleanup_table_fields(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -76,6 +76,8 @@ impl Document {
 						Kind::Object => true,
 						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
 						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+						Kind::Literal(KindLiteral::Object(_)) => true,
+						Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
 						_ => false,
 					}
 				}
@@ -89,7 +91,7 @@ impl Document {
 				// - Literal types: allow nested
 				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
 
-				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
+				for k in self.current.doc.as_ref().each(&fd.name) {
 					defined_field_names.insert(&k, allows_nested);
 
 					// Also insert all ancestor paths
@@ -186,7 +188,7 @@ impl Document {
 	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -219,7 +221,7 @@ impl Document {
 			}
 
 			// Loop over each field in document
-			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
@@ -349,7 +351,7 @@ impl Document {
 	pub(super) async fn cleanup_table_references(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
 		// Check import
@@ -366,7 +368,7 @@ impl Document {
 			}
 
 			// Loop over each value in document
-			for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (_, val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Skip if the value is empty
 				if val.is_none() || val.is_empty_array() {
 					continue;
@@ -396,13 +398,13 @@ impl Document {
 
 struct FieldEditContext<'a> {
 	/// The mutable request context
-	context: Option<MutableContext>,
+	context: Option<Context>,
 	/// The defined field statement
 	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
 	/// The current request context
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	/// The current request options
 	opt: &'a Options,
 	/// The current document record being processed
@@ -503,7 +505,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -517,7 +519,7 @@ impl FieldEditContext<'_> {
 			let val =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
 			return Ok(val);
 		}
@@ -540,7 +542,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -554,7 +556,7 @@ impl FieldEditContext<'_> {
 			let val =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
 			return Ok(val);
 		}
@@ -583,7 +585,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = MutableContext::new(self.ctx);
+					let mut ctx = Context::new(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -597,7 +599,7 @@ impl FieldEditContext<'_> {
 			let res =
 				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
 			// Unfreeze the new context
-			self.context = Some(MutableContext::unfreeze(ctx)?);
+			self.context = Some(Context::unfreeze(ctx)?);
 			// Check the ASSERT clause result
 			ensure!(
 				res.is_truthy(),
@@ -658,7 +660,7 @@ impl FieldEditContext<'_> {
 							ctx
 						}
 						None => {
-							let mut ctx = MutableContext::new(self.ctx);
+							let mut ctx = Context::new(self.ctx);
 							ctx.add_value("before", self.old.clone());
 							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());
@@ -675,7 +677,7 @@ impl FieldEditContext<'_> {
 						.await
 						.catch_return()?;
 					// Unfreeze the new context
-					self.context = Some(MutableContext::unfreeze(ctx)?);
+					self.context = Some(Context::unfreeze(ctx)?);
 					// If the specific permissions
 					// expression was not truthy,
 					// then this field could not be
@@ -734,7 +736,7 @@ impl FieldEditContext<'_> {
 
 			// Process the actions
 			let ff = self.def.name.to_sql();
-			for action in actions.into_iter() {
+			for action in actions {
 				match action {
 					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;

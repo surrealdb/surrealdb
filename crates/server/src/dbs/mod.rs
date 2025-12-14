@@ -447,7 +447,7 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for experimental features
 		if self.deny_all {
-			return self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None);
+			return self.allow_experimental.clone().unwrap_or(Targets::None);
 		}
 
 		// If there was a general deny for experimental features, we allow if there are
@@ -462,7 +462,7 @@ impl DbsCapabilities {
 		// If there are no high level denies, we allow the provided Experimental
 		// features If nothing was provided, we deny Experimental targets by default
 		// (Targets::None)
-		self.allow_experimental.as_ref().cloned().unwrap_or(Targets::None) // Experimental targets are disabled by default for the server
+		self.allow_experimental.clone().unwrap_or(Targets::None) // Experimental targets are disabled by default for the server
 	}
 
 	fn get_allow_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
@@ -484,7 +484,7 @@ impl DbsCapabilities {
 		// If there are no high level denies, we allow the provided arbitrary query
 		// subjects If nothing was provided, we allow arbitrary queries by default
 		// (Targets::All)
-		self.allow_arbitrary_query.as_ref().cloned().unwrap_or(Targets::All) // arbitrary queries are enabled by default for the server
+		self.allow_arbitrary_query.clone().unwrap_or(Targets::All) // arbitrary queries are enabled by default for the server
 	}
 
 	fn get_deny_funcs(&self) -> Targets<FuncTarget> {
@@ -677,7 +677,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	composer: C,
 	opt: &Config,
 	canceller: CancellationToken,
-	StartCommandDbsOptions {
+	#[cfg_attr(not(storage), allow(unused_variables))] StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
@@ -739,9 +739,10 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
-		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
+	#[cfg(storage)]
+	let dbs = dbs.with_temporary_directory(temporary_directory);
 	// Ensure the storage version is up to date to prevent corruption
 	let (_, is_new) =
 		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;

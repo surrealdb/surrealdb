@@ -20,7 +20,7 @@ use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultConfig, IndexId,
 	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::doc::CursorRecord;
 use crate::err::Error;
@@ -702,12 +702,18 @@ impl Transaction {
 	// This function should be called immediately before calling the commit function
 	// to ensure the timestamp reflects the actual commit time.
 	pub(crate) async fn store_changes(&self) -> Result<()> {
+		// Get the changes from the changefeed
+		let changes = self.cf.changes()?;
+		// For zero-length changes, return early
+		if changes.is_empty() {
+			return Ok(());
+		}
 		// Get the current transaction timestamp
 		let ts = self.timestamp().await?.to_ts_bytes();
 		// Convert the timestamp bytes to a slice
 		let ts = ts.as_slice();
 		// Collect all changefeed write operations as futures
-		let futures = self.cf.changes()?.into_iter().map(|(ns, db, tb, value)| async move {
+		let futures = changes.into_iter().map(|(ns, db, tb, value)| async move {
 			// Create the changefeed key with the current timestamp
 			let key = crate::key::change::new(ns, db, ts, &tb).encode_key()?;
 			// Write the changefeed entry using the raw transactor API
@@ -894,7 +900,7 @@ impl NamespaceProvider for Transaction {
 		Ok(cached_ns)
 	}
 
-	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
+	async fn get_next_ns_id(&self, ctx: Option<&Context>) -> Result<NamespaceId> {
 		self.sequences.next_namespace_id(ctx).await
 	}
 }
@@ -937,8 +943,8 @@ impl DatabaseProvider for Transaction {
 				};
 
 				let val = Arc::new(db_def);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -949,7 +955,7 @@ impl DatabaseProvider for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_db_upwards(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
 		upwards: bool,
@@ -996,11 +1002,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	async fn get_next_db_id(
-		&self,
-		ctx: Option<&MutableContext>,
-		ns: NamespaceId,
-	) -> Result<DatabaseId> {
+	async fn get_next_db_id(&self, ctx: Option<&Context>, ns: NamespaceId) -> Result<DatabaseId> {
 		self.sequences.next_database_id(ctx, ns).await
 	}
 
@@ -1167,7 +1169,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	/// Retrieve all model definitions for a specific database.
+	/// Retrieve all config definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_configs(
 		&self,
@@ -1206,16 +1208,15 @@ impl DatabaseProvider for Transaction {
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
-
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
 	}
 
-	/// Retrieve a specific analyzer definition.
+	/// Retrieve a specific analyzer definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_analyzer(
 		&self,
@@ -1232,13 +1233,14 @@ impl DatabaseProvider for Transaction {
 					name: az.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
 	}
 
+	/// Retrieve a specific sequence definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_sequence(
 		&self,
@@ -1255,8 +1257,8 @@ impl DatabaseProvider for Transaction {
 					name: sq.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
@@ -1279,22 +1281,11 @@ impl DatabaseProvider for Transaction {
 					name: fc.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
-	}
-
-	async fn put_db_function(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		fc: &catalog::FunctionDefinition,
-	) -> Result<()> {
-		let key = crate::key::database::fc::new(ns, db, &fc.name);
-		self.set(&key, fc, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific module definition from a database.
@@ -1314,23 +1305,11 @@ impl DatabaseProvider for Transaction {
 					name: md.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
-	}
-
-	async fn put_db_module(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		md: &catalog::ModuleDefinition,
-	) -> Result<()> {
-		let name = md.get_storage_name()?;
-		let key = crate::key::database::md::new(ns, db, &name);
-		self.set(&key, md, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific function definition from a database.
@@ -1350,22 +1329,11 @@ impl DatabaseProvider for Transaction {
 					name: pa.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
-	}
-
-	async fn put_db_param(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		pa: &catalog::ParamDefinition,
-	) -> Result<()> {
-		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		self.set(&key, pa, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific config definition from a database.
@@ -1391,6 +1359,40 @@ impl DatabaseProvider for Transaction {
 				}
 			}
 		}
+	}
+
+	async fn put_db_function(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		fc: &catalog::FunctionDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::fc::new(ns, db, &fc.name);
+		self.set(&key, fc, None).await?;
+		Ok(())
+	}
+
+	async fn put_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &catalog::ModuleDefinition,
+	) -> Result<()> {
+		let name = md.get_storage_name()?;
+		let key = crate::key::database::md::new(ns, db, &name);
+		self.set(&key, md, None).await?;
+		Ok(())
+	}
+
+	async fn put_db_param(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		pa: &catalog::ParamDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::pa::new(ns, db, &pa.name);
+		self.set(&key, pa, None).await?;
+		Ok(())
 	}
 }
 
@@ -1448,7 +1450,7 @@ impl TableProvider for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_tb_upwards(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
 		tb: &str,
@@ -1567,7 +1569,7 @@ impl TableProvider for Transaction {
 		self.cache.insert(qey, cached_entry.clone());
 
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.insert(qey, cached_entry.clone());
+		self.cache.insert(qey, cached_entry);
 
 		Ok(cached_tb)
 	}
@@ -1722,8 +1724,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1747,8 +1749,8 @@ impl TableProvider for Transaction {
 					name: ev.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
@@ -1772,8 +1774,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1810,8 +1812,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2005,7 +2007,7 @@ impl TableProvider for Transaction {
 
 	async fn get_next_tb_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {
@@ -2086,17 +2088,11 @@ impl UserProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
-	}
-
-	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
-		let key = crate::key::root::us::new(&us.name);
-		self.set(&key, us, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific namespace user definition.
@@ -2116,17 +2112,11 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
-	}
-
-	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
-		let key = crate::key::namespace::us::new(ns, &us.name);
-		self.set(&key, us, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific user definition from a database.
@@ -2147,11 +2137,23 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
+	}
+
+	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
+		let key = crate::key::root::us::new(&us.name);
+		self.set(&key, us, None).await?;
+		Ok(())
+	}
+
+	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
+		let key = crate::key::namespace::us::new(ns, &us.name);
+		self.set(&key, us, None).await?;
+		Ok(())
 	}
 
 	async fn put_db_user(
@@ -2302,8 +2304,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2325,8 +2327,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2348,8 +2350,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2372,8 +2374,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2396,8 +2398,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2421,8 +2423,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2435,7 +2437,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::root::access::all::new(ra);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2447,7 +2448,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::namespace::access::all::new(ns, na);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2459,7 +2459,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::database::access::all::new(ns, db, da);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2503,10 +2502,10 @@ impl ApiProvider for Transaction {
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
-				let api_def = Arc::new(val);
-				let val = cache::tx::Entry::Any(api_def.clone());
-				self.cache.insert(qey, val.clone());
-				Ok(Some(api_def))
+				let val = Arc::new(val);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(Some(val))
 			}
 		}
 	}
@@ -2515,7 +2514,6 @@ impl ApiProvider for Transaction {
 		let name = ap.path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		self.set(&key, ap, None).await?;
-
 		// Return result
 		Ok(())
 	}

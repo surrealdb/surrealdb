@@ -1,10 +1,12 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
+#![allow(clippy::mutable_key_type)]
 
 mod error;
 mod flatbuffers;
 mod kind;
 mod notification;
+#[macro_use]
 mod sql;
 mod traits;
 pub(crate) mod utils;

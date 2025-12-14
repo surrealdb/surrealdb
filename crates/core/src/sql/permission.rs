@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -124,13 +125,13 @@ impl surrealdb_types::ToSql for Permissions {
 			match permission {
 				Permission::Specific(v) if fmt.is_pretty() => {
 					f.push_str(" WHERE ");
-					v.fmt_sql(f, fmt);
+					CoverStmts(v).fmt_sql(f, fmt);
 				}
 				Permission::None => f.push_str(" NONE"),
 				Permission::Full => f.push_str(" FULL"),
 				Permission::Specific(v) => {
 					f.push_str(" WHERE ");
-					v.fmt_sql(f, fmt);
+					CoverStmts(v).fmt_sql(f, fmt);
 				}
 			}
 		}
@@ -171,9 +172,9 @@ pub(crate) enum Permission {
 impl ToSql for Permission {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::None => write_sql!(f, sql_fmt, "NONE"),
-			Self::Full => write_sql!(f, sql_fmt, "FULL"),
-			Self::Specific(v) => write_sql!(f, sql_fmt, "WHERE {v}"),
+			Self::None => f.push_str("NONE"),
+			Self::Full => f.push_str("FULL"),
+			Self::Specific(v) => write_sql!(f, sql_fmt, "WHERE {}", CoverStmts(v)),
 		}
 	}
 }

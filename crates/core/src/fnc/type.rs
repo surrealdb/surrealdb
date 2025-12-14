@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
 use super::args::Optional;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -53,7 +53,7 @@ pub fn duration((val,): (Value,)) -> Result<Value> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value> {
 	match opt {
@@ -68,7 +68,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value> {
 	match opt {

@@ -1,7 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -22,7 +22,7 @@ impl ToSql for AlterTableStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {}", EscapeKwFreeIdent(&self.name));
+		write_sql!(f, fmt, " {}", EscapeKwIdent(&self.name, &["IF"]));
 		if let Some(kind) = &self.kind {
 			write_sql!(f, fmt, " TYPE");
 			match &kind {
@@ -63,14 +63,14 @@ impl ToSql for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => write_sql!(f, fmt, " COMMENT {}", comment),
-			AlterKind::Drop => write_sql!(f, fmt, " DROP COMMENT"),
+			AlterKind::Set(ref comment) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(comment)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
 			AlterKind::Set(ref changefeed) => write_sql!(f, fmt, " {}", changefeed),
-			AlterKind::Drop => write_sql!(f, fmt, " DROP CHANGEFEED"),
+			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
 		if let Some(permissions) = &self.permissions {

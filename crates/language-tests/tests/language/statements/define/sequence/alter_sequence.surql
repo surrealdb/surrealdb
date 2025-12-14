@@ -20,5 +20,5 @@ value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs
 DEFINE SEQUENCE seq;
 ALTER SEQUENCE seq TIMEOUT 5s;
 INFO FOR DB;
-ALTER SEQUENCE seq TIMEOUT 0s;
+ALTER SEQUENCE seq TIMEOUT NONE;
 INFO FOR DB;

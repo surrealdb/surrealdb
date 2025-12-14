@@ -149,7 +149,7 @@ impl<'a> TreeBuilder<'a> {
 			&& let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await?
 		{
 			for (index_reference, id_col) in &irf {
-				if *id_col == 0 {
+				if *id_col == 0 && index_reference.index.supports_order() {
 					self.index_map.order_limit = Some(IndexOption::new(
 						index_reference.clone(),
 						Some(id),
@@ -260,8 +260,8 @@ impl<'a> TreeBuilder<'a> {
 					group,
 					exp: exp.clone(),
 					io,
-					left: left.clone(),
-					right: right.clone(),
+					left,
+					right,
 				};
 				self.resolved_expressions.insert(exp, re.clone());
 				Ok(re.into())

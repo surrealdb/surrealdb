@@ -1,14 +1,14 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Operation;
 use crate::val::{Closure, Value};
 
 pub async fn chain(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {

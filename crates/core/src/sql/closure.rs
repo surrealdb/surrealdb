@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,7 +27,10 @@ impl ToSql for Closure {
 		if let Some(returns) = &self.returns {
 			write_sql!(f, fmt, " -> {returns}");
 		}
-		write_sql!(f, fmt, " {}", self.body);
+		match &self.body {
+			Expr::Idiom(_) => write_sql!(f, fmt, " ({})", &self.body),
+			x => write_sql!(f, fmt, " {}", CoverStmts(x)),
+		}
 	}
 }
 

@@ -173,14 +173,19 @@ pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
 
 /// The version identifier of this build
-pub static PKG_VERSION: LazyLock<String> =
-	LazyLock::new(|| match option_env!("SURREAL_BUILD_METADATA") {
+pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
+	// Use SURREAL_BUILD_VERSION if set, otherwise fall back to CARGO_PKG_VERSION
+	let version = option_env!("SURREAL_BUILD_VERSION")
+		.filter(|v| !v.trim().is_empty())
+		.unwrap_or(env!("CARGO_PKG_VERSION"));
+	// Append build metadata if set
+	match option_env!("SURREAL_BUILD_METADATA") {
 		Some(metadata) if !metadata.trim().is_empty() => {
-			let version = env!("CARGO_PKG_VERSION");
 			format!("{version}+{metadata}")
 		}
-		_ => env!("CARGO_PKG_VERSION").to_owned(),
-	});
+		_ => version.to_owned(),
+	}
+});
 
 /// Whether to enable Tokio Console
 pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =

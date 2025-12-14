@@ -14,10 +14,11 @@ use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
+use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
-	TopLevelExpr, UpdateStatement, UpsertStatement,
+	InsertStatement, KillStatement, Literal, LiveStatement, Model, Output, RelateStatement,
+	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
@@ -114,7 +115,10 @@ pub trait RpcProtocol {
 
 	async fn sessions(&self) -> Result<DbResult, RpcError> {
 		Ok(DbResult::Other(PublicValue::Array(
-			self.list_sessions().into_iter().map(|x| PublicValue::Uuid(PublicUuid(x))).collect(),
+			self.list_sessions()
+				.into_iter()
+				.map(|x| PublicValue::Uuid(PublicUuid::from(x)))
+				.collect(),
 		)))
 	}
 
@@ -294,7 +298,7 @@ pub trait RpcProtocol {
 		// Lock the context for update
 		let guard = mutex.acquire().await;
 		// Clone the current session
-		let mut session = self.get_session(session_id.as_ref()).clone().as_ref().clone();
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
@@ -323,7 +327,7 @@ pub trait RpcProtocol {
 		// Lock the context for update
 		let guard = mutex.acquire().await;
 		// Clone the current session
-		let mut session = self.get_session(session_id.as_ref()).clone().as_ref().clone();
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
 		// Attempt signin, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
@@ -650,16 +654,15 @@ pub trait RpcProtocol {
 			x => Expr::from_public_value(x),
 		};
 
-		let (diff, fields) = if diff.unwrap_or_default().is_true() {
-			(true, Fields::none())
+		let fields = if diff.unwrap_or_default().is_true() {
+			LiveFields::Diff
 		} else {
-			(false, Fields::all())
+			LiveFields::Select(Fields::all())
 		};
 
 		// Specify the SQL query string
 		let sql = LiveStatement {
 			fields,
-			diff,
 			what,
 			cond: None,
 			fetch: None,
@@ -722,8 +725,8 @@ pub trait RpcProtocol {
 			limit: None,
 			start: None,
 			fetch: None,
-			version: None,
-			timeout: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 			tempfiles: false,
@@ -815,9 +818,9 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			ignore: false,
 			update: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -869,9 +872,9 @@ pub trait RpcProtocol {
 			what: vec![value_to_table(what)],
 			data,
 			output: Some(Output::After),
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
-			version: None,
+			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
@@ -922,7 +925,7 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		};
@@ -976,7 +979,7 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		};
@@ -1093,7 +1096,7 @@ pub trait RpcProtocol {
 			},
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		}));
@@ -1154,7 +1157,7 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			uniq: false,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 		}));
 		// Specify the query parameters
@@ -1193,7 +1196,7 @@ pub trait RpcProtocol {
 			output: Some(Output::Before),
 			with: None,
 			cond: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 		}));
@@ -1493,17 +1496,15 @@ where
 
 	// Post-process hooks for web layer
 	for response in &res {
-		// This error should be unreachable because we shouldn't proceed if there's no
-		// handler
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(&lqid.0, session_id).await;
+					this.handle_live(lqid, session_id).await;
 				}
 			}
 			QueryType::Kill => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_kill(&lqid.0).await;
+					this.handle_kill(lqid).await;
 				}
 			}
 			_ => {}

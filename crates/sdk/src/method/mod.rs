@@ -607,8 +607,7 @@ where
 	///
 	/// // Run queries
 	/// let mut result = db
-	///     .query("CREATE person")
-	///     .query("SELECT * FROM $table")
+	///     .query("CREATE person; SELECT * FROM $table")
 	///     .bind(("table", Table::from("person")))
 	///     .await?;
 	///
