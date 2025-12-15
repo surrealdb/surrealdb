@@ -108,7 +108,7 @@ async fn database_change_feeds() -> Result<()> {
 #[tokio::test]
 async fn table_change_feeds() -> Result<()> {
 	let sql = "
-		DEFINE NS test; DEFINE DB test;
+		DEFINE NS `test-tb-cf`; DEFINE DB `test-tb-cf`;
         DEFINE TABLE person CHANGEFEED 1h;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -287,8 +287,8 @@ async fn changefeed_with_ts() -> Result<()> {
 	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
-	DEFINE NS test;
-	DEFINE DB test;
+	DEFINE NS `test-cf-ts`;
+	DEFINE DB `test-cf-ts`;
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
 	let mut res = db.execute(sql, &ses, None).await?;

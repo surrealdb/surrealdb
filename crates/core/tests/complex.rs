@@ -205,6 +205,9 @@ fn ok_cast_chain_depth() -> Result<()> {
 fn excessive_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
+		let res = run_queries("DEFINE NS test; DEFINE DB test;").await;
+		assert_eq!(res.len(), 2);
+
 		// Run a casting query which will fail (either while parsing or executing)
 		let mut res = run_queries(&cast_chain(125)).await;
 		assert_eq!(res.len(), 1);
