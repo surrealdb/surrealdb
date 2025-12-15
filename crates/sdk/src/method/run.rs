@@ -2,10 +2,9 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, Array, SurrealValue, Value};
-
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
+use crate::types::{Array, SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
 /// A run future
@@ -57,11 +56,14 @@ where
 			};
 
 			router
-				.execute(Command::Run {
-					name,
-					version,
-					args,
-				})
+				.execute(
+					client.session_id,
+					Command::Run {
+						name,
+						version,
+						args,
+					},
+				)
 				.await
 		})
 	}

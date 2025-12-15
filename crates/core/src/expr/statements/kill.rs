@@ -78,6 +78,7 @@ impl KillStatement {
 			sender
 				.send(PublicNotification::new(
 					lid.into(),
+					None,
 					PublicAction::Killed,
 					PublicValue::None,
 					PublicValue::None,

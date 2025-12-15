@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use surrealdb_types::ToSql;
+use uuid::Uuid;
 
 use crate::iam::{Auth, Level, Role};
 use crate::types::{PublicValue, PublicVariables};
@@ -18,8 +19,8 @@ pub struct Session {
 	pub ip: Option<String>,
 	/// The current connection origin
 	pub or: Option<String>,
-	/// The current connection ID
-	pub id: Option<String>,
+	/// The current session ID
+	pub id: Option<Uuid>,
 	/// The currently selected namespace
 	pub ns: Option<String>,
 	/// The currently selected database
@@ -95,7 +96,7 @@ impl Session {
 			"ac".to_string() => access.clone(),
 			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
 			"db".to_string() => self.db.clone().map(|x| x.into()).unwrap_or(Value::None),
-			"id".to_string() => self.id.clone().map(|x| x.into()).unwrap_or(Value::None),
+			"id".to_string() => self.id.map(|x| Value::Uuid(x.into())).unwrap_or(Value::None),
 			"ip".to_string() => self.ip.clone().map(|x| x.into()).unwrap_or(Value::None),
 			"ns".to_string() => self.ns.clone().map(|x| x.into()).unwrap_or(Value::None),
 			"or".to_string() => self.or.clone().map(|x| x.into()).unwrap_or(Value::None),
