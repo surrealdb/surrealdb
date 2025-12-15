@@ -4,7 +4,12 @@ use anyhow::Result;
 use futures::Stream;
 use surrealdb_types::{Datetime, Duration, QueryChunk, RecordId, SurrealValue, Table, Value, Variables};
 
-use crate::method::{Executable, Query, Request};
+use crate::method::{
+	condition::ConditionBuilder,
+	Executable,
+	Query,
+	Request,
+};
 use crate::utils::{QueryResult, ValueStream};
 
 #[derive(Clone)]
@@ -13,8 +18,8 @@ pub struct Select {
 	pub(crate) fields: Vec<String>,
 	pub(crate) limit: Option<u64>,
 	pub(crate) start: Option<u64>,
-	// cond
-	// fetch
+	pub(crate) cond: Option<String>,
+	pub(crate) fetch: Option<Vec<String>>,
 	pub(crate) timeout: Option<Duration>,
 	pub(crate) version: Option<Datetime>,
 }
@@ -26,6 +31,8 @@ impl Select {
 			fields: vec![],
 			limit: None,
 			start: None,
+			cond: None,
+			fetch: None,
 			timeout: None,
 			version: None,
 		}
@@ -46,6 +53,11 @@ impl Select {
 		sql.push_str(" FROM $subject");
 		vars.insert("subject".to_string(), self.subject.clone());
 
+		if let Some(ref cond) = self.cond {
+			sql.push_str(" WHERE ");
+			sql.push_str(cond);
+		}
+
 		if let Some(limit) = self.limit {
 			sql.push_str(" LIMIT $limit");
 			vars.insert("limit".to_string(), limit);
@@ -56,14 +68,19 @@ impl Select {
 			vars.insert("start".to_string(), start);
 		}
 
-		if let Some(timeout) = self.timeout {
-			sql.push_str(" TIMEOUT $timeout");
-			vars.insert("timeout".to_string(), timeout);
+		if let Some(ref fetch) = self.fetch {
+			sql.push_str(" FETCH type::fields($fetch)");
+			vars.insert("fetch".to_string(), fetch.clone());
 		}
 
 		if let Some(version) = self.version {
 			sql.push_str(" VERSION $version");
 			vars.insert("version".to_string(), version);
+		}
+
+		if let Some(timeout) = self.timeout {
+			sql.push_str(" TIMEOUT $timeout");
+			vars.insert("timeout".to_string(), timeout);
 		}
 
 		(sql, vars)
@@ -104,6 +121,56 @@ impl Request<Select> {
 
 	pub fn version(mut self, version: Datetime) -> Self {
 		self.inner.version = Some(version);
+		self
+	}
+
+	/// Add a WHERE clause using a raw SQL expression string.
+	///
+	/// # Example
+	/// ```ignore
+	/// db.select("user").cond("age > 18").collect().await?;
+	/// ```
+	pub fn cond(mut self, condition: impl Into<String>) -> Self {
+		self.inner.cond = Some(condition.into());
+		self
+	}
+
+	/// Add a WHERE clause using a closure-based condition builder.
+	///
+	/// # Example
+	/// ```ignore
+	/// db.select("user")
+	///     .where(|w| {
+	///         w.field("age").gt(18)
+	///          .and()
+	///          .field("status").eq("active")
+	///     })
+	///     .collect().await?;
+	/// ```
+	pub fn r#where<F>(mut self, f: F) -> Self
+	where
+		F: FnOnce(ConditionBuilder) -> ConditionBuilder,
+	{
+		let builder = ConditionBuilder::new();
+		let builder = f(builder);
+		self.inner.cond = Some(builder.to_sql());
+		self
+	}
+
+	/// Add a FETCH clause to eagerly load related records.
+	///
+	/// # Example
+	/// ```ignore
+	/// db.select("user").fetch("profile").collect().await?;
+	/// db.select("user").fetch(["profile", "settings"]).collect().await?;
+	/// ```
+	pub fn fetch<T, S>(mut self, fields: T) -> Self
+	where
+		T: Into<Vec<S>>,
+		S: Into<String>,
+	{
+		let fields: Vec<S> = fields.into();
+		self.inner.fetch = Some(fields.into_iter().map(Into::into).collect());
 		self
 	}
 }

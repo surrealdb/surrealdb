@@ -5,6 +5,8 @@ use std::{
 };
 use uuid::Uuid;
 
+mod condition;
+
 mod query;
 pub use query::*;
 

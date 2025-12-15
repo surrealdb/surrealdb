@@ -1,5 +1,7 @@
 // SDK2 integration tests
 
+mod select;
+
 use sdk2::Surreal;
 use surrealdb_core::embedded::EmbeddedSurrealEngine;
 use surrealdb_types::{RecordId, SurrealValue, Value};
