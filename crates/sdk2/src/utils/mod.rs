@@ -18,3 +18,6 @@ pub use features::*;
 
 mod frame;
 pub use frame::*;
+
+mod bindable;
+pub use bindable::*;

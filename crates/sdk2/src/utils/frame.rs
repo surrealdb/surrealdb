@@ -18,6 +18,8 @@ pub enum QueryFrame<T: SurrealValue = Value> {
         query: u64,
         /// The actual value
         value: T,
+        /// Whether this is a single value or a batch
+        is_single: bool,
     },
     /// An error occurred during query execution
     Error {
@@ -68,14 +70,26 @@ impl<T: SurrealValue> QueryFrame<T> {
             _ => None,
         }
     }
+
+    /// Converts to a Result, returning Ok(value) for Value frames,
+    /// Err for Error frames, and None for Done frames.
+    pub fn into_result(self) -> Option<Result<T, Error>> {
+        match self {
+            QueryFrame::Value { value, .. } => Some(Ok(value)),
+            QueryFrame::Error { error, .. } => Some(Err(error)),
+            QueryFrame::Done { .. } => None,
+        }
+    }
 }
 
 pin_project! {
-    /// A stream of [`QueryFrame`]s from query execution.
+    /// A stream of [`QueryFrame`]s from multi-statement query execution.
     ///
-    /// This wrapper provides:
-    /// 1. A generic stream of [`QueryFrame`] items with proper batching
-    /// 2. Index-based filtering via [`.index()`](Self::index) to get results for a single query
+    /// When executing multiple statements (e.g., `"SELECT * FROM a; SELECT * FROM b"`),
+    /// this stream yields frames from all queries interleaved. Each frame includes
+    /// a `query` index indicating which statement it belongs to.
+    ///
+    /// For single-query access with type conversion, use [`.into_value_stream()`](Self::into_value_stream).
     pub struct QueryStream<S: Stream<Item = QueryChunk>> {
         #[pin]
         inner: S,
@@ -92,7 +106,7 @@ impl<S: Stream<Item = QueryChunk>> QueryStream<S> {
         }
     }
 
-    /// Returns a specialized stream for a specific query index, with type conversion.
+    /// Converts this into a [`ValueStream`] for a specific query index with type conversion.
     ///
     /// # Type Parameters
     /// - `T`: The target type to convert values to. Defaults to [`Value`].
@@ -104,11 +118,14 @@ impl<S: Stream<Item = QueryChunk>> QueryStream<S> {
     /// ```ignore
     /// let stream = db.query("SELECT * FROM user; SELECT * FROM post").stream().await?;
     ///
-    /// // Get only the user results, typed as User
-    /// let users: IndexedQueryStream<_, User> = stream.index::<User>(0);
+    /// // Get only the user results as a typed ValueStream
+    /// let mut users = stream.into_value_stream::<User>(0);
+    /// while let Some(frame) = users.next().await {
+    ///     // ...
+    /// }
     /// ```
-    pub fn index<T: SurrealValue>(self, index: u64) -> IndexedQueryStream<S, T> {
-        IndexedQueryStream {
+    pub fn into_value_stream<T: SurrealValue>(self, index: u64) -> ValueStream<S, T> {
+        ValueStream {
             inner: self.inner,
             index,
             buffer: VecDeque::new(),
@@ -142,10 +159,27 @@ impl<S: Stream<Item = QueryChunk>> Stream for QueryStream<S> {
 }
 
 pin_project! {
-    /// A filtered stream for a single query index with type conversion.
+    /// A typed stream of values from a single query.
     ///
-    /// Created via [`QueryStream::index()`].
-    pub struct IndexedQueryStream<S: Stream<Item = QueryChunk>, T: SurrealValue = Value> {
+    /// This stream filters frames to a specific query index and converts values
+    /// to the target type `T`. It yields [`QueryFrame<T>`] items.
+    ///
+    /// Created via [`QueryStream::into_value_stream()`].
+    ///
+    /// # Example
+    /// ```ignore
+    /// let stream = db.query("SELECT * FROM user").stream().await?;
+    /// let mut values = stream.into_value_stream::<User>(0);
+    ///
+    /// while let Some(frame) = values.next().await {
+    ///     match frame {
+    ///         QueryFrame::Value { value, .. } => println!("User: {value:?}"),
+    ///         QueryFrame::Error { error, .. } => eprintln!("Error: {error}"),
+    ///         QueryFrame::Done { .. } => println!("Complete"),
+    ///     }
+    /// }
+    /// ```
+    pub struct ValueStream<S: Stream<Item = QueryChunk>, T: SurrealValue = Value> {
         #[pin]
         inner: S,
         index: u64,
@@ -154,7 +188,7 @@ pin_project! {
     }
 }
 
-impl<S: Stream<Item = QueryChunk>, T: SurrealValue> Stream for IndexedQueryStream<S, T> {
+impl<S: Stream<Item = QueryChunk>, T: SurrealValue> Stream for ValueStream<S, T> {
     type Item = QueryFrame<T>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -217,7 +251,8 @@ fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeq
         for value in results {
             match T::from_value(value) {
                 Ok(typed) => {
-                    buffer.push_back(QueryFrame::Value { query, value: typed });
+                    let is_single = matches!(chunk.kind, QueryResponseKind::Single);
+                    buffer.push_back(QueryFrame::Value { query, value: typed, is_single });
                 }
                 Err(e) => {
                     buffer.push_back(QueryFrame::Error {

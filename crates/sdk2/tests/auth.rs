@@ -28,8 +28,10 @@ async fn test_simple_auth() {
             DURATION FOR SESSION 60s, FOR TOKEN 1d;
     ").await;
 
+    // let mut rx = surreal.subscribe::<Auth>();
+
     let sess = surreal.fork_session().await.unwrap();
-    let tokens = sess.signup(AccessRecordAuth {
+    let _tokens = sess.signup(AccessRecordAuth {
         namespace: "test".to_string(),
         database: "test".to_string(),
         access: "user".to_string(),
@@ -39,8 +41,15 @@ async fn test_simple_auth() {
         }.into(),
     }).await.unwrap();
 
-    let user: User = surreal.query("SELECT * FROM ONLY user LIMIT 1").await.unwrap().first().unwrap().clone().into_t().unwrap();
+    let results = surreal.query("SELECT * FROM ONLY user LIMIT 1").await.unwrap();
+    let user: User = results.into_iter().next().unwrap().take().unwrap().into_t().unwrap();
     assert_eq!(user.email, "test@test.com");
     assert_eq!(user.id.table.to_string(), "user");
+
+    // TODO no events coming through
+    // let event = rx.recv().await.unwrap();
+    // assert!(event.session_id.is_none());
+    // assert!(event.token.is_some());
+    // assert_eq!(event.token, tokens.access);
 }
 

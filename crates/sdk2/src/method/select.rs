@@ -1,7 +1,11 @@
+use std::pin::Pin;
+
 use anyhow::Result;
-use surrealdb_types::{RecordId, SurrealValue, Table, Variables};
+use futures::Stream;
+use surrealdb_types::{QueryChunk, RecordId, SurrealValue, Table, Value, Variables};
 
 use crate::method::{Executable, Query, Request};
+use crate::utils::ValueStream;
 
 #[derive(Clone)]
 pub struct Select {
@@ -51,7 +55,7 @@ impl Select {
 	}
 }
 
-/// Builder methods for Query requests
+/// Builder methods for Select requests
 impl Request<Select> {
 	pub fn field(mut self, field: impl Into<String>) -> Self {
 		self.inner.fields.push(field.into());
@@ -78,14 +82,50 @@ impl Request<Select> {
 		self
 	}
 
-	pub async fn collect(self) -> Result<Vec<surrealdb_types::Value>> {
+	/// Execute the select and return a typed [`ValueStream`].
+	///
+	/// # Type Parameters
+	/// - `T`: The target type to convert values to. Defaults to [`Value`].
+	///
+	/// # Example
+	/// ```ignore
+	/// use futures::StreamExt;
+	///
+	/// let mut stream = db.select("user").stream::<User>().await?;
+	/// while let Some(frame) = stream.next().await {
+	///     if let Some(user) = frame.into_value() {
+	///         println!("{user:?}");
+	///     }
+	/// }
+	/// ```
+	pub async fn stream<T: SurrealValue>(
+		self,
+	) -> Result<ValueStream<Pin<Box<dyn Stream<Item = QueryChunk> + Send>>, T>> {
 		let (sql, vars) = self.inner.build();
-		Request::new(&self, Query::new(sql)).bind(vars).collect().await
+		let stream = Request::new(&self, Query::new(sql)).bind(vars).stream().await?;
+		Ok(stream.into_value_stream::<T>(0))
+	}
+
+	/// Execute the select and collect all results into a Vec.
+	pub async fn collect(self) -> Result<Vec<Value>> {
+		let (sql, vars) = self.inner.build();
+		let results = Request::new(&self, Query::new(sql)).bind(vars).collect().await?;
+		match results.into_iter().next() {
+			Some(result) => {
+				let value = result.take().map_err(anyhow::Error::msg)?;
+				match value {
+					Value::Array(arr) => Ok(arr.into_vec()),
+					Value::None => Ok(Vec::new()),
+					v => Ok(vec![v]),
+				}
+			}
+			None => Ok(Vec::new()),
+		}
 	}
 }
 
 impl Executable for Select {
-	type Output = Vec<surrealdb_types::Value>;
+	type Output = Vec<Value>;
 
 	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
 		req.collect()
