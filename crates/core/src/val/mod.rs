@@ -32,6 +32,7 @@ pub(crate) mod range;
 pub(crate) mod record_id;
 pub(crate) mod regex;
 pub(crate) mod set;
+pub(crate) mod symbol;
 pub(crate) mod table;
 pub(crate) mod uuid;
 pub(crate) mod value;
@@ -49,6 +50,7 @@ pub(crate) use self::range::Range;
 pub(crate) use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub(crate) use self::regex::Regex;
 pub(crate) use self::set::Set;
+pub(crate) use self::symbol::Symbol;
 pub(crate) use self::table::Table;
 pub(crate) use self::uuid::Uuid;
 pub(crate) use self::value::{CastError, CoerceError};
@@ -75,7 +77,7 @@ pub(crate) enum Value {
 	Null,
 	Bool(bool),
 	Number(Number),
-	String(String),
+	String(Symbol),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
@@ -211,7 +213,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn into_raw_string(self) -> String {
 		match self {
-			Value::String(v) => v,
+			Value::String(v) => v.into(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
@@ -221,7 +223,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::String(v) => v.clone(),
+			Value::String(v) => v.into(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
@@ -531,7 +533,7 @@ impl Value {
 			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
 			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
 			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
-			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand)),
+			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand.into())),
 			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
 			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
 			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
@@ -608,9 +610,8 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::String(mut v), Self::String(w)) => {
-				v.push_str(&w);
-				Value::String(v)
+			(Self::String(v), Self::String(w)) => {
+				Value::String(format!("{}{}", v.as_str(), w.as_str()).into())
 			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
@@ -770,6 +771,35 @@ macro_rules! subtypes {
 		Value::$name
 	};
 
+	// Special case for String variant that stores Symbol but presents as String
+	(@method String(String) => $is:ident,$as:ident,$into:ident) => {
+		#[doc = concat!("Check if the value is a [`String`]")]
+		#[allow(dead_code)]
+		pub fn $is(&self) -> bool{
+			matches!(self, Value::String(_))
+		}
+
+		#[doc = concat!("Return a reference to the string if the value is of that type")]
+		#[allow(dead_code)]
+		pub fn $as(&self) -> Option<&str>{
+			if let Value::String(x) = self{
+				Some(x)
+			}else{
+				None
+			}
+		}
+
+		#[doc = concat!("Turns the value into a [`String`] returning None if the value is not of that type")]
+		#[allow(dead_code)]
+		pub fn $into(self) -> Option<String>{
+			if let Value::String(x) = self{
+				Some(x.into())
+			}else{
+				None
+			}
+		}
+	};
+
 	(@method $name:ident($t:ty) => $is:ident,$as:ident,$into:ident) => {
 		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
 		#[allow(dead_code)]
@@ -791,7 +821,7 @@ macro_rules! subtypes {
 		#[allow(dead_code)]
 		pub fn $into(self) -> Option<$t>{
 			if let Value::$name(x) = self{
-				Some(x)
+				Some(x.into())
 			}else{
 				None
 			}
@@ -824,7 +854,7 @@ macro_rules! subtypes {
 	(@from $name:ident($t:ident) => $is:ident,$as:ident,$into:ident) => {
 		impl From<$t> for Value {
 			fn from(v: $t) -> Self{
-				Value::$name(v)
+				Value::$name(v.into())
 			}
 		}
 	};
@@ -910,7 +940,7 @@ impl From<usize> for Value {
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Self::String(v.to_owned())
+		Self::String(v.into())
 	}
 }
 
@@ -988,7 +1018,7 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),
 		crate::val::Value::Bool(value) => Ok(surrealdb_types::Value::Bool(value)),
 		crate::val::Value::Number(value) => convert_number_to_public(value),
-		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value)),
+		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value.into())),
 		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
 		crate::val::Value::Duration(value) => convert_duration_to_public(value),
 		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),

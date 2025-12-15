@@ -1,6 +1,5 @@
-use imbl::ordmap::Entry;
-
 use anyhow::Result;
+use imbl::ordmap::Entry;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
@@ -271,7 +270,7 @@ impl Value {
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
-						Value::String(x) => x,
+						Value::String(x) => x.into(),
 						Value::RecordId(x) => x.to_sql(),
 						Value::Number(x) => x.to_sql(),
 						Value::Range(x) => x.to_sql(),

@@ -20,7 +20,7 @@ impl Value {
 			// There is a string for the id field
 			Value::String(id) if !id.is_empty() => Ok(RecordId {
 				table: tb,
-				key: id.into(),
+				key: String::from(id).into(),
 			}),
 			// There is an object for the id field
 			Value::Object(id) => Ok(RecordId {

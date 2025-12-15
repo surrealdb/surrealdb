@@ -207,7 +207,7 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 			),
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
-		SurValue::String(s) => GqlValue::String(s),
+		SurValue::String(s) => GqlValue::String(s.into()),
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_sql()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
@@ -443,7 +443,7 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 		Literal::Float(f) => Ok(SurValue::Number(SurNumber::Float(f))),
 		Literal::Integer(i) => Ok(SurValue::Number(SurNumber::Int(i))),
 		Literal::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
-		Literal::String(s) => Ok(SurValue::String(s)),
+		Literal::String(s) => Ok(SurValue::String(s.into())),
 		Literal::Bytes(b) => Ok(SurValue::Bytes(b)),
 		Literal::Regex(r) => Ok(SurValue::Regex(r)),
 		Literal::RecordId(record_id_lit) => {
@@ -645,7 +645,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::String(s.to_owned())),
+			GqlValue::String(s) => Ok(SurValue::String(s.into())),
 			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},

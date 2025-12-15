@@ -17,7 +17,7 @@ impl InfoStructure for RequestMiddleware {
 			self.0
 				.into_iter()
 				.map(|(k, v)| {
-					let value = v.iter().map(|x| Value::String(x.to_sql())).collect();
+					let value = v.iter().map(|x| Value::String(x.to_sql().into())).collect();
 
 					(k, Value::Array(Array(value)))
 				})

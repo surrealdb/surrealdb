@@ -96,6 +96,6 @@ impl ToSql for Block {
 
 impl InfoStructure for Block {
 	fn structure(self) -> Value {
-		Value::String(self.to_sql())
+		Value::String(self.to_sql().into())
 	}
 }

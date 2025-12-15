@@ -402,7 +402,7 @@ macro_rules! impl_direct {
 
 			fn coerce(v: Value) -> Result<Self, CoerceError> {
 				if let Value::$name(x) = v {
-					return Ok(x);
+					return Ok(x.into());
 				} else {
 					return Err(CoerceError::InvalidKind{
 						from: v,
@@ -540,13 +540,13 @@ impl Value {
 
 	fn can_coerce_to_table(&self, val: &[String]) -> bool {
 		match self {
-			Value::Table(t) => val.is_empty() || val.contains(&t.as_str().to_string()),
+			Value::Table(t) => val.is_empty() || val.iter().any(|v| v.as_str() == t.as_str()),
 			Value::String(s) => {
 				// Allow strings to be coerced to tables
 				if val.is_empty() {
 					true
 				} else {
-					val.contains(s)
+					val.iter().any(|t| t.as_str() == s.as_str())
 				}
 			}
 			_ => false,
@@ -678,7 +678,7 @@ impl Value {
 		let this = match self {
 			// Tables are allowed if correct type
 			Value::Table(v) => {
-				if val.is_empty() || val.contains(&v.as_str().to_string()) {
+				if val.is_empty() || val.iter().any(|t| t.as_str() == v.as_str()) {
 					return Ok(v);
 				} else {
 					Value::Table(v)
@@ -686,7 +686,7 @@ impl Value {
 			}
 			// Allow strings to be coerced to tables
 			Value::String(s) => {
-				if val.is_empty() || val.contains(&s) {
+				if val.is_empty() || val.iter().any(|t| t.as_str() == s.as_str()) {
 					return Ok(crate::val::Table::new(s));
 				} else {
 					Value::String(s)
@@ -844,7 +844,7 @@ mod tests {
 	#[test]
 	fn test_coerce_to_table_generic() {
 		// Test coercing string to generic table type
-		let value = Value::String("users".to_string());
+		let value = Value::String("users".into());
 		let kind = Kind::Table(vec![]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_ok());
@@ -856,7 +856,7 @@ mod tests {
 	#[test]
 	fn test_coerce_to_table_specific() {
 		// Coercion should fail for wrong table name (more strict than cast)
-		let value = Value::String("posts".to_string());
+		let value = Value::String("posts".into());
 		let kind = Kind::Table(vec!["users".to_string()]);
 		let result = value.coerce_to_kind(&kind);
 		// Coercion from string to specific table type should fail because

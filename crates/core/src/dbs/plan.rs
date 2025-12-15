@@ -155,14 +155,17 @@ impl ExplainItem {
 				.into(),
 				details: vec![
 					//TODO: Properly handle possible null byte.
-					("table", Value::String(tb.clone())),
+					("table", Value::String(tb.clone().into())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},
 			Iterable::Mergeable(tb, None, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("table", Value::String(tb.to_owned())), ("value", v.to_owned())],
+				details: vec![
+					("table", Value::String(tb.to_owned().into())),
+					("value", v.to_owned()),
+				],
 			},
 			Iterable::Mergeable(tb, Some(id), v) => Self {
 				name: "Iterate Mergeable".into(),
@@ -189,7 +192,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::String(t.clone()))];
+				let mut details = vec![("table", Value::String(t.clone().into()))];
 				if let Some(qp) = ctx.get_query_planner()
 					&& let Some(exe) = qp.get_query_executor(t.as_str())
 				{

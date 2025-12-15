@@ -50,7 +50,7 @@ impl Highlighter {
 
 	fn extract(val: Value, vals: &mut Vec<String>) {
 		match val {
-			Value::String(s) => vals.push(s),
+			Value::String(s) => vals.push(s.to_string()),
 			Value::Number(n) => vals.push(n.to_string()),
 			Value::Bool(b) => vals.push(b.to_string()),
 			Value::Array(a) => {

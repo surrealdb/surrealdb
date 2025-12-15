@@ -76,7 +76,7 @@ impl Operation {
 				value,
 			} => {
 				map! {
-					"op".to_owned() => Value::String("add".to_owned()),
+					"op".to_owned() => Value::String("add".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -87,7 +87,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("remove".to_owned()),
+					"op".to_owned() => Value::String("remove".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 				}
@@ -98,7 +98,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("replace".to_owned()),
+					"op".to_owned() => Value::String("replace".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -110,7 +110,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("change".to_owned()),
+					"op".to_owned() => Value::String("change".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
@@ -122,7 +122,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("copy".to_owned()),
+					"op".to_owned() => Value::String("copy".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
@@ -134,7 +134,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("map".to_owned()),
+					"op".to_owned() => Value::String("map".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
@@ -146,7 +146,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("test".to_owned()),
+					"op".to_owned() => Value::String("test".into()),
 					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,

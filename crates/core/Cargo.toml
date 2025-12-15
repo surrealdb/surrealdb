@@ -129,6 +129,7 @@ imbl.workspace = true
 ipnet.workspace = true
 jsonwebtoken.workspace = true
 linfa-linalg.workspace = true
+lru.workspace = true
 md-5.workspace = true
 nanoid.workspace = true
 ndarray.workspace = true

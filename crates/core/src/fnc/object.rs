@@ -10,7 +10,7 @@ pub fn entries((object,): (Object,)) -> Result<Value> {
 		object
 			.iter()
 			.map(|(k, v)| {
-				let k = Value::String(k.to_owned());
+				let k = Value::String(k.into());
 				let v = v.clone();
 				Value::Array(Array(vec![k, v]))
 			})
@@ -26,7 +26,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
 				let key = match entry.first() {
 					Some(v) => match v {
-						Value::String(v) => v.clone(),
+						Value::String(v) => v.into(),
 						v => v.to_sql(),
 					},
 					_ => {
@@ -75,15 +75,7 @@ pub fn len((object,): (Object,)) -> Result<Value> {
 }
 
 pub fn keys((object,): (Object,)) -> Result<Value> {
-	Ok(Value::Array(Array(
-		object
-			.keys()
-			.map(|v| {
-				let strand = v.clone();
-				Value::String(strand)
-			})
-			.collect(),
-	)))
+	Ok(Value::Array(Array(object.keys().map(|v| Value::String(v.into())).collect())))
 }
 
 pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {

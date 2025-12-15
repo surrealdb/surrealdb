@@ -354,7 +354,7 @@ impl Cast for String {
 
 			Value::Null => Ok("NULL".into()),
 			Value::None => Ok("NONE".into()),
-			Value::String(x) => Ok(x),
+			Value::String(x) => Ok(x.into()),
 			Value::Uuid(x) => Ok(x.to_raw()),
 			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
@@ -966,7 +966,7 @@ impl Value {
 			Value::Table(v) if v.is_table_type(val) => Ok(v),
 			Value::String(v) => {
 				// Check if the string is a valid table name and matches the allowed types
-				let table = crate::val::Table::new(v.clone());
+				let table = crate::val::Table::from(v.clone());
 				if table.is_table_type(val) {
 					Ok(table)
 				} else {
@@ -980,7 +980,7 @@ impl Value {
 					kind.push('>');
 
 					Err(CastError::InvalidKind {
-						from: Value::String(v),
+						from: Value::String(v.clone()),
 						into: kind,
 					})
 				}
@@ -1149,7 +1149,7 @@ mod tests {
 	#[test]
 	fn test_cast_to_table_generic() {
 		// Test casting string to generic table type
-		let value = Value::String("users".to_string());
+		let value = Value::String("users".to_string().into());
 		let kind = Kind::Table(vec![]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1163,7 +1163,7 @@ mod tests {
 	#[test]
 	fn test_cast_to_table_specific() {
 		// Test casting string to specific table type (matching)
-		let value = Value::String("users".to_string());
+		let value = Value::String("users".to_string().into());
 		let kind = Kind::Table(vec!["users".to_string()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1172,7 +1172,7 @@ mod tests {
 		}
 
 		// Test casting string to specific table type (not matching)
-		let value = Value::String("posts".to_string());
+		let value = Value::String("posts".to_string().into());
 		let kind = Kind::Table(vec!["users".to_string()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_err());
@@ -1181,7 +1181,7 @@ mod tests {
 	#[test]
 	fn test_cast_to_table_union() {
 		// Test casting string to union of table types
-		let value = Value::String("posts".to_string());
+		let value = Value::String("posts".to_string().into());
 		let kind = Kind::Table(vec!["users".to_string(), "posts".to_string()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1190,7 +1190,7 @@ mod tests {
 		}
 
 		// Test casting string that doesn't match any in the union
-		let value = Value::String("comments".to_string());
+		let value = Value::String("comments".to_string().into());
 		let kind = Kind::Table(vec!["users".to_string(), "posts".to_string()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_err());
@@ -1208,7 +1208,7 @@ mod tests {
 	#[test]
 	fn test_can_cast_to_table() {
 		// Test can_cast_to_kind for tables - String can always cast to generic table
-		let value = Value::String("users".to_string());
+		let value = Value::String("users".to_string().into());
 		let kind = Kind::Table(vec![]);
 		assert!(value.can_cast_to_kind(&kind));
 

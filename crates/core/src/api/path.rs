@@ -282,7 +282,7 @@ impl Segment {
 					let values = segments
 						.iter()
 						.copied()
-						.map(|x| Value::String(x.to_owned()))
+						.map(|x| Value::String(x.to_owned().into()))
 						.collect::<Vec<_>>();
 
 					Some(Some((x.to_owned(), Value::Array(Array(values)))))

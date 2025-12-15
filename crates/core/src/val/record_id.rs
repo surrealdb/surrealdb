@@ -216,7 +216,7 @@ impl RecordIdKey {
 	pub(crate) fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
-			RecordIdKey::String(s) => Value::String(s),
+			RecordIdKey::String(s) => Value::String(s.into()),
 			RecordIdKey::Uuid(u) => Value::Uuid(u),
 			RecordIdKey::Object(object) => Value::Object(object),
 			RecordIdKey::Array(array) => Value::Array(array),
@@ -238,7 +238,7 @@ impl RecordIdKey {
 		// rejected.
 		match value {
 			Value::Number(Number::Int(i)) => Some(RecordIdKey::Number(i)),
-			Value::String(strand) => Some(RecordIdKey::String(strand)),
+			Value::String(strand) => Some(RecordIdKey::String(strand.into())),
 			// NOTE: This was previously (before expr inversion pr) also rejected in this
 			// conversion, a bug I assume.
 			Value::Uuid(uuid) => Some(RecordIdKey::Uuid(uuid)),

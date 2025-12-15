@@ -125,6 +125,7 @@ indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.2.1"
+lru = { version = "0.16.2", features = ["hashbrown"] }
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 nanoid = "0.4.0"

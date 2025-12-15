@@ -291,10 +291,10 @@ impl Claims {
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => out.insert("aud".to_string(), Value::String(v)),
+				Audience::Single(v) => out.insert("aud".to_string(), Value::String(v.into())),
 				Audience::Multiple(v) => out.insert(
 					"aud".to_string(),
-					v.into_iter().map(Value::String).collect::<Vec<_>>().into(),
+					v.into_iter().map(|v| Value::String(v.into())).collect::<Vec<_>>().into(),
 				),
 			};
 		}

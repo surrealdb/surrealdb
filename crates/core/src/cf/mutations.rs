@@ -34,7 +34,7 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name));
+		h.insert("name", Value::String(v.name.into()));
 		Value::Object(Object::from(h))
 	}
 }

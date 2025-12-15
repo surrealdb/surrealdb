@@ -63,7 +63,9 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
 		match val {
-			Value::String(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
+			Value::String(s) => {
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, s.into()).await?)
+			}
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_sql()).await?)
 			}
@@ -95,11 +97,11 @@ impl Analyzer {
 	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
 			let val = Function::Custom(function_name.clone())
-				.compute(stk, ctx, opt, None, vec![Value::String(input)])
+				.compute(stk, ctx, opt, None, vec![Value::String(input.into())])
 				.await
 				.catch_return()?;
 			if let Value::String(val) = val {
-				input = val;
+				input = val.to_string();
 			} else {
 				bail!(Error::InvalidFunction {
 					name: function_name,

@@ -197,7 +197,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::String(x.to_sql()))
+								.map(|x| Value::String(x.to_sql().into()))
 								.collect();
 
 							(m.name, Value::Array(Array(value)))

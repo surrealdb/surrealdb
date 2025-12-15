@@ -33,7 +33,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_number_int(Value::Number(Number::Int(1)), "1", "1")]
 #[case::value_number_float(Value::Number(Number::Float(1.0)), "1f", "1f")]
 #[case::value_number_decimal(Value::Number(Number::Decimal(1.into())), "1dec", "1dec")]
-#[case::value_string(Value::String("hello".to_string()), "'hello'", "'hello'")]
+#[case::value_string(Value::String("hello".into()), "'hello'", "'hello'")]
 #[case::value_array(Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))].into()), "[1, 2]", "[\n\t1,\n\t2\n]")]
 #[case::value_set(Value::Set(Set::new()), "{,}", "{,}")]
 #[case::value_set_one(Value::Set(Set::from(vec![Value::Number(Number::Int(1))])), "{1,}", "{1,}")]

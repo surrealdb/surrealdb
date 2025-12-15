@@ -200,8 +200,8 @@ impl Executor {
 
 				// Return the current namespace and database
 				Ok(Value::from(map! {
-					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
-					"database".to_string() => self.opt.db.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string().into())).unwrap_or(Value::None),
+					"database".to_string() => self.opt.db.clone().map(|x| Value::String(x.to_string().into())).unwrap_or(Value::None),
 				}))
 			}
 			TopLevelExpr::Option(_) => {

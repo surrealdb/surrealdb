@@ -199,7 +199,7 @@ fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<Reco
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Some(RecordIdKey::Number(id.as_int())),
 			// There is a string for the id field
-			Value::String(id) if !id.is_empty() => Some(id.into()),
+			Value::String(id) if !id.is_empty() => Some(RecordIdKey::String(id.into())),
 			// There is an object for the id field
 			Value::Object(id) => Some(id.into()),
 			// There is an array for the id field

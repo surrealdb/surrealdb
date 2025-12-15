@@ -91,7 +91,7 @@ impl Value {
 						&& let Value::String(v) = this.pick(&path)
 					{
 						let dmp = dmp::new();
-						let pch = dmp.patch_from_text(p).map_err(|e| {
+						let pch = dmp.patch_from_text(p.into()).map_err(|e| {
 							Error::InvalidPatch(PatchError {
 								message: format!("{e:?}"),
 							})

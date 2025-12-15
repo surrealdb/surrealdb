@@ -242,7 +242,7 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 				crate::val::Value::Number(crate::val::Number::Decimal(d))
 			}
 		},
-		surrealdb_types::Value::String(s) => crate::val::Value::String(s),
+		surrealdb_types::Value::String(s) => crate::val::Value::String(s.into()),
 		surrealdb_types::Value::Duration(d) => {
 			crate::val::Value::Duration(crate::val::Duration(d.into_inner()))
 		}

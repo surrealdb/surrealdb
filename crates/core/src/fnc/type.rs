@@ -17,7 +17,7 @@ use crate::val::{
 
 /// Returns the type of the value as a string.
 pub fn type_of((val,): (Value,)) -> Result<Value> {
-	Ok(Value::String(val.kind_of().to_string()))
+	Ok(Value::String(val.kind_of().into()))
 }
 
 pub fn array((val,): (Value,)) -> Result<Value> {
@@ -136,7 +136,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
-			value: arg1,
+			value: arg1.into(),
 		}),
 
 		// Handle second argument
@@ -307,12 +307,11 @@ mod tests {
 
 	#[test]
 	fn is_array() {
-		let value = super::is::array((vec![
-			Value::String("hello".to_owned()),
-			Value::String("world".to_owned()),
-		]
-		.into(),))
-		.unwrap();
+		let value =
+			super::is::array((
+				vec![Value::String("hello".into()), Value::String("world".into())].into(),
+			))
+			.unwrap();
 		assert_eq!(value, Value::Bool(true));
 
 		let value = super::is::array(("test".into(),)).unwrap();

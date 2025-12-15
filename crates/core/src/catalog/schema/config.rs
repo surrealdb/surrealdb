@@ -108,10 +108,10 @@ impl InfoStructure for GraphQLTablesConfig {
 			GraphQLTablesConfig::None => Value::None,
 			GraphQLTablesConfig::Auto => Value::String("AUTO".into()),
 			GraphQLTablesConfig::Include(ts) => Value::from(map!(
-				"include" => Value::Array(ts.into_iter().map(Value::String).collect()),
+				"include" => Value::Array(ts.into_iter().map(|v| Value::String(v.into())).collect()),
 			)),
 			GraphQLTablesConfig::Exclude(ts) => Value::from(map!(
-				"exclude" => Value::Array(ts.into_iter().map(Value::String).collect()),
+				"exclude" => Value::Array(ts.into_iter().map(|v| Value::String(v.into())).collect()),
 			)),
 		}
 	}
@@ -164,8 +164,8 @@ impl ToSql for DefaultConfig {
 impl InfoStructure for DefaultConfig {
 	fn structure(self) -> Value {
 		Value::from(map!(
-			"namespace", if let Some(x) = self.namespace => Value::String(x),
-			"database", if let Some(x) = self.database => Value::String(x),
+			"namespace", if let Some(x) = self.namespace => Value::String(x.into()),
+			"database", if let Some(x) = self.database => Value::String(x.into()),
 		))
 	}
 }

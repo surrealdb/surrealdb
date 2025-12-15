@@ -89,7 +89,7 @@ impl Literal {
 			Literal::Float(x) => Value::Number(Number::Float(*x)),
 			Literal::Integer(i) => Value::Number(Number::Int(*i)),
 			Literal::Decimal(d) => Value::Number(Number::Decimal(*d)),
-			Literal::String(strand) => Value::String(strand.clone()),
+			Literal::String(strand) => Value::String(strand.into()),
 			Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
 			Literal::Regex(regex) => Value::Regex(regex.clone()),
 			Literal::RecordId(record_id_lit) => {
