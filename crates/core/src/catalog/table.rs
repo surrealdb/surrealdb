@@ -131,7 +131,7 @@ impl ToSql for TableDefinition {
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
+			"name".to_string() => self.name.into_string().into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
 			"kind".to_string() => self.table_type.structure(),

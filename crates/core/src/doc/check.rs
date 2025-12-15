@@ -22,10 +22,7 @@ impl Document {
 	/// type is `ANY` or `RELATION`. When inserting
 	/// a node or normal record, we check that the
 	/// table type is `ANY` or `NORMAL`.
-	pub(super) async fn check_table_type(
-		&mut self,
-		stm: &Statement<'_>,
-	) -> Result<()> {
+	pub(super) async fn check_table_type(&mut self, stm: &Statement<'_>) -> Result<()> {
 		// Get the table for this document
 		let tb = self.tb().await?;
 		// Determine the type of statement

@@ -25,6 +25,8 @@ impl Document {
 			return Ok(());
 		};
 
+		let table_fields = self.fd(ctx, opt).await?;
+
 		// Get the document to compute the fields for
 		let doc = match doc_kind {
 			DocKind::Initial => &mut self.initial,
@@ -33,9 +35,7 @@ impl Document {
 			DocKind::CurrentReduced => &mut self.current_reduced,
 		};
 
-		let table_fields = self.doc_ctx.fd()?;
-
-		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), table_fields, doc).await?;
+		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), &table_fields, doc).await?;
 
 		Ok(())
 	}

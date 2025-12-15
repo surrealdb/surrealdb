@@ -162,9 +162,9 @@ impl RelateStatement {
 
 				// Auto-create the through table if it doesn't exist
 				let tb = txn.get_or_add_tb(Some(ctx), opt.ns()?, opt.db()?, through_table).await?;
-				let fields =
-					txn.all_tb_fields(ns.namespace_id, db.database_id, through_table, opt.version)
-						.await?;
+				let fields = txn
+					.all_tb_fields(ns.namespace_id, db.database_id, through_table, opt.version)
+					.await?;
 				let doc_ctx = NsDbTbCtx {
 					ns: Arc::clone(&ns),
 					db: Arc::clone(&db),

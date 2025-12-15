@@ -239,7 +239,6 @@ impl Iterator {
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
 						Err(_) => bail!(Error::InvalidControlFlow),
-						//
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
@@ -307,17 +306,6 @@ impl Iterator {
 			self.guaranteed = Some(Iterable::GenerateRecordId(doc_ctx.clone(), table.clone()));
 		}
 
-		// For statements which require the table to exist already (like SELECT, UPDATE, DELETE),
-		// check if the table exists If it doesn't exist, throw an error rather than returning
-		// empty results or automatically creating the table.
-		// if stm_ctx.stm.requires_table_existence()
-		// 	&& doc_ctx.tb().is_none()
-		// {
-		// 	bail!(Error::TbNotFound {
-		// 		name: table.to_string(),
-		// 	});
-		// }
-
 		planner.add_iterables(stk, stm_ctx, doc_ctx, table, granted_perms, self).await?;
 
 		Ok(())
@@ -333,12 +321,10 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		rid: RecordId,
 	) -> Result<()> {
-		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
-		let tb = if stm_ctx.stm.is_deferable() {
-			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table).await?
-		} else {
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
-		};
+		let tb = ctx
+			.tx()
+			.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
+			.await?;
 		let fields = ctx
 			.tx()
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
@@ -455,7 +441,7 @@ impl Iterator {
 
 		let txn = ctx.tx();
 		let tb =
-			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?;
+			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?;
 		let fields = txn
 			.all_tb_fields(
 				doc_ctx.ns.namespace_id,
@@ -584,8 +570,7 @@ impl Iterator {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(ctx, opt, stm_ctx, doc_ctx, v).await?,
 				Expr::Table(table_name) => {
-					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name)
-						.await?
+					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 				}
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.

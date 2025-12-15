@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -15,7 +17,7 @@ use crate::val::{Datetime, Duration, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct InsertStatement {
-	pub into: Expr,
+	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
@@ -67,28 +69,50 @@ impl InsertStatement {
 			None => ctx,
 		};
 		// Parse the INTO expression
-		let tb = match stk.run(|stk| self.into.compute(stk, ctx, opt, doc)).await.catch_return()? {
-			Value::Table(into) => into,
-			Value::String(into) => TableName::new(into),
-			v => {
-				bail!(Error::InsertStatement {
-					value: v.to_sql(),
-				})
+		let tb = match &self.into {
+			Some(into) => {
+				match stk.run(|stk| into.compute(stk, ctx, opt, doc)).await.catch_return()? {
+					Value::Table(into) => Some(into),
+					Value::String(into) => Some(TableName::new(into)),
+					_ => {
+						return Err(Error::InsertStatement {
+							value: into.to_sql(),
+						}
+						.into());
+					}
+				}
 			}
+			None => None,
 		};
 
 		let txn = ctx.tx();
-		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
-		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
-		let tb_def = txn.expect_tb_by_name(opt.ns()?, opt.db()?, &tb).await?;
-		let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version).await?;
+		// let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+		// let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
+		// let tb_def = txn.expect_tb_by_name(opt.ns()?, opt.db()?, &tb).await?;
+		// let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version).await?;
 
-		let doc_ctx = NsDbTbCtx {
-			ns,
-			db,
-			tb: tb_def,
-			fields,
-		};
+		// let doc_ctx = NsDbTbCtx {
+		// 	ns,
+		// 	db,
+		// 	tb: tb_def,
+		// 	fields,
+		// };
+
+		let ns = ctx.tx().expect_ns_by_name(opt.ns()?).await?;
+		let db = ctx.tx().expect_db_by_name(opt.ns()?, opt.db()?).await?;
+
+		let mut doc_ctx = None;
+		if let Some(tb) = &tb {
+			let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb).await?;
+			let fields =
+				ctx.tx().all_tb_fields(ns.namespace_id, db.database_id, tb, opt.version).await?;
+			doc_ctx = Some(NsDbTbCtx {
+				ns: Arc::clone(&ns),
+				db: Arc::clone(&db),
+				tb: tb_def,
+				fields,
+			});
+		}
 
 		// Parse the data expression
 		match &self.data {
@@ -104,10 +128,33 @@ impl InsertStatement {
 						o.set(stk, ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
-					let id = extract_rid_key(&o)?;
+					let (tb, id) = extract_table_and_rid_key(&o, &tb)?;
+
+					doc_ctx = match doc_ctx {
+						Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+						Some(_) | None => {
+							let tb_def =
+								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb).await?;
+							let fields = txn
+								.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version)
+								.await?;
+							Some(NsDbTbCtx {
+								ns: Arc::clone(&ns),
+								db: Arc::clone(&db),
+								tb: tb_def,
+								fields,
+							})
+						}
+					};
 
 					// Pass the value to the iterator
-					i.ingest(iterable(doc_ctx.clone(), tb.clone(), id, o, self.relation)?)
+					i.ingest(iterable(
+						doc_ctx.clone().expect("doc_ctx must be set at this point"),
+						tb.clone(),
+						id,
+						o,
+						self.relation,
+					)?)
 				}
 			}
 			// Check if this is a modern statement
@@ -117,16 +164,75 @@ impl InsertStatement {
 					Value::Array(v) => {
 						for v in v {
 							// Specify the new table record id
-							let id = extract_rid_key(&v)?;
+							let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
+
+							doc_ctx = match doc_ctx {
+								Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+								Some(_) | None => {
+									let tb_def = txn
+										.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb)
+										.await?;
+									let fields = txn
+										.all_tb_fields(
+											ns.namespace_id,
+											db.database_id,
+											&tb,
+											opt.version,
+										)
+										.await?;
+									Some(NsDbTbCtx {
+										ns: Arc::clone(&ns),
+										db: Arc::clone(&db),
+										tb: tb_def,
+										fields,
+									})
+								}
+							};
+
 							// Pass the value to the iterator
-							i.ingest(iterable(doc_ctx.clone(), tb.clone(), id, v, self.relation)?)
+							i.ingest(iterable(
+								doc_ctx.clone().expect("doc_ctx must be set at this point"),
+								tb.clone(),
+								id,
+								v,
+								self.relation,
+							)?)
 						}
 					}
 					Value::Object(_) => {
 						// Specify the new table record id
-						let id = extract_rid_key(&v)?;
+						let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
+
+						doc_ctx = match doc_ctx {
+							Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+							Some(_) | None => {
+								let tb_def =
+									txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb).await?;
+								let fields = txn
+									.all_tb_fields(
+										ns.namespace_id,
+										db.database_id,
+										&tb,
+										opt.version,
+									)
+									.await?;
+								Some(NsDbTbCtx {
+									ns: Arc::clone(&ns),
+									db: Arc::clone(&db),
+									tb: tb_def,
+									fields,
+								})
+							}
+						};
+
 						// Pass the value to the iterator
-						i.ingest(iterable(doc_ctx, tb.clone(), id, v, self.relation)?)
+						i.ingest(iterable(
+							doc_ctx.clone().expect("doc_ctx must be set at this point"),
+							tb.clone(),
+							id,
+							v,
+							self.relation,
+						)?)
 					}
 					v => {
 						bail!(Error::InsertStatement {
@@ -201,8 +307,21 @@ fn iterable(
 	}
 }
 
-fn extract_rid_key(v: &Value) -> Result<Option<RecordIdKey>> {
-	let rid = match v.rid() {
+fn extract_table_and_rid_key(
+	record: &Value,
+	into: &Option<TableName>,
+) -> Result<(TableName, Option<RecordIdKey>)> {
+	let Some(tb) = into else {
+		let record = record.rid();
+		let Value::RecordId(rid) = record else {
+			bail!(Error::InsertStatementId {
+				value: record.to_sql(),
+			});
+		};
+		return Ok((rid.table, Some(rid.key)));
+	};
+
+	let rid = match record.rid() {
 		// There is a floating point number for the id field
 		// TODO: Is this correct? Rounding to int seems like unexpected behavior.
 		Value::Number(id) if id.is_float() => Some(RecordIdKey::Number(id.as_int())),
@@ -217,7 +336,10 @@ fn extract_rid_key(v: &Value) -> Result<Option<RecordIdKey>> {
 		// There is a UUID for the id field
 		Value::Uuid(id) => Some(id.into()),
 		// There is a record id defined
-		Value::RecordId(id) => Some(id.key),
+		Value::RecordId(id) => {
+			// TODO: Perhaps check if the table in the RID matches the table we're inserting into.
+			Some(id.key)
+		}
 		// There is no record id field
 		Value::None => None,
 		// Any other value cannot be converted to a record id key
@@ -228,5 +350,5 @@ fn extract_rid_key(v: &Value) -> Result<Option<RecordIdKey>> {
 		}
 	};
 
-	Ok(rid)
+	Ok((tb.clone(), rid))
 }

@@ -773,7 +773,9 @@ impl MutVisitor for AggregateExprCollector<'_> {
 	}
 
 	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
-		self.visit_mut_expr(&mut i.into)?;
+		if let Some(into) = &mut i.into {
+			self.visit_mut_expr(into)?;
+		}
 		self.visit_mut_expr(&mut i.timeout)?;
 		self.visit_mut_expr(&mut i.version)?;
 
@@ -896,7 +898,9 @@ impl MutVisitor for ParentRewritor {
 	}
 
 	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
-		self.visit_mut_expr(&mut i.into)?;
+		if let Some(into) = &mut i.into {
+			self.visit_mut_expr(into)?;
+		}
 		self.visit_mut_expr(&mut i.timeout)?;
 		self.visit_mut_expr(&mut i.version)?;
 		Ok(())

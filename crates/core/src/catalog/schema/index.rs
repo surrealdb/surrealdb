@@ -108,7 +108,7 @@ impl InfoStructure for IndexDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
-			"what".to_string() => self.table_name.into(),
+			"table".to_string() => self.table_name.into_string().into(),
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),

@@ -61,6 +61,13 @@ pub(crate) enum DocumentContext {
 }
 
 impl DocumentContext {
+	pub(crate) fn ns(&self) -> &Arc<NamespaceDefinition> {
+		match self {
+			DocumentContext::NsDbCtx(ctx) => &ctx.ns,
+			DocumentContext::NsDbTbCtx(ctx) => &ctx.ns,
+		}
+	}
+
 	pub(crate) fn db(&self) -> &Arc<DatabaseDefinition> {
 		match self {
 			DocumentContext::NsDbCtx(ctx) => &ctx.db,
@@ -535,9 +542,7 @@ impl Document {
 
 	/// Get the table for this document
 	#[instrument(level = "trace", name = "Document::tb", skip_all)]
-	pub(super) async fn tb(
-		&self,
-	) -> Result<&Arc<TableDefinition>> {
+	pub(super) async fn tb(&self) -> Result<&Arc<TableDefinition>> {
 		self.doc_ctx.tb()
 	}
 

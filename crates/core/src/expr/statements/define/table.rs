@@ -80,10 +80,9 @@ impl DefineTableStatement {
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
-		
+
 		// Fetch the transaction
 		let txn = ctx.tx();
-
 
 		let ns = txn.expect_ns_by_name(ns_name).await?;
 		let db = txn.expect_db_by_name(ns_name, db_name).await?;
@@ -153,7 +152,6 @@ impl DefineTableStatement {
 		// Clear the cache
 		txn.clear_cache();
 
-
 		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),
@@ -186,7 +184,8 @@ impl DefineTableStatement {
 				let key = crate::key::table::ft::new(ns.namespace_id, db.database_id, ft, &name);
 				txn.set(&key, &tb_def, None).await?;
 				// Refresh the table cache
-				let Some(foreign_tb) = txn.get_tb(ns.namespace_id, db.database_id, ft).await? else {
+				let Some(foreign_tb) = txn.get_tb(ns.namespace_id, db.database_id, ft).await?
+				else {
 					bail!(Error::TbNotFound {
 						name: ft.clone(),
 					});
@@ -310,6 +309,20 @@ impl DefineTableStatement {
 			let key = key::record::new(ns, db, view_table_name, &id.key);
 			let record = Arc::new(Record::new(Value::Object(o).into()));
 			tx.put(&key, &record, None).await?;
+
+			let ns = doc_ctx.ns();
+			let db = doc_ctx.db();
+			let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+			let fields = ctx
+				.tx()
+				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
+				.await?;
+			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+				ns: Arc::clone(ns),
+				db: Arc::clone(db),
+				tb,
+				fields,
+			});
 
 			Document::run_triggers(
 				stk,
@@ -713,8 +726,17 @@ impl DefineTableStatement {
 				table: view_table_name.clone(),
 				key,
 			});
-			Document::run_triggers(stk, ctx, opt, doc_ctx.clone(), id, doc::Action::Create, None, Some(record))
-				.await?;
+			Document::run_triggers(
+				stk,
+				ctx,
+				opt,
+				doc_ctx.clone(),
+				id,
+				doc::Action::Create,
+				None,
+				Some(record),
+			)
+			.await?;
 
 			yield_now!();
 		}

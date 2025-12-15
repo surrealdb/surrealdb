@@ -219,15 +219,15 @@ user-login = "emilio"
 user-name = "Emilio Cobos Álvarez"
 
 [[publisher.clap]]
-version = "4.5.51"
-when = "2025-10-29"
+version = "4.5.53"
+when = "2025-11-19"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_builder]]
-version = "4.5.51"
-when = "2025-10-29"
+version = "4.5.53"
+when = "2025-11-19"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -1257,6 +1257,13 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.thread-id]]
+version = "4.2.2"
+when = "2024-07-18"
+user-id = 498
+user-login = "ruuda"
+user-name = "Ruud van Asseldonk"
+
 [[publisher.tokio-io-timeout]]
 version = "1.2.1"
 when = "2025-07-20"
@@ -1323,6 +1330,20 @@ user-name = "Hayden Stainsby"
 [[publisher.tracing-core]]
 version = "0.1.35"
 when = "2025-11-26"
+user-id = 172786
+user-login = "hds"
+user-name = "Hayden Stainsby"
+
+[[publisher.tracing-perfetto]]
+version = "0.1.5"
+when = "2025-01-02"
+user-id = 17316
+user-login = "csmoe"
+user-name = "csmoe"
+
+[[publisher.tracing-subscriber]]
+version = "0.3.22"
+when = "2025-11-28"
 user-id = 172786
 user-login = "hds"
 user-name = "Hayden Stainsby"
@@ -2983,11 +3004,6 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.3 -> 0.2.0"
 notes = "Nothing out of the ordinary, a typical major version update and nothing awry."
-
-[[audits.bytecode-alliance.audits.tracing-subscriber]]
-who = "Pat Hickey <phickey@fastly.com>"
-criteria = "safe-to-deploy"
-version = "0.3.17"
 
 [[audits.bytecode-alliance.audits.try-lock]]
 who = "Pat Hickey <phickey@fastly.com>"
@@ -4797,18 +4813,6 @@ who = "Jan-Erik Rediger <jrediger@mozilla.com>"
 criteria = "safe-to-deploy"
 delta = "1.0.43 -> 1.0.69"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.tracing-subscriber]]
-who = "Mark Hammond <mhammond@skippinet.com.au>"
-criteria = "safe-to-deploy"
-delta = "0.3.17 -> 0.3.19"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.tracing-subscriber]]
-who = "Mark Hammond <mhammond@skippinet.com.au>"
-criteria = "safe-to-deploy"
-delta = "0.3.19 -> 0.3.20"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.url]]
 who = "Valentin Gosu <valentin.gosu@gmail.com>"

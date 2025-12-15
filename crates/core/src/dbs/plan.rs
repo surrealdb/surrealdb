@@ -161,7 +161,10 @@ impl ExplainItem {
 			},
 			Iterable::Mergeable(_doc_ctx, tb, None, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("table", Value::String(tb.clone().into_string())), ("value", v.to_owned())],
+				details: vec![
+					("table", Value::String(tb.clone().into_string())),
+					("value", v.to_owned()),
+				],
 			},
 			Iterable::Mergeable(_doc_ctx, tb, Some(id), v) => Self {
 				name: "Iterate Mergeable".into(),

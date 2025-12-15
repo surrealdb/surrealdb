@@ -2232,7 +2232,7 @@ fn parse_insert() {
 	assert_eq!(
 		res,
 		Expr::Insert(Box::new(InsertStatement {
-			into: Expr::Param(Param::new("foo".to_owned())),
+			into: Some(Expr::Param(Param::new("foo".to_owned()))),
 			data: Data::ValuesExpression(vec![
 				vec![
 					(Idiom::field("a".to_owned()), Expr::Literal(Literal::Integer(1)),),
@@ -2277,7 +2277,7 @@ fn parse_insert_select() {
 	assert_eq!(
 		res,
 		Expr::Insert(Box::new(InsertStatement {
-			into: Expr::Table("bar".to_owned()),
+			into: Some(Expr::Table("bar".to_owned())),
 			data: Data::SingleExpression(Expr::Select(Box::new(SelectStatement {
 				expr: Fields::Select(vec![Field::Single(Selector {
 					expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),

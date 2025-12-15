@@ -9,7 +9,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext};
+use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
@@ -19,7 +19,6 @@ use crate::expr::{
 use crate::idx::planner::RecordStrategy;
 use crate::key;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
-
 struct Recalculation {
 	function: String,
 	stat: usize,
@@ -125,7 +124,9 @@ impl Document {
 					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
 					let record = Arc::new(Record::new(data.into()));
 
-					ctx.tx().set_record(db.namespace_id, db.database_id, table_name, id, record, None).await?;
+					ctx.tx()
+						.set_record(db.namespace_id, db.database_id, table_name, id, record, None)
+						.await?;
 				} else {
 					ctx.tx().del_record(db.namespace_id, db.database_id, table_name, id).await?;
 				}
@@ -372,15 +373,40 @@ impl Document {
 		record.data = data.into();
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None).await?;
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+			.await?;
 
 		let id = Arc::new(RecordId {
 			table: view_table_name.to_string().into(),
 			key,
 		});
 
-		Self::run_triggers(stk, ctx, opt, self.doc_ctx.clone(), id, action, Some(record_before.into()), Some(record))
+		let ns = self.doc_ctx.ns();
+		let db = self.doc_ctx.db();
+
+		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let fields = ctx
+			.tx()
+			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 			.await?;
+		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			ns: Arc::clone(ns),
+			db: Arc::clone(db),
+			tb,
+			fields,
+		});
+
+		Self::run_triggers(
+			stk,
+			ctx,
+			opt,
+			doc_ctx,
+			id,
+			action,
+			Some(record_before.into()),
+			Some(record),
+		)
+		.await?;
 
 		Ok(())
 	}
@@ -422,12 +448,37 @@ impl Document {
 			// Only one record, we can just delete the record.
 			tx.del(&k).await?;
 
+			let ns = self.doc_ctx.ns();
+			let db = self.doc_ctx.db();
+
+			let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+			let fields = ctx
+				.tx()
+				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
+				.await?;
+			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+				ns: Arc::clone(ns),
+				db: Arc::clone(db),
+				tb,
+				fields,
+			});
+
 			let id = RecordId {
 				table: view_table_name.to_string().into(),
 				key,
 			};
-			Self::run_triggers(stk, ctx, opt, self.doc_ctx.clone(), id.into(), Action::Delete, Some(record.into()), None)
-				.await?;
+
+			Self::run_triggers(
+				stk,
+				ctx,
+				opt,
+				doc_ctx,
+				id.into(),
+				Action::Delete,
+				Some(record.into()),
+				None,
+			)
+			.await?;
 			return Ok(());
 		}
 
@@ -683,17 +734,34 @@ impl Document {
 		record.data = data.into();
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None).await?;
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+			.await?;
 
 		let id = RecordId {
 			table: view_table_name.to_string().into(),
 			key,
 		};
+
+		let ns = self.doc_ctx.ns();
+		let db = self.doc_ctx.db();
+
+		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let fields = ctx
+			.tx()
+			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
+			.await?;
+		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			ns: Arc::clone(ns),
+			db: Arc::clone(db),
+			tb,
+			fields,
+		});
+
 		Self::run_triggers(
 			stk,
 			ctx,
 			opt,
-			self.doc_ctx.clone(),
+			doc_ctx,
 			id.into(),
 			Action::Update,
 			Some(record_before.into()),
@@ -1063,17 +1131,34 @@ impl Document {
 		record.data = data.into();
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None).await?;
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+			.await?;
 
 		let id = RecordId {
 			table: view_table_name.to_owned(),
 			key,
 		};
+
+		let ns = self.doc_ctx.ns();
+		let db = self.doc_ctx.db();
+
+		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let fields = ctx
+			.tx()
+			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
+			.await?;
+		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			ns: Arc::clone(ns),
+			db: Arc::clone(db),
+			tb,
+			fields,
+		});
+
 		Self::run_triggers(
 			stk,
 			ctx,
 			opt,
-			self.doc_ctx.clone(),
+			doc_ctx,
 			Arc::new(id),
 			Action::Update,
 			Some(record_before.into()),

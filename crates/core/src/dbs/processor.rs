@@ -550,8 +550,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
 		// to ensure that distinct can be checked.
-		let pro =
-			collectable.prepare(self.coll.opt, self.coll.txn, skippable).await?;
+		let pro = collectable.prepare(self.coll.opt, self.coll.txn, skippable).await?;
 		if self.dis.check_already_processed(&pro) {
 			return Ok(());
 		}
@@ -642,9 +641,7 @@ pub(super) trait Collector {
 			// For Table and Range iterables, the RecordStrategy determines whether we
 			// collect only keys, keys+values, or just a count without materializing records.
 			Iterable::Range(doc_ctx, tb, v, rs, sc) => match rs {
-				RecordStrategy::Count => {
-					self.collect_range_count(ctx, doc_ctx, &tb, v).await?
-				}
+				RecordStrategy::Count => self.collect_range_count(ctx, doc_ctx, &tb, v).await?,
 				RecordStrategy::KeysOnly => {
 					self.collect_range_keys(ctx, opt, doc_ctx, &tb, v, sc).await?
 				}

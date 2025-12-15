@@ -22,6 +22,10 @@ value = "[UserTag:`tag-1`, UserTag:`tag-2`]"
     DEFINE FIELD color ON TABLE UserTag COMPUTED group.color;
     DEFINE FIELD group ON TABLE UserTag TYPE option<record<UserTagGroup>>;
 
+    INSERT INTO ⟨UserTagGroup⟩ [
+      { id: "utg-1", color: Color:yellow },
+      { id: "utg-2", color: Color:blue }
+    ];
 
     INSERT INTO ⟨UserTag⟩ [
       { id: "tag-1", group: UserTagGroup:`utg-1`},
@@ -34,11 +38,6 @@ value = "[UserTag:`tag-1`, UserTag:`tag-2`]"
       { id: "yellow" },
       { id: "blue" },
       { id: "red" }
-    ];
-
-    INSERT INTO ⟨UserTagGroup⟩ [
-      { id: "utg-1", color: Color:yellow },
-      { id: "utg-2", color: Color:blue }
     ];
 
     RETURN "OK";

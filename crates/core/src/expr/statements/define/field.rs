@@ -146,10 +146,13 @@ impl DefineFieldStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
+
 		// Get the name of the field
 		let fd = self.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &definition.table, &fd).await? {
+		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -164,8 +167,6 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-
-		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
 
 		// Process the statement
 		txn.put_tb_field(ns, db, &tb.name, &definition).await?;

@@ -761,14 +761,10 @@ pub trait RpcProtocol {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
-			PublicValue::Null | PublicValue::None => {
-				return Err(RpcError::InvalidParams(
-					"Expected (what:Table, data:Value)".to_string(),
-				));
-			}
-			PublicValue::Table(x) => Expr::Table(x.into_string()),
-			PublicValue::String(x) => Expr::Table(x),
-			x => Expr::from_public_value(x),
+			PublicValue::Null | PublicValue::None => None,
+			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
+			PublicValue::String(x) => Some(Expr::Table(x)),
+			x => Some(Expr::from_public_value(x)),
 		};
 
 		// Specify the SQL query string
@@ -808,14 +804,10 @@ pub trait RpcProtocol {
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
 		let table_name = match what {
-			PublicValue::Null | PublicValue::None => {
-				return Err(RpcError::InvalidParams(
-					"Expected (what:Table, data:Value)".to_string(),
-				));
-			}
-			PublicValue::Table(x) => Expr::Table(x.into_string()),
-			PublicValue::String(x) => Expr::Table(x),
-			x => Expr::from_public_value(x),
+			PublicValue::Null | PublicValue::None => None,
+			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
+			PublicValue::String(x) => Some(Expr::Table(x)),
+			x => Some(Expr::from_public_value(x)),
 		};
 
 		let data = SqlData::SingleExpression(Expr::from_public_value(data));

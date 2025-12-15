@@ -2326,7 +2326,7 @@ mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
 	use crate::types::{PublicValue, PublicVariables};
-use crate::val::TableName;
+	use crate::val::TableName;
 
 	#[tokio::test]
 	async fn test_setup_superuser() {

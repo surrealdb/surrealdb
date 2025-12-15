@@ -105,9 +105,6 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
 
-	// /// Retrieve a specific database definition.
-	// async fn get_db(&self, ns: NamespaceId, db: DatabaseId) -> Result<Arc<DatabaseDefinition>>;
-
 	/// Retrieve a specific database definition.
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>>;
 
