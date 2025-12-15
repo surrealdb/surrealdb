@@ -1284,6 +1284,10 @@ version = "12.16.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
+version = "2.0.110"
+criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
 version = "2.0.111"
 criteria = "safe-to-deploy"
 
@@ -1541,6 +1545,18 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-core]]
+version = "0.62.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-result]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-strings]]
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
