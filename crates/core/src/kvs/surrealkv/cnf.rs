@@ -38,30 +38,6 @@ pub(super) static SURREALKV_VLOG_MAX_FILE_SIZE: LazyLock<u64> =
 		}
 	});
 
-/// The value log cache capacity in bytes (default: dynamic from 16 MiB to 256 MiB)
-pub(super) static SURREALKV_VLOG_CACHE_CAPACITY: LazyLock<u64> =
-	lazy_env_parse!(bytes, "SURREAL_SURREALKV_VLOG_CACHE_CAPACITY", u64, || {
-		// Load the system attributes
-		let mut system = System::new_all();
-		// Refresh the system memory
-		system.refresh_memory();
-		// Get the available memory
-		let memory = match system.cgroup_limits() {
-			Some(limits) => limits.total_memory,
-			None => system.total_memory(),
-		};
-		// Dynamically set the vlog cache capacity based on available memory
-		if memory < 4 * 1024 * 1024 * 1024 {
-			16 * 1024 * 1024 // For systems with < 4 GiB, use 16 MiB
-		} else if memory < 16 * 1024 * 1024 * 1024 {
-			64 * 1024 * 1024 // For systems with < 16 GiB, use 64 MiB
-		} else if memory < 64 * 1024 * 1024 * 1024 {
-			128 * 1024 * 1024 // For systems with < 64 GiB, use 128 MiB
-		} else {
-			256 * 1024 * 1024 // For systems with > 64 GiB, use 256 MiB
-		}
-	});
-
 /// The block cache capacity in bytes (default: dynamic based on memory)
 pub(super) static SURREALKV_BLOCK_CACHE_CAPACITY: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY", u64, || {
@@ -74,10 +50,10 @@ pub(super) static SURREALKV_BLOCK_CACHE_CAPACITY: LazyLock<u64> =
 			Some(limits) => limits.total_memory,
 			None => system.total_memory(),
 		};
-		// Divide the total memory by 4 for block cache
-		let memory = memory.saturating_div(4);
-		// Subtract 512 MiB from the memory size
-		let memory = memory.saturating_sub(512 * 1024 * 1024);
+		// Divide the total memory by 2
+		let memory = memory.saturating_div(2);
+		// Subtract 1 GiB from the memory size
+		let memory = memory.saturating_sub(1024 * 1024 * 1024);
 		// Take the larger of 16MiB or available memory
 		max(memory, 16 * 1024 * 1024)
 	});
