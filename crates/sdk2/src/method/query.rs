@@ -2,20 +2,10 @@ use std::pin::Pin;
 
 use anyhow::Result;
 use futures::StreamExt;
-use surrealdb_types::{Array, Duration, QueryChunk, QueryStats, SurrealValue, Value, Variables};
+use surrealdb_types::{Array, QueryChunk, Value, Variables};
 
 use crate::method::{Executable, Request};
-use crate::utils::{Bindable, QueryFrame, QueryStream};
-
-fn empty_stats() -> QueryStats {
-	QueryStats {
-		records_received: 0,
-		bytes_received: 0,
-		records_scanned: 0,
-		bytes_scanned: 0,
-		duration: Duration::default(),
-	}
-}
+use crate::utils::{Bindable, QueryFrame, QueryResult, QueryResults, QueryStream};
 
 #[derive(Clone)]
 pub struct Query {
@@ -110,7 +100,11 @@ impl Request<Query> {
 			match frame {
 				QueryFrame::Value { value, is_single, .. } => {
 					if is_single {
-						results[index].result = Ok(value);
+						// For single values, we need to preserve stats/kind from default
+						// They'll be updated when Done frame arrives
+						let stats = results[index].stats().clone();
+						let kind = results[index].kind().clone();
+						results[index] = QueryResult::new(Ok(value), stats, kind);
 					} else {
 						if let Some(values) = values[index].as_mut() {
 							values.push(value);
@@ -119,20 +113,25 @@ impl Request<Query> {
 						}
 					}
 				}
-				QueryFrame::Error { error, stats, .. } => {
-					results[index].result = Err(error.to_string());
-					results[index].stats = stats;
+				QueryFrame::Error { error, stats, r#type, .. } => {
+					results[index] = QueryResult::new(Err(error.to_string()), stats, r#type);
 				}
-				QueryFrame::Done { stats, .. } => {
-					if let Some(values) = values[index].take() {
-						results[index].result = Ok(Value::Array(Array::from_values(values)));
-					}
-					results[index].stats = stats;
+				QueryFrame::Done { stats, r#type, .. } => {
+					let result = if let Some(values) = values[index].take() {
+						Ok(Value::Array(Array::from_values(values)))
+					} else {
+						// If no values were collected, check if we already have a single value
+						match results[index].try_get::<Value>() {
+							Some(Ok(v)) if v != Value::None => Ok(v),
+							_ => Ok(Value::None),
+						}
+					};
+					results[index] = QueryResult::new(result, stats, r#type);
 				}
 			}
 		}
 
-		Ok(QueryResults { results })
+		Ok(QueryResults::new(results))
 	}
 }
 
@@ -141,111 +140,5 @@ impl Executable for Query {
 
 	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
 		req.collect()
-	}
-}
-
-/// Result of a single query statement.
-#[derive(Debug, Clone)]
-pub struct QueryResult<T: SurrealValue = Value> {
-	result: Result<T, String>,
-	stats: QueryStats,
-}
-
-impl Default for QueryResult {
-	fn default() -> Self {
-		Self {
-			result: Ok(Value::None),
-			stats: empty_stats(),
-		}
-	}
-}
-
-impl<T: SurrealValue> QueryResult<T> {
-	/// Returns true if this query succeeded.
-	pub fn is_ok(&self) -> bool {
-		self.result.is_ok()
-	}
-
-	/// Returns true if this query failed.
-	pub fn is_err(&self) -> bool {
-		self.result.is_err()
-	}
-
-	pub fn take(self) -> Result<T, String> {
-		self.result
-	}
-
-	/// Returns the query statistics.
-	pub fn stats(&self) -> &QueryStats {
-		&self.stats
-	}
-}
-
-/// Collected results from a multi-statement query.
-///
-/// Each statement's results are stored separately, allowing per-statement
-/// error handling and typed access.
-#[derive(Debug, Clone, Default)]
-pub struct QueryResults {
-	results: Vec<QueryResult>,
-}
-
-impl QueryResults {
-	/// Returns the number of statements in the query.
-	pub fn len(&self) -> usize {
-		self.results.len()
-	}
-
-	/// Returns true if no statements were executed.
-	pub fn is_empty(&self) -> bool {
-		self.results.is_empty()
-	}
-
-	/// Gets a reference to the result at the given index.
-	pub fn get(&self, index: usize) -> Option<&QueryResult> {
-		self.results.get(index)
-	}
-
-	/// Gets a mutable reference to the result at the given index.
-	pub fn get_mut(&mut self, index: usize) -> Option<&mut QueryResult> {
-		self.results.get_mut(index)
-	}
-
-	/// Returns true if all statements succeeded.
-	pub fn is_all_ok(&self) -> bool {
-		self.results.iter().all(|r| r.is_ok())
-	}
-
-	/// Returns an iterator over all results.
-	pub fn iter(&self) -> impl Iterator<Item = &QueryResult> {
-		self.results.iter()
-	}
-
-	/// Returns a mutable iterator over all results.
-	pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut QueryResult> {
-		self.results.iter_mut()
-	}
-}
-
-impl std::ops::Index<usize> for QueryResults {
-	type Output = QueryResult;
-
-	fn index(&self, index: usize) -> &Self::Output {
-		&self.results[index]
-	}
-}
-
-impl std::ops::IndexMut<usize> for QueryResults {
-	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-		&mut self.results[index]
-	}
-}
-
-impl IntoIterator for QueryResults {
-	type Item = QueryResult;
-	type IntoIter = std::vec::IntoIter<QueryResult>;
-
-	fn into_iter(self) -> Self::IntoIter {
-		self.results.into_iter()
 	}
 }

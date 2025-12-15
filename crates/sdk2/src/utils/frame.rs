@@ -29,6 +29,8 @@ pub enum QueryFrame<T: SurrealValue = Value> {
         stats: QueryStats,
         /// The error that occurred
         error: Error,
+        /// The type of query (e.g., Live, Other)
+        r#type: QueryType,
     },
     /// Query execution completed
     Done {
@@ -235,6 +237,8 @@ fn chunk_to_frames(chunk: QueryChunk, buffer: &mut VecDeque<QueryFrame>) {
 /// Converts a QueryChunk into typed QueryFrames.
 fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeque<QueryFrame<T>>) {
     let query = chunk.query;
+    let query_type = chunk.r#type.unwrap_or(QueryType::Other);
+    let chunk_kind = chunk.kind;
 
     // Handle error case
     if let Some(error) = chunk.error {
@@ -242,6 +246,7 @@ fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeq
             query,
             stats: chunk.stats.unwrap_or_else(empty_stats),
             error: Error::msg(error),
+            r#type: query_type,
         });
         return;
     }
@@ -251,7 +256,7 @@ fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeq
         for value in results {
             match T::from_value(value) {
                 Ok(typed) => {
-                    let is_single = matches!(chunk.kind, QueryResponseKind::Single);
+                    let is_single = matches!(chunk_kind, QueryResponseKind::Single);
                     buffer.push_back(QueryFrame::Value { query, value: typed, is_single });
                 }
                 Err(e) => {
@@ -259,6 +264,7 @@ fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeq
                         query,
                         stats: empty_stats(),
                         error: e,
+                        r#type: query_type.clone(),
                     });
                 }
             }
@@ -266,11 +272,11 @@ fn chunk_to_frames_typed<T: SurrealValue>(chunk: QueryChunk, buffer: &mut VecDeq
     }
 
     // Emit Done frame for final chunks
-    if matches!(chunk.kind, QueryResponseKind::Single | QueryResponseKind::BatchedFinal) {
+    if matches!(chunk_kind, QueryResponseKind::Single | QueryResponseKind::BatchedFinal) {
         buffer.push_back(QueryFrame::Done {
             query,
             stats: chunk.stats.unwrap_or_else(empty_stats),
-            r#type: chunk.r#type.unwrap_or(QueryType::Other),
+            r#type: query_type,
         });
     }
 }

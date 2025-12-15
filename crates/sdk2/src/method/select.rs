@@ -2,10 +2,10 @@ use std::pin::Pin;
 
 use anyhow::Result;
 use futures::Stream;
-use surrealdb_types::{QueryChunk, RecordId, SurrealValue, Table, Value, Variables};
+use surrealdb_types::{Datetime, Duration, QueryChunk, RecordId, SurrealValue, Table, Value, Variables};
 
 use crate::method::{Executable, Query, Request};
-use crate::utils::ValueStream;
+use crate::utils::{QueryResult, ValueStream};
 
 #[derive(Clone)]
 pub struct Select {
@@ -13,7 +13,10 @@ pub struct Select {
 	pub(crate) fields: Vec<String>,
 	pub(crate) limit: Option<u64>,
 	pub(crate) start: Option<u64>,
-	// add cond, fetch, timeout, version
+	// cond
+	// fetch
+	pub(crate) timeout: Option<Duration>,
+	pub(crate) version: Option<Datetime>,
 }
 
 impl Select {
@@ -23,6 +26,8 @@ impl Select {
 			fields: vec![],
 			limit: None,
 			start: None,
+			timeout: None,
+			version: None,
 		}
 	}
 
@@ -49,6 +54,16 @@ impl Select {
 		if let Some(start) = self.start {
 			sql.push_str(" START $start");
 			vars.insert("start".to_string(), start);
+		}
+
+		if let Some(timeout) = self.timeout {
+			sql.push_str(" TIMEOUT $timeout");
+			vars.insert("timeout".to_string(), timeout);
+		}
+
+		if let Some(version) = self.version {
+			sql.push_str(" VERSION $version");
+			vars.insert("version".to_string(), version);
 		}
 
 		(sql, vars)
@@ -82,6 +97,20 @@ impl Request<Select> {
 		self
 	}
 
+	pub fn timeout(mut self, timeout: Duration) -> Self {
+		self.inner.timeout = Some(timeout);
+		self
+	}
+
+	pub fn version(mut self, version: Datetime) -> Self {
+		self.inner.version = Some(version);
+		self
+	}
+}
+
+// Execution methods
+impl Request<Select> {
+
 	/// Execute the select and return a typed [`ValueStream`].
 	///
 	/// # Type Parameters
@@ -106,29 +135,42 @@ impl Request<Select> {
 		Ok(stream.into_value_stream::<T>(0))
 	}
 
-	/// Execute the select and collect all results into a Vec.
-	pub async fn collect(self) -> Result<Vec<Value>> {
+	/// Execute the select and collect all results into a typed [`QueryResult`].
+	///
+	/// # Type Parameters
+	/// - `T`: The target type to convert values to. Use type inference or specify explicitly.
+	///
+	/// # Example
+	/// ```ignore
+	/// // Type inference (recommended)
+	/// let result: QueryResult<Vec<User>> = db.select("user").collect().await?;
+	/// let users: Vec<User> = result.take()?;
+	///
+	/// // Explicit type parameter
+	/// let result = db.select("user").collect::<Vec<User>>().await?;
+	///
+	/// // Default to Value
+	/// let result = db.select("user").collect::<Value>().await?;
+	///
+	/// // Access stats
+	/// let stats = result.stats();
+	/// ```
+	pub async fn collect<T: SurrealValue>(self) -> Result<QueryResult<T>> {
 		let (sql, vars) = self.inner.build();
 		let results = Request::new(&self, Query::new(sql)).bind(vars).collect().await?;
-		match results.into_iter().next() {
-			Some(result) => {
-				let value = result.take().map_err(anyhow::Error::msg)?;
-				match value {
-					Value::Array(arr) => Ok(arr.into_vec()),
-					Value::None => Ok(Vec::new()),
-					v => Ok(vec![v]),
-				}
-			}
-			None => Ok(Vec::new()),
-		}
+		let result = results
+			.into_iter()
+			.next()
+			.ok_or_else(|| anyhow::anyhow!("No result returned from select query"))?;
+		result.into_typed()
 	}
 }
 
 impl Executable for Select {
-	type Output = Vec<Value>;
+	type Output = QueryResult;
 
 	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
-		req.collect()
+		req.collect::<Value>()
 	}
 }
 

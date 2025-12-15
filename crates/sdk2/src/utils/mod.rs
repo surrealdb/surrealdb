@@ -21,3 +21,6 @@ pub use frame::*;
 
 mod bindable;
 pub use bindable::*;
+
+mod result;
+pub use result::*;
