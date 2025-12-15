@@ -22,7 +22,7 @@ impl Document {
 		stmt: &SelectStatement,
 		omit: &[Idiom],
 	) -> Result<Value, IgnoreError> {
-		self.check_record_exists()?;
+		self.check_record_exists().await?;
 		check_select_permissions_quick(opt, self.doc_ctx.tb().ok())?;
 		self.check_select_where_condition(stk, ctx, opt, stmt).await?;
 		check_select_permissions_table(stk, ctx, opt, self.doc_ctx.tb().ok(), &self.current)

@@ -14,7 +14,7 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		self.check_record_exists()?;
+		self.check_record_exists().await?;
 		self.check_permissions_quick(opt, stm).await?;
 		self.check_where_condition(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;

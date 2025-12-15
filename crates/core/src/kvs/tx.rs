@@ -926,17 +926,6 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	// async fn get_db(&self, ns: NamespaceId, db: DatabaseId) -> Result<Arc<DatabaseDefinition>> {
-	// 	let qey = cache::tx::Lookup::Db(ns, db);
-	// 	match self.cache.get(&qey) {
-	// 		Some(val) => val.try_into_type(),
-	// 		None => {
-	// 			let key = crate::key::database::
-	// 		}
-	// 	}
-	// 	.try_into_type()
-	// }
-
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>> {

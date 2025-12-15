@@ -90,7 +90,7 @@ impl Document {
 	/// using a Record ID, and that record does not
 	/// exist, then this function will exit early.
 	#[instrument(level = "trace", name = "Document::check_record_exists", skip_all)]
-	pub(super) fn check_record_exists(&self) -> Result<(), IgnoreError> {
+	pub(super) async fn check_record_exists(&self) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() && self.current.doc.as_ref().is_none() {
 			return Err(IgnoreError::Ignore);

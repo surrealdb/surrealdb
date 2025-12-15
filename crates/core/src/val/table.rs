@@ -1,20 +1,17 @@
 use std::borrow::{Borrow, Cow};
 use std::fmt::{self, Display};
+use std::io::{BufRead, Read, Write};
 use std::ops::Deref;
 
-use revision::revisioned;
-use storekey::{BorrowDecode, Encode};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use storekey::{BorrowDecode, Decode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::EscapeIdent;
-use crate::val::IndexFormat;
 
 /// A value type referencing a specific table.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[storekey(format = "()")]
-#[storekey(format = "IndexFormat")]
 #[repr(transparent)]
 pub struct TableName(String);
 
@@ -131,5 +128,44 @@ impl Display for TableName {
 impl Borrow<str> for TableName {
 	fn borrow(&self) -> &str {
 		&self.0
+	}
+}
+
+impl Revisioned for TableName {
+	fn revision() -> u16 {
+		String::revision()
+	}
+}
+
+impl SerializeRevisioned for TableName {
+	fn serialize_revisioned<W: Write>(&self, w: &mut W) -> Result<(), revision::Error> {
+		<String as SerializeRevisioned>::serialize_revisioned(&self.0, w)
+	}
+}
+
+impl DeserializeRevisioned for TableName {
+	fn deserialize_revisioned<R: Read>(r: &mut R) -> Result<Self, revision::Error> {
+		let s = <String as DeserializeRevisioned>::deserialize_revisioned(r)?;
+		Ok(TableName(s))
+	}
+}
+
+impl<F> Encode<F> for TableName {
+	fn encode<W: Write>(&self, w: &mut storekey::Writer<W>) -> Result<(), storekey::EncodeError> {
+		<String as Encode<F>>::encode::<W>(&self.0, w)
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for TableName {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		let s = <String as BorrowDecode<'de, F>>::borrow_decode(r)?;
+		Ok(TableName(s))
+	}
+}
+
+impl<F> Decode<F> for TableName {
+	fn decode<R: BufRead>(r: &mut storekey::Reader<R>) -> Result<Self, storekey::DecodeError> {
+		let s = <String as Decode<F>>::decode(r)?;
+		Ok(TableName(s))
 	}
 }

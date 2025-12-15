@@ -6587,6 +6587,7 @@ dependencies = [
 name = "surrealdb-profiling"
 version = "3.0.0-alpha.17"
 dependencies = [
+ "anyhow",
  "chrono",
  "clap",
  "surrealdb",

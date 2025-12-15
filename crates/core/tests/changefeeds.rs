@@ -108,6 +108,7 @@ async fn database_change_feeds() -> Result<()> {
 #[tokio::test]
 async fn table_change_feeds() -> Result<()> {
 	let sql = "
+		DEFINE NS test; DEFINE DB test;
         DEFINE TABLE person CHANGEFEED 1h;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -135,7 +136,12 @@ async fn table_change_feeds() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 10);
+	assert_eq!(res.len(), 12);
+	// DEFINE NS; DEFINE DB;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
@@ -281,9 +287,15 @@ async fn changefeed_with_ts() -> Result<()> {
 	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
+	DEFINE NS test;
+	DEFINE DB test;
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-	db.execute(sql, &ses, None).await?.remove(0).result?;
+	let mut res = db.execute(sql, &ses, None).await?;
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+	res.remove(0).result.unwrap();
+
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';

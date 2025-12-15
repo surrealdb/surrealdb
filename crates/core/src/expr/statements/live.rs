@@ -177,6 +177,10 @@ mod tests {
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
+		// Define the table
+		let define_statement = format!("DEFINE TABLE {tb};");
+		dbs.execute(&define_statement, &ses, None).await.unwrap();
+
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
 		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
