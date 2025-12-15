@@ -139,6 +139,7 @@ impl RemoveTableStatement {
 				sender
 					.send(PublicNotification::new(
 						lv.id.into(),
+						None,
 						PublicAction::Killed,
 						PublicValue::None,
 						PublicValue::None,

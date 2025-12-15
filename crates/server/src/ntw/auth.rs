@@ -91,13 +91,13 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 			// Attempt to parse the request id as a UUID.
 			match Uuid::try_parse(&id) {
 				// The specified request id was a valid UUID.
-				Ok(id) => Some(id.to_string()),
+				Ok(id) => Some(id),
 				// The specified request id was not a valid UUID.
 				Err(_) => bail!(NetError::Request),
 			}
 		}
 		// No request id was specified, create a new id.
-		None => Some(Uuid::new_v4().to_string()),
+		None => Some(Uuid::new_v4()),
 	};
 
 	// Extract the namespace from the headers.

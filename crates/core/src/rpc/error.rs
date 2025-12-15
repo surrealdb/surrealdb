@@ -1,4 +1,5 @@
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::err;
 use crate::rpc::DbResultError;
@@ -30,6 +31,10 @@ pub enum RpcError {
 	Serialize(String),
 	#[error("Could not deserialize surreal value: {0}")]
 	Deserialize(String),
+	#[error("Session not found: {0:?}")]
+	SessionNotFound(Option<Uuid>),
+	#[error("Session already exists: {0}")]
+	SessionExists(Uuid),
 }
 
 impl From<anyhow::Error> for RpcError {

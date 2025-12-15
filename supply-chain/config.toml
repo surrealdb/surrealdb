@@ -203,6 +203,10 @@ criteria = "safe-to-deploy"
 version = "1.5.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.boxcar]]
+version = "0.2.14"
+criteria = "safe-to-deploy"
+
 [[exemptions.brotli]]
 version = "8.0.2"
 criteria = "safe-to-deploy"
@@ -717,6 +721,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lz4-sys]]
 version = "1.11.1+lz4-1.10.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.lz4_flex]]
+version = "0.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.mac]]
@@ -1276,6 +1284,10 @@ version = "12.16.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
+version = "2.0.110"
+criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
 version = "2.0.111"
 criteria = "safe-to-deploy"
 
@@ -1413,6 +1425,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
 version = "0.28.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.twox-hash]]
+version = "2.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.typenum]]
