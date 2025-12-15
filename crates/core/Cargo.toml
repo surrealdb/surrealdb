@@ -100,7 +100,6 @@ addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
 anyhow.workspace = true
-arc-swap.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
@@ -137,7 +136,6 @@ num_cpus.workspace = true
 num-traits.workspace = true
 object_store.workspace = true
 parking_lot.workspace = true
-papaya.workspace = true
 path-clean.workspace = true
 pbkdf2 = { workspace = true, features = ["simple"] }
 phf = { workspace = true, features = ["macros", "unicase"] }

@@ -18,7 +18,7 @@ license-file.workspace = true
 default = ["protocol-ws", "rustls"]
 allocator = ["surrealdb-core/allocator"]
 protocol-http = ["dep:reqwest"]
-protocol-ws = ["dep:tokio-tungstenite", "dep:trice", "tokio/time"]
+protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
 kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
@@ -60,19 +60,13 @@ targets = []
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 
-# External surreal crates
-trice = { workspace = true, optional = true }
-
 # Other crates
 bincode.workspace = true
 boxcar.workspace = true
 async-channel.workspace = true
-castaway.workspace = true
-dashmap.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 futures.workspace = true
 indexmap = { workspace = true, features = ["serde"] }
-papaya.workspace = true
 path-clean.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }

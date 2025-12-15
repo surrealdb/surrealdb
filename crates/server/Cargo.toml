@@ -60,7 +60,6 @@ surrealdb-types.workspace = true
 
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
-arc-swap.workspace = true
 async-trait.workspace = true
 axum = { version = "0.8.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.10.2", features = [
@@ -111,10 +110,6 @@ futures.workspace = true
 futures-util.workspace = true
 http.workspace = true
 num_cpus.workspace = true
-# Pinned until SurrealML is compatible with later versions
-ort.workspace = true
-ort-sys.workspace = true
-papaya.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = [
