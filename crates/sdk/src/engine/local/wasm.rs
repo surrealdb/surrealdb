@@ -192,11 +192,11 @@ pub(crate) async fn run_router(
 				let Some(notification) = notification else {
 					continue
 				};
-				let Some(session_id) = notification.session.map(|x| x.0) else {
+				let Some(session_id) = notification.session.map(|x| x.into_inner()) else {
 					continue
 				};
 
-				let live_query_id = notification.id.0;
+				let live_query_id = notification.id.into_inner();
 
 				match router_state.sessions.get(&session_id) {
 					Some(Ok(state)) => {
