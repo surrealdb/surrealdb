@@ -10,6 +10,7 @@ use crate::expr::FlowResultExt as _;
 use crate::val::RecordId;
 
 impl Document {
+	#[instrument(level = "trace", name = "Document::computed_fields", skip_all)]
 	pub(super) async fn computed_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -39,6 +40,7 @@ impl Document {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", name = "Document::computed_fields_inner", skip_all)]
 	pub(super) async fn computed_fields_inner(
 		stk: &mut Stk,
 		ctx: &FrozenContext,

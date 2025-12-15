@@ -431,8 +431,7 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)
 				.unwrap();
 			// When a DB resource is targeted and NS and DB was provided, it succeeds
-			opts.clone()
-				.with_ns(Some("ns".into()))
+			opts.with_ns(Some("ns".into()))
 				.with_db(Some("db".into()))
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();
@@ -461,8 +460,7 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)
 				.unwrap();
 			// When a DB resource is targeted and NS and DB was provided, it succeeds
-			opts.clone()
-				.with_ns(Some("ns".into()))
+			opts.with_ns(Some("ns".into()))
 				.with_db(Some("db".into()))
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();

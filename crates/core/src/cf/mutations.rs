@@ -33,7 +33,7 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.clone().into_string()));
+		h.insert("name", Value::String(v.name.into_string()));
 		Value::Object(Object::from(h))
 	}
 }
@@ -132,11 +132,7 @@ impl TableMutation {
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						operations
-							.clone()
-							.into_iter()
-							.map(|x| Value::Object(x.into_object()))
-							.collect(),
+						operations.into_iter().map(|x| Value::Object(x.into_object())).collect(),
 					)),
 				);
 				h

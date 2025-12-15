@@ -41,8 +41,8 @@ impl File {
 impl From<surrealdb_types::File> for File {
 	fn from(v: surrealdb_types::File) -> Self {
 		Self {
-			bucket: v.bucket().to_string(),
-			key: v.key().to_string(),
+			bucket: v.bucket,
+			key: v.key,
 		}
 	}
 }

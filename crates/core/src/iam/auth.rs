@@ -86,7 +86,7 @@ impl Auth {
 
 	pub fn for_record(rid: String, ns: &str, db: &str, ac: &str) -> Self {
 		Self::new(Actor::new(
-			rid.clone(),
+			rid,
 			vec![],
 			Level::Record(ns.to_owned(), db.to_owned(), ac.to_owned()),
 		))

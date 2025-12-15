@@ -158,7 +158,7 @@ impl PlanBuilder {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
-				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
+				return Ok(Plan::SingleIndex(None, o, record_strategy));
 			}
 		}
 		// If every expression is backed by an index we can use the MultiIndex plan

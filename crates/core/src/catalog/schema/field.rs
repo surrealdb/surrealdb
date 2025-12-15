@@ -84,7 +84,7 @@ impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"what".to_string() => Value::from(self.table.clone()),
+			"table".to_string() => Value::String(self.table.into_string()),
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
 			"flexible".to_string(), if self.flexible => true.into(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),

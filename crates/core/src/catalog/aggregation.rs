@@ -1065,7 +1065,7 @@ impl AggregationAnalysis {
 
 		// Place the expression which need to be calculated for the aggregate in the right index.
 		let mut aggregate_arguments = Vec::with_capacity(exprs_map.len());
-		for (k, v) in exprs_map.into_iter() {
+		for (k, v) in exprs_map {
 			if aggregate_arguments.len() > v {
 				aggregate_arguments[v] = k
 			} else {

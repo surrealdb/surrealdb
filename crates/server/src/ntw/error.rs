@@ -184,7 +184,7 @@ impl IntoResponse for ResponseError {
 				code: StatusCode::FORBIDDEN,
 				details: Some("Forbidden".to_string()),
 				description: Some("Not allowed to do this.".to_string()),
-				information: Some(error_str.clone()),
+				information: Some(error_str),
 			}
 			.into_response();
 		}

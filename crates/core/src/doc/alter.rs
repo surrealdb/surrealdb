@@ -360,7 +360,7 @@ async fn apply_assignments(
 	doc: &mut Value,
 	assignments: Vec<ComputedAssignment>,
 ) -> Result<()> {
-	for x in assignments.into_iter() {
+	for x in assignments {
 		match &x.operator {
 			AssignOperator::Assign => match x.value {
 				Value::None => doc.del(stk, ctx, opt, &x.place).await?,

@@ -478,7 +478,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let vs5_int = versionstamp5.to_int().unwrap() as u64 + 1;
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE {vs5_int} LIMIT 10; ");
 	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
-	let Value::Array(array) = value.clone() else {
+	let Value::Array(array) = value else {
 		unreachable!()
 	};
 	assert_eq!(array.len(), 0);

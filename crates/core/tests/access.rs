@@ -736,7 +736,7 @@ the database name matches", 			),
 		let statement = format!("ACCESS api ON {base} GRANT FOR USER tobie");
 
 		let test_level = level;
-		for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+		for ((level, role), (ns, db), should_succeed, msg) in tests {
 			let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 			let sess_setup = match *test_level {
 				"ROOT" => Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),

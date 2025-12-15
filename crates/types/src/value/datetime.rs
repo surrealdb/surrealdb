@@ -35,13 +35,8 @@ impl Datetime {
 		Self(Utc::now())
 	}
 
-	/// Create a new datetime from chrono DateTime<Utc>
-	pub fn new(dt: DateTime<Utc>) -> Self {
-		Self(dt)
-	}
-
-	/// Get the inner DateTime<Utc>
-	pub fn inner(&self) -> DateTime<Utc> {
+	/// Convert into the inner DateTime<Utc>
+	pub fn into_inner(self) -> DateTime<Utc> {
 		self.0
 	}
 

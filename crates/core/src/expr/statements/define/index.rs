@@ -64,7 +64,7 @@ impl DefineIndexStatement {
 
 		// Ensure the table exists
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.expect_tb_by_name(ns, db, &table_name).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns, db, &table_name).await?;
 
 		// Check if the definition exists
 		let index_id = if let Some(ix) =

@@ -103,13 +103,13 @@ impl ToSql for Regex {
 
 impl From<surrealdb_types::Regex> for Regex {
 	fn from(v: surrealdb_types::Regex) -> Self {
-		Self(v.0)
+		Self(v.into_inner())
 	}
 }
 
 impl From<Regex> for surrealdb_types::Regex {
 	fn from(x: Regex) -> Self {
-		surrealdb_types::Regex(x.0)
+		surrealdb_types::Regex::from(x.0)
 	}
 }
 

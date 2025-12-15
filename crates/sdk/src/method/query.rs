@@ -855,7 +855,7 @@ mod tests {
 		assert_eq!(body, vec![article.body]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value)]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();

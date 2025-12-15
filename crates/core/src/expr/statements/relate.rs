@@ -149,21 +149,30 @@ impl RelateStatement {
 
 		//
 		for f in from.iter() {
-			let tb = txn.expect_tb(db.namespace_id, db.database_id, &f.table).await?;
-			let fields =
-				txn.all_tb_fields(ns.namespace_id, db.database_id, &f.table, opt.version).await?;
-			let doc_ctx = NsDbTbCtx {
-				ns: Arc::clone(&ns),
-				db: Arc::clone(&db),
-				tb,
-				fields,
-			};
 			for t in to.iter() {
 				let through =
 					stk.run(|stk| self.through.compute(stk, ctx, opt, doc)).await.catch_return()?;
-
 				let through = RelateThrough::try_from(through)?;
-				i.ingest(Iterable::Relatable(doc_ctx.clone(), f.clone(), through, t.clone(), None));
+
+				// Get the table name from the through part (where the relation record is stored)
+				let through_table = match &through {
+					RelateThrough::Table(tb) => tb,
+					RelateThrough::RecordId(rid) => &rid.table,
+				};
+
+				// Auto-create the through table if it doesn't exist
+				let tb = txn.get_or_add_tb(Some(ctx), opt.ns()?, opt.db()?, through_table).await?;
+				let fields =
+					txn.all_tb_fields(ns.namespace_id, db.database_id, through_table, opt.version)
+						.await?;
+				let doc_ctx = NsDbTbCtx {
+					ns: Arc::clone(&ns),
+					db: Arc::clone(&db),
+					tb,
+					fields,
+				};
+
+				i.ingest(Iterable::Relatable(doc_ctx, f.clone(), through, t.clone(), None));
 			}
 		}
 
@@ -213,7 +222,7 @@ impl TryFrom<Value> for RelateThrough {
 	fn try_from(value: Value) -> Result<Self> {
 		match value {
 			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
-			Value::Table(table) => Ok(RelateThrough::Table(table.clone())),
+			Value::Table(table) => Ok(RelateThrough::Table(table)),
 			_ => bail!(Error::RelateStatementOut {
 				value: value.to_sql()
 			}),

@@ -270,7 +270,7 @@ mod tests {
 		let Ok(PublicValue::RecordId(fk)) = syn::value("other:test") else {
 			panic!()
 		};
-		let fk = fk.clone().into();
+		let fk = fk.into();
 		let tb: TableName = "testtb".into();
 		let val = Graph::new(
 			NamespaceId(1),

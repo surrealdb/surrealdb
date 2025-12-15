@@ -31,7 +31,7 @@ impl Tasks {
 	}
 	#[cfg(not(target_family = "wasm"))]
 	pub async fn resolve(self) -> Result<(), Error> {
-		for task in self.0.into_iter() {
+		for task in self.0 {
 			let _ = task.await;
 		}
 		Ok(())
@@ -50,7 +50,7 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task2 = spawn_task_node_membership_check(dbs.clone(), canceller.clone(), opts);
 	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
-	let task5 = spawn_task_index_compaction(dbs.clone(), canceller.clone(), opts);
+	let task5 = spawn_task_index_compaction(dbs, canceller, opts);
 	Tasks(vec![task1, task2, task3, task4, task5])
 }
 

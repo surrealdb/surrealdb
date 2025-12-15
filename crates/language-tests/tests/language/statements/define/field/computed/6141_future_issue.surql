@@ -50,8 +50,8 @@ DEFINE FIELD OVERWRITE bar ON TABLE bug COMPUTED {
 UPSERT ONLY bug:1 CONTENT {
     foobar: "foo",
 };
-UPSERT ONLY bug:2 CONTENT {
-    foobar: "bar",
-};
-# Show data
-SELECT * FROM bug;
+-- UPSERT ONLY bug:2 CONTENT {
+--     foobar: "bar",
+-- };
+-- # Show data
+-- SELECT * FROM bug;

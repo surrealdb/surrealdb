@@ -91,7 +91,7 @@ impl Document {
 				// - Literal types: allow nested
 				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
 
-				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
+				for k in self.current.doc.as_ref().each(&fd.name) {
 					defined_field_names.insert(&k, allows_nested);
 
 					// Also insert all ancestor paths
@@ -221,7 +221,7 @@ impl Document {
 			}
 
 			// Loop over each field in document
-			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
@@ -368,7 +368,7 @@ impl Document {
 			}
 
 			// Loop over each value in document
-			for (_, val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+			for (_, val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Skip if the value is empty
 				if val.is_none() || val.is_empty_array() {
 					continue;
@@ -736,7 +736,7 @@ impl FieldEditContext<'_> {
 
 			// Process the actions
 			let ff = self.def.name.to_sql();
-			for action in actions.into_iter() {
+			for action in actions {
 				match action {
 					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;

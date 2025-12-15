@@ -333,8 +333,12 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		rid: RecordId,
 	) -> Result<()> {
-		let tb =
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?;
+		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
+		let tb = if stm_ctx.stm.is_deferable() {
+			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table).await?
+		} else {
+			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
+		};
 		let fields = ctx
 			.tx()
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
@@ -376,10 +380,16 @@ impl Iterator {
 	) -> Result<()> {
 		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 
-		let tb = ctx
-			.tx()
-			.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table())
-			.await?;
+		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
+		let tb = if stm_ctx.stm.is_deferable() {
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, mock.table())
+				.await?
+		} else {
+			ctx.tx()
+				.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table())
+				.await?
+		};
 		let fields = ctx
 			.tx()
 			.all_tb_fields(
@@ -525,7 +535,7 @@ impl Iterator {
 				self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, rid).await?
 			}
 			Value::Array(array) => {
-				for v in array.into_iter() {
+				for v in array {
 					match v {
 						Value::Table(table) => {
 							self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table)
