@@ -51,12 +51,13 @@ impl FromStr for Action {
 }
 
 /// A live query notification.
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SurrealValue)]
 #[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs
 	pub id: Uuid,
+	/// The ID of the session that sent this notification
+	pub session: Option<Uuid>,
 	/// The CREATE / UPDATE / DELETE action which caused this notification
 	pub action: Action,
 	/// The id of the document to which this notification has been made
@@ -67,9 +68,16 @@ pub struct Notification {
 
 impl Notification {
 	/// Construct a new notification.
-	pub fn new(id: Uuid, action: Action, record: Value, result: Value) -> Self {
+	pub fn new(
+		id: Uuid,
+		session: Option<Uuid>,
+		action: Action,
+		record: Value,
+		result: Value,
+	) -> Self {
 		Self {
 			id,
+			session,
 			action,
 			record,
 			result,

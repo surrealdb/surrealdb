@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -12,6 +11,7 @@ use crate::conn::Command;
 use crate::err::Error;
 use crate::method::{BoxFuture, Content, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// An insert future
@@ -77,11 +77,14 @@ macro_rules! into_future {
 				};
 
 				router
-					.$method(Command::Query {
-						txn,
-						query,
-						variables,
-					})
+					.$method(
+						client.session_id,
+						Command::Query {
+							txn,
+							query,
+							variables,
+						},
+					)
 					.await
 			})
 		}

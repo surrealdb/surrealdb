@@ -5,11 +5,11 @@ use std::mem;
 use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
-use surrealdb_types::{self, SurrealValue, Value};
 
 use crate::err::Error;
 use crate::method::live::Stream;
 use crate::notification::Notification;
+use crate::types::{SurrealValue, Value};
 use crate::{IndexedResults as QueryResponse, Result};
 
 /// Represents a way to take a single query result from a list of responses

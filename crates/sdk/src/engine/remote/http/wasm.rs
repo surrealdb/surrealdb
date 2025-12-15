@@ -1,23 +1,27 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
+use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
-use indexmap::IndexMap;
+use futures::FutureExt;
 use reqwest::ClientBuilder;
-use reqwest::header::HeaderMap;
 use tokio::sync::watch;
-use url::Url;
 use wasm_bindgen_futures::spawn_local;
 
-use super::Client;
+use super::{Client, RouterState};
 use crate::conn::{Route, Router};
+use crate::engine::SessionError;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{Result, Surreal, conn};
+use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	#[allow(private_interfaces)]
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -26,25 +30,28 @@ impl conn::Sealed for Client {
 
 			let (conn_tx, conn_rx) = async_channel::bounded(1);
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
 			conn_rx.recv().await??;
 
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::Backup);
+
 			let waiter = watch::channel(Some(WaitFor::Connection));
 			let router = Router {
-				features: HashSet::new(),
+				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
 	}
 }
 
-async fn client(base_url: &Url) -> Result<reqwest::Client> {
+async fn create_client(base_url: &url::Url) -> Result<reqwest::Client> {
 	let headers = super::default_headers();
 	let builder = ClientBuilder::new().default_headers(headers);
 	let client = builder.build()?;
@@ -57,33 +64,90 @@ pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let base_url = address.url;
 
-	let client = match client(&base_url).await {
+	let client = match create_client(&base_url).await {
 		Ok(client) => {
-			let _ = conn_tx.send(Ok(())).await;
+			conn_tx.send(Ok(())).await.ok();
 			client
 		}
 		Err(error) => {
-			let _ = conn_tx.send(Err(error)).await;
+			conn_tx.send(Err(error)).await.ok();
 			return;
 		}
 	};
 
-	let mut headers = HeaderMap::new();
-	let mut vars = IndexMap::new();
-	let mut auth = None;
+	let state = Arc::new(RouterState::new(client, base_url));
 
-	while let Ok(route) = route_rx.recv().await {
-		match super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
-			.await
-		{
-			Ok(value) => {
-				let _ = route.response.send(Ok(value)).await;
+	loop {
+		futures::select! {
+			session = session_rx.recv().fuse() => {
+				let Ok(session_id) = session else {
+					break
+				};
+				match session_id {
+					SessionId::Initial(session_id) => {
+						state.handle_session_initial(session_id).await;
+					}
+					SessionId::Clone { old, new } => {
+						state.handle_session_clone(old, new).await;
+					}
+					SessionId::Drop(session_id) => {
+						state.handle_session_drop(session_id).await;
+					}
+				}
 			}
-			Err(error) => {
-				let _ = route.response.send(Err(error.into())).await;
+			route = route_rx.recv().fuse() => {
+				let Ok(route) = route else {
+					break
+				};
+
+				let session_id = route.request.session_id;
+				let command = route.request.command.clone();
+
+				// Get session state for this session_id
+				let session_state = match state.sessions.get(&session_id) {
+					Some(Ok(state)) => state,
+					Some(Err(error)) => {
+						route.response.send(Err(Error::from(error).into())).await.ok();
+						continue;
+					}
+					None => {
+						let error = Error::from(SessionError::NotFound(session_id));
+						route.response.send(Err(error.into())).await.ok();
+						continue;
+					}
+				};
+
+				// Spawn the request handling in a background task
+				// SessionState uses RwLock internally, so we can share the Arc directly
+				let router_state = state.clone();
+				spawn_local(async move {
+					let result = super::router(
+						route.request,
+						&router_state.base_url,
+						&router_state.client,
+						&session_state,
+					)
+					.await;
+
+					// On success, add replayable commands to the replay list
+					// boxcar::Vec is lock-free, so this is safe to do concurrently
+					if result.is_ok() && command.replayable() {
+						session_state.replay.push(command);
+					}
+
+					match result {
+						Ok(value) => {
+							route.response.send(Ok(value)).await.ok();
+						}
+						Err(error) => {
+							route.response.send(Err(error.into())).await.ok();
+						}
+					}
+				});
 			}
 		}
 	}

@@ -29,9 +29,12 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			let value = router
-				.execute_value(Command::Authenticate {
-					token: SurrealValue::from_value(self.token.into_value())?,
-				})
+				.execute_value(
+					self.client.session_id,
+					Command::Authenticate {
+						token: SurrealValue::from_value(self.token.into_value())?,
+					},
+				)
 				.await?;
 			Ok(Token::from_value(value)?)
 		})
@@ -103,9 +106,12 @@ where
 			};
 			// Execute the refresh command to obtain new tokens.
 			let value = router
-				.execute_value(Command::Refresh {
-					token: SurrealValue::from_value(token)?,
-				})
+				.execute_value(
+					self.client.session_id,
+					Command::Refresh {
+						token: SurrealValue::from_value(token)?,
+					},
+				)
 				.await?;
 			Ok(Token::from_value(value)?)
 		})
