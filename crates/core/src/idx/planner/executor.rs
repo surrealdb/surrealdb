@@ -10,7 +10,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -127,7 +127,7 @@ impl InnerQueryExecutor {
 	pub(super) async fn new(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		table: &str,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
@@ -288,7 +288,7 @@ impl QueryExecutor {
 	pub(crate) async fn knn(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		thg: &RecordId,
 		doc: Option<&CursorDoc>,
@@ -681,7 +681,7 @@ impl QueryExecutor {
 	pub(crate) async fn matches(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		thg: &RecordId,
 		exp: &Expr,
@@ -706,7 +706,7 @@ impl QueryExecutor {
 
 	async fn fulltext_matches_with_doc_id(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		thg: &RecordId,
 		fti: &FullTextIndex,
 		fte: &FullTextEntry,
@@ -727,7 +727,7 @@ impl QueryExecutor {
 	async fn fulltext_matches_with_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		fti: &FullTextIndex,
 		fte: &FullTextEntry,
@@ -768,7 +768,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn highlight(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		thg: &RecordId,
 		hlp: HighlightParams,
 		doc: &Value,
@@ -786,7 +786,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn offsets(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		thg: &RecordId,
 		match_ref: Value,
 		partial: bool,
@@ -807,7 +807,7 @@ impl QueryExecutor {
 
 	pub(crate) async fn score(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		match_ref: &Value,
 		rid: &RecordId,
 		ir: Option<&Arc<IteratorRecord>>,
@@ -852,7 +852,7 @@ struct InnerFullTextEntry {
 impl FullTextEntry {
 	async fn new(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		fti: &FullTextIndex,
 		io: IndexOption,
@@ -882,7 +882,7 @@ impl HnswEntry {
 	async fn new(
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],

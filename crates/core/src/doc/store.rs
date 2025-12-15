@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
@@ -9,7 +9,7 @@ use crate::err::Error;
 impl Document {
 	pub(super) async fn store_record_data(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {

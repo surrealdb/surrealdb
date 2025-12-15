@@ -4,7 +4,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
 use crate::expr::part::Part;
@@ -18,7 +18,7 @@ impl Value {
 	pub(crate) async fn set(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		path: &[Part],
 		val: Value,
@@ -246,7 +246,7 @@ impl Value {
 
 	async fn assign(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		place: &mut Value,
 		mut val: Value,

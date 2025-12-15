@@ -1045,7 +1045,7 @@ async fn router(
 				Err(error) => {
 					return Err(crate::Error::FileRead {
 						path,
-						error: io::Error::new(io::ErrorKind::InvalidData, error.message.clone()),
+						error: io::Error::new(io::ErrorKind::InvalidData, error.message),
 					});
 				}
 			};

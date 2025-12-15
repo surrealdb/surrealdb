@@ -119,7 +119,7 @@ impl KnnBruteForceResult {
 	}
 
 	pub(super) fn insert(&mut self, e: Arc<Expr>, m: HashMap<Arc<RecordId>, Number>) {
-		self.exp.insert(e.clone(), self.res.len());
+		self.exp.insert(e, self.res.len());
 		self.res.push(m);
 	}
 }

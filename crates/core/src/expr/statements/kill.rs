@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -22,7 +22,7 @@ impl KillStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -45,7 +45,7 @@ impl KillStatement {
 			Ok(id) => id,
 		};
 		// Get the Node ID
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the LIVE ID
 		let lid = lid.0;
 		// Get the transaction

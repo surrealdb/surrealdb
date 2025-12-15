@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-match = "$error = /Couldn't coerce value for field `employees` of `team:[a-z0-9]+`: Expected `array<record<employee>,5>` but found an collection of length `6`/"
+match = "$error = /Couldn't coerce value for field `employees` of `team:[a-z0-9]+`: Expected `array<record<employee>,5>` but found a collection of length `6`/"
 */
 
 DEFINE FIELD employees ON TABLE team TYPE array<record<employee>, 5>;

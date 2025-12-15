@@ -1146,7 +1146,7 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
 	let check_error =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 

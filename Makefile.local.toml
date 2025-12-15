@@ -27,7 +27,7 @@ args = [
 ]
 
 # Format
-[tasks.format]
+[tasks.fmt]
 category = "LOCAL USAGE"
 description = "Format the SurrealDB source code according to the project rules"
 toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
@@ -38,7 +38,7 @@ args = ["fmt", "--all"]
 [tasks.check]
 category = "LOCAL USAGE"
 description = "Run the SurrealDB code quality checks"
-dependencies = ["ci-format", "ci-check", "ci-clippy"]
+dependencies = ["ci-fmt", "ci-check", "ci-clippy"]
 
 # Serve
 [tasks.serve]

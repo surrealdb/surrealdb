@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 use crate::sql::fetch::Fetchs;
 
@@ -12,7 +13,7 @@ pub struct OutputStatement {
 
 impl ToSql for OutputStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "RETURN {}", self.what);
+		write_sql!(f, sql_fmt, "RETURN {}", CoverStmts(&self.what));
 		if let Some(ref v) = self.fetch {
 			write_sql!(f, sql_fmt, " {}", v);
 		}

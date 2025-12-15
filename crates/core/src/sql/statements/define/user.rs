@@ -6,7 +6,7 @@ use rand::rngs::OsRng;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -25,10 +25,10 @@ pub(crate) struct DefineUserStatement {
 	pub base: Base,
 	pub pass_type: PassType,
 	pub roles: Vec<String>,
-	pub token_duration: Option<Expr>,
-	pub session_duration: Option<Expr>,
+	pub token_duration: Expr,
+	pub session_duration: Expr,
 
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineUserStatement {
@@ -39,9 +39,9 @@ impl Default for DefineUserStatement {
 			base: Base::Root,
 			pass_type: PassType::Unset,
 			roles: vec![],
-			token_duration: None,
-			session_duration: None,
-			comment: None,
+			token_duration: Expr::Literal(Literal::None),
+			session_duration: Expr::Literal(Literal::None),
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -55,7 +55,7 @@ impl ToSql for DefineUserStatement {
 			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
 
-		write_sql!(f, fmt, " {} ON {}", self.name, self.base);
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		match self.pass_type {
 			PassType::Unset => write_sql!(f, fmt, " PASSHASH \"\" "),
@@ -76,21 +76,12 @@ impl ToSql for DefineUserStatement {
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write_sql!(f, fmt, " DURATION");
-		write_sql!(f, fmt, " FOR TOKEN ");
-		match self.token_duration {
-			Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
-			Some(ref dur) => dur.fmt_sql(f, fmt),
-			None => write_sql!(f, fmt, "NONE"),
-		}
-		write_sql!(f, fmt, ", FOR SESSION ");
-		match self.session_duration {
-			Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
-			Some(ref dur) => dur.fmt_sql(f, fmt),
-			None => write_sql!(f, fmt, "NONE"),
-		}
-		if let Some(ref v) = self.comment {
-			write_sql!(f, fmt, " COMMENT {}", v);
+		f.push_str(" DURATION FOR TOKEN ");
+		CoverStmts(&self.token_duration).fmt_sql(f, fmt);
+		f.push_str(", FOR SESSION ");
+		CoverStmts(&self.session_duration).fmt_sql(f, fmt);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -122,10 +113,10 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			code,
 			roles: v.roles,
 			duration: crate::expr::user::UserDuration {
-				token: v.token_duration.map(Into::into),
-				session: v.session_duration.map(Into::into),
+				token: v.token_duration.into(),
+				session: v.session_duration.into(),
 			},
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -138,9 +129,9 @@ impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement 
 			base: v.base.into(),
 			pass_type: PassType::Hash(v.hash),
 			roles: v.roles,
-			token_duration: v.duration.token.map(Into::into),
-			session_duration: v.duration.session.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			token_duration: v.duration.token.into(),
+			session_duration: v.duration.session.into(),
+			comment: v.comment.into(),
 		}
 	}
 }

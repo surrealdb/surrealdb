@@ -600,7 +600,7 @@ impl RpcProtocol for Websocket {
 			self.transactions.len()
 		);
 		// Return the transaction ID to the client
-		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid(id))))
+		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid::from(id))))
 	}
 
 	/// Commit a transaction
@@ -612,11 +612,13 @@ impl RpcProtocol for Websocket {
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Expected transaction UUID".to_string(),
 			));
 		};
+
+		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
@@ -641,11 +643,13 @@ impl RpcProtocol for Websocket {
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Expected transaction UUID".to_string(),
 			));
 		};
+
+		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, tx)) = self.transactions.remove(&txn_id) else {

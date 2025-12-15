@@ -2,24 +2,39 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, Expr, Output, Timeout, With};
+use crate::expr::{Cond, Explain, Expr, Literal, Output, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DeleteStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
+}
+
+impl Default for DeleteStatement {
+	fn default() -> Self {
+		Self {
+			only: Default::default(),
+			what: Default::default(),
+			with: Default::default(),
+			cond: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			explain: Default::default(),
+		}
+	}
 }
 
 impl DeleteStatement {
@@ -27,7 +42,7 @@ impl DeleteStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {

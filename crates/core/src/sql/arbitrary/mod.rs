@@ -7,16 +7,18 @@ use std::time;
 use arbitrary::{Arbitrary, Result, Unstructured};
 pub(crate) use idiom::*;
 pub(crate) use parts::*;
+use rust_decimal::Decimal;
 use surrealdb_types::Duration;
 pub(crate) use utils::*;
 
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::statements::SleepStatement;
+use crate::val::Bytes;
 
 impl<'a> Arbitrary<'a> for ChangeFeed {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
 		Ok(Self {
-			expiry: time::Duration::new(u64::arbitrary(u)?, u32::arbitrary(u)?).into(),
+			expiry: u.arbitrary()?,
 			store_diff: bool::arbitrary(u)?,
 		})
 	}
@@ -29,4 +31,14 @@ impl<'a> Arbitrary<'a> for SleepStatement {
 			duration: Duration::from_std(time::Duration::new(0, 0)),
 		})
 	}
+}
+
+impl<'a> Arbitrary<'a> for Bytes {
+	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
+		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
+	}
+}
+
+pub fn arb_decimal<'a>(u: &mut Unstructured<'a>) -> Result<Decimal> {
+	Ok(Decimal::arbitrary(u)?.normalize())
 }

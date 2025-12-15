@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
@@ -22,7 +22,7 @@ impl Document {
 	pub(super) async fn pluck(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
@@ -82,7 +82,7 @@ impl Document {
 						(&mut self.initial, &mut self.current)
 					};
 					// Configure the context
-					let mut ctx = MutableContext::new(ctx);
+					let mut ctx = Context::new(ctx);
 					ctx.add_value("after", current.doc.as_arc());
 					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
@@ -153,7 +153,7 @@ impl Document {
 								// Get the current value
 								let val = Arc::new(self.current.doc.as_ref().pick(k));
 								// Configure the context
-								let mut ctx = MutableContext::new(ctx);
+								let mut ctx = Context::new(ctx);
 								ctx.add_value("value", val);
 								let ctx = ctx.freeze();
 								// Process the PERMISSION clause

@@ -1,7 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::sql::{Expr, ModuleExecutable, Permission};
+use crate::fmt::CoverStmts;
+use crate::sql::{Expr, Literal, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -9,7 +10,7 @@ pub(crate) struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -25,8 +26,8 @@ impl ToSql for DefineModuleStatement {
 			write_sql!(f, sql_fmt, " mod::{} AS", name);
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
-		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", v);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		if sql_fmt.is_pretty() {
 			f.push('\n');
@@ -44,7 +45,7 @@ impl From<DefineModuleStatement> for crate::expr::statements::DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name,
 			executable: v.executable.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -56,7 +57,7 @@ impl From<crate::expr::statements::DefineModuleStatement> for DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name,
 			executable: v.executable.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}

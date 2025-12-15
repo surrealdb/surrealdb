@@ -3,13 +3,13 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, Timeout,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Literal, Splits, Start,
 	With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -31,8 +31,8 @@ pub(crate) struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Expr>,
-	pub timeout: Option<Timeout>,
+	pub version: Expr,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
@@ -53,8 +53,8 @@ impl Default for SelectStatement {
 			limit: None,
 			start: None,
 			fetch: None,
-			version: None,
-			timeout: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 			tempfiles: false,
@@ -74,7 +74,7 @@ impl SelectStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		parent_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -86,16 +86,13 @@ impl SelectStatement {
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
-		let version = match &self.version {
-			Some(v) => Some(
-				stk.run(|stk| v.compute(stk, ctx, opt, parent_doc))
-					.await
-					.catch_return()?
-					.cast_to::<Datetime>()?
-					.to_version_stamp()?,
-			),
-			_ => None,
-		};
+		let version = stk
+			.run(|stk| self.version.compute(stk, ctx, opt, parent_doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Datetime>>()?
+			.map(|x| x.to_version_stamp())
+			.transpose()?;
 		let opt = Arc::new(opt.clone().with_version(version));
 
 		// Extract the limits

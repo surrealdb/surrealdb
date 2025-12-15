@@ -191,7 +191,7 @@ where
 	/// Specifies the data to insert into the table
 	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		InsertRelation::from_closure(self.client, || {
 			let mut data = data.into_value();

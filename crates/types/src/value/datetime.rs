@@ -35,13 +35,8 @@ impl Datetime {
 		Self(Utc::now())
 	}
 
-	/// Create a new datetime from chrono DateTime<Utc>
-	pub fn new(dt: DateTime<Utc>) -> Self {
-		Self(dt)
-	}
-
-	/// Get the inner DateTime<Utc>
-	pub fn inner(&self) -> DateTime<Utc> {
+	/// Convert into the inner DateTime<Utc>
+	pub fn into_inner(self) -> DateTime<Utc> {
 		self.0
 	}
 
@@ -114,7 +109,7 @@ impl Deref for Datetime {
 #[cfg(feature = "arbitrary")]
 mod arb {
 	use arbitrary::Arbitrary;
-	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset};
+	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, Timelike};
 
 	use super::*;
 
@@ -122,6 +117,11 @@ mod arb {
 		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 			let date = u.arbitrary::<NaiveDate>()?;
 			let time = u.arbitrary::<NaiveTime>()?;
+			// Arbitrary was able to create times with 60 seconds instead of the 59 second limit.
+			let time = time.with_second(time.second() % 60).expect("0 to 59 is a valid second");
+			let time = time
+				.with_nanosecond(time.nanosecond() % 1_000_000_000)
+				.expect("0 to 999_999_999 is a valid nanosecond");
 
 			let offset = if u.arbitrary()? {
 				Utc.fix()
@@ -139,13 +139,11 @@ mod arb {
 
 			let datetime = NaiveDateTime::new(date, time);
 
-			Ok(Datetime(
-				offset
-					.from_local_datetime(&datetime)
-					.earliest()
-					.expect("earliest should not fail with fixed offest")
-					.with_timezone(&Utc),
-			))
+			let Some(x) = offset.from_local_datetime(&datetime).earliest() else {
+				return Err(arbitrary::Error::IncorrectFormat);
+			};
+
+			Ok(Datetime(x.with_timezone(&Utc)))
 		}
 	}
 }

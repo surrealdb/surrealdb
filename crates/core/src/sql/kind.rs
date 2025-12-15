@@ -5,7 +5,7 @@ use std::hash;
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, QuoteStr};
+use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Float, Fmt, QuoteStr};
 use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -519,11 +519,11 @@ impl ToSql for KindLiteral {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			KindLiteral::String(s) => write_sql!(f, fmt, "{}", QuoteStr(s)),
-			KindLiteral::Integer(n) => f.push_str(&n.to_string()),
-			KindLiteral::Float(n) => f.push_str(&n.to_string()),
-			KindLiteral::Decimal(n) => f.push_str(&n.to_string()),
-			KindLiteral::Duration(d) => d.fmt_sql(f, fmt),
-			KindLiteral::Bool(b) => f.push_str(&b.to_string()),
+			KindLiteral::Integer(n) => write_sql!(f, fmt, "{}", n),
+			KindLiteral::Float(n) => write_sql!(f, fmt, " {}", Float(*n)),
+			KindLiteral::Decimal(n) => write_sql!(f, fmt, " {}", n),
+			KindLiteral::Duration(d) => write_sql!(f, fmt, "{}", d),
+			KindLiteral::Bool(b) => write_sql!(f, fmt, "{}", b),
 			KindLiteral::Array(a) => {
 				f.push('[');
 				if !a.is_empty() {
@@ -761,7 +761,7 @@ mod tests {
 	fn test_kind_either() {
 		let kinds =
 			vec![Kind::Table(vec!["users".to_string()]), Kind::Table(vec!["posts".to_string()])];
-		let either = Kind::either(kinds.clone());
+		let either = Kind::either(kinds);
 		assert!(matches!(either, Kind::Either(_)));
 		if let Kind::Either(inner) = either {
 			assert_eq!(inner.len(), 2);

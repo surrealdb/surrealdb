@@ -1,8 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::EscapeIdent;
-use crate::sql::{Expr, Permission};
+use crate::fmt::{CoverStmts, EscapeIdent};
+use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,7 +11,7 @@ pub struct DefineModelStatement {
 	pub hash: String,
 	pub name: String,
 	pub version: String,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -22,7 +22,7 @@ impl Default for DefineModelStatement {
 			hash: String::new(),
 			name: String::new(),
 			version: String::new(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			permissions: Permission::default(),
 		}
 	}
@@ -37,8 +37,8 @@ impl ToSql for DefineModelStatement {
 			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
 		write_sql!(f, fmt, " ml::{}<{}>", EscapeIdent(&self.name), self.version);
-		if let Some(comment) = self.comment.as_ref() {
-			write_sql!(f, fmt, " COMMENT {}", comment);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
@@ -51,7 +51,7 @@ impl From<DefineModelStatement> for crate::expr::statements::DefineModelStatemen
 			hash: v.hash,
 			name: v.name,
 			version: v.version,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -64,7 +64,7 @@ impl From<crate::expr::statements::DefineModelStatement> for DefineModelStatemen
 			hash: v.hash,
 			name: v.name,
 			version: v.version,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}

@@ -1,7 +1,7 @@
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -42,7 +42,7 @@ impl ForeachStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -69,10 +69,10 @@ impl ForeachStatement {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout)));
 			}
 			// Duplicate context
-			let ctx = MutableContext::new(ctx).freeze();
+			let ctx = Context::new(ctx).freeze();
 			// Set the current parameter
 			let key = self.param.as_str().to_owned();
-			let mut ctx = MutableContext::unfreeze(ctx)?;
+			let mut ctx = Context::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
 			let mut ctx = Some(ctx.freeze());
 			// Loop over the code block statements

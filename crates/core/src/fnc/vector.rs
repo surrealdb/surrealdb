@@ -53,7 +53,7 @@ pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
 pub mod distance {
 	use anyhow::Result;
 
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::doc::CursorDoc;
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
@@ -77,7 +77,7 @@ pub mod distance {
 	}
 
 	pub fn knn(
-		(ctx, doc): (&Context, Option<&CursorDoc>),
+		(ctx, doc): (&FrozenContext, Option<&CursorDoc>),
 		(Optional(knn_ref),): (Optional<Value>,),
 	) -> Result<Value> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
@@ -154,7 +154,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_int = Number::Int(2);
 
-		let result: Result<Value> = scale((input_vector.clone(), scalar_int));
+		let result: Result<Value> = scale((input_vector, scalar_int));
 
 		let expected_output: Vec<_> =
 			vec![2, 4, 6, 8].into_iter().map(Number::Int).map(Value::from).collect();
@@ -167,7 +167,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_float = Number::Float(1.51);
 
-		let result: Result<Value> = scale((input_vector.clone(), scalar_float));
+		let result: Result<Value> = scale((input_vector, scalar_float));
 		let expected_output = vec![1.51, 3.02, 4.53, 6.04]
 			.into_iter()
 			.map(Number::Float)
@@ -181,7 +181,7 @@ mod tests {
 		let input_vector: Vec<Number> = vec![1, 2, 3, 4].into_iter().map(Number::Int).collect();
 		let scalar_decimal = Number::Decimal(Decimal::new(3141, 3));
 
-		let result: Result<Value> = scale((input_vector.clone(), scalar_decimal));
+		let result: Result<Value> = scale((input_vector, scalar_decimal));
 		let expected_output: Vec<_> = vec![
 			Value::Number(Number::Decimal(Decimal::new(3141, 3))), // 3.141 * 1
 			Value::Number(Number::Decimal(Decimal::new(6282, 3))), // 3.141 * 2

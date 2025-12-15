@@ -7,7 +7,7 @@ use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::part::{Next, NextMethod};
@@ -69,22 +69,6 @@ impl Idiom {
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
 	}
-	/// Check if this Idiom is an specific field
-	pub(crate) fn is_field(&self, other: Option<&str>) -> bool {
-		if self.len() != 1 {
-			return false;
-		}
-
-		let Part::Field(ref x) = self.0[0] else {
-			return false;
-		};
-
-		if let Some(other) = other {
-			return x.as_str() == other;
-		}
-
-		true
-	}
 
 	/// Returns a raw string representation of this idiom without any escaping.
 	pub(crate) fn to_raw_string(&self) -> String {
@@ -130,7 +114,7 @@ impl Idiom {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {

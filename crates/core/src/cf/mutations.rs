@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use revision::revisioned;
 
 use crate::catalog::TableDefinition;
+use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -32,20 +34,64 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.clone()));
+		h.insert("name", Value::String(v.name));
 		Value::Object(Object::from(h))
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableMutations(pub String, pub Vec<TableMutation>);
+pub struct TableMutations(pub Arc<str>, pub Vec<TableMutation>);
 
 impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
-	pub fn new(tb: String) -> Self {
+	/// Create a new table mutations
+	pub fn new(tb: Arc<str>) -> Self {
 		Self(tb, Vec::new())
+	}
+	/// Push a table change to the table mutations
+	pub fn push_table_change(&mut self, dt: TableDefinition) {
+		// Push the table change to the entry
+		self.1.push(TableMutation::Def(dt));
+	}
+
+	/// Push a mutation to the table mutations (record change)
+	pub fn push_record_change(
+		&mut self,
+		id: RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
+		store_difference: bool,
+	) {
+		// Check if this is a delete operation
+		if current.as_ref().is_nullish() {
+			// Push the delete mutation to the entry
+			self.1.push(match store_difference {
+				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+				false => TableMutation::Del(id),
+			});
+		} else {
+			// Push the set mutation to the entry
+			self.1.push(match store_difference {
+				true => {
+					if previous.as_ref().is_none() {
+						TableMutation::Set(id, current.into_owned())
+					} else {
+						// We intentionally record the patches in reverse (current -> previous)
+						// because we cannot otherwise resolve operations such as "replace" and
+						// "remove".
+						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
+						TableMutation::SetWithDiff(
+							id,
+							current.into_owned(),
+							patches_to_create_previous,
+						)
+					}
+				}
+				false => TableMutation::Set(id, current.into_owned()),
+			});
+		}
 	}
 }
 
@@ -87,11 +133,7 @@ impl TableMutation {
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						operations
-							.clone()
-							.into_iter()
-							.map(|x| Value::Object(x.into_object()))
-							.collect(),
+						operations.into_iter().map(|x| Value::Object(x.into_object())).collect(),
 					)),
 				);
 				h
@@ -165,7 +207,7 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				Arc::from("mytb"),
 				vec![
 					TableMutation::Set(
 						RecordId::new("mytb".to_string(), "tobie".to_owned()),
@@ -200,7 +242,7 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				Arc::from("mytb"),
 				vec![
 					TableMutation::SetWithDiff(
 						RecordId::new("mytb".to_owned(), "tobie".to_owned()),

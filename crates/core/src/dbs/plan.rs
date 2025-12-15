@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::expr::lookup::LookupKind;
@@ -14,7 +14,7 @@ pub(super) struct Plan {
 
 impl Plan {
 	pub(super) fn new(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		stm: &Statement<'_>,
 		iterables: &Vec<Iterable>,
 		results: &Results,
@@ -46,7 +46,7 @@ impl Plan {
 pub(super) struct Explanation(Vec<ExplainItem>);
 
 impl Explanation {
-	fn add_iter(&mut self, ctx: &Context, iter: &Iterable) {
+	fn add_iter(&mut self, ctx: &FrozenContext, iter: &Iterable) {
 		self.0.push(ExplainItem::new_iter(ctx, iter));
 	}
 
@@ -102,7 +102,7 @@ impl ExplainItem {
 		}
 	}
 
-	fn new_iter(ctx: &Context, iter: &Iterable) -> Self {
+	fn new_iter(ctx: &FrozenContext, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(v) => Self {
 				name: "Iterate Value".into(),

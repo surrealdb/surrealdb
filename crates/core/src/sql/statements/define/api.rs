@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub(crate) struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineApiStatement {
@@ -25,7 +25,7 @@ impl Default for DefineApiStatement {
 			actions: Vec::new(),
 			fallback: None,
 			config: ApiConfig::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -38,7 +38,7 @@ impl ToSql for DefineApiStatement {
 			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
 			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " {}", self.path);
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.path));
 		let sql_fmt = sql_fmt.increment();
 
 		write_sql!(f, sql_fmt, " FOR any");
@@ -48,7 +48,7 @@ impl ToSql for DefineApiStatement {
 			write_sql!(f, sql_fmt, "{}", self.config);
 
 			if let Some(fallback) = &self.fallback {
-				write_sql!(f, sql_fmt, " THEN {}", fallback);
+				write_sql!(f, sql_fmt, " THEN {}", CoverStmts(fallback));
 			}
 		}
 
@@ -56,8 +56,8 @@ impl ToSql for DefineApiStatement {
 			write_sql!(f, sql_fmt, " {}", action);
 		}
 
-		if let Some(ref comment) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", comment);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -70,7 +70,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -83,7 +83,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -91,6 +91,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct ApiAction {
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,

@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9,7 +10,7 @@ pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineNamespaceStatement {
@@ -18,7 +19,7 @@ impl Default for DefineNamespaceStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::None),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -31,9 +32,9 @@ impl ToSql for DefineNamespaceStatement {
 			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
 			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " {}", self.name);
-		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", v);
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -44,7 +45,7 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -56,7 +57,7 @@ impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

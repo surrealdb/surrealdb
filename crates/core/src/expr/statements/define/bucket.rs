@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use super::{CursorDoc, DefineKind};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
@@ -19,7 +19,7 @@ pub(crate) struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineBucketStatement {
@@ -30,7 +30,7 @@ impl Default for DefineBucketStatement {
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -39,7 +39,7 @@ impl DefineBucketStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -87,13 +87,20 @@ impl DefineBucketStatement {
 
 		// Process the statement
 		let key = crate::key::database::bu::new(ns, db, &name);
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		let ap = BucketDefinition {
 			id: None,
 			name: name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache

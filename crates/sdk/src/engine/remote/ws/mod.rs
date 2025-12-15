@@ -455,7 +455,7 @@ where
 	E: std::fmt::Debug,
 {
 	if let Ok(DbResult::Live(notification)) = result {
-		let live_query_id = notification.id.0;
+		let live_query_id = notification.id.into_inner();
 
 		if let Some(sender) = session_state.live_queries.get(&live_query_id)
 			&& sender.send(Ok(notification)).await.is_err()
@@ -599,7 +599,7 @@ async fn handle_session_clone<M, S, E>(
 			}
 		}
 		Some(Err(error)) => {
-			sessions.insert(new, Err(error.clone()));
+			sessions.insert(new, Err(error));
 		}
 		None => {
 			sessions.insert(new, Err(SessionError::NotFound(old)));

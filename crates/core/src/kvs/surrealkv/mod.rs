@@ -17,6 +17,7 @@ const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
 pub struct Datastore {
 	db: Tree,
+	enable_versions: bool,
 }
 
 pub struct Transaction {
@@ -24,6 +25,8 @@ pub struct Transaction {
 	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
+	/// Is versioning enabled?
+	enable_versions: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
 }
@@ -39,9 +42,6 @@ impl Datastore {
 		// Configure the maximum value log file size
 		info!(target: TARGET, "Setting value log max file size: {}", *cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
 		let builder = builder.with_vlog_max_file_size(*cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
-		// Configure the value log cache capacity
-		info!(target: TARGET, "Setting value log cache capacity: {}", *cnf::SURREALKV_VLOG_CACHE_CAPACITY);
-		let builder = builder.with_vlog_cache_capacity(*cnf::SURREALKV_VLOG_CACHE_CAPACITY);
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
@@ -59,6 +59,7 @@ impl Datastore {
 		match builder.build() {
 			Ok(db) => Ok(Datastore {
 				db,
+				enable_versions,
 			}),
 			Err(e) => Err(Error::Datastore(e.to_string())),
 		}
@@ -90,6 +91,7 @@ impl Datastore {
 		Ok(Box::new(Transaction {
 			done: AtomicBool::new(false),
 			write,
+			enable_versions: self.enable_versions,
 			inner: RwLock::new(txn),
 		}))
 	}
@@ -286,7 +288,11 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key
-		inner.soft_delete(&key)?;
+		if self.enable_versions {
+			inner.soft_delete(&key)?;
+		} else {
+			inner.delete(&key)?;
+		}
 		// Return result
 		Ok(())
 	}
@@ -305,11 +311,19 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key if valid
-		match (inner.get(&key)?, chk) {
-			(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
-			(None, None) => inner.soft_delete(&key)?,
-			_ => return Err(Error::TransactionConditionNotMet),
-		};
+		if self.enable_versions {
+			match (inner.get(&key)?, chk) {
+				(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
+				(None, None) => inner.soft_delete(&key)?,
+				_ => return Err(Error::TransactionConditionNotMet),
+			};
+		} else {
+			match (inner.get(&key)?, chk) {
+				(Some(v), Some(w)) if v == w => inner.delete(&key)?,
+				(None, None) => inner.delete(&key)?,
+				_ => return Err(Error::TransactionConditionNotMet),
+			};
+		}
 		// Return result
 		Ok(())
 	}

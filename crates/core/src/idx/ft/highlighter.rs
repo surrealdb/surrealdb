@@ -59,7 +59,7 @@ impl Highlighter {
 				}
 			}
 			Value::Object(a) => {
-				for (_, v) in a.0.into_iter() {
+				for (_, v) in a.0 {
 					Self::extract(v, vals);
 				}
 			}

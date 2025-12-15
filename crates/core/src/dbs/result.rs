@@ -2,7 +2,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
 use crate::dbs::group::GroupCollector;
@@ -29,7 +29,7 @@ pub(super) enum Results {
 impl Results {
 	pub(super) fn prepare(
 		&mut self,
-		#[cfg(storage)] ctx: &Context,
+		#[cfg(storage)] ctx: &FrozenContext,
 		stm: &Statement<'_>,
 		start: Option<u32>,
 		limit: Option<u32>,
@@ -72,7 +72,7 @@ impl Results {
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rs: RecordStrategy,
 		val: Value,

@@ -3,7 +3,6 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -12,21 +11,7 @@ use crate::expr::Expr;
 use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Array")]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Array(pub(crate) Vec<Value>);
@@ -291,7 +276,7 @@ impl Complement<Array> for Array {
 		for i in other.iter() {
 			set.insert(i);
 		}
-		for v in self.into_iter() {
+		for v in self {
 			if !set.contains(&v) {
 				out.push(v)
 			}
@@ -310,7 +295,7 @@ impl Difference<Array> for Array {
 	fn difference(self, other: Array) -> Array {
 		let mut out = Array::with_capacity(self.len() + other.len());
 		let mut other = VecDeque::from(other.0);
-		for v in self.into_iter() {
+		for v in self {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 			} else {
@@ -331,7 +316,7 @@ pub(crate) trait Flatten<T> {
 impl Flatten<Array> for Array {
 	fn flatten(self) -> Array {
 		let mut out = Array::with_capacity(self.len());
-		for v in self.into_iter() {
+		for v in self {
 			match v {
 				Value::Array(mut a) => out.append(&mut a),
 				_ => out.push(v),
@@ -350,7 +335,7 @@ pub(crate) trait Intersect<T> {
 impl Intersect<Self> for Array {
 	fn intersect(self, mut other: Self) -> Self {
 		let mut out = Self::new();
-		for v in self.0.into_iter() {
+		for v in self.0 {
 			if let Some(pos) = other.iter().position(|w| v == *w) {
 				other.remove(pos);
 				out.push(v);

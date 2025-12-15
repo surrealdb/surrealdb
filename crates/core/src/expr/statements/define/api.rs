@@ -7,7 +7,7 @@ use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
 use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
@@ -20,14 +20,14 @@ pub(crate) struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl DefineApiStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -68,12 +68,18 @@ impl DefineApiStatement {
 			});
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		let ap = ApiDefinition {
 			path,
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache

@@ -5,7 +5,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::cond::Cond;
@@ -19,6 +19,7 @@ use crate::expr::output::Output;
 use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
+use crate::expr::statements::LiveFields;
 use crate::expr::statements::access::AccessStatement;
 use crate::expr::statements::create::CreateStatement;
 use crate::expr::statements::delete::DeleteStatement;
@@ -29,8 +30,9 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Idiom, Timeout, With};
+use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
 use crate::idx::planner::QueryPlanner;
+use crate::val::Duration;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
@@ -314,7 +316,10 @@ impl Statement<'_> {
 				stmt,
 				..
 			} => Some(&stmt.expr),
-			Statement::Live(v) => Some(&v.fields),
+			Statement::Live(v) => match &v.fields {
+				LiveFields::Diff => None,
+				LiveFields::Select(x) => Some(x),
+			},
 			_ => None,
 		}
 	}
@@ -509,31 +514,38 @@ impl Statement<'_> {
 		}
 	}
 
-	pub(crate) fn timeout(&self) -> Option<&Timeout> {
+	pub(crate) fn timeout(&self) -> Option<&Expr> {
 		match self {
-			Statement::Create(s) => s.timeout.as_ref(),
-			Statement::Delete(s) => s.timeout.as_ref(),
-			Statement::Insert(s) => s.timeout.as_ref(),
+			Statement::Create(s) => Some(&s.timeout),
+			Statement::Delete(s) => Some(&s.timeout),
+			Statement::Insert(s) => Some(&s.timeout),
 			Statement::Select {
 				stmt,
 				..
-			} => stmt.timeout.as_ref(),
-			Statement::Update(s) => s.timeout.as_ref(),
-			Statement::Upsert(s) => s.timeout.as_ref(),
+			} => Some(&stmt.timeout),
+			Statement::Update(s) => Some(&s.timeout),
+			Statement::Upsert(s) => Some(&s.timeout),
 			_ => None,
 		}
 	}
 	pub(crate) async fn setup_timeout<'a>(
 		&self,
 		stk: &mut Stk,
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Cow<'a, Context>> {
+	) -> Result<Cow<'a, FrozenContext>> {
 		if let Some(t) = self.timeout() {
-			let x = t.compute(stk, ctx, opt, doc).await?.0;
-			let mut ctx = MutableContext::new(ctx);
-			ctx.add_timeout(x)?;
+			let Some(x) = stk
+				.run(|stk| t.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to::<Option<Duration>>()?
+			else {
+				return Ok(Cow::Borrowed(ctx));
+			};
+			let mut ctx = Context::new(ctx);
+			ctx.add_timeout(x.0)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
 			Ok(Cow::Borrowed(ctx))
@@ -543,12 +555,12 @@ impl Statement<'_> {
 	pub(crate) fn setup_query_planner<'a>(
 		&self,
 		planner: QueryPlanner,
-		ctx: Cow<'a, Context>,
-	) -> Cow<'a, Context> {
+		ctx: Cow<'a, FrozenContext>,
+	) -> Cow<'a, FrozenContext> {
 		// Add query executors if any
 		if planner.has_executors() {
 			// Create a new context
-			let mut ctx = MutableContext::new(&ctx);
+			let mut ctx = Context::new(&ctx);
 			ctx.set_query_planner(planner);
 			Cow::Owned(ctx.freeze())
 		} else {
@@ -558,7 +570,7 @@ impl Statement<'_> {
 
 	pub(crate) async fn from_select<'a>(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		stmt: &'a SelectStatement,

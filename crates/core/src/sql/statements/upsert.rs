@@ -1,9 +1,9 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmtsSql, Fmt};
-use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Cond, Data, Explain, Expr, Literal, Output, With};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct UpsertStatement {
 	pub only: bool,
@@ -13,18 +13,34 @@ pub(crate) struct UpsertStatement {
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
+impl Default for UpsertStatement {
+	fn default() -> Self {
+		Self {
+			only: Default::default(),
+			what: Default::default(),
+			with: Default::default(),
+			data: Default::default(),
+			cond: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			explain: Default::default(),
+		}
+	}
+}
+
 impl ToSql for UpsertStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "UPSERT");
+		f.push_str("UPSERT");
 		if self.only {
-			write_sql!(f, fmt, " ONLY");
+			f.push_str(" ONLY")
 		}
-		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)));
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
 		if let Some(ref v) = self.with {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -37,8 +53,8 @@ impl ToSql for UpsertStatement {
 		if let Some(ref v) = self.output {
 			write_sql!(f, fmt, " {v}");
 		}
-		if let Some(ref v) = self.timeout {
-			write_sql!(f, fmt, " {v}");
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 		if self.parallel {
 			write_sql!(f, fmt, " PARALLEL");
@@ -58,7 +74,7 @@ impl From<UpsertStatement> for crate::expr::statements::UpsertStatement {
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
@@ -74,7 +90,7 @@ impl From<crate::expr::statements::UpsertStatement> for UpsertStatement {
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}

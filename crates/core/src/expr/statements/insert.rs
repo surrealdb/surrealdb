@@ -2,17 +2,17 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, RecordIdKey, Table};
+use crate::val::{Datetime, Duration, RecordIdKey, Table};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
@@ -20,10 +20,26 @@ pub(crate) struct InsertStatement {
 	pub ignore: bool,
 	pub update: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Expr>,
+	pub version: Expr,
+}
+
+impl Default for InsertStatement {
+	fn default() -> Self {
+		Self {
+			into: Default::default(),
+			data: Default::default(),
+			ignore: Default::default(),
+			update: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			relation: Default::default(),
+			version: Expr::Literal(Literal::None),
+		}
+	}
 }
 
 impl InsertStatement {
@@ -31,7 +47,7 @@ impl InsertStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -40,32 +56,35 @@ impl InsertStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Propagate the version to the underlying datastore
-		let version = match &self.version {
-			Some(v) => Some(
-				stk.run(|stk| v.compute(stk, ctx, opt, doc))
-					.await
-					.catch_return()?
-					.cast_to::<Datetime>()?
-					.to_version_stamp()?,
-			),
-			_ => None,
-		};
+		let version = stk
+			.run(|stk| self.version.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Datetime>>()?
+			.map(|x| x.to_version_stamp())
+			.transpose()?;
 		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
+		let ctx_store;
+		let ctx = match stk
+			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+		{
 			Some(timeout) => {
-				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(x)?;
-				ctx.freeze()
+				let mut ctx = Context::new(ctx);
+				ctx.add_timeout(timeout.0)?;
+				ctx_store = ctx.freeze();
+				&ctx_store
 			}
-			None => ctx.clone(),
+			None => ctx,
 		};
 		// Parse the INTO expression
 		let into = match &self.into {
 			None => None,
 			Some(into) => {
-				match stk.run(|stk| into.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+				match stk.run(|stk| into.compute(stk, ctx, opt, doc)).await.catch_return()? {
 					Value::Table(into) => Some(into),
 					v => {
 						bail!(Error::InsertStatement {
@@ -86,8 +105,8 @@ impl InsertStatement {
 					// Set each field from the expression
 					for (k, v) in v.iter() {
 						let v =
-							stk.run(|stk| v.compute(stk, &ctx, opt, None)).await.catch_return()?;
-						o.set(stk, &ctx, opt, k, v).await?;
+							stk.run(|stk| v.compute(stk, ctx, opt, None)).await.catch_return()?;
+						o.set(stk, ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
 					let (tb, id) = extract_tb_id(&o, &into)?;
@@ -97,7 +116,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+				let v = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -128,7 +147,7 @@ impl InsertStatement {
 		// Ensure the database exists.
 		ctx.get_db(opt).await?;
 
-		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+		CursorDoc::update_parent(ctx, doc, async |ctx| {
 			// Process the statement
 			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout

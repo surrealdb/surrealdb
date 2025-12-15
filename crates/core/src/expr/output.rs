@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::field::{Fields, Selector};
 use crate::expr::{Expr, Field, Literal};
@@ -23,32 +23,31 @@ impl ToSql for Output {
 			Self::Diff => f.push_str("DIFF"),
 			Self::After => f.push_str("AFTER"),
 			Self::Before => f.push_str("BEFORE"),
-			Self::Fields(v) => {
-				let starts_with_none = match v {
-					Fields::Value(selector) => {
-						matches!(selector.expr, Expr::Literal(Literal::None))
+			Self::Fields(v) => match v {
+				Fields::Select(fields) => {
+					let mut iter = fields.iter();
+					match iter.next() {
+						Some(Field::Single(Selector {
+							expr: Expr::Literal(Literal::None),
+							alias,
+						})) => {
+							f.push_str("(NONE)");
+							if let Some(alias) = alias {
+								write_sql!(f, fmt, " AS {alias}");
+							}
+						}
+						Some(x) => {
+							x.fmt_sql(f, fmt);
+						}
+						None => {}
 					}
-					Fields::Select(fields) => fields
-						.first()
-						.map(|x| {
-							matches!(
-								x,
-								Field::Single(Selector {
-									expr: Expr::Literal(Literal::None),
-									..
-								})
-							)
-						})
-						.unwrap_or(false),
-				};
-				if starts_with_none {
-					f.push('(');
-					v.fmt_sql(f, fmt);
-					f.push(')')
-				} else {
-					v.fmt_sql(f, fmt)
+
+					for x in iter {
+						write_sql!(f, fmt, ", {x}");
+					}
 				}
-			}
+				x => x.fmt_sql(f, fmt),
+			},
 		}
 	}
 }

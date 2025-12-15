@@ -7,7 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 #[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -52,7 +52,7 @@ impl From<ModuleExecutable> for catalog::ModuleExecutable {
 impl ModuleExecutable {
 	pub(crate) async fn signature(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: &NamespaceId,
 		db: &DatabaseId,
 		sub: Option<&str>,
@@ -68,7 +68,7 @@ impl ModuleExecutable {
 	pub(crate) async fn run(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
@@ -125,7 +125,7 @@ impl ToSql for SurrealismExecutable {
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: &NamespaceId,
 		db: &DatabaseId,
 		sub: Option<&str>,
@@ -163,7 +163,7 @@ impl SurrealismExecutable {
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
@@ -198,7 +198,7 @@ impl SurrealismExecutable {
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_ns: &NamespaceId,
 		_db: &DatabaseId,
 		_sub: Option<&str>,
@@ -209,7 +209,7 @@ impl SurrealismExecutable {
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
 		_args: Vec<Value>,
@@ -261,7 +261,11 @@ impl ToSql for SiloExecutable {
 
 #[cfg(feature = "surrealism")]
 impl SiloExecutable {
-	pub(crate) async fn signature(&self, ctx: &Context, sub: Option<&str>) -> Result<Signature> {
+	pub(crate) async fn signature(
+		&self,
+		ctx: &FrozenContext,
+		sub: Option<&str>,
+	) -> Result<Signature> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get silo function signature: Experimental capability `surrealism` is not enabled"
@@ -301,7 +305,7 @@ impl SiloExecutable {
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
@@ -339,14 +343,18 @@ impl SiloExecutable {
 
 #[cfg(not(feature = "surrealism"))]
 impl SiloExecutable {
-	pub(crate) async fn signature(&self, _ctx: &Context, _sub: Option<&str>) -> Result<Signature> {
+	pub(crate) async fn signature(
+		&self,
+		_ctx: &FrozenContext,
+		_sub: Option<&str>,
+	) -> Result<Signature> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
 
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
 		_args: Vec<Value>,

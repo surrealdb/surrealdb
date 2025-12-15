@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
@@ -236,7 +236,7 @@ impl Sequences {
 	/// The next sequential value
 	async fn next_val(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		seq: Arc<SequenceDomain>,
 		start: i64,
 		batch: u32,
@@ -265,10 +265,7 @@ impl Sequences {
 	///
 	/// # Returns
 	/// A new unique namespace ID
-	pub(crate) async fn next_namespace_id(
-		&self,
-		ctx: Option<&MutableContext>,
-	) -> Result<NamespaceId> {
+	pub(crate) async fn next_namespace_id(&self, ctx: Option<&Context>) -> Result<NamespaceId> {
 		let domain = Arc::new(SequenceDomain::new_namespace_ids());
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(NamespaceId(id as u32))
@@ -284,7 +281,7 @@ impl Sequences {
 	/// A new unique database ID for the given namespace
 	pub(crate) async fn next_database_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: NamespaceId,
 	) -> Result<DatabaseId> {
 		let domain = Arc::new(SequenceDomain::new_database_ids(ns));
@@ -303,7 +300,7 @@ impl Sequences {
 	/// A new unique table ID for the given database
 	pub(crate) async fn next_table_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {
@@ -324,7 +321,7 @@ impl Sequences {
 	/// A new unique index ID for the given table
 	pub(crate) async fn next_index_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: String,
@@ -347,7 +344,7 @@ impl Sequences {
 	/// The next value in the user-defined sequence
 	pub(crate) async fn next_user_sequence_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -369,7 +366,7 @@ impl Sequences {
 	/// A new unique document ID for the full-text search index
 	pub(crate) async fn next_fts_doc_id(
 		&self,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		ikb: IndexKeyBase,
 		batch: u32,
 	) -> Result<DocId> {
@@ -412,7 +409,7 @@ impl Sequence {
 	/// * `batch` - The batch size for ID allocations
 	/// * `timeout` - Optional timeout for batch allocation operations
 	async fn load(
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		sqs: &Sequences,
 		seq: &SequenceDomain,
 		start: i64,
@@ -458,7 +455,7 @@ impl Sequence {
 	async fn next(
 		&mut self,
 		sqs: &Sequences,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		seq: &SequenceDomain,
 		batch: u32,
 	) -> Result<i64> {
@@ -504,7 +501,7 @@ impl Sequence {
 	/// A tuple of (start, end) representing the allocated batch range [start, end)
 	async fn find_batch_allocation(
 		sqs: &Sequences,
-		ctx: Option<&MutableContext>,
+		ctx: Option<&Context>,
 		seq: &SequenceDomain,
 		next: i64,
 		batch: u32,

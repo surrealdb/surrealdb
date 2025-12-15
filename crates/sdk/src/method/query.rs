@@ -166,25 +166,6 @@ impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
-	/// Chains a query onto an existing query
-	pub fn query(self, surql: impl Into<Cow<'r, str>>) -> Self {
-		let client = self.client.clone();
-		let query = if self.query.is_empty() {
-			surql.into()
-		} else if self.query.ends_with(';') {
-			Cow::Owned(format!("{} {}", self.query, surql.into()))
-		} else {
-			Cow::Owned(format!("{}; {}", self.query, surql.into()))
-		};
-
-		Query {
-			txn: self.txn,
-			client,
-			query,
-			variables: self.variables,
-		}
-	}
-
 	/// Return query statistics along with its results
 	pub const fn with_stats(self) -> WithStats<Self> {
 		WithStats(self)
@@ -309,16 +290,13 @@ impl IndexedResults {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
-	/// let mut response = db
-	///     // Get `john`'s details
-	///     .query("SELECT * FROM user:john")
-	///     // List all users whose first name is John
-	///     .query("SELECT * FROM user WHERE name.first = 'John'")
-	///     // Get John's address
-	///     .query("SELECT address FROM user:john")
-	///     // Get all users' addresses
-	///     .query("SELECT address FROM user")
-	///     .await?;
+	/// // Run multiple queries in a single request
+	/// let mut response = db.query("
+	///     SELECT * FROM user:john;
+	///     SELECT * FROM user WHERE name.first = 'John';
+	///     SELECT address FROM user:john;
+	///     SELECT address FROM user;
+	/// ").await?;
 	///
 	/// // Get the first (and only) user from the first query
 	/// let user: Option<User> = response.take(0)?;
@@ -511,16 +489,13 @@ impl WithStats<IndexedResults> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
-	/// let mut response = db
-	///     // Get `john`'s details
-	///     .query("SELECT * FROM user:john")
-	///     // List all users whose first name is John
-	///     .query("SELECT * FROM user WHERE name.first = 'John'")
-	///     // Get John's address
-	///     .query("SELECT address FROM user:john")
-	///     // Get all users' addresses
-	///     .query("SELECT address FROM user")
-	///     // Return stats along with query results
+	/// // Run multiple queries in a single request with stats
+	/// let mut response = db.query("
+	///     SELECT * FROM user:john;
+	///     SELECT * FROM user WHERE name.first = 'John';
+	///     SELECT address FROM user:john;
+	///     SELECT address FROM user;
+	/// ")
 	///     .with_stats()
 	///     .await?;
 	///
@@ -884,7 +859,7 @@ mod tests {
 		assert_eq!(body, vec![article.body]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value)]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();

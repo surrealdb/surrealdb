@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
 use crate::val::Value;
 
@@ -29,17 +30,15 @@ impl BucketDefinition {
 	pub fn to_sql_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			backend: self
-				.backend
-				.clone()
-				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			backend: self.backend.clone().map(|v| sql::Expr::Literal(sql::Literal::String(v))),
 			permissions: self.permissions.clone().into(),
 			readonly: self.readonly,
 			comment: self
 				.comment
 				.clone()
-				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }
@@ -49,7 +48,7 @@ impl InfoStructure for BucketDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend.clone()),
+			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})

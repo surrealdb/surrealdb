@@ -203,7 +203,7 @@ impl RouterState {
 				}
 			}
 			Some(Err(error)) => {
-				self.sessions.insert(new, Err(error.clone()));
+				self.sessions.insert(new, Err(error));
 			}
 			None => {
 				self.sessions.insert(new, Err(SessionError::NotFound(old)));

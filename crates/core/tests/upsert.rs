@@ -612,7 +612,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
 
-	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+	for ((level, role), (ns, db), should_succeed, msg) in tests {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		// Test the statement when the table has to be created

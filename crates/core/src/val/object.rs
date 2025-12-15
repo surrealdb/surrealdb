@@ -4,7 +4,6 @@ use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -15,21 +14,7 @@ use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Object")]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
@@ -124,7 +109,7 @@ impl TryInto<HeaderMap> for Object {
 	type Error = Error;
 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
 		let mut headermap = HeaderMap::new();
-		for (k, v) in self.into_iter() {
+		for (k, v) in self {
 			let k: HeaderName = k.parse()?;
 			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
 			headermap.insert(k, v);

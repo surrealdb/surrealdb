@@ -1,9 +1,9 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmtsSql, Fmt};
-use crate::sql::{Cond, Explain, Expr, Output, Timeout, With};
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Cond, Explain, Expr, Literal, Output, With};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DeleteStatement {
 	pub only: bool,
@@ -12,18 +12,32 @@ pub struct DeleteStatement {
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
+impl Default for DeleteStatement {
+	fn default() -> Self {
+		Self {
+			only: Default::default(),
+			what: Default::default(),
+			with: Default::default(),
+			cond: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			explain: Default::default(),
+		}
+	}
+}
 impl ToSql for DeleteStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "DELETE");
 		if self.only {
 			f.push_str(" ONLY")
 		}
-		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)));
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
 		if let Some(ref v) = self.with {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -33,9 +47,11 @@ impl ToSql for DeleteStatement {
 		if let Some(ref v) = self.output {
 			write_sql!(f, fmt, " {v}");
 		}
-		if let Some(ref v) = self.timeout {
-			write_sql!(f, fmt, " {v}");
+
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
+
 		if self.parallel {
 			f.push_str(" PARALLEL");
 		}
@@ -53,7 +69,7 @@ impl From<DeleteStatement> for crate::expr::statements::DeleteStatement {
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
@@ -68,7 +84,7 @@ impl From<crate::expr::statements::DeleteStatement> for DeleteStatement {
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}

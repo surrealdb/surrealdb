@@ -8,7 +8,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{FlowResultExt as _, Function};
@@ -40,7 +40,7 @@ impl Analyzer {
 	pub(in crate::idx::ft) async fn analyze_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
@@ -56,7 +56,7 @@ impl Analyzer {
 	pub(super) async fn analyze_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		val: Value,
 		stage: FilteringStage,
@@ -88,7 +88,7 @@ impl Analyzer {
 	pub(super) async fn generate_tokens(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stage: FilteringStage,
 		mut input: String,
@@ -123,7 +123,7 @@ impl Analyzer {
 	pub(crate) async fn analyze(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		input: String,
 	) -> Result<Value> {
@@ -174,7 +174,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::Analyzer;
-	use crate::ctx::MutableContext;
+	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::expr::DefineAnalyzerStatement;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
@@ -187,7 +187,7 @@ mod tests {
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
 		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 
@@ -201,7 +201,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::default();
+		let opts = Options::new(ds.id());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(

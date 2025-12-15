@@ -2,7 +2,7 @@ use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, EscapeRid, Fmt};
+use crate::fmt::{EscapeKey, EscapeRidKey, Fmt};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -64,18 +64,21 @@ impl RecordIdKeyLit {
 					})
 					.collect(),
 			),
-			PublicRecordIdKey::Range(x) => RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
-				start: match x.start {
-					Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
-					Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
-					Bound::Unbounded => Bound::Unbounded,
-				},
-				end: match x.end {
-					Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
-					Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
-					Bound::Unbounded => Bound::Unbounded,
-				},
-			})),
+			PublicRecordIdKey::Range(x) => {
+				let range = x.into_inner();
+				RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: match range.0 {
+						Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+					end: match range.1 {
+						Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+				}))
+			}
 		}
 	}
 }
@@ -84,8 +87,10 @@ impl From<RecordIdKeyLit> for crate::expr::RecordIdKeyLit {
 	fn from(value: RecordIdKeyLit) -> Self {
 		match value {
 			RecordIdKeyLit::Number(x) => crate::expr::RecordIdKeyLit::Number(x),
-			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x.clone()),
-			RecordIdKeyLit::Uuid(x) => crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.0)),
+			RecordIdKeyLit::String(x) => crate::expr::RecordIdKeyLit::String(x),
+			RecordIdKeyLit::Uuid(x) => {
+				crate::expr::RecordIdKeyLit::Uuid(crate::val::Uuid(x.into_inner()))
+			}
 			RecordIdKeyLit::Array(x) => {
 				crate::expr::RecordIdKeyLit::Array(x.into_iter().map(From::from).collect())
 			}
@@ -102,9 +107,9 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.clone()),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x),
 			crate::expr::RecordIdKeyLit::Uuid(uuid) => {
-				RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0))
+				RecordIdKeyLit::Uuid(surrealdb_types::Uuid::from(uuid.0))
 			}
 			crate::expr::RecordIdKeyLit::Array(exprs) => {
 				RecordIdKeyLit::Array(exprs.into_iter().map(From::from).collect())
@@ -121,8 +126,8 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 impl ToSql for RecordIdKeyLit {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Number(v) => f.push_str(&v.to_string()),
-			Self::String(v) => write_sql!(f, fmt, "{}", EscapeRid(v)),
+			Self::Number(v) => write_sql!(f, fmt, "{v}"),
+			Self::String(v) => EscapeRidKey(v).fmt_sql(f, fmt),
 			Self::Uuid(v) => v.fmt_sql(f, fmt),
 			Self::Array(v) => {
 				f.push('[');

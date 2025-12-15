@@ -1,0 +1,167 @@
+name: 'Build Linux binary'
+description: 'Build SurrealDB binary for Linux using Docker'
+
+inputs:
+  arch:
+    description: 'Target architecture (x86_64-unknown-linux-gnu or aarch64-unknown-linux-gnu)'
+    required: true
+  platform:
+    description: 'Platform name (amd64 or arm64)'
+    required: true
+  name:
+    description: 'The name of output'
+    required: true
+  build-metadata:
+    description: 'Build metadata'
+    required: false
+    default: ''
+  onnx-version:
+    description: 'The ONNX library version'
+    required: false
+    default: '1.16.3'
+  extra-features:
+    description: 'Extra features enabled in the binary'
+    required: false
+    default: 'storage-tikv,jwks,ml'
+  upload:
+    description: 'Upload build artifacts'
+    required: false
+    default: 'true'
+  release:
+    description: 'Compile with release flag'
+    required: false
+    default: 'true'
+
+outputs:
+  artifact-name:
+    description: 'Name of the uploaded artifact'
+    value: surreal-${{ inputs.name }}.linux-${{ inputs.platform }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare docker image name
+      id: image
+      shell: bash
+      run: |
+        set -x
+
+        tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+        echo "tag=${tag}" >> $GITHUB_OUTPUT
+
+        echo "folder=/tmp/surrealdb-builder/${tag}" >> $GITHUB_OUTPUT
+
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+    - name: Setup artifact directory
+      shell: bash
+      run: mkdir -p ${{ steps.image.outputs.folder }}
+
+    - name: Restore cache artifact (if exists)
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      continue-on-error: true
+      with:
+        name: surrealdb-builder-${{ steps.image.outputs.tag }}-${{ inputs.platform }}
+        path: ${{ steps.image.outputs.folder }}
+
+    - name: Build & Push builder image
+      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+      id: build
+      with:
+        context: .
+        platforms: linux/${{ inputs.platform }}
+        file: ./docker/Dockerfile
+        target: builder
+        cache-from: type=local,src=${{ steps.image.outputs.folder }}
+        cache-to: type=local,dest=${{ steps.image.outputs.folder }}
+        push: false
+        outputs: type=docker,dest=${{ steps.image.outputs.folder }}/surrealdb-builder-${{ steps.image.outputs.tag }}-${{ inputs.platform }}
+        tags: surrealdb-builder:${{ steps.image.outputs.tag }}-${{ inputs.platform }}
+
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        targets: ${{ inputs.arch }}
+
+    - name: Output package versions
+      shell: bash
+      run: |
+        set -x
+        set +e
+        go version ; cargo version ; rustc --version ; cmake --version ; gcc --version ; g++ --version ; perl -v
+
+    - name: Determine ONNX architecture
+      id: onnx
+      shell: bash
+      run: |
+        if [[ "${{ inputs.platform }}" == "amd64" ]]; then
+          echo "arch=x64" >> $GITHUB_OUTPUT
+        else
+          echo "arch=aarch64" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build binary
+      shell: bash
+      env:
+        SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
+      run: |
+        set -x
+
+        tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
+        folder="/tmp/surrealdb-builder/${tag}"
+
+        # Build
+        extra_args=""
+        compile_profile="debug"
+        if [[ "${{ inputs.name }}" == "ci" && "${{ inputs.upload }}" == "false" ]]; then
+          extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+        else
+          extra_args="${extra_args} --features default"
+          if [[ ! -z "${{ inputs.extra-features }}" ]]; then
+            extra_args="${extra_args} --features ${{ inputs.extra-features }}"
+          fi
+        fi
+        if [[ "${{ inputs.release }}" == "true" ]]; then
+          extra_args="${extra_args} --release"
+          compile_profile="release"
+        fi
+
+        # Download libonnxruntime's static library and tell ORT crate to use it
+        tmpdir=$(mktemp -d)
+        curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz | \
+          tar -xz -C $tmpdir
+        export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+
+        docker load -i ${folder}/surrealdb-builder-${tag}-${{ inputs.platform }}
+
+        docker run \
+          --rm -t \
+          -v $(pwd):/surrealdb \
+          -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
+          -e RUSTFLAGS="${RUSTFLAGS}" \
+          -e ORT_STRATEGY=$ORT_STRATEGY \
+          -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
+          -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+          surrealdb-builder:${tag}-${{ inputs.platform }} \
+            --target ${{ inputs.arch }} --no-default-features ${extra_args} --locked
+
+        # Package
+        cp target/${{ inputs.arch }}/${compile_profile}/surreal surreal
+        tar -zcvf surreal-${{ inputs.name }}.linux-${{ inputs.platform }}.tgz surreal
+        echo $(shasum -a 256 surreal-${{ inputs.name }}.linux-${{ inputs.platform }}.tgz | cut -f1 -d' ') > surreal-${{ inputs.name }}.linux-${{ inputs.platform }}.txt
+
+        # Verify the binary is compatible with various Linux distributions
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/surreal:/surreal ubuntu:24.04 /surreal version
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/surreal:/surreal rockylinux/rockylinux:10 /surreal version
+        docker run --platform linux/${{ inputs.platform }} --rm -t -v ./target/${{ inputs.arch }}/${compile_profile}/surreal:/surreal debian:12 /surreal version
+
+    - name: Upload artifacts
+      if: ${{ inputs.upload == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: surreal-${{ inputs.name }}.linux-${{ inputs.platform }}
+        path: |
+          surreal
+          surreal-${{ inputs.name }}.linux-${{ inputs.platform }}.tgz
+          surreal-${{ inputs.name }}.linux-${{ inputs.platform }}.txt

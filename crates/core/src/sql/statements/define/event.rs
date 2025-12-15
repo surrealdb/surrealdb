@@ -1,8 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
-use crate::sql::Expr;
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -13,7 +13,7 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl ToSql for DefineEventStatement {
@@ -28,13 +28,13 @@ impl ToSql for DefineEventStatement {
 			f,
 			fmt,
 			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
-			Fmt::comma_separated(&self.then)
+			CoverStmts(&self.name),
+			CoverStmts(&self.target_table),
+			CoverStmts(&self.when),
+			Fmt::comma_separated(self.then.iter().map(CoverStmts))
 		);
-		if let Some(ref v) = self.comment {
-			write_sql!(f, fmt, " COMMENT {}", v)
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }
@@ -47,7 +47,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -61,7 +61,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

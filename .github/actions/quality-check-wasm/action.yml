@@ -1,0 +1,26 @@
+name: 'Check Wasm'
+description: 'Run cargo check for WebAssembly target'
+
+inputs:
+  save-cache:
+    description: 'Whether to save the cargo cache'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        targets: wasm32-unknown-unknown
+        save-cache: ${{ inputs.save-cache }}
+
+    - name: Install tools
+      uses: ./.github/actions/install-tools
+
+    - name: Check wasm
+      shell: bash
+      run: cargo make ci-check-wasm
+
+

@@ -1,3 +1,4 @@
+use core::f64;
 use std::collections::BTreeMap;
 
 use reblessive::Stk;
@@ -205,11 +206,21 @@ impl Parser<'_> {
 				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
 			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				Ok(KindLiteral::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Ok(KindLiteral::Float(f64::INFINITY))
+			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
 				let kind = self.next_token_value::<NumberToken>()?;
 				let kind = match kind {
 					NumberToken::Float(f) => KindLiteral::Float(f),
-					NumberToken::Integer(i) => KindLiteral::Integer(i),
+					NumberToken::Integer(i) => {
+						KindLiteral::Integer(i.into_int(self.recent_span())?)
+					}
 					NumberToken::Decimal(d) => KindLiteral::Decimal(d),
 				};
 				Ok(kind)
@@ -219,7 +230,9 @@ impl Parser<'_> {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
 				let v = match compound.value {
-					compound::Numeric::Integer(x) => KindLiteral::Integer(x),
+					compound::Numeric::Integer(x) => {
+						KindLiteral::Integer(x.into_int(compound.span)?)
+					}
 					compound::Numeric::Float(x) => KindLiteral::Float(x),
 					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
 					compound::Numeric::Duration(x) => {

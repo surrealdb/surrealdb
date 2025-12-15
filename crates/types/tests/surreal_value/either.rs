@@ -31,15 +31,15 @@ fn test_either3_multiple_types() {
 
 	// Test each variant
 	let val = Value::String("test".to_string());
-	let either = MultiType::from_value(val.clone()).unwrap();
+	let either = MultiType::from_value(val).unwrap();
 	assert!(matches!(either, Either3::A(_)));
 
 	let val = Value::Number(100.into());
-	let either = MultiType::from_value(val.clone()).unwrap();
+	let either = MultiType::from_value(val).unwrap();
 	assert!(matches!(either, Either3::B(_)));
 
 	let val = Value::Bool(false);
-	let either = MultiType::from_value(val.clone()).unwrap();
+	let either = MultiType::from_value(val).unwrap();
 	assert!(matches!(either, Either3::C(_)));
 }
 
@@ -103,7 +103,7 @@ fn test_either10_max_variants() {
 
 	// Test last variant (i8)
 	let val = Value::Number(5.into());
-	let either = MaxTypes::from_value(val.clone()).unwrap();
+	let either = MaxTypes::from_value(val).unwrap();
 	// Should match one of the numeric types
 	assert!(matches!(
 		either,
@@ -124,9 +124,9 @@ fn test_either_nested() {
 
 	// Test nested string
 	let val = Value::String("nested".to_string());
-	let inner = Inner::from_value(val.clone()).unwrap();
+	let inner = Inner::from_value(val).unwrap();
 	let inner_val = inner.into_value();
-	let outer = Outer::from_value(inner_val.clone()).unwrap();
+	let outer = Outer::from_value(inner_val).unwrap();
 	assert!(matches!(outer, Either2::A(_)));
 }
 

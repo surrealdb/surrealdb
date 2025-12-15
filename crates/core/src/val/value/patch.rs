@@ -15,7 +15,6 @@ impl Value {
 		for operation in Operation::value_to_operations(ops)
 			.map_err(Error::InvalidPatch)
 			.map_err(anyhow::Error::new)?
-			.into_iter()
 		{
 			match operation {
 				// Add a value
