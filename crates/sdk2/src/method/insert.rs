@@ -1,13 +1,13 @@
 use surrealdb_types::{SurrealValue, Variables};
 
-use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, IntoVersion, Subject, Timeout, Version}};
+use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, Return, ReturnBuilder, Subject, Timeout}};
 
 #[derive(Clone)]
 pub struct Insert {
 	pub(crate) subject: Subject,
 	pub(crate) content: Option<surrealdb_types::Value>,
 	pub(crate) timeout: Timeout,
-	pub(crate) version: Version,
+	pub(crate) r#return: Return,
 }
 
 impl Insert {
@@ -16,7 +16,7 @@ impl Insert {
 			subject: subject.into(),
 			content: None,
 			timeout: Timeout::default(),
-			version: Version::default(),
+			r#return: Return::Before,
 		}
 	}
 }
@@ -50,8 +50,13 @@ impl Request<Insert> {
 		self
 	}
 
-	pub fn version<T: IntoVersion>(mut self, version: T) -> Self {
-		version.build(&mut self.inner.version);
+	pub fn r#return<F>(mut self, r#return: F) -> Self
+	where
+		F: FnOnce(ReturnBuilder) -> Return,
+	{
+		let builder = ReturnBuilder::new();
+		let r#return = r#return(builder);
+		self.inner.r#return = r#return;
 		self
 	}
 }
@@ -83,7 +88,7 @@ impl QueryExecutable for Insert {
 			}
 		}
 
-		ctx.push(self.version);
+		ctx.push(self.r#return);
 		ctx.push(self.timeout);
 
 		ctx.output()

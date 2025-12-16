@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, SurrealValue, Table, ToSql, Variables};
 
-use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, IntoVersion, Subject, Timeout, Version}};
+use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, Return, Subject, Timeout}};
+use crate::sql::ReturnBuilder;
 
 #[derive(Clone)]
 pub struct Relate {
@@ -9,7 +10,7 @@ pub struct Relate {
 	pub(crate) to: Subject,
 	pub(crate) content: Option<surrealdb_types::Value>,
 	pub(crate) timeout: Timeout,
-	pub(crate) version: Version,
+	pub(crate) r#return: Return,
 }
 
 impl Relate {
@@ -20,7 +21,7 @@ impl Relate {
 			to: to.into(),
 			content: None,
 			timeout: Timeout::default(),
-			version: Version::default(),
+			r#return: Return::Before,
 		}
 	}
 }
@@ -45,8 +46,13 @@ impl Request<Relate> {
 		self
 	}
 
-	pub fn version<T: IntoVersion>(mut self, version: T) -> Self {
-		version.build(&mut self.inner.version);
+	pub fn r#return<F>(mut self, r#return: F) -> Self
+	where
+		F: FnOnce(ReturnBuilder) -> Return,
+	{
+		let builder = ReturnBuilder::new();
+		let r#return = r#return(builder);
+		self.inner.r#return = r#return;
 		self
 	}
 }
@@ -105,7 +111,7 @@ impl QueryExecutable for Relate {
 			ctx.push(var);
 		}
 
-		ctx.push(self.version);
+		ctx.push(self.r#return);
 		ctx.push(self.timeout);
 
 		ctx.output()

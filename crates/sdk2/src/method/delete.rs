@@ -1,13 +1,14 @@
 use surrealdb_types::Variables;
 
-use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, Condition, ConditionBuilder, IntoCondition, IntoTimeout, IntoVersion, Subject, Timeout, Version}};
+use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, Condition, ConditionBuilder, IntoCondition, IntoTimeout, Return, ReturnBuilder, Subject, Timeout}};
 
 #[derive(Clone)]
 pub struct Delete {
 	pub(crate) subject: Subject,
 	pub(crate) cond: Condition,
 	pub(crate) timeout: Timeout,
-	pub(crate) version: Version,
+	pub(crate) only: bool,
+	pub(crate) r#return: Return,
 }
 
 impl Delete {
@@ -16,13 +17,19 @@ impl Delete {
 			subject: subject.into(),
 			cond: Condition::default(),
 			timeout: Timeout::default(),
-			version: Version::default(),
+			only: false,
+			r#return: Return::Before,
 		}
 	}
 }
 
 /// Builder methods for Delete requests
 impl Request<Delete> {
+	pub fn only(mut self) -> Self {
+		self.inner.only = true;
+		self
+	}
+
 	/// Add a WHERE clause using a raw SQL expression string.
 	///
 	/// # Example
@@ -57,8 +64,13 @@ impl Request<Delete> {
 		self
 	}
 
-	pub fn version<T: IntoVersion>(mut self, version: T) -> Self {
-		version.build(&mut self.inner.version);
+	pub fn r#return<F>(mut self, r#return: F) -> Self
+	where
+		F: FnOnce(ReturnBuilder) -> Return,
+	{
+		let builder = ReturnBuilder::new();
+		let r#return = r#return(builder);
+		self.inner.r#return = r#return;
 		self
 	}
 }
@@ -67,28 +79,18 @@ impl QueryExecutable for Delete {
 	fn query(self) -> (String, Variables) {
 		let mut ctx = BuildSqlContext::default();
 
-		// Check if subject is a specific record ID or a table
-		match &self.subject {
-			crate::sql::Subject::RecordId(_) => {
-				// For specific record IDs, use "DELETE record_id"
-				ctx.push("DELETE ");
-				ctx.push(self.subject);
-			}
-			crate::sql::Subject::Table(_) => {
-				// For tables, use "DELETE FROM table"
-				ctx.push("DELETE FROM ");
-				ctx.push(self.subject);
-				
-				if !self.cond.is_empty() {
-					ctx.push(" WHERE ");
-					ctx.push(self.cond);
-				}
-			}
+		ctx.push("DELETE ");
+		if self.only {
+			ctx.push("ONLY ");
+		}
+		ctx.push(self.subject);
+
+		if !self.cond.is_empty() {
+			ctx.push(" WHERE ");
+			ctx.push(self.cond);
 		}
 
-		ctx.push(" RETURN BEFORE");
-
-		ctx.push(self.version);
+		ctx.push(self.r#return);
 		ctx.push(self.timeout);
 
 		ctx.output()

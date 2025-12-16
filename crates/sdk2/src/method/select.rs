@@ -12,6 +12,7 @@ pub struct Select {
 	pub(crate) fetch: Fields,
 	pub(crate) timeout: Timeout,
 	pub(crate) version: Version,
+	pub(crate) only: bool,
 }
 
 impl Select {
@@ -25,12 +26,18 @@ impl Select {
 			fetch: Fields::default(),
 			timeout: Timeout::default(),
 			version: Version::default(),
+			only: false,
 		}
 	}
 }
 
 /// Builder methods for Select requests
 impl Request<Select> {
+	pub fn only(mut self) -> Self {
+		self.inner.only = true;
+		self
+	}
+
 	pub fn field(mut self, field: impl Into<String>) -> Self {
 		self.inner.fields.0.push(field.into());
 		self
@@ -114,6 +121,9 @@ impl QueryExecutable for Select {
 		ctx.push("SELECT ");
 		ctx.push(self.fields);
 		ctx.push(" FROM ");
+		if self.only {
+			ctx.push("ONLY ");
+		}
 		ctx.push(self.subject);
 
 		if !self.cond.is_empty() {
@@ -121,7 +131,8 @@ impl QueryExecutable for Select {
 			ctx.push(self.cond);
 		}
 
-		if let Some(limit) = self.limit {
+		let limit = self.only.then(|| 1).or(self.limit);
+		if let Some(limit) = limit {
 			ctx.push(format!(" LIMIT {limit}"));
 		}
 

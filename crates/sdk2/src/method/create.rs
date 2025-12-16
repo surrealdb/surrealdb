@@ -1,13 +1,14 @@
 use surrealdb_types::{SurrealValue, Variables};
 
-use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, IntoVersion, Subject, Timeout, Version}};
+use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, IntoTimeout, Return, ReturnBuilder, Subject, Timeout}};
 
 #[derive(Clone)]
 pub struct Create {
 	pub(crate) subject: Subject,
 	pub(crate) content: Option<surrealdb_types::Value>,
 	pub(crate) timeout: Timeout,
-	pub(crate) version: Version,
+	pub(crate) only: bool,
+	pub(crate) r#return: Return,
 }
 
 impl Create {
@@ -16,13 +17,19 @@ impl Create {
 			subject: subject.into(),
 			content: None,
 			timeout: Timeout::default(),
-			version: Version::default(),
+			only: false,
+			r#return: Return::Before,
 		}
 	}
 }
 
 /// Builder methods for Create requests
 impl Request<Create> {
+	pub fn only(mut self) -> Self {
+		self.inner.only = true;
+		self
+	}
+
 	/// Sets the content/data for the record to create.
 	///
 	/// # Example
@@ -41,8 +48,13 @@ impl Request<Create> {
 		self
 	}
 
-	pub fn version<T: IntoVersion>(mut self, version: T) -> Self {
-		version.build(&mut self.inner.version);
+	pub fn r#return<F>(mut self, r#return: F) -> Self
+	where
+		F: FnOnce(ReturnBuilder) -> Return,
+	{
+		let builder = ReturnBuilder::new();
+		let r#return = r#return(builder);
+		self.inner.r#return = r#return;
 		self
 	}
 }
@@ -52,6 +64,9 @@ impl QueryExecutable for Create {
 		let mut ctx = BuildSqlContext::default();
 
 		ctx.push("CREATE ");
+		if self.only {
+			ctx.push("ONLY ");
+		}
 		ctx.push(self.subject);
 
 		if let Some(content) = self.content {
@@ -60,7 +75,7 @@ impl QueryExecutable for Create {
 			ctx.push(var);
 		}
 
-		ctx.push(self.version);
+		ctx.push(self.r#return);
 		ctx.push(self.timeout);
 
 		ctx.output()
