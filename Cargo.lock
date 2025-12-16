@@ -6609,9 +6609,7 @@ dependencies = [
  "chrono",
  "clap",
  "surrealdb",
- "surrealdb-types",
  "tokio",
- "tracing",
  "tracing-perfetto",
  "tracing-subscriber",
 ]

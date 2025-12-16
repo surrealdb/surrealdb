@@ -431,6 +431,8 @@ pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
+	db.query(format!("DEFINE TABLE bar")).await.unwrap().check().unwrap();
+
 	let mut stream =
 		db.query("LIVE SELECT field FROM bar").await.unwrap().stream::<Value>(0).unwrap();
 

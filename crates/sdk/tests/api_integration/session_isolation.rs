@@ -31,6 +31,14 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 	let ns1 = Ulid::new().to_string();
 	let db1_name = Ulid::new().to_string();
 	db.use_ns(&ns1).use_db(&db1_name).await.unwrap();
+	// Explicitly define namespace and database
+	db.query(format!(
+		"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1_name}`"
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
 
 	// Create a record in the first database
 	let table = format!("t{}", Ulid::new());
@@ -43,6 +51,12 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 	let ns2 = Ulid::new().to_string();
 	let db2_name = Ulid::new().to_string();
 	db2.use_ns(&ns2).use_db(&db2_name).await.unwrap();
+	// Explicitly define namespace and database
+	db2.query(format!("DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2_name}`; DEFINE TABLE `{table}`"))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 
 	// Query on cloned client should return nothing (different database)
 	let records: Vec<TestRecord> =
@@ -68,17 +82,34 @@ pub async fn multiple_namespaces_databases(new_db: impl CreateDb) {
 	let ns1 = Ulid::new().to_string();
 	let db1 = Ulid::new().to_string();
 	client1.use_ns(&ns1).use_db(&db1).await.unwrap();
+	client1
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 
 	// Client 2: namespace2/database2
 	let client2 = db.clone();
 	let ns2 = Ulid::new().to_string();
 	let db2 = Ulid::new().to_string();
 	client2.use_ns(&ns2).use_db(&db2).await.unwrap();
+	client2
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 
 	// Client 3: namespace1/database2 (same ns as client1, different db)
 	let client3 = db.clone();
 	let db3 = Ulid::new().to_string();
 	client3.use_ns(&ns1).use_db(&db3).await.unwrap();
+	client3.query(format!("DEFINE DATABASE IF NOT EXISTS `{db3}`")).await.unwrap().check().unwrap();
 
 	let table = format!("t{}", Ulid::new());
 
@@ -117,6 +148,14 @@ pub async fn session_variables_isolated(new_db: impl CreateDb) {
 	// Set up two clients with same namespace/database
 	let client1 = db.clone();
 	client1.use_ns(&ns).use_db(&db_name).await.unwrap();
+	client1
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 
 	let client2 = db.clone();
 	client2.use_ns(&ns).use_db(&db_name).await.unwrap();
@@ -187,14 +226,17 @@ pub async fn session_transactions_isolated(new_db: impl CreateDb) {
 	let ns = Ulid::new().to_string();
 	let db_name = Ulid::new().to_string();
 
+	let table = format!("t{}", Ulid::new());
+
+	db.use_ns(&ns).use_db(&db_name).await.unwrap();
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap().check().unwrap();
+
 	// Set up two clients with same namespace/database
 	let client1 = db.clone();
 	client1.use_ns(&ns).use_db(&db_name).await.unwrap();
 
 	let client2 = db.clone();
 	client2.use_ns(&ns).use_db(&db_name).await.unwrap();
-
-	let table = format!("t{}", Ulid::new());
 
 	// Start transaction on client1 (consumes client1)
 	let tx1 = client1.begin().await.unwrap();
@@ -252,6 +294,8 @@ pub async fn session_authentication_isolated(new_db: impl CreateDb) {
 	db.use_ns(&ns).use_db(&db_name).await.unwrap();
 	db.query(format!(
 		"
+		DEFINE NAMESPACE IF NOT EXISTS `{ns}`;
+		DEFINE DATABASE IF NOT EXISTS `{db_name}`;
 		DEFINE TABLE {table};
         DEFINE USER ns_user ON NAMESPACE PASSWORD 'ns_pass' ROLES OWNER;
         DEFINE USER db_user ON DATABASE PASSWORD 'db_pass' ROLES OWNER;
@@ -336,12 +380,28 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 	let ns1 = Ulid::new().to_string();
 	let db1 = Ulid::new().to_string();
 	client1.use_ns(&ns1).use_db(&db1).await.unwrap();
+	client1
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 	client1.set("multiplier", 10).await.unwrap();
 
 	let client2 = db.clone();
 	let ns2 = Ulid::new().to_string();
 	let db2 = Ulid::new().to_string();
 	client2.use_ns(&ns2).use_db(&db2).await.unwrap();
+	client2
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 	client2.set("multiplier", 20).await.unwrap();
 
 	let client3 = db.clone();
@@ -442,6 +502,14 @@ pub async fn query_variables_with_session_vars(new_db: impl CreateDb) {
 
 	let client1 = db.clone();
 	client1.use_ns(&ns).use_db(&db_name).await.unwrap();
+	client1
+		.query(format!(
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
 	client1.set("session_value", 100).await.unwrap();
 
 	let client2 = db.clone();
@@ -501,6 +569,14 @@ pub async fn shared_connection_isolated_sessions(new_db: impl CreateDb) {
 			let table = format!("t{}", Ulid::new());
 
 			client.use_ns(&ns).use_db(&db_name).await.unwrap();
+			client
+				.query(format!(
+					"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+				))
+				.await
+				.unwrap()
+				.check()
+				.unwrap();
 			client.set("client_id", i as i32).await.unwrap();
 
 			// Create records
