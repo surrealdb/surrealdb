@@ -215,6 +215,50 @@ macro_rules! impl_queryable {
 			) -> crate::method::Request<crate::method::Select> {
 				crate::api::Queryable::select(self, subject)
 			}
+
+			pub fn create(
+				&self,
+				subject: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Create> {
+				crate::api::Queryable::create(self, subject)
+			}
+
+			pub fn delete(
+				&self,
+				subject: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Delete> {
+				crate::api::Queryable::delete(self, subject)
+			}
+
+			pub fn insert(
+				&self,
+				subject: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Insert> {
+				crate::api::Queryable::insert(self, subject)
+			}
+
+			pub fn update(
+				&self,
+				subject: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Update> {
+				crate::api::Queryable::update(self, subject)
+			}
+
+			pub fn upsert(
+				&self,
+				subject: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Upsert> {
+				crate::api::Queryable::upsert(self, subject)
+			}
+
+			pub fn relate(
+				&self,
+				from: impl Into<crate::sql::Subject>,
+				through: impl Into<surrealdb_types::Table>,
+				to: impl Into<crate::sql::Subject>,
+			) -> crate::method::Request<crate::method::Relate> {
+				crate::api::Queryable::relate(self, from, through, to)
+			}
 		}
 	};
 }

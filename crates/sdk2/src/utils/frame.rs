@@ -154,7 +154,10 @@ impl<S: Stream<Item = QueryChunk>> Stream for QueryStream<S> {
                 // Return the first frame from the buffer
                 Poll::Ready(this.buffer.pop_front())
             }
-            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(None) => {
+                // Check buffer before ending - there might be frames left
+                Poll::Ready(this.buffer.pop_front())
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -212,7 +215,10 @@ impl<S: Stream<Item = QueryChunk>, T: SurrealValue> Stream for ValueStream<S, T>
                     }
                     // Skip chunks for other query indices, continue polling
                 }
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(None) => {
+                    // Check buffer before ending - there might be frames left
+                    return Poll::Ready(this.buffer.pop_front());
+                }
                 Poll::Pending => return Poll::Pending,
             }
         }

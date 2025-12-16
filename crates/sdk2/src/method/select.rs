@@ -1,16 +1,6 @@
-use std::pin::Pin;
+use surrealdb_types::Variables;
 
-use anyhow::Result;
-use futures::Stream;
-use surrealdb_types::{QueryChunk, SurrealValue, Value, Variables};
-
-use crate::method::{
-	Executable,
-	Query,
-	Request,
-};
-use crate::sql::{BuildSqlContext, Condition, ConditionBuilder, Fields, IntoCondition, IntoFields, IntoTimeout, IntoVersion, Subject, Timeout, Version};
-use crate::utils::{QueryResult, ValueStream};
+use crate::{method::{QueryExecutable, Request}, sql::{BuildSqlContext, Condition, ConditionBuilder, Fields, IntoCondition, IntoFields, IntoTimeout, IntoVersion, Subject, Timeout, Version}};
 
 #[derive(Clone)]
 pub struct Select {
@@ -36,38 +26,6 @@ impl Select {
 			timeout: Timeout::default(),
 			version: Version::default(),
 		}
-	}
-
-	pub fn build(self) -> (String, Variables) {
-		let mut ctx = BuildSqlContext::default();
-
-		ctx.push("SELECT ");
-		ctx.push(self.fields);
-		ctx.push(" FROM ");
-		ctx.push(self.subject);
-
-		if !self.cond.is_empty() {
-			ctx.push(" WHERE ");
-			ctx.push(self.cond);
-		}
-
-		if let Some(limit) = self.limit {
-			ctx.push(format!(" LIMIT {limit}"));
-		}
-
-		if let Some(start) = self.start {
-			ctx.push(format!(" START {start}"));
-		}
-
-		if !self.fetch.is_empty() {
-			ctx.push(" FETCH ");
-			ctx.push(self.fetch);
-		}
-
-		ctx.push(self.version);
-		ctx.push(self.timeout);
-
-		ctx.output()
 	}
 }
 
@@ -149,70 +107,36 @@ impl Request<Select> {
 	}
 }
 
-// Execution methods
-impl Request<Select> {
+impl QueryExecutable for Select {
+	fn query(self) -> (String, Variables) {
+		let mut ctx = BuildSqlContext::default();
 
-	/// Execute the select and return a typed [`ValueStream`].
-	///
-	/// # Type Parameters
-	/// - `T`: The target type to convert values to. Defaults to [`Value`].
-	///
-	/// # Example
-	/// ```ignore
-	/// use futures::StreamExt;
-	///
-	/// let mut stream = db.select("user").stream::<User>().await?;
-	/// while let Some(frame) = stream.next().await {
-	///     if let Some(user) = frame.into_value() {
-	///         println!("{user:?}");
-	///     }
-	/// }
-	/// ```
-	pub async fn stream<T: SurrealValue>(
-		self,
-	) -> Result<ValueStream<Pin<Box<dyn Stream<Item = QueryChunk> + Send>>, T>> {
-		let (inner, ctx) = self.split();
-		let (sql, vars) = inner.build();
-		let stream = ctx.into_request(Query::new(sql)).bind(vars).stream().await?;
-		Ok(stream.into_value_stream::<T>(0))
-	}
+		ctx.push("SELECT ");
+		ctx.push(self.fields);
+		ctx.push(" FROM ");
+		ctx.push(self.subject);
 
-	/// Execute the select and collect all results into a typed [`QueryResult`].
-	///
-	/// # Type Parameters
-	/// - `T`: The target type to convert values to. Use type inference or specify explicitly.
-	///
-	/// # Example
-	/// ```ignore
-	/// // Type inference (recommended)
-	/// let result: QueryResult<Vec<User>> = db.select("user").collect().await?;
-	/// let users: Vec<User> = result.take()?;
-	///
-	/// // Explicit type parameter
-	/// let result = db.select("user").collect::<Vec<User>>().await?;
-	///
-	/// // Default to Value
-	/// let result = db.select("user").collect::<Value>().await?;
-	///
-	/// // Access stats
-	/// let stats = result.stats();
-	/// ```
-	pub async fn collect<T: SurrealValue>(self) -> Result<QueryResult<T>> {
-		let (inner, ctx) = self.split();
-		let (sql, vars) = inner.build();
-		let results = ctx.into_request(Query::new(sql)).bind(vars).collect().await?;
-		let result = results
-			.into_iter()
-			.next()
-			.ok_or_else(|| anyhow::anyhow!("No result returned from select query"))?;
-		result.into_typed()
-	}
-}
+		if !self.cond.is_empty() {
+			ctx.push(" WHERE ");
+			ctx.push(self.cond);
+		}
 
-impl Executable for Select {
-	type Output = QueryResult;
+		if let Some(limit) = self.limit {
+			ctx.push(format!(" LIMIT {limit}"));
+		}
 
-	fn execute(req: Request<Self>) -> impl Future<Output = Result<Self::Output>> + Send {
-		req.collect::<Value>()
+		if let Some(start) = self.start {
+			ctx.push(format!(" START {start}"));
+		}
+
+		if !self.fetch.is_empty() {
+			ctx.push(" FETCH ");
+			ctx.push(self.fetch);
+		}
+
+		ctx.push(self.version);
+		ctx.push(self.timeout);
+
+		ctx.output()
 	}
 }

@@ -2,26 +2,13 @@
 
 use sdk2::Surreal;
 use surrealdb_core::embedded::EmbeddedSurrealEngine;
-use surrealdb_types::{RecordId, SurrealValue, Value};
+use surrealdb_types::{RecordId, SurrealValue};
 
 async fn setup() -> Surreal {
 	let surreal = Surreal::new().attach_engine::<EmbeddedSurrealEngine>();
 	surreal.connect("memory://").await.unwrap();
 	surreal.use_ns("test").use_db("test").await.unwrap();
 	surreal
-}
-
-// Helper to extract users from result (handles both single object and array)
-fn extract_users(value: Value) -> Vec<User> {
-	match value {
-		Value::Array(arr) => {
-			arr.iter().map(|v| v.clone().into_t::<User>().unwrap()).collect()
-		}
-		Value::Object(_) => {
-			vec![value.into_t::<User>().unwrap()]
-		}
-		_ => panic!("Unexpected value type: {:?}", value),
-	}
 }
 
 #[derive(Debug, Clone, PartialEq, SurrealValue)]
@@ -41,9 +28,7 @@ async fn test_select_cond_basic() {
 	db.query("CREATE user:3 SET name = 'Charlie', age = 20").await.unwrap();
 
 	// Test cond with simple condition
-	let result = db.select("user").cond("age > 25").collect::<Value>().await.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
+	let users = db.select("user").cond("age > 25").collect::<Vec<User>>().await.unwrap();
 	
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Bob");
@@ -59,14 +44,12 @@ async fn test_select_cond_with_literal_values() {
 
 	// Test cond with embedded values
 	let min_age = 25;
-	let result = db
+	let users = db
 		.select("user")
 		.cond(&format!("age > {}", min_age))
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Bob");
@@ -81,14 +64,12 @@ async fn test_select_where_simple() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30").await.unwrap();
 
 	// Test where with simple comparison
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").gt(25))
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Bob");
@@ -103,14 +84,12 @@ async fn test_select_where_eq() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30").await.unwrap();
 
 	// Test where with equality
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("name").eq("Alice"))
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Alice");
@@ -135,25 +114,14 @@ async fn test_select_where_and() {
 	db.query("CREATE user:3 SET name = 'Charlie', age = 25, active = true").await.unwrap();
 
 	// Test where with AND
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.field("age").eq(25).and().field("active").eq(true)
 		})
-		.collect::<Value>()
+		.collect::<Vec<UserWithActive>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	
-	let users = match value {
-		Value::Array(arr) => {
-			arr.iter().map(|v| v.clone().into_t::<UserWithActive>().unwrap()).collect::<Vec<_>>()
-		}
-		Value::Object(_) => {
-			vec![value.into_t::<UserWithActive>().unwrap()]
-		}
-		_ => panic!("Unexpected value type"),
-	};
 
 	// Should get Alice and Charlie (both age = 25 AND active = true)
 	// But the query might be returning only 1 due to SQL generation issue
@@ -172,16 +140,14 @@ async fn test_select_where_or() {
 	db.query("CREATE user:3 SET name = 'Charlie', age = 20").await.unwrap();
 
 	// Test where with OR
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.field("name").eq("Alice").or().field("name").eq("Bob")
 		})
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 2);
 	assert!(users.iter().any(|u| u.name == "Alice"));
@@ -204,78 +170,48 @@ async fn test_select_where_comparison_operators() {
 	}
 
 	// Test gt
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").gt(20))
-		.collect::<Value>()
+		.collect::<Vec<UserAge>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users: Vec<UserAge> = match value {
-		Value::Array(arr) => arr.iter().map(|v| v.clone().into_t().unwrap()).collect(),
-		Value::Object(_) => vec![value.into_t().unwrap()],
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 2);
 
 	// Test gte
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").gte(25))
-		.collect::<Value>()
+		.collect::<Vec<UserAge>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users: Vec<UserAge> = match value {
-		Value::Array(arr) => arr.iter().map(|v| v.clone().into_t().unwrap()).collect(),
-		Value::Object(_) => vec![value.into_t().unwrap()],
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 2);
 
 	// Test lt
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").lt(30))
-		.collect::<Value>()
+		.collect::<Vec<UserAge>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users: Vec<UserAge> = match value {
-		Value::Array(arr) => arr.iter().map(|v| v.clone().into_t().unwrap()).collect(),
-		Value::Object(_) => vec![value.into_t().unwrap()],
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 2);
 
 	// Test lte
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").lte(25))
-		.collect::<Value>()
+		.collect::<Vec<UserAge>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users: Vec<UserAge> = match value {
-		Value::Array(arr) => arr.iter().map(|v| v.clone().into_t().unwrap()).collect(),
-		Value::Object(_) => vec![value.into_t().unwrap()],
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 2);
 
 	// Test ne
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").ne(25))
-		.collect::<Value>()
+		.collect::<Vec<UserAge>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users: Vec<UserAge> = match value {
-		Value::Array(arr) => arr.iter().map(|v| v.clone().into_t().unwrap()).collect(),
-		Value::Object(_) => vec![value.into_t().unwrap()],
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 2);
 }
 
@@ -289,16 +225,14 @@ async fn test_select_where_with_literal_values() {
 	// Test where with literal values
 	let min_age = 20;
 	let target_name = "Bob";
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.field("age").gt(min_age).and().field("name").eq(target_name)
 		})
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Bob");
@@ -313,14 +247,12 @@ async fn test_select_fetch_single() {
 	db.query("CREATE user:1 SET name = 'Alice', profile = profile:1").await.unwrap();
 
 	// Test fetch with single field
-	let result = db
+	let users = db
 		.select("user")
 		.fetch(["profile"])
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	// The profile should be fetched and included in the result
@@ -335,14 +267,12 @@ async fn test_select_fetch_multiple() {
 	db.query("CREATE user:1 SET name = 'Alice', profile = profile:1, settings = settings:1").await.unwrap();
 
 	// Test fetch with multiple fields
-	let result = db
+	let users = db
 		.select("user")
 		.fetch(["profile", "settings"])
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 }
@@ -356,14 +286,12 @@ async fn test_select_fetch_with_vec() {
 
 	// Test fetch with Vec
 	let fields = vec!["profile"];
-	let result = db
+	let users = db
 		.select("user")
 		.fetch(fields)
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 }
@@ -377,15 +305,13 @@ async fn test_select_cond_and_fetch() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30").await.unwrap();
 
 	// Test combining cond and fetch
-	let result = db
+	let users = db
 		.select("user")
 		.cond("age > 20")
 		.fetch(["profile"])
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 2);
 }
@@ -399,15 +325,13 @@ async fn test_select_where_and_fetch() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30").await.unwrap();
 
 	// Test combining where and fetch
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("age").gt(20))
 		.fetch(["profile"])
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	// Should get both users (age > 20), even if one doesn't have profile
 	assert!(users.len() >= 1);
@@ -431,7 +355,7 @@ async fn test_select_where_complex_condition() {
 	db.query("CREATE user:3 SET name = 'Charlie', age = 20, active = true").await.unwrap();
 
 	// Test complex condition with multiple AND/OR
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.field("age").gt(20)
@@ -440,20 +364,9 @@ async fn test_select_where_complex_condition() {
 				.or()
 				.field("name").eq("Bob")
 		})
-		.collect::<Value>()
+		.collect::<Vec<UserWithActive>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	
-	let users = match value {
-		Value::Array(arr) => {
-			arr.iter().map(|v| v.clone().into_t::<UserWithActive>().unwrap()).collect::<Vec<_>>()
-		}
-		Value::Object(_) => {
-			vec![value.into_t::<UserWithActive>().unwrap()]
-		}
-		_ => panic!("Unexpected value type"),
-	};
 
 	// Should get Alice (age > 20 AND active) or Bob (name = 'Bob')
 	assert_eq!(users.len(), 2);
@@ -477,43 +390,23 @@ async fn test_select_where_with_different_value_types() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30, active = false, score = 87.0").await.unwrap();
 
 	// Test with boolean
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("active").eq(true))
-		.collect::<Value>()
+		.collect::<Vec<UserWithScore>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = match value {
-		Value::Array(arr) => {
-			arr.iter().map(|v| v.clone().into_t::<UserWithScore>().unwrap()).collect::<Vec<_>>()
-		}
-		Value::Object(_) => {
-			vec![value.into_t::<UserWithScore>().unwrap()]
-		}
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Alice");
 	assert_eq!(users[0].age, Some(25));
 
 	// Test with float
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| w.field("score").gt(90.0))
-		.collect::<Value>()
+		.collect::<Vec<UserWithScore>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = match value {
-		Value::Array(arr) => {
-			arr.iter().map(|v| v.clone().into_t::<UserWithScore>().unwrap()).collect::<Vec<_>>()
-		}
-		Value::Object(_) => {
-			vec![value.into_t::<UserWithScore>().unwrap()]
-		}
-		_ => panic!("Unexpected value type"),
-	};
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Alice");
 	assert_eq!(users[0].age, Some(25));
@@ -528,18 +421,16 @@ async fn test_select_where_raw() {
 	db.query("CREATE user:3 SET name = 'admin', age = 20").await.unwrap();
 
 	// Test where with raw SQL
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.field("age").gt(20)
 				.and()
 				.raw("name != 'admin'")
 		})
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	// Should get Alice (age 25 > 20, name != 'admin') and Bob (age 30 > 20, name != 'admin')
 	// But not admin (age 20 is not > 20)
@@ -557,16 +448,14 @@ async fn test_select_where_raw_only() {
 	db.query("CREATE user:2 SET name = 'Bob', age = 30").await.unwrap();
 
 	// Test where with only raw SQL
-	let result = db
+	let users = db
 		.select("user")
 		.r#where(|w| {
 			w.raw("age > 25 AND name = 'Bob'")
 		})
-		.collect::<Value>()
+		.collect::<Vec<User>>()
 		.await
 		.unwrap();
-	let value: Value = result.take().unwrap();
-	let users = extract_users(value);
 
 	assert_eq!(users.len(), 1);
 	assert_eq!(users[0].name, "Bob");
