@@ -8,3 +8,5 @@ pub mod auth;
 pub(crate) mod mac;
 
 pub use api::Surreal;
+
+pub mod sql;

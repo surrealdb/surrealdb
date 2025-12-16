@@ -211,7 +211,7 @@ macro_rules! impl_queryable {
 
 			pub fn select(
 				&self,
-				subject: impl Into<crate::method::SelectSubject>,
+				subject: impl Into<crate::sql::Subject>,
 			) -> crate::method::Request<crate::method::Select> {
 				crate::api::Queryable::select(self, subject)
 			}

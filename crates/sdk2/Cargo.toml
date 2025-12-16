@@ -19,6 +19,7 @@ path = "src/lib.rs"
 anyhow.workspace = true
 arc-swap = "1.7.1"
 bytes.workspace = true
+chrono.workspace = true
 dashmap.workspace = true
 futures.workspace = true
 parking_lot.workspace = true

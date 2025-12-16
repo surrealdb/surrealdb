@@ -350,14 +350,7 @@ impl SurrealBridge for EmbeddedSurrealEngine {
 
         let chunks = res.into_iter().enumerate().map(|(idx, query_result)| {
             let (result, error) = match query_result.result {
-                Ok(value) => {
-                    // Value from QueryResult is already PublicValue (surrealdb_types::Value)
-                    let public_values = match value {
-                        crate::types::PublicValue::Array(arr) => arr.into_vec(),
-                        v => vec![v],
-                    };
-                    (Some(public_values), None)
-                },
+                Ok(value) => (Some(vec![value]), None),
                 Err(e) => (None, Some(e.to_string())),
             };
 

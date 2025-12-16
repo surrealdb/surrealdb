@@ -5,8 +5,6 @@ use std::{
 };
 use uuid::Uuid;
 
-mod condition;
-
 mod query;
 pub use query::*;
 
@@ -52,6 +50,51 @@ impl<R> Request<R> {
 			tx_id: ctx.tx_id(),
 			inner,
 		}
+	}
+
+	/// Extract the inner value and return both the inner and a new Request builder
+	/// that can create a Request with a different inner type using the same context.
+	pub(crate) fn split(self) -> (R, RequestContext) {
+		(
+			self.inner,
+			RequestContext {
+				controller: self.controller,
+				session_id: self.session_id,
+				tx_id: self.tx_id,
+			},
+		)
+	}
+}
+
+/// Context extracted from a Request, used to create new Requests with the same context.
+pub(crate) struct RequestContext {
+	pub(crate) controller: Controller,
+	pub(crate) session_id: Option<Uuid>,
+	pub(crate) tx_id: Option<Uuid>,
+}
+
+impl RequestContext {
+	pub(crate) fn into_request<R>(self, inner: R) -> Request<R> {
+		Request {
+			controller: self.controller,
+			session_id: self.session_id,
+			tx_id: self.tx_id,
+			inner,
+		}
+	}
+}
+
+impl SurrealContext for RequestContext {
+	fn controller(&self) -> Controller {
+		self.controller.clone()
+	}
+
+	fn session_id(&self) -> Option<Uuid> {
+		self.session_id
+	}
+
+	fn tx_id(&self) -> Option<Uuid> {
+		self.tx_id
 	}
 }
 
