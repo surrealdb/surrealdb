@@ -203,6 +203,7 @@ pub(crate) enum ExtraFeatures {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum SessionId {
 	Initial(Uuid),
 	Clone {
@@ -215,6 +216,7 @@ enum SessionId {
 #[derive(Debug, Clone)]
 struct SessionClone {
 	sender: Sender<SessionId>,
+	#[allow(dead_code)]
 	receiver: Receiver<SessionId>,
 }
 
