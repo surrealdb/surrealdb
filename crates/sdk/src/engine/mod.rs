@@ -49,6 +49,7 @@ impl Stream for IntervalStream {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum SessionError {
 	NotFound(Uuid),
 	Remote(String),
