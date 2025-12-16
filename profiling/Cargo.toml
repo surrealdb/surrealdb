@@ -13,6 +13,7 @@ license-file.workspace = true
 
 [dependencies]
 surrealdb = { workspace = true, features = ["kv-mem"] }
+surrealdb-types.workspace = true
 
 anyhow.workspace = true
 clap = { version = "4.5.53", features = ["derive"] }
@@ -23,3 +24,6 @@ chrono.workspace = true
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+ignored = ["surrealdb-types"]

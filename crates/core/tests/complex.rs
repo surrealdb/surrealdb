@@ -230,7 +230,9 @@ async fn run_queries(
 + 'static {
 	let dbs = new_ds().await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute("DEFINE NS test; DEFINE DB test;", &ses, None).await.unwrap();
+	dbs.execute("DEFINE NS test; DEFINE DB test;", &ses, None)
+		.await
+		.expect("Failed to execute query");
 	dbs.execute(sql, &ses, None)
 		.await
 		.expect("Failed to execute query")
