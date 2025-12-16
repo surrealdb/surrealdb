@@ -13,7 +13,10 @@ use crate::iam::Action;
 use crate::val::Value;
 
 impl Document {
-	#[instrument(level = "trace", name = "Document::select", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::select", skip_all)
+	)]
 	pub(super) async fn select(
 		&mut self,
 		stk: &mut Stk,
@@ -31,7 +34,10 @@ impl Document {
 	}
 }
 
-#[instrument(level = "trace", name = "Document::check_select_permissions_quick", skip_all)]
+#[cfg_attr(
+	feature = "trace-doc-ops",
+	instrument(level = "trace", name = "Document::check_select_permissions_quick", skip_all)
+)]
 fn check_select_permissions_quick(
 	opt: &Options,
 	table: Option<&Arc<TableDefinition>>,
@@ -58,7 +64,10 @@ fn check_select_permissions_quick(
 /// clauses and evaluating the expression. This
 /// function checks and evaluates `FULL`, `NONE`,
 /// and specific permissions clauses on the table.
-#[instrument(level = "trace", name = "Document::check_select_permissions_table", skip_all)]
+#[cfg_attr(
+	feature = "trace-doc-ops",
+	instrument(level = "trace", name = "Document::check_select_permissions_table", skip_all)
+)]
 pub(super) async fn check_select_permissions_table(
 	stk: &mut Stk,
 	ctx: &FrozenContext,

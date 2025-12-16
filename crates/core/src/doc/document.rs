@@ -397,7 +397,10 @@ impl Document {
 	/// based on the permissions, then this function will
 	/// not have any performance impact by cloning the
 	/// full and reduced documents.
-	#[instrument(level = "trace", name = "Document::reduced", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::reduced", skip_all)
+	)]
 	pub(crate) async fn reduced(
 		&mut self,
 		stk: &mut Stk,
@@ -445,7 +448,10 @@ impl Document {
 		Ok(true)
 	}
 
-	#[instrument(level = "trace", name = "Document::compute_reduced_target", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::compute_reduced_target", skip_all)
+	)]
 	pub(crate) async fn compute_reduced_target(
 		&self,
 		stk: &mut Stk,
@@ -509,7 +515,10 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	#[instrument(level = "trace", name = "Document::db", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::db", skip_all)
+	)]
 	pub(super) async fn db(
 		&self,
 		ctx: &FrozenContext,
@@ -541,13 +550,19 @@ impl Document {
 	}
 
 	/// Get the table for this document
-	#[instrument(level = "trace", name = "Document::tb", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::tb", skip_all)
+	)]
 	pub(super) async fn tb(&self) -> Result<&Arc<TableDefinition>> {
 		self.doc_ctx.tb()
 	}
 
 	/// Get the foreign tables for this document
-	#[instrument(level = "trace", name = "Document::ft", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ft", skip_all)
+	)]
 	pub(super) async fn ft(
 		&self,
 		ctx: &FrozenContext,
@@ -579,7 +594,10 @@ impl Document {
 	}
 
 	/// Get the events for this document
-	#[instrument(level = "trace", name = "Document::ev", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ev", skip_all)
+	)]
 	pub(super) async fn ev(
 		&self,
 		ctx: &FrozenContext,
@@ -612,7 +630,10 @@ impl Document {
 	}
 
 	/// Get the fields for this document
-	#[instrument(level = "trace", name = "Document::fd", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::fd", skip_all)
+	)]
 	pub(super) async fn fd(
 		&self,
 		_ctx: &FrozenContext,
@@ -622,7 +643,10 @@ impl Document {
 	}
 
 	/// Get the indexes for this document
-	#[instrument(level = "trace", name = "Document::ix", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ix", skip_all)
+	)]
 	pub(super) async fn ix(
 		&self,
 		ctx: &FrozenContext,
@@ -654,7 +678,10 @@ impl Document {
 	}
 
 	// Get the lives for this document
-	#[instrument(level = "trace", name = "Document::lv", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::lv", skip_all)
+	)]
 	pub(super) async fn lv(
 		&self,
 		ctx: &FrozenContext,

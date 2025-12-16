@@ -89,7 +89,10 @@ impl Document {
 	/// If the user specifies a record directly
 	/// using a Record ID, and that record does not
 	/// exist, then this function will exit early.
-	#[instrument(level = "trace", name = "Document::check_record_exists", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_record_exists", skip_all)
+	)]
 	pub(super) async fn check_record_exists(&self) -> Result<(), IgnoreError> {
 		// Check if this record exists
 		if self.id.is_some() && self.current.doc.as_ref().is_none() {
@@ -107,7 +110,10 @@ impl Document {
 	/// match the in and out values specified in the
 	/// statement, or present in any record which
 	/// is being updated.
-	#[instrument(level = "trace", name = "Document::check_data_fields", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_data_fields", skip_all)
+	)]
 	pub(super) async fn check_data_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -191,7 +197,10 @@ impl Document {
 	/// the document. This ensures that records from
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
-	#[instrument(level = "trace", name = "Document::check_where_condition", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_where_condition", skip_all)
+	)]
 	pub(super) async fn check_where_condition(
 		&mut self,
 		stk: &mut Stk,
@@ -236,7 +245,10 @@ impl Document {
 	/// the document. This ensures that records from
 	/// a table, or from an index can be filtered out
 	/// before being included within the query output.
-	#[instrument(level = "trace", name = "Document::check_select_where_condition", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_select_where_condition", skip_all)
+	)]
 	pub(super) async fn check_select_where_condition(
 		&mut self,
 		stk: &mut Stk,
@@ -284,7 +296,10 @@ impl Document {
 	/// This function is used when outputting a record,
 	/// ensuring that a user has the permission to view
 	/// the record after it has been updated or modified.
-	#[instrument(level = "trace", name = "Document::check_output_permissions", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_output_permissions", skip_all)
+	)]
 	pub(super) async fn check_output_permissions(
 		&self,
 		stk: &mut Stk,
@@ -336,7 +351,10 @@ impl Document {
 	/// permissions are `NONE`. This function does not
 	/// check any custom advanced table permissions,
 	/// which should be checked at a later stage.
-	#[instrument(level = "trace", name = "Document::check_permissions_quick", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_permissions_quick", skip_all)
+	)]
 	pub(super) async fn check_permissions_quick(
 		&self,
 		opt: &Options,
@@ -367,7 +385,10 @@ impl Document {
 	/// clauses and evaluating the expression. This
 	/// function checks and evaluates `FULL`, `NONE`,
 	/// and specific permissions clauses on the table.
-	#[instrument(level = "trace", name = "Document::check_permissions_table", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::check_permissions_table", skip_all)
+	)]
 	pub(super) async fn check_permissions_table(
 		&self,
 		stk: &mut Stk,

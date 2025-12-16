@@ -606,7 +606,7 @@ pub(super) trait Collector {
 		Cow::Borrowed(ctx)
 	}
 
-	#[instrument(level = "trace", name = "Collector::collect_iterable", skip(self, ctx, opt))]
+	#[instrument(level = "trace", name = "Collector::collect_iterable", skip_all)]
 	async fn collect_iterable(
 		&mut self,
 		ctx: &FrozenContext,

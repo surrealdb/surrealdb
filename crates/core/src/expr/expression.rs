@@ -322,7 +322,10 @@ impl Expr {
 	}
 
 	/// Process this type returning a computed simple Value
-	#[instrument(level = "trace", name = "Expr::compute", skip_all)]
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Expr::compute", skip_all)
+	)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
