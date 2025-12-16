@@ -2,7 +2,6 @@ use uuid::Uuid;
 
 use super::lookup::Lookup;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::RecordIdKey;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub(crate) enum Key {
@@ -114,8 +113,6 @@ pub(crate) enum Key {
 	Fd(NamespaceId, DatabaseId, String, String),
 	/// A cache key for an index (on a table)
 	Ix(NamespaceId, DatabaseId, String, String),
-	/// A cache key for a record
-	Record(NamespaceId, DatabaseId, String, RecordIdKey),
 }
 
 impl<'a> From<Lookup<'a>> for Key {
@@ -178,7 +175,6 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Ev(a, b, c, d) => Key::Ev(a, b, c.to_string(), d.to_string()),
 			Lookup::Fd(a, b, c, d) => Key::Fd(a, b, c.to_string(), d.to_string()),
 			Lookup::Ix(a, b, c, d) => Key::Ix(a, b, c.to_string(), d.to_string()),
-			Lookup::Record(a, b, c, d) => Key::Record(a, b, c.to_string(), d.to_owned()),
 		}
 	}
 }
