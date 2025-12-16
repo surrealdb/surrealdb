@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::ops::{Deref, DerefMut};
 
+use imbl::OrdSet;
+use imbl::shared_ptr::DefaultSharedPtr;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -10,17 +12,17 @@ use crate::val::{IndexFormat, Value};
 
 /// Internal Set type that stores unique values
 ///
-/// Sets use BTreeSet internally to maintain uniqueness and sorted order.
+/// Sets use OrdSet internally to maintain uniqueness and sorted order.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Set(pub(crate) BTreeSet<Value>);
+pub(crate) struct Set(pub(crate) OrdSet<Value>);
 
 impl Set {
 	/// Create a new empty set
 	pub fn new() -> Self {
-		Set(BTreeSet::new())
+		Set(OrdSet::new())
 	}
 
 	/// Get the number of elements in the set
@@ -39,20 +41,18 @@ impl Set {
 	}
 
 	/// Insert a value into the set
-	/// Returns true if the value was newly inserted
-	pub fn insert(&mut self, value: Value) -> bool {
-		self.0.insert(value)
+	pub fn insert(&mut self, value: Value) {
+		self.0.insert(value);
+	}
+
+	/// Remove a value from the set
+	pub fn remove(&mut self, value: &Value) {
+		self.0.remove(value);
 	}
 
 	/// Check if the set contains a value
 	pub fn contains(&self, value: &Value) -> bool {
 		self.0.contains(value)
-	}
-
-	/// Remove a value from the set
-	/// Returns true if the value was present
-	pub fn remove(&mut self, value: &Value) -> bool {
-		self.0.remove(value)
 	}
 
 	/// Convert into a literal expression
@@ -62,22 +62,22 @@ impl Set {
 
 	/// Return the union of this set with another (A ∪ B)
 	pub fn union(self, other: Set) -> Set {
-		Set(self.0.union(&other.0).cloned().collect())
+		Set(self.0.union(other.0))
 	}
 
 	/// Return the intersection of this set with another (A ∩ B)
-	pub fn intersection(&self, other: &Set) -> Set {
-		Set(self.0.intersection(&other.0).cloned().collect())
+	pub fn intersection(self, other: Set) -> Set {
+		Set(self.0.intersection(other.0))
 	}
 
 	/// Return the symmetric difference (A △ B) - elements in either but not both
 	pub fn symmetric_difference(self, other: Set) -> Set {
-		Set(self.0.symmetric_difference(&other.0).cloned().collect())
+		Set(self.0.symmetric_difference(other.0))
 	}
 
 	/// Return the relative complement (A \ B) - elements in self but not in other
 	pub fn complement(self, other: Set) -> Set {
-		Set(self.0.difference(&other.0).cloned().collect())
+		Set(self.0.difference(other.0))
 	}
 
 	/// Flatten nested sets and arrays into a single set
@@ -115,7 +115,7 @@ where
 
 impl From<BTreeSet<Value>> for Set {
 	fn from(set: BTreeSet<Value>) -> Self {
-		Set(set)
+		Set(set.into())
 	}
 }
 
@@ -148,7 +148,7 @@ impl FromIterator<Value> for Set {
 }
 
 impl Deref for Set {
-	type Target = BTreeSet<Value>;
+	type Target = OrdSet<Value>;
 	fn deref(&self) -> &Self::Target {
 		&self.0
 	}
@@ -162,7 +162,7 @@ impl DerefMut for Set {
 
 impl IntoIterator for Set {
 	type Item = Value;
-	type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
+	type IntoIter = imbl::ordset::ConsumingIter<Self::Item, DefaultSharedPtr>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
 	}

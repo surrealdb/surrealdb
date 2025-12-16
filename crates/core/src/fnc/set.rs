@@ -62,7 +62,7 @@ pub fn union((set1, set2): (Set, Set)) -> Result<Value> {
 
 /// Return the intersection of two sets (A ∩ B)
 pub fn intersect((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.intersection(&set2).into())
+	Ok(set1.intersection(set2).into())
 }
 
 /// Return the symmetric difference of two sets (A △ B)
