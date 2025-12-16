@@ -17,7 +17,7 @@ async fn define_statement_namespace() -> Result<()> {
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("other", "other").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -30,7 +30,7 @@ async fn define_statement_namespace() -> Result<()> {
 		"{
 			accesses: {},
 			defaults: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
+			namespaces: { other: 'DEFINE NAMESPACE other', test: 'DEFINE NAMESPACE test' },
 			nodes: {},
 			system: {
 				available_parallelism: 0,
@@ -59,7 +59,7 @@ async fn define_statement_database() -> Result<()> {
 		DEFINE DATABASE test;
 		INFO FOR NS;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "otherdb").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -71,7 +71,7 @@ async fn define_statement_database() -> Result<()> {
 	let val = syn::value(
 		"{
 			accesses: {},
-			databases: { test: 'DEFINE DATABASE test' },
+			databases: { otherdb: 'DEFINE DATABASE otherdb', test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
 	)
@@ -88,7 +88,7 @@ async fn define_statement_index_concurrently_building_status(
 	appended_size: usize,
 ) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
-	let ds = new_ds().await?;
+	let ds = new_ds("test", "test").await?;
 	// Populate initial records
 	for i in 0..initial_size {
 		let mut responses = ds
@@ -243,7 +243,7 @@ async fn define_statement_search_index() -> Result<()> {
 		INFO FOR TABLE blog;
 	"#;
 
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -276,7 +276,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner();
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
@@ -295,7 +295,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_ns() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -366,7 +366,7 @@ async fn define_statement_user_ns() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_db() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.

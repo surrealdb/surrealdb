@@ -33,7 +33,7 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 	db.use_ns(&ns1).use_db(&db1_name).await.unwrap();
 	// Explicitly define namespace and database
 	db.query(format!(
-		"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1_name}`"
+		"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; USE NS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1_name}`"
 	))
 	.await
 	.unwrap()
@@ -52,7 +52,7 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 	let db2_name = Ulid::new().to_string();
 	db2.use_ns(&ns2).use_db(&db2_name).await.unwrap();
 	// Explicitly define namespace and database
-	db2.query(format!("DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2_name}`; DEFINE TABLE `{table}`"))
+	db2.query(format!("DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; USE NS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2_name}`; DEFINE TABLE `{table}`"))
 		.await
 		.unwrap()
 		.check()
@@ -84,7 +84,7 @@ pub async fn multiple_namespaces_databases(new_db: impl CreateDb) {
 	client1.use_ns(&ns1).use_db(&db1).await.unwrap();
 	client1
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; USE NS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
 		))
 		.await
 		.unwrap()
@@ -98,7 +98,7 @@ pub async fn multiple_namespaces_databases(new_db: impl CreateDb) {
 	client2.use_ns(&ns2).use_db(&db2).await.unwrap();
 	client2
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; USE NS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
 		))
 		.await
 		.unwrap()
@@ -150,7 +150,7 @@ pub async fn session_variables_isolated(new_db: impl CreateDb) {
 	client1.use_ns(&ns).use_db(&db_name).await.unwrap();
 	client1
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; USE NS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
 		))
 		.await
 		.unwrap()
@@ -295,6 +295,7 @@ pub async fn session_authentication_isolated(new_db: impl CreateDb) {
 	db.query(format!(
 		"
 		DEFINE NAMESPACE IF NOT EXISTS `{ns}`;
+		USE NS `{ns}`;
 		DEFINE DATABASE IF NOT EXISTS `{db_name}`;
 		DEFINE TABLE {table};
         DEFINE USER ns_user ON NAMESPACE PASSWORD 'ns_pass' ROLES OWNER;
@@ -382,7 +383,7 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 	client1.use_ns(&ns1).use_db(&db1).await.unwrap();
 	client1
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns1}`; USE NS `{ns1}`; DEFINE DATABASE IF NOT EXISTS `{db1}`"
 		))
 		.await
 		.unwrap()
@@ -396,7 +397,7 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 	client2.use_ns(&ns2).use_db(&db2).await.unwrap();
 	client2
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns2}`; USE NS `{ns2}`; DEFINE DATABASE IF NOT EXISTS `{db2}`"
 		))
 		.await
 		.unwrap()
@@ -504,7 +505,7 @@ pub async fn query_variables_with_session_vars(new_db: impl CreateDb) {
 	client1.use_ns(&ns).use_db(&db_name).await.unwrap();
 	client1
 		.query(format!(
-			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+			"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; USE NS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
 		))
 		.await
 		.unwrap()
@@ -571,7 +572,7 @@ pub async fn shared_connection_isolated_sessions(new_db: impl CreateDb) {
 			client.use_ns(&ns).use_db(&db_name).await.unwrap();
 			client
 				.query(format!(
-					"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+					"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; USE NS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
 				))
 				.await
 				.unwrap()

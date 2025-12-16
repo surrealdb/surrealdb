@@ -16,7 +16,7 @@ async fn select_array_group_group_by() -> Result<()> {
         CREATE test:4 SET user = 2, role = 2;
         SELECT user, array::group(role) FROM test GROUP BY user;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -54,7 +54,7 @@ async fn select_count_group_all_permissions(
 	// Define the permissions
 	let sql = format!(
 		r"
-				DEFINE TABLE table PERMISSIONS {perm};
+				DEFINE TABLE OVERWRITE table PERMISSIONS {perm};
 				CREATE table:baz CONTENT {{ bar: 'hello', foo: 'world'}};
 			"
 	);
@@ -188,19 +188,19 @@ async fn select_count_range_keys_only_permissions(
 	let sql = format!(
 		r"
 			USE NS test DB test;
+			DEFINE TABLE table PERMISSIONS {perms};
 			SELECT COUNT() FROM table:a..z GROUP ALL;
 			SELECT COUNT() FROM table:a..z;
-			DEFINE TABLE table PERMISSIONS {perms};
 			CREATE table:me CONTENT {{ bar: 'hello', foo: 'world'}};
 			CREATE table:you CONTENT {{ bar: 'don\'t', foo: 'show up'}};
 		"
 	);
 	let mut t = Test::new(&sql).await?;
-	t.skip_ok(1)?;
+	t.skip_ok(2).expect("failed to skip ok");
 	// The first select should be successful
 	t.expect_vals(&["[{count: 0}]", "[]"])?;
 	//
-	t.skip_ok(3)?;
+	t.skip_ok(2).expect("failed to skip ok");
 	// Create and select as a record user
 	let sql = r"
 			USE NS test DB test;
@@ -222,7 +222,7 @@ async fn select_count_range_keys_only_permissions(
 	.await?;
 	t.expect_size(5)?;
 	//
-	t.skip_ok(1)?;
+	t.skip_ok(1).expect("failed to skip ok");
 	//
 	// The explain plan is still accessible
 	let operation = match expect_count_optim {

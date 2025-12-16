@@ -131,7 +131,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 fn ok_graph_traversal_depth() -> Result<()> {
 	// Build the SQL traversal query
 	fn graph_traversal(n: usize) -> String {
-		let mut ret = String::from("DEFINE DB test; REMOVE TABLE IF EXISTS node;\n");
+		let mut ret = String::from("REMOVE TABLE IF EXISTS node;\n");
 		ret.push_str("CREATE node:0;\n");
 		for i in 1..=n {
 			let prev = i - 1;
@@ -228,11 +228,8 @@ async fn run_queries(
 ) -> impl ExactSizeIterator<Item = std::result::Result<Value, DbResultError>>
 + DoubleEndedIterator
 + 'static {
-	let dbs = new_ds().await.expect("Failed to create new datastore");
+	let dbs = new_ds("test", "test").await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute("DEFINE NS test; DEFINE DB test;", &ses, None)
-		.await
-		.expect("Failed to execute query");
 	dbs.execute(sql, &ses, None)
 		.await
 		.expect("Failed to execute query")

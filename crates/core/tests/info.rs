@@ -88,7 +88,7 @@ async fn info_for_user() {
         DEFINE USER user ON NS PASSWORD 'pass';
         DEFINE USER user ON DB PASSWORD 'pass';
     "#;
-	let dbs = new_ds().await.unwrap();
+	let dbs = new_ds("ns", "db").await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -541,7 +541,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -564,7 +564,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -587,7 +587,7 @@ async fn access_info_redacted() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -611,7 +611,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -638,7 +638,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -662,7 +662,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -685,7 +685,7 @@ async fn access_info_redacted_structure() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("ns", "db").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -709,7 +709,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("ns", "db").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -734,7 +734,7 @@ async fn function_info_structure() {
         DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!" };
         INFO FOR DB STRUCTURE;
     "#;
-	let dbs = new_ds().await.unwrap();
+	let dbs = new_ds("ns", "db").await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();

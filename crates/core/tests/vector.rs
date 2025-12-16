@@ -168,7 +168,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 			WHERE flag = true AND point <|2,40|> $pt
 			ORDER BY distance;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -241,7 +241,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 			WHERE flag = true AND point <|2,EUCLIDEAN|> $pt
 			ORDER BY distance;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);

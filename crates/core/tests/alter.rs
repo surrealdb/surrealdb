@@ -9,10 +9,7 @@ use tokio::time::sleep;
 
 async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
-	let ds = new_ds().await?;
-
-	let mut r = ds.execute("DEFINE NS test; DEFINE DB test;", &session, None).await?;
-	skip_ok(&mut r, 2)?;
+	let ds = new_ds("test", "test").await?;
 
 	// Populate initial records
 	// We need enough records so that the indexation should last more than 5 seconds
