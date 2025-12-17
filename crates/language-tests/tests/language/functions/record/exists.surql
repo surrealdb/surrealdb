@@ -14,6 +14,7 @@ value = "{ id: person:tobie }"
 value = "true"
 
 */
+DEFINE TABLE person;
 record::exists(r"person:tobie");
 CREATE ONLY person:tobie;
 record::exists(r"person:tobie");
