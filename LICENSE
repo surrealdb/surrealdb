@@ -3,25 +3,26 @@ Business Source License 1.1
 Parameters
 
 Licensor:             SurrealDB Ltd.
-Licensed Work:        SurrealDB 2.0
-                      The Licensed Work is (c) 2024 SurrealDB Ltd.
+Licensed Work:        SurrealDB 3.0
+                      The Licensed Work is (c) 2025 SurrealDB Limited
 Additional Use Grant: You may make use of the Licensed Work, provided that
-                      you may not use the Licensed Work for a Database
+                      you may not use the Licensed Work as a Database
                       Service.
 
-					  A "Database Service" is a commercial offering that
-					  allows third parties (other than your direct
-					  employees and contractors) to access the functionality
-					  of the Licensed Work by creating or managing tables
-					  whose schemas are controlled or managed by such third
-					  parties.
+					  “Database Service” means any product, service,
+					  platform, or commercial offering in which the Licensed
+					  Work is used to provide database functionality to
+					  third parties, other than your direct employees or
+					  contractors working on your behalf, that enables third
+					  parties to create, manage, or control schemas or
+					  tables.
 
-Change Date:          2029-09-17
+Change Date:          2030-01-01
 
 Change License:       Apache License, Version 2.0
 
 For information about alternative licensing arrangements for the Software,
-please visit: https://surrealdb.com
+please visit: https://surrealdb.com/legal
 
 Notice
 
