@@ -603,9 +603,7 @@ impl Value {
 			Kind::String => self.is_string(),
 			Kind::Uuid => self.is_uuid(),
 			Kind::Regex => matches!(self, Value::Regex(_)),
-			Kind::Table(table) => {
-				self.is_table_and(|t| table.is_empty() || table.contains(&t.to_string()))
-			}
+			Kind::Table(table) => self.is_table_and(|t| table.is_empty() || table.contains(t)),
 			Kind::Record(table) => self.is_record_and(|r| r.is_table_type(table)),
 			Kind::Geometry(kinds) => {
 				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))
@@ -775,11 +773,11 @@ mod tests {
 	#[case::string(Value::String("".to_string()), true)]
 	#[case::string(Value::String("hello".to_string()), false)]
 	#[case::bytes(Value::Bytes(Bytes::default()), true)]
-	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), false)]
+	#[case::bytes(Value::Bytes(Bytes::from(::bytes::Bytes::from(vec![1_u8, 2, 3]))), false)]
 	#[case::object(Value::Object(Object::default()), true)]
 	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
 	#[case::array(Value::Array(Array::new()), true)]
-	#[case::array(Value::Array(Array::from_values(vec![Value::String("hello".to_string())])), false)]
+	#[case::array(Value::Array(Array::from(vec![Value::String("hello".to_string())])), false)]
 	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), false)]
 	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), false)]
 	#[case::file(Value::File(File::default()), false)]
@@ -1162,8 +1160,8 @@ mod tests {
 	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
-	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
-	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![255_u8, 0, 128]))), "b\"FF0080\"")]
+	#[case::bytes(Value::Bytes(Bytes::from(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
+	#[case::bytes(Value::Bytes(Bytes::from(::bytes::Bytes::from(vec![255_u8, 0, 128]))), "b\"FF0080\"")]
 	// Tables
 	#[case::table(Value::Table("test".into()), "test")]
 	#[case::table(Value::Table("escap'd".into()), "`escap'd`")]
@@ -1275,18 +1273,18 @@ mod tests {
 	)]
 	#[case::table(
 		Value::Table("test".into()),
-		vec![Kind::Table(vec!["test".to_string()]), Kind::Table(vec![]), Kind::Any],
+		vec![Kind::Table(vec!["test".into()]), Kind::Table(vec![]), Kind::Any],
 		vec![Kind::None, Kind::Null]
 	)]
 	#[case::record(
 		Value::RecordId(RecordId::new("test", "key")),
-		vec![Kind::Record(vec!["test".to_string()]), Kind::Record(vec![]), Kind::Any],
-		vec![Kind::None, Kind::Null, Kind::Record(vec!["other".to_string()])]
+		vec![Kind::Record(vec!["test".into()]), Kind::Record(vec![]), Kind::Any],
+		vec![Kind::None, Kind::Null, Kind::Record(vec!["other".into()])]
 	)]
 	#[case::record_multi_table(
 		Value::RecordId(RecordId::new("user", "id")),
-		vec![Kind::Record(vec!["user".to_string(), "admin".to_string()]), Kind::Any],
-		vec![Kind::Record(vec!["post".to_string(), "comment".to_string()])]
+		vec![Kind::Record(vec!["user".into(), "admin".into()]), Kind::Any],
+		vec![Kind::Record(vec!["post".into(), "comment".into()])]
 	)]
 	#[case::geometry_point(
 		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
@@ -1327,7 +1325,7 @@ mod tests {
 		vec![Kind::None, Kind::Null]
 	)]
 	#[case::array_strings(
-		Value::Array(Array::from_values(vec![
+		Value::Array(Array::from(vec![
 			Value::String("a".to_string()),
 			Value::String("b".to_string())
 		])),
@@ -1339,7 +1337,7 @@ mod tests {
 		vec![Kind::Array(Box::new(Kind::Int), None), Kind::Array(Box::new(Kind::String), Some(1))]
 	)]
 	#[case::array_mixed_fails(
-		Value::Array(Array::from_values(vec![
+		Value::Array(Array::from(vec![
 			Value::String("a".to_string()),
 			Value::Number(Number::Int(1))
 		])),
@@ -1347,7 +1345,7 @@ mod tests {
 		vec![Kind::Array(Box::new(Kind::String), None), Kind::Array(Box::new(Kind::Int), None)]
 	)]
 	#[case::array_with_max(
-		Value::Array(Array::from_values(vec![
+		Value::Array(Array::from(vec![
 			Value::Number(Number::Int(1)),
 			Value::Number(Number::Int(2)),
 			Value::Number(Number::Int(3))
@@ -1392,7 +1390,7 @@ mod tests {
 		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Object(BTreeMap::new()))]
 	)]
 	#[case::literal_array(
-		Value::Array(Array::from_values(vec![
+		Value::Array(Array::from(vec![
 			Value::Number(Number::Int(1)),
 			Value::String("test".to_string())
 		])),

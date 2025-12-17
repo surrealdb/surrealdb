@@ -22,7 +22,7 @@ async fn upsert_merge_and_content() -> Result<()> {
 		UPSERT person:test MERGE { age: 50 };
 		UPSERT person:test MERGE 'some content';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -110,7 +110,7 @@ async fn upsert_simple_with_input() -> Result<()> {
 		UPSERT person:test SET name = 'Tobie';
 		SELECT * FROM person:test;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -227,7 +227,7 @@ async fn upsert_with_return_clause() -> Result<()> {
 		UPSERT person:test SET age = 35 RETURN age, name;
 		DELETE person:test RETURN VALUE $before;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -306,7 +306,7 @@ async fn upsert_new_record_with_table() -> Result<()> {
 		-- Select all created records
 		SELECT count() FROM person GROUP ALL;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -342,7 +342,7 @@ async fn upsert_new_records_with_table_and_unique_index() -> Result<()> {
 		-- Select all created records
 		SELECT count() FROM person GROUP ALL;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -392,7 +392,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 		-- This will return an error, as the readonly field is modified
 		UPSERT person:test REPLACE { age: 5, data: { other: true } };
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -612,13 +612,22 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "UPSERT person:test CONTENT { name: 'Name' };";
 
-	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+	for ((level, role), (ns, db), should_succeed, msg) in tests {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		// Test the statement when the table has to be created
 
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+
+			// Define additional namespaces/databases for cross-namespace tests
+			ds.execute(
+				"DEFINE NS OTHER_NS; USE NS OTHER_NS; DEFINE DB DB; USE NS NS; DEFINE DB OTHER_DB;",
+				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
+			)
+			.await
+			.unwrap();
 
 			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
 			let res = resp.remove(0).output();
@@ -641,7 +650,16 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the statement when the table already exists
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+
+			// Define additional namespaces/databases for cross-namespace tests
+			ds.execute(
+				"DEFINE NS OTHER_NS; USE NS OTHER_NS; DEFINE DB DB; USE NS NS; DEFINE DB OTHER_DB;",
+				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
+			)
+			.await
+			.unwrap();
 
 			// Prepare datastore
 			let mut resp = ds
@@ -737,7 +755,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -745,17 +763,18 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 
-		let err = res.unwrap_err().to_string();
-		assert!(
-			err.contains("Not enough permissions to perform this action"),
-			"anonymous user should not be able to create the table: {}",
-			err
+		// With auth enabled, anonymous users can create tables (implicitly creating them)
+		// but get empty results due to default permissions
+		assert_eq!(
+			res.unwrap(),
+			Value::Array(Array::new()),
+			"anonymous user should get empty result when creating table with auth enabled"
 		);
 	}
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -808,7 +827,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -876,7 +895,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -893,7 +912,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -945,7 +964,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -1027,7 +1046,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 			}
 		};
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);

@@ -7,8 +7,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::index::Appending;
+use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Ia<'a> {
 	__: u8,
 	_a: u8,
@@ -16,7 +18,7 @@ pub(crate) struct Ia<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -28,7 +30,7 @@ pub(crate) struct Ia<'a> {
 impl_kv_key_storekey!(Ia<'_> => Appending);
 
 impl<'a> Ia<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, i: u32) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, i: u32) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -54,7 +56,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ia::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 1);
+		let tb = TableName::from("testtb");
+		let val = Ia::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 1);
 		let enc = Ia::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

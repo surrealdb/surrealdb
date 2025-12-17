@@ -547,10 +547,10 @@ mod tests {
 		let ns = NamespaceId(1);
 		let db = DatabaseId(2);
 		let tb = TableId(3);
-		let tb = TableDefinition::new(ns, db, tb, "tb".to_string());
+		let tb = TableDefinition::new(ns, db, tb, "tb".into());
 		let mut h = HnswFlavor::new(
 			tb.table_id,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), &tb.name, IndexId(4)),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), tb.name.clone(), IndexId(4)),
 			p,
 			ds.index_store().vector_cache().clone(),
 		)
@@ -759,7 +759,7 @@ mod tests {
 			let mut h = HnswIndex::new(
 				ctx.get_index_stores().vector_cache().clone(),
 				&tx,
-				IndexKeyBase::new(ns, db, "tb", ix),
+				IndexKeyBase::new(ns, db, "tb".into(), ix),
 				tb,
 				&p,
 			)
@@ -848,7 +848,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(4));
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut h =
@@ -895,7 +895,7 @@ mod tests {
 		let mut h = HnswIndex::new(
 			ctx.get_index_stores().vector_cache().clone(),
 			&tx,
-			IndexKeyBase::new(db.namespace_id, db.database_id, "tb", ix),
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), ix),
 			tb,
 			&p,
 		)

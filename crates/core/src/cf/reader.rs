@@ -7,6 +7,7 @@ use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::{KVKey, KVValue, Timestamp, Transaction};
+use crate::val::TableName;
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific timestamp or version number.
@@ -20,7 +21,7 @@ pub async fn read(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: Option<&str>,
+	tb: Option<&TableName>,
 	start: ShowSince,
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>> {
@@ -50,7 +51,7 @@ pub async fn read(
 		let dec = crate::key::change::Cf::decode_key(&k)?;
 
 		// Check the change is for the desired table
-		if tb.is_some_and(|tb| tb != dec.tb) {
+		if tb.is_some_and(|tb| *tb != *dec.tb) {
 			continue;
 		}
 		// Decode the byte array into a vector of operations

@@ -10,7 +10,6 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryType;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
-use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -19,6 +18,7 @@ use crate::err::Error;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, WithStats};
 use crate::notification::Notification;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal, opt};
 
 /// A query future
@@ -104,11 +104,14 @@ where
 			let router = client.inner.router.extract()?;
 
 			let results = router
-				.execute_query(Command::Query {
-					query: Cow::Owned(query.into_owned()),
-					txn,
-					variables: variables?,
-				})
+				.execute_query(
+					client.session_id,
+					Command::Query {
+						query: Cow::Owned(query.into_owned()),
+						txn,
+						variables: variables?,
+					},
+				)
 				.await?;
 
 			let mut indexed_results = IndexedResults::new();
@@ -127,6 +130,7 @@ where
 						let live_stream = crate::method::live::register(
 							router,
 							live_query_id.into(),
+							client.session_id,
 						)
 						.await
 						.map(|rx| {
@@ -855,7 +859,7 @@ mod tests {
 		assert_eq!(body, vec![article.body]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value)]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();

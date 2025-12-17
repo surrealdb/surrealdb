@@ -13,7 +13,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
-	Uuid,
+	TableName, Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -124,9 +124,9 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A table type.
-	Table(Vec<String>),
+	Table(Vec<TableName>),
 	/// A record type.
-	Record(Vec<String>),
+	Record(Vec<TableName>),
 	/// A geometry type.
 	/// The vec contains the geometry types as strings, for example `"point"` or
 	/// `"polygon"`.
@@ -477,8 +477,12 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
 			crate::types::PublicKind::Range => Kind::Range,
-			crate::types::PublicKind::Table(table) => Kind::Table(table),
-			crate::types::PublicKind::Record(tables) => Kind::Record(tables),
+			crate::types::PublicKind::Table(table) => {
+				Kind::Table(table.into_iter().map(TableName::from).collect())
+			}
+			crate::types::PublicKind::Record(tables) => {
+				Kind::Record(tables.into_iter().map(TableName::from).collect())
+			}
 			crate::types::PublicKind::Geometry(kinds) => {
 				Kind::Geometry(kinds.into_iter().map(Into::into).collect())
 			}
@@ -520,8 +524,12 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
 			Kind::Range => crate::types::PublicKind::Range,
-			Kind::Table(tables) => crate::types::PublicKind::Table(tables),
-			Kind::Record(tables) => crate::types::PublicKind::Record(tables),
+			Kind::Table(tables) => {
+				crate::types::PublicKind::Table(tables.into_iter().map(Into::into).collect())
+			}
+			Kind::Record(tables) => {
+				crate::types::PublicKind::Record(tables.into_iter().map(Into::into).collect())
+			}
 			Kind::Geometry(kinds) => {
 				crate::types::PublicKind::Geometry(kinds.into_iter().map(Into::into).collect())
 			}
@@ -566,7 +574,7 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Float(f) => KindLiteral::Float(f),
 			crate::types::PublicKindLiteral::Decimal(d) => KindLiteral::Decimal(d),
 			crate::types::PublicKindLiteral::Duration(d) => {
-				KindLiteral::Duration(crate::val::Duration(d.inner()))
+				KindLiteral::Duration(crate::val::Duration(*d))
 			}
 			crate::types::PublicKindLiteral::Array(kinds) => {
 				KindLiteral::Array(kinds.into_iter().map(Kind::from).collect())

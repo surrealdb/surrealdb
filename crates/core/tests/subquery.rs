@@ -23,7 +23,7 @@ async fn subquery_select() -> Result<()> {
 		-- Using an outer SELECT, select a specific record in a subquery, returning an array
 		SELECT * FROM (SELECT age >= 18 AS adult FROM person:test) WHERE adult = true;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -145,7 +145,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 			UPSERT person:test SET sport = ['basketball'] RETURN sport;
 		END;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
@@ -278,7 +278,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 			UPSERT person:test SET sport = ['basketball'] RETURN sport;
 		END;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);

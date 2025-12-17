@@ -37,6 +37,7 @@ impl Default for DefineSequenceStatement {
 }
 
 impl DefineSequenceStatement {
+	#[instrument(level = "trace", name = "DefineSequenceStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

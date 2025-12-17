@@ -83,7 +83,7 @@ impl Set {
 	/// Flatten nested sets and arrays into a single set
 	pub fn flatten(self) -> Set {
 		let mut out = Set::new();
-		for v in self.into_iter() {
+		for v in self {
 			match v {
 				Value::Array(arr) => {
 					for item in arr.0 {

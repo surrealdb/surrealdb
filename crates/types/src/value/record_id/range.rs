@@ -86,6 +86,21 @@ impl SurrealValue for RecordIdKeyRange {
 }
 
 impl RecordIdKeyRange {
+	/// Returns the start bound of the range.
+	pub fn start(&self) -> Bound<&RecordIdKey> {
+		self.start.as_ref()
+	}
+
+	/// Returns the upper bound of the range.
+	pub fn end(&self) -> Bound<&RecordIdKey> {
+		self.end.as_ref()
+	}
+
+	/// Converts this range into the inner bounds.
+	pub fn into_inner(self) -> (Bound<RecordIdKey>, Bound<RecordIdKey>) {
+		(self.start, self.end)
+	}
+
 	/// Converts this range into a `Range` value.
 	pub fn into_value_range(self) -> Range {
 		Range {

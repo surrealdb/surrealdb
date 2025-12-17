@@ -16,7 +16,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
-use crate::val::{Datetime, Object, Value};
+use crate::val::{Datetime, Object, TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum InfoStatement {
@@ -37,6 +37,7 @@ pub(crate) enum InfoStatement {
 
 impl InfoStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "InfoStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -239,7 +240,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
-								out.insert(v.name.clone(), v.to_sql().into());
+								out.insert(v.name.clone().into_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -275,7 +276,7 @@ impl InfoStatement {
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Compute table name
-				let tb = expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?;
+				let tb = TableName::new(expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?);
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -331,7 +332,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
-								out.insert(v.name.clone(), v.to_sql().into());
+								out.insert(v.name.clone().into_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -394,7 +395,8 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Compute table & index names
 				let index = expr_to_ident(stk, ctx, opt, doc, index, "index name").await?;
-				let table = expr_to_ident(stk, ctx, opt, doc, table, "table name").await?;
+				let table =
+					TableName::new(expr_to_ident(stk, ctx, opt, doc, table, "table name").await?);
 				// Get the transaction
 				let txn = ctx.tx();
 

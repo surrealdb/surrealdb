@@ -46,7 +46,6 @@ mod tests {
 
 	#[test]
 	fn key_changefeed_cleanup() {
-		#[rustfmt::skip]
 		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);
 		let enc = Tl::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!tl\0\x01");

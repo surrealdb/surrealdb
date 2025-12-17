@@ -828,7 +828,7 @@ mod test {
 				right: Box::new(one.clone()),
 			}),
 			op: BinaryOperator::Subtract,
-			right: Box::new(one.clone()),
+			right: Box::new(one),
 		};
 		assert_eq!(expected, out);
 	}

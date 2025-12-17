@@ -6,7 +6,7 @@ use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use tokio::sync::Mutex;
 
 use crate::expr::Expr;
-use crate::val::{Number, RecordId};
+use crate::val::{Number, RecordId, TableName};
 
 pub(super) struct KnnPriorityList(Arc<Mutex<Inner>>);
 
@@ -119,16 +119,18 @@ impl KnnBruteForceResult {
 	}
 
 	pub(super) fn insert(&mut self, e: Arc<Expr>, m: HashMap<Arc<RecordId>, Number>) {
-		self.exp.insert(e.clone(), self.res.len());
+		self.exp.insert(e, self.res.len());
 		self.res.push(m);
 	}
 }
 
 #[derive(Clone)]
-pub(crate) struct KnnBruteForceResults(Arc<std::collections::HashMap<String, KnnBruteForceResult>>);
+pub(crate) struct KnnBruteForceResults(
+	Arc<std::collections::HashMap<TableName, KnnBruteForceResult>>,
+);
 
-impl From<std::collections::HashMap<String, KnnBruteForceResult>> for KnnBruteForceResults {
-	fn from(map: std::collections::HashMap<String, KnnBruteForceResult>) -> Self {
+impl From<std::collections::HashMap<TableName, KnnBruteForceResult>> for KnnBruteForceResults {
+	fn from(map: std::collections::HashMap<TableName, KnnBruteForceResult>) -> Self {
 		Self(map.into())
 	}
 }

@@ -12,7 +12,7 @@ use crate::helpers::Test;
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
@@ -26,7 +26,7 @@ async fn select_where_iterate_three_multi_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_parallel() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
 	skip_ok(&mut res, 8)?;
 	// OR results
@@ -40,7 +40,7 @@ async fn select_where_iterate_three_multi_index_parallel() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_all_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(
 		&dbs,
 		&three_multi_index_query("WITH INDEX uniq_name,idx_genre,ft_company", ""),
@@ -59,7 +59,7 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX ft_company", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
@@ -76,7 +76,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 #[tokio::test]
 #[ignore] // TODO EK
 async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res =
 		execute_test(&dbs, &three_multi_index_query("WITH INDEX uniq_name", ""), 12).await?;
 	skip_ok(&mut res, 8)?;
@@ -92,7 +92,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_two_multi_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
@@ -106,7 +106,7 @@ async fn select_where_iterate_two_multi_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_two_multi_index_with_one_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
@@ -120,7 +120,7 @@ async fn select_where_iterate_two_multi_index_with_one_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_two_multi_index_with_two_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res =
 		execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
@@ -135,7 +135,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_where_iterate_two_no_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &two_multi_index_query("WITH NOINDEX", ""), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
@@ -497,7 +497,7 @@ const TWO_MULTI_INDEX_EXPLAIN: &str = "[
 
 #[tokio::test]
 async fn select_with_no_index_unary_operator() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs
 		.execute(
@@ -538,7 +538,7 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 
 #[tokio::test]
 async fn select_unsupported_unary_operator() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut res = dbs
 		.execute(
@@ -697,7 +697,7 @@ async fn select_range(
 	explain: &str,
 	result: &str,
 ) -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &range_test(unique, from_incl, to_incl), 8).await?;
 	skip_ok(&mut res, 6)?;
 	{
@@ -944,7 +944,7 @@ async fn select_single_range_operator(
 	explain: &str,
 	result: &str,
 ) -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, &single_range_operator_test(unique, op), 6).await?;
 	skip_ok(&mut res, 4)?;
 	{
@@ -1138,7 +1138,7 @@ async fn select_unique_single_range_operator_more_or_equal() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_idiom_param_value() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie', genre='m', company='SurrealDB';
@@ -1251,7 +1251,7 @@ async fn test_contains(
 
 #[tokio::test]
 async fn select_contains() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
 
@@ -1296,7 +1296,7 @@ async fn select_contains() -> Result<()> {
 
 #[tokio::test]
 async fn select_contains_all() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
 	const SQL: &str = r#"
@@ -1339,7 +1339,7 @@ async fn select_contains_all() -> Result<()> {
 
 #[tokio::test]
 async fn select_contains_any() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(&dbs, CONTAINS_CONTENT, 3).await?;
 	skip_ok(&mut res, 3)?;
 	const SQL: &str = r#"
@@ -1385,7 +1385,7 @@ async fn select_contains_any() -> Result<()> {
 // 1. Datetime are recognized by the query planner
 // 2. we can take the value store in a variable
 async fn select_with_datetime_value() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	let sql = "
@@ -1450,7 +1450,7 @@ async fn select_with_datetime_value() -> Result<()> {
 // 1. UUID are recognized by the query planner
 // 2. we can take the value from a object stored as a variable
 async fn select_with_uuid_value() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	let sql = "
@@ -1513,7 +1513,7 @@ async fn select_with_uuid_value() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_in_operator() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	let sql = "
@@ -1575,7 +1575,7 @@ async fn select_with_in_operator() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_in_operator_uniq_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	let sql = r#"
@@ -1742,7 +1742,7 @@ async fn select_with_in_and_not_valid_compound_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_record_id_link_no_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -1796,7 +1796,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_record_id_link_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -1863,7 +1863,7 @@ async fn select_with_record_id_link_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_record_id_link_unique_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -1929,7 +1929,7 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 }
 #[tokio::test]
 async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -1999,7 +1999,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_record_id_link_full_text_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -2058,7 +2058,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "
@@ -2109,7 +2109,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 
 #[tokio::test]
 async fn select_with_exact_operator() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	//
 	let sql = "

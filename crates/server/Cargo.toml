@@ -60,7 +60,6 @@ surrealdb-types.workspace = true
 
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
-arc-swap = "1.7.1"
 async-trait.workspace = true
 axum = { version = "0.8.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.10.2", features = [

@@ -46,7 +46,7 @@ impl IndexStores {
 		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 		self.0.hnsw_indexes.get(ctx, tb, &ikb, p).await
 	}
 
@@ -114,7 +114,7 @@ impl IndexStores {
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+			let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 			self.remove_hnsw_index(tb, ikb).await?;
 		}
 		Ok(())

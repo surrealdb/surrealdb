@@ -16,16 +16,6 @@ use crate::sql::{SqlFormat, ToSql};
 pub struct Bytes(pub(crate) ::bytes::Bytes);
 
 impl Bytes {
-	/// Create new bytes from bytes::Bytes
-	pub fn new(data: bytes::Bytes) -> Self {
-		Self(data)
-	}
-
-	/// Get the inner bytes::Bytes
-	pub fn inner(&self) -> &bytes::Bytes {
-		&self.0
-	}
-
 	/// Convert the bytes to a bytes::Bytes
 	pub fn into_inner(self) -> bytes::Bytes {
 		self.0

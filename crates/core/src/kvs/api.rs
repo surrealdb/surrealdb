@@ -171,7 +171,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		}
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
-		for key in keys.into_iter() {
+		for key in keys {
 			if let Some(val) = self.get(key, version).await? {
 				out.push(Some(val));
 			} else {
@@ -212,7 +212,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		while let Some(rng) = next {
 			let res = self.batch_keys_vals(rng, *NORMAL_FETCH_SIZE, version).await?;
 			next = res.next;
-			for v in res.result.into_iter() {
+			for v in res.result {
 				out.push(v);
 			}
 		}
@@ -257,7 +257,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		while let Some(rng) = next {
 			let res = self.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
-			for k in res.result.into_iter() {
+			for k in res.result {
 				self.del(k).await?;
 			}
 		}

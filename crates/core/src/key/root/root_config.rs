@@ -47,10 +47,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = RootConfig::new(
-			"testty",
-		);
+		let val = RootConfig::new("testty");
 		let enc = RootConfig::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!cgtestty\0");
 	}

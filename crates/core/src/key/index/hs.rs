@@ -7,8 +7,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::HnswState;
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Hs<'a> {
 	__: u8,
 	_a: u8,
@@ -16,7 +18,7 @@ pub(crate) struct Hs<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -27,7 +29,7 @@ pub(crate) struct Hs<'a> {
 impl_kv_key_storekey!(Hs<'_> => HnswState);
 
 impl<'a> Hs<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -52,7 +54,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hs::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let tb = TableName::from("testtb");
+		let val = Hs::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3));
 		let enc = Hs::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 use revision::revisioned;
 
@@ -8,7 +7,7 @@ use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, RecordId, Value};
+use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -34,20 +33,20 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.clone()));
+		h.insert("name", Value::String(v.name.into_string()));
 		Value::Object(Object::from(h))
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableMutations(pub Arc<str>, pub Vec<TableMutation>);
+pub struct TableMutations(pub TableName, pub Vec<TableMutation>);
 
 impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
 	/// Create a new table mutations
-	pub fn new(tb: Arc<str>) -> Self {
+	pub fn new(tb: TableName) -> Self {
 		Self(tb, Vec::new())
 	}
 	/// Push a table change to the table mutations
@@ -133,11 +132,7 @@ impl TableMutation {
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						operations
-							.clone()
-							.into_iter()
-							.map(|x| Value::Object(x.into_object()))
-							.collect(),
+						operations.into_iter().map(|x| Value::Object(x.into_object())).collect(),
 					)),
 				);
 				h
@@ -211,24 +206,21 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				Arc::from("mytb"),
+				"mytb".into(),
 				vec![
 					TableMutation::Set(
-						RecordId::new("mytb".to_string(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 					),
-					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
+					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
 					TableMutation::Def(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
-						"mytb".to_string(),
+						"mytb".into(),
 					)),
 				],
 			)]),
@@ -246,15 +238,12 @@ mod tests {
 		let cs = ChangeSet(
 			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				Arc::from("mytb"),
+				"mytb".into(),
 				vec![
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Add {
@@ -263,23 +252,20 @@ mod tests {
 						}],
 					),
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie2".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie2".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Remove {
 							path: vec!["temp".to_owned()],
 						}],
 					),
-					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
+					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
 					TableMutation::DelWithOriginal(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(map! {
-								"id" => Value::from(RecordId::new("mytb".to_owned(),"tobie".to_owned())),
+								"id" => Value::from(RecordId::new("mytb".into(),"tobie".to_owned())),
 								"note" => Value::from("surreal"),
 						})),
 					),
@@ -287,7 +273,7 @@ mod tests {
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
-						"mytb".to_string(),
+						"mytb".into(),
 					)),
 				],
 			)]),

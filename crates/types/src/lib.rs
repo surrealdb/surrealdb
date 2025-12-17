@@ -1,8 +1,10 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
+#![allow(clippy::mutable_key_type)]
 
 mod error;
 mod flatbuffers;
+mod hashmap;
 mod kind;
 mod notification;
 #[macro_use]
@@ -16,6 +18,7 @@ mod variables;
 pub use anyhow;
 pub use error::*;
 pub use flatbuffers::*;
+pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;
 pub use sql::{SqlFormat, ToSql, write_sql};

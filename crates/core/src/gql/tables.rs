@@ -93,7 +93,7 @@ pub async fn process_tbs(
 		let kvs1 = datastore.clone();
 
 		query = query.field(
-			Field::new(tb.name.clone(), TypeRef::named_nn_list_nn(tb.name.clone()), move |ctx| {
+			Field::new(tb.name.clone().into_string(), TypeRef::named_nn_list_nn(tb.name.clone().into_string()), move |ctx| {
 				let tb_name = first_tb_name.clone();
 				let fds1 = fds1.clone();
 				let kvs1 = kvs1.clone();
@@ -250,56 +250,59 @@ pub async fn process_tbs(
 
 		let kvs2 = datastore.to_owned();
 		query = query.field(
-			Field::new(format!("_get_{}", tb.name), TypeRef::named(tb.name.clone()), move |ctx| {
-				let tb_name = second_tb_name.clone();
-				let kvs2 = kvs2.clone();
-				FieldFuture::new({
-					async move {
-						// Get session from GraphQL context (has proper user permissions)
-						let sess2 = ctx.data::<Arc<Session>>()?;
-						let args = ctx.args.as_index_map();
-						let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-							Some(i) => i,
-							None => {
-								return Err(internal_error(
-									"Schema validation failed: No id found in _get_",
-								)
-								.into());
+			Field::new(
+				format!("_get_{}", tb.name),
+				TypeRef::named(tb.name.clone().into_string()),
+				move |ctx| {
+					let tb_name = second_tb_name.clone();
+					let kvs2 = kvs2.clone();
+					FieldFuture::new({
+						async move {
+							// Get session from GraphQL context (has proper user permissions)
+							let sess2 = ctx.data::<Arc<Session>>()?;
+							let args = ctx.args.as_index_map();
+							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+								Some(i) => i,
+								None => {
+									return Err(internal_error(
+										"Schema validation failed: No id found in _get_",
+									)
+									.into());
+								}
+							};
+
+							let record_id = RecordId::new(tb_name, id);
+
+							// Build SELECT VALUE id FROM ONLY <record_id>
+							let select_stmt = SelectStatement {
+								what: vec![Value::RecordId(record_id.clone()).into_literal()],
+								expr: Fields::Value(Box::new(Selector {
+									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
+									alias: None,
+								})),
+								only: true,
+								..Default::default()
+							};
+
+							let plan = LogicalPlan {
+								expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(
+									select_stmt,
+								)))],
+							};
+
+							let res = execute_plan(&kvs2, sess2, plan).await?;
+
+							match res {
+								Value::RecordId(t) => {
+									// let erased: ErasedRecord = (kvs2.clone(), sess2.clone(), t);
+									Ok(Some(FieldValue::owned_any(t)))
+								}
+								_ => Ok(None),
 							}
-						};
-
-						// TODO: STU: Parse record id.
-						let record_id = RecordId::new(tb_name, id);
-
-						// Build SELECT VALUE id FROM ONLY <record_id>
-						let select_stmt = SelectStatement {
-							what: vec![Value::RecordId(record_id.clone()).into_literal()],
-							expr: Fields::Value(Box::new(Selector {
-								expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-								alias: None,
-							})),
-							only: true,
-							..Default::default()
-						};
-
-						let plan = LogicalPlan {
-							expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(
-								select_stmt,
-							)))],
-						};
-
-						let res = execute_plan(&kvs2, sess2, plan).await?;
-
-						match res {
-							Value::RecordId(t) => {
-								// let erased: ErasedRecord = (kvs2.clone(), sess2.clone(), t);
-								Ok(Some(FieldValue::owned_any(t)))
-							}
-							_ => Ok(None),
 						}
-					}
-				})
-			})
+					})
+				},
+			)
 			.description(if let Some(c) = &tb.comment {
 				c.clone()
 			} else {
@@ -311,7 +314,7 @@ pub async fn process_tbs(
 			.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
 		);
 
-		let mut table_ty_obj = Object::new(tb.name.clone())
+		let mut table_ty_obj = Object::new(tb.name.clone().into_string())
 			.field(Field::new(
 				"id",
 				TypeRef::named_nn(TypeRef::ID),
@@ -379,7 +382,13 @@ pub async fn process_tbs(
 						}
 					};
 
-					let record_id = RecordId::new("TODO: STU".to_string(), id); // TODO: STU: Parse record id.
+					// Parse ID as a record id.
+					let record_id: crate::val::RecordId = match crate::syn::record_id(&id) {
+						Ok(x) => x.into(),
+						Err(e) => {
+							return Err(internal_error(format!("Invalid record id: {e}")).into());
+						}
+					};
 
 					// Build SELECT VALUE id FROM ONLY <record_id>
 					let select_stmt = SelectStatement {
@@ -401,7 +410,7 @@ pub async fn process_tbs(
 					match res {
 						Value::RecordId(t) => {
 							// Generic _get returns interface type "record", needs .with_type()
-							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table.clone())))
+							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table)))
 						}
 						_ => Ok(None),
 					}
@@ -453,7 +462,7 @@ fn make_table_field_resolver(
 						let field_val = match field_kind {
 							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
 								// Interface or union type, needs .with_type()
-								field_val.with_type(rid.table.clone())
+								field_val.with_type(rid.table)
 							}
 							_ => {
 								// Concrete type, no .with_type() needed
@@ -468,7 +477,7 @@ fn make_table_field_resolver(
 							Some(Kind::Either(ks)) if ks.len() != 1 => {}
 							_ => {}
 						}
-						let out = sql_value_to_gql_value(v.clone())
+						let out = sql_value_to_gql_value(v)
 							.map_err(|_| "SQL to GQL translation failed")?;
 						Ok(Some(FieldValue::value(out)))
 					}

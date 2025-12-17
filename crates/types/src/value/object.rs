@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,64 +21,28 @@ impl Object {
 		Object(BTreeMap::new())
 	}
 
-	/// Get an iterator over the key-value pairs in the object
-	pub fn iter(&self) -> std::collections::btree_map::Iter<'_, String, Value> {
-		self.0.iter()
-	}
-
-	/// Get the value of a key
-	pub fn get(&self, key: &str) -> Option<&Value> {
-		self.0.get(key)
-	}
-
-	/// Get a mutable reference to the value of a key
-	pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
-		self.0.get_mut(key)
-	}
-
-	/// Get an iterator over the keys in the object
-	pub fn keys(&self) -> std::collections::btree_map::Keys<'_, String, Value> {
-		self.0.keys()
-	}
-
 	/// Insert a key-value pair into the object
 	pub fn insert(&mut self, key: impl Into<String>, value: impl SurrealValue) -> Option<Value> {
 		self.0.insert(key.into(), value.into_value())
 	}
 
-	/// Remove a key-value pair from the object
-	pub fn remove(&mut self, key: &str) -> Option<Value> {
-		self.0.remove(key)
+	/// Convert into the inner BTreeMap<String, Value>
+	pub fn into_inner(self) -> BTreeMap<String, Value> {
+		self.0
 	}
+}
 
-	/// Extend the object with the contents of another object
-	pub fn extend(&mut self, other: Object) {
-		self.0.extend(other.0);
-	}
+impl Deref for Object {
+	type Target = BTreeMap<String, Value>;
 
-	/// Clear the object
-	pub fn clear(&mut self) {
-		self.0.clear();
-	}
-
-	/// Get the number of key-value pairs in the object
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-
-	/// Check if the object is empty
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-
-	/// Create new object from BTreeMap<String, Value>
-	pub fn from_map(map: BTreeMap<String, Value>) -> Self {
-		Self(map)
-	}
-
-	/// Get the inner BTreeMap<String, Value>
-	pub fn inner(&self) -> &BTreeMap<String, Value> {
+	fn deref(&self) -> &Self::Target {
 		&self.0
+	}
+}
+
+impl DerefMut for Object {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.0
 	}
 }
 
@@ -143,5 +108,21 @@ impl IntoIterator for Object {
 	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl<'a> IntoIterator for &'a Object {
+	type Item = (&'a String, &'a Value);
+	type IntoIter = std::collections::btree_map::Iter<'a, String, Value>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.iter()
+	}
+}
+
+impl<'a> IntoIterator for &'a mut Object {
+	type Item = (&'a String, &'a mut Value);
+	type IntoIter = std::collections::btree_map::IterMut<'a, String, Value>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.iter_mut()
 	}
 }

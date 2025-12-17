@@ -1,4 +1,4 @@
-use surrealdb_types::{Action, Uuid};
+use crate::types::{Action, Uuid};
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]

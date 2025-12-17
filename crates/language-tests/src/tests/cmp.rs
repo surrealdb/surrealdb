@@ -284,5 +284,6 @@ impl_roughly_eq_enum!(
 		Regex(r),
 		Range(r),
 		File(f),
+		Table(t),
 	}
 );

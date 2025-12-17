@@ -677,13 +677,13 @@ pub async fn insert_relation_table(new_db: impl CreateDb) {
 	drop(permit);
 	let tmp: Result<Vec<ApiRecordId>, _> = db.insert("likes").relation(object! {}).await;
 	tmp.unwrap_err();
-	let val = object! {in: RecordId::new("person", "a"), out: RecordId::new("thing", "a")};
+	let val = object! {in: RecordId::new("person", "a"), out: RecordId::new("record", "a")};
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
 
 	let vals = array![
-		object! { in: rid!(person:b), out: rid!("thing:a") },
-		object! { id: rid!("likes:2"), in: rid!("person:c"), out: rid!("thing:a") },
-		object! { id: rid!("likes:3"), in: rid!("person:d"), out: rid!("thing:a") },
+		object! { in: rid!(person:b), out: rid!("record:a") },
+		object! { id: rid!("likes:2"), in: rid!("person:c"), out: rid!("record:a") },
+		object! { id: rid!("likes:3"), in: rid!("person:d"), out: rid!("record:a") },
 	];
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
@@ -1546,7 +1546,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
-	let changes = a.get("changes").unwrap().clone().clone();
+	let changes = a.get("changes").unwrap().clone();
 	assert_eq!(
 		changes,
 		surrealdb::parse::value(
@@ -1791,7 +1791,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		.await
 		.unwrap();
 	assert!(user.is_some());
-	txn.commit().await.unwrap();
+	let db = txn.commit().await.unwrap();
 
 	// Verify the user was created by querying through the main db connection
 	let users: Vec<User> = db.select("user").await.unwrap();
@@ -1810,7 +1810,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		.await
 		.unwrap();
 	// Cancel the transaction - the user should not be persisted
-	txn.cancel().await.unwrap();
+	let db = txn.cancel().await.unwrap();
 
 	// Verify Jane was not created
 	let users: Vec<User> = db.select("user").await.unwrap();
@@ -1835,7 +1835,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	txn.commit().await.unwrap();
+	let db = txn.commit().await.unwrap();
 
 	// Verify all users were created
 	let users: Vec<User> = db.select("user").await.unwrap();

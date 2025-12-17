@@ -12,11 +12,11 @@ use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterTableStatement {
-	pub name: String,
+	pub name: TableName,
 	pub if_exists: bool,
 	pub(crate) schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
@@ -26,6 +26,7 @@ pub(crate) struct AlterTableStatement {
 }
 
 impl AlterTableStatement {
+	#[instrument(level = "trace", name = "AlterTableStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;

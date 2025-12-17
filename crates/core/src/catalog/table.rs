@@ -8,7 +8,7 @@ use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::DefineTableStatement;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -45,7 +45,7 @@ pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
 	pub(crate) database_id: DatabaseId,
 	pub(crate) table_id: TableId,
-	pub(crate) name: String,
+	pub(crate) name: TableName,
 	pub(crate) drop: bool,
 	pub(crate) schemafull: bool,
 	pub(crate) view: Option<ViewDefinition>,
@@ -71,7 +71,7 @@ impl TableDefinition {
 		namespace_id: NamespaceId,
 		database_id: DatabaseId,
 		table_id: TableId,
-		name: String,
+		name: TableName,
 	) -> Self {
 		let now = Uuid::now_v7();
 		Self {
@@ -105,7 +105,7 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			name: sql::Expr::Table(self.name.clone().into_string()),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
@@ -131,7 +131,7 @@ impl ToSql for TableDefinition {
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
+			"name".to_string() => self.name.into_string().into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
 			"kind".to_string() => self.table_type.structure(),

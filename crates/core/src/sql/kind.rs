@@ -201,8 +201,12 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
-			Kind::Table(tables) => crate::expr::Kind::Table(tables),
-			Kind::Record(tables) => crate::expr::Kind::Record(tables),
+			Kind::Table(tables) => {
+				crate::expr::Kind::Table(tables.into_iter().map(Into::into).collect())
+			}
+			Kind::Record(tables) => {
+				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
+			}
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
@@ -240,8 +244,12 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
-			crate::expr::Kind::Table(tables) => Kind::Table(tables),
-			crate::expr::Kind::Record(tables) => Kind::Record(tables),
+			crate::expr::Kind::Table(tables) => {
+				Kind::Table(tables.into_iter().map(Into::into).collect())
+			}
+			crate::expr::Kind::Record(tables) => {
+				Kind::Record(tables.into_iter().map(Into::into).collect())
+			}
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
@@ -283,8 +291,12 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::String => crate::types::PublicKind::String,
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
-			Kind::Table(k) => crate::types::PublicKind::Table(k),
-			Kind::Record(k) => crate::types::PublicKind::Record(k),
+			Kind::Table(k) => {
+				crate::types::PublicKind::Table(k.into_iter().map(Into::into).collect())
+			}
+			Kind::Record(k) => {
+				crate::types::PublicKind::Record(k.into_iter().map(Into::into).collect())
+			}
 			Kind::Geometry(k) => {
 				crate::types::PublicKind::Geometry(k.into_iter().map(Into::into).collect())
 			}
@@ -322,8 +334,12 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::String => Kind::String,
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
-			crate::types::PublicKind::Table(k) => Kind::Table(k),
-			crate::types::PublicKind::Record(k) => Kind::Record(k),
+			crate::types::PublicKind::Table(k) => {
+				Kind::Table(k.into_iter().map(Into::into).collect())
+			}
+			crate::types::PublicKind::Record(k) => {
+				Kind::Record(k.into_iter().map(Into::into).collect())
+			}
 			crate::types::PublicKind::Geometry(k) => {
 				Kind::Geometry(k.into_iter().map(Into::into).collect())
 			}
@@ -761,7 +777,7 @@ mod tests {
 	fn test_kind_either() {
 		let kinds =
 			vec![Kind::Table(vec!["users".to_string()]), Kind::Table(vec!["posts".to_string()])];
-		let either = Kind::either(kinds.clone());
+		let either = Kind::either(kinds);
 		assert!(matches!(either, Kind::Either(_)));
 		if let Kind::Either(inner) = either {
 			assert_eq!(inner.len(), 2);

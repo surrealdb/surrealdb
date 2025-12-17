@@ -6,7 +6,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
 use crate::fmt::EscapeIdent;
-use crate::val::RecordId;
+use crate::val::{RecordId, TableName};
 
 pub(crate) mod key;
 pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
@@ -16,7 +16,7 @@ pub(crate) use range::RecordIdKeyRangeLit;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RecordIdLit {
 	/// Table name
-	pub table: String,
+	pub table: TableName,
 	pub(crate) key: RecordIdKeyLit,
 }
 

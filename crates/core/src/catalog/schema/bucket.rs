@@ -48,7 +48,7 @@ impl InfoStructure for BucketDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend.clone()),
+			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend),
 			"readonly".to_string() => self.readonly.into(),
 			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
 		})

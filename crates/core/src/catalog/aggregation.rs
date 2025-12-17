@@ -773,8 +773,8 @@ impl MutVisitor for AggregateExprCollector<'_> {
 	}
 
 	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
-		if let Some(v) = i.into.as_mut() {
-			self.visit_mut_expr(v)?;
+		if let Some(into) = &mut i.into {
+			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
 		self.visit_mut_expr(&mut i.version)?;
@@ -898,8 +898,8 @@ impl MutVisitor for ParentRewritor {
 	}
 
 	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
-		if let Some(v) = i.into.as_mut() {
-			self.visit_mut_expr(v)?;
+		if let Some(into) = &mut i.into {
+			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
 		self.visit_mut_expr(&mut i.version)?;
@@ -1069,7 +1069,7 @@ impl AggregationAnalysis {
 
 		// Place the expression which need to be calculated for the aggregate in the right index.
 		let mut aggregate_arguments = Vec::with_capacity(exprs_map.len());
-		for (k, v) in exprs_map.into_iter() {
+		for (k, v) in exprs_map {
 			if aggregate_arguments.len() > v {
 				aggregate_arguments[v] = k
 			} else {

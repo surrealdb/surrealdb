@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeIdent};
@@ -13,10 +15,7 @@ use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::types::{
-	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRecordId,
-	PublicUuid, PublicValue,
-};
+use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -94,9 +93,7 @@ impl Expr {
 			PublicValue::Number(PublicNumber::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			PublicValue::Number(PublicNumber::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
 			PublicValue::String(x) => Expr::Literal(Literal::String(x)),
-			PublicValue::Bytes(x) => {
-				Expr::Literal(Literal::Bytes(PublicBytes::from(x.into_inner())))
-			}
+			PublicValue::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(x)),
 			PublicValue::Table(x) => Expr::Table(x.into_string()),
 			PublicValue::RecordId(PublicRecordId {
@@ -122,18 +119,11 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			PublicValue::Duration(x) => {
-				Expr::Literal(Literal::Duration(PublicDuration::from(x.inner())))
-			}
-			PublicValue::Datetime(x) => {
-				Expr::Literal(Literal::Datetime(PublicDatetime::from(x.inner())))
-			}
-			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(PublicUuid::from(x.0))),
+			PublicValue::Duration(x) => Expr::Literal(Literal::Duration(x)),
+			PublicValue::Datetime(x) => Expr::Literal(Literal::Datetime(x)),
+			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(x)),
 			PublicValue::Geometry(x) => Expr::Literal(Literal::Geometry(x)),
-			PublicValue::File(x) => Expr::Literal(Literal::File(PublicFile::new(
-				x.bucket().to_string(),
-				x.key().to_string(),
-			))),
+			PublicValue::File(x) => Expr::Literal(Literal::File(PublicFile::new(x.bucket, x.key))),
 			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}
 	}
@@ -207,21 +197,23 @@ fn convert_public_range_to_literal(range: surrealdb_types::Range) -> Expr {
 	use crate::sql::literal::Literal;
 	use crate::sql::operator::BinaryOperator;
 
+	let range = range.into_inner();
+
 	// Determine the operator first before moving the values
-	let op = match (&range.start, &range.end) {
+	let op = match (&range.0, &range.1) {
 		(std::ops::Bound::Included(_), std::ops::Bound::Included(_)) => {
 			BinaryOperator::RangeInclusive
 		}
 		_ => BinaryOperator::Range,
 	};
 
-	let start_expr = match range.start {
+	let start_expr = match range.0 {
 		std::ops::Bound::Included(v) => Expr::from_public_value(v),
 		std::ops::Bound::Excluded(v) => Expr::from_public_value(v),
 		std::ops::Bound::Unbounded => Expr::Literal(Literal::None),
 	};
 
-	let end_expr = match range.end {
+	let end_expr = match range.1 {
 		std::ops::Bound::Included(v) => Expr::from_public_value(v),
 		std::ops::Bound::Excluded(v) => Expr::from_public_value(v),
 		std::ops::Bound::Unbounded => Expr::Literal(Literal::None),
@@ -252,32 +244,32 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		},
 		surrealdb_types::Value::String(s) => crate::val::Value::String(s),
 		surrealdb_types::Value::Duration(d) => {
-			crate::val::Value::Duration(crate::val::Duration(d.inner()))
+			crate::val::Value::Duration(crate::val::Duration(d.into_inner()))
 		}
 		surrealdb_types::Value::Datetime(dt) => {
-			crate::val::Value::Datetime(crate::val::Datetime(dt.inner()))
+			crate::val::Value::Datetime(crate::val::Datetime(dt.into_inner()))
 		}
-		surrealdb_types::Value::Uuid(u) => crate::val::Value::Uuid(crate::val::Uuid(u.0)),
-		surrealdb_types::Value::Array(a) => crate::val::Value::Array(crate::val::Array(
-			a.inner().clone().into_iter().map(convert_public_value_to_internal).collect(),
+		surrealdb_types::Value::Uuid(u) => {
+			crate::val::Value::Uuid(crate::val::Uuid(u.into_inner()))
+		}
+		surrealdb_types::Value::Array(a) => crate::val::Value::Array(crate::val::Array::from(
+			a.into_iter().map(convert_public_value_to_internal).collect::<Vec<_>>(),
 		)),
-		surrealdb_types::Value::Set(s) => {
-			let values: Vec<crate::val::Value> =
-				s.into_iter().map(convert_public_value_to_internal).collect();
-			crate::val::Value::Set(crate::val::Set::from(values))
-		}
-		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object(
-			o.inner()
-				.clone()
-				.into_iter()
+		surrealdb_types::Value::Set(s) => crate::val::Value::Set(crate::val::Set::from(
+			s.into_iter()
+				.map(convert_public_value_to_internal)
+				.collect::<std::collections::BTreeSet<_>>(),
+		)),
+		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object::from(
+			o.into_iter()
 				.map(|(k, v)| (k, convert_public_value_to_internal(v)))
-				.collect(),
+				.collect::<std::collections::BTreeMap<_, _>>(),
 		)),
 		surrealdb_types::Value::Geometry(g) => {
 			crate::val::Value::Geometry(convert_public_geometry_to_internal(g))
 		}
 		surrealdb_types::Value::Bytes(b) => {
-			crate::val::Value::Bytes(crate::val::Bytes(b.inner().clone()))
+			crate::val::Value::Bytes(crate::val::Bytes(b.into_inner()))
 		}
 		surrealdb_types::Value::Table(t) => crate::val::Value::Table(t.into()),
 		surrealdb_types::Value::RecordId(PublicRecordId {
@@ -286,39 +278,29 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		}) => {
 			let key = convert_public_record_id_key_to_internal(key);
 			crate::val::Value::RecordId(crate::val::RecordId {
-				table: table.into_string(),
+				table: table.into(),
 				key,
 			})
 		}
 		surrealdb_types::Value::File(f) => crate::val::Value::File(crate::val::File {
-			bucket: f.bucket().to_string(),
-			key: f.key().to_string(),
+			bucket: f.bucket,
+			key: f.key,
 		}),
-		surrealdb_types::Value::Range(r) => {
-			let start = match r.start {
-				std::ops::Bound::Included(v) => {
-					std::ops::Bound::Included(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Excluded(v) => {
-					std::ops::Bound::Excluded(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			let end = match r.end {
-				std::ops::Bound::Included(v) => {
-					std::ops::Bound::Included(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Excluded(v) => {
-					std::ops::Bound::Excluded(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			crate::val::Value::Range(Box::new(crate::val::Range {
-				start,
-				end,
-			}))
+		surrealdb_types::Value::Range(r) => crate::val::Value::Range(Box::new(crate::val::Range {
+			start: match r.start {
+				Bound::Included(v) => Bound::Included(convert_public_value_to_internal(v)),
+				Bound::Excluded(v) => Bound::Excluded(convert_public_value_to_internal(v)),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match r.end {
+				Bound::Included(v) => Bound::Included(convert_public_value_to_internal(v)),
+				Bound::Excluded(v) => Bound::Excluded(convert_public_value_to_internal(v)),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		})),
+		surrealdb_types::Value::Regex(r) => {
+			crate::val::Value::Regex(crate::val::Regex(r.into_inner()))
 		}
-		surrealdb_types::Value::Regex(r) => crate::val::Value::Regex(crate::val::Regex(r.0)),
 	}
 }
 
@@ -329,44 +311,36 @@ fn convert_public_record_id_key_to_internal(
 		surrealdb_types::RecordIdKey::Number(n) => crate::val::RecordIdKey::Number(n),
 		surrealdb_types::RecordIdKey::String(s) => crate::val::RecordIdKey::String(s),
 		surrealdb_types::RecordIdKey::Uuid(u) => {
-			crate::val::RecordIdKey::Uuid(crate::val::Uuid(u.0))
+			crate::val::RecordIdKey::Uuid(crate::val::Uuid(u.into_inner()))
 		}
-		surrealdb_types::RecordIdKey::Array(a) => {
-			crate::val::RecordIdKey::Array(crate::val::Array(
-				a.inner().clone().into_iter().map(convert_public_value_to_internal).collect(),
-			))
-		}
+		surrealdb_types::RecordIdKey::Array(a) => crate::val::RecordIdKey::Array(
+			crate::val::Array(a.into_iter().map(convert_public_value_to_internal).collect()),
+		),
 		surrealdb_types::RecordIdKey::Object(o) => {
 			crate::val::RecordIdKey::Object(crate::val::Object(
-				o.inner()
-					.clone()
-					.into_iter()
-					.map(|(k, v)| (k, convert_public_value_to_internal(v)))
-					.collect(),
+				o.into_iter().map(|(k, v)| (k, convert_public_value_to_internal(v))).collect(),
 			))
 		}
 		surrealdb_types::RecordIdKey::Range(r) => {
-			let start = match r.start {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			let end = match r.end {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
 			crate::val::RecordIdKey::Range(Box::new(crate::val::RecordIdKeyRange {
-				start,
-				end,
+				start: match r.start {
+					Bound::Included(k) => {
+						Bound::Included(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Unbounded => Bound::Unbounded,
+				},
+				end: match r.end {
+					Bound::Included(k) => {
+						Bound::Included(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Unbounded => Bound::Unbounded,
+				},
 			}))
 		}
 	}
@@ -510,7 +484,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t),
+			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -570,7 +544,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t),
+			crate::expr::Expr::Table(t) => Expr::Table(t.into_string()),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),

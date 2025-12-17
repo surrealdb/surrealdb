@@ -10,7 +10,7 @@ use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Set, SqlNone, Uuid, Value,
+	RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -538,22 +538,23 @@ impl Value {
 		}
 	}
 
-	fn can_coerce_to_table(&self, val: &[String]) -> bool {
+	fn can_coerce_to_table(&self, val: &[TableName]) -> bool {
 		match self {
-			Value::Table(t) => val.is_empty() || val.contains(&t.as_str().to_string()),
+			Value::Table(t) => val.is_empty() || val.contains(t),
 			Value::String(s) => {
 				// Allow strings to be coerced to tables
 				if val.is_empty() {
 					true
 				} else {
-					val.contains(s)
+					let s = TableName::from(s.clone());
+					val.contains(&s)
 				}
 			}
 			_ => false,
 		}
 	}
 
-	fn can_coerce_to_record(&self, val: &[String]) -> bool {
+	fn can_coerce_to_record(&self, val: &[TableName]) -> bool {
 		match self {
 			Value::RecordId(t) => val.is_empty() || val.contains(&t.table),
 			_ => false,
@@ -614,7 +615,7 @@ impl Value {
 			},
 			Kind::Table(t) => {
 				if t.is_empty() {
-					self.coerce_to::<String>().map(|s| Value::Table(crate::val::Table::new(s)))
+					self.coerce_to::<String>().map(|s| Value::Table(crate::val::TableName::new(s)))
 				} else {
 					self.coerce_to_table_kind(t).map(Value::from)
 				}
@@ -673,12 +674,12 @@ impl Value {
 	/// Try to coerce this value to a Table of a certain type
 	pub(crate) fn coerce_to_table_kind(
 		self,
-		val: &[String],
-	) -> Result<crate::val::Table, CoerceError> {
+		val: &[TableName],
+	) -> Result<crate::val::TableName, CoerceError> {
 		let this = match self {
 			// Tables are allowed if correct type
 			Value::Table(v) => {
-				if val.is_empty() || val.contains(&v.as_str().to_string()) {
+				if val.is_empty() || val.contains(&v) {
 					return Ok(v);
 				} else {
 					Value::Table(v)
@@ -686,11 +687,16 @@ impl Value {
 			}
 			// Allow strings to be coerced to tables
 			Value::String(s) => {
-				if val.is_empty() || val.contains(&s) {
-					return Ok(crate::val::Table::new(s));
-				} else {
-					Value::String(s)
+				if val.is_empty() {
+					return Ok(crate::val::TableName::new(s));
 				}
+
+				let t = TableName::from(s);
+				if val.contains(&t) {
+					return Ok(t);
+				}
+
+				Value::String(t.into_string())
 			}
 			x => x,
 		};
@@ -710,7 +716,7 @@ impl Value {
 	}
 
 	/// Try to coerce this value to a Record of a certain type
-	pub(crate) fn coerce_to_record_kind(self, val: &[String]) -> Result<RecordId, CoerceError> {
+	pub(crate) fn coerce_to_record_kind(self, val: &[TableName]) -> Result<RecordId, CoerceError> {
 		let this = match self {
 			// Records are allowed if correct type
 			Value::RecordId(v) => {
@@ -857,7 +863,7 @@ mod tests {
 	fn test_coerce_to_table_specific() {
 		// Coercion should fail for wrong table name (more strict than cast)
 		let value = Value::String("posts".to_string());
-		let kind = Kind::Table(vec!["users".to_string()]);
+		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.coerce_to_kind(&kind);
 		// Coercion from string to specific table type should fail because
 		// coercion is stricter and only allows exact matches
@@ -867,14 +873,14 @@ mod tests {
 	#[test]
 	fn test_coerce_table_to_table() {
 		// Test coercing table value to matching table type
-		let value = Value::Table(crate::val::Table::new("users".to_string()));
-		let kind = Kind::Table(vec!["users".to_string()]);
+		let value = Value::Table("users".into());
+		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_ok());
 
 		// Test coercing table value to non-matching table type
-		let value = Value::Table(crate::val::Table::new("posts".to_string()));
-		let kind = Kind::Table(vec!["users".to_string()]);
+		let value = Value::Table("posts".into());
+		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_err());
 	}
@@ -882,13 +888,13 @@ mod tests {
 	#[test]
 	fn test_can_coerce_to_table() {
 		// Test can_coerce_to_kind for tables
-		let value = Value::Table(crate::val::Table::new("users".to_string()));
-		let kind = Kind::Table(vec!["users".to_string()]);
+		let value = Value::Table("users".into());
+		let kind = Kind::Table(vec!["users".into()]);
 		assert!(value.can_coerce_to_kind(&kind));
 
 		// Wrong table name
-		let value = Value::Table(crate::val::Table::new("posts".to_string()));
-		let kind = Kind::Table(vec!["users".to_string()]);
+		let value = Value::Table("posts".into());
+		let kind = Kind::Table(vec!["users".into()]);
 		assert!(!value.can_coerce_to_kind(&kind));
 
 		// Wrong type
@@ -900,7 +906,7 @@ mod tests {
 	#[test]
 	fn test_coerce_table_empty_tables_list() {
 		// Test with empty tables list (should accept any table)
-		let value = Value::Table(crate::val::Table::new("anything".to_string()));
+		let value = Value::Table("anything".into());
 		let kind = Kind::Table(vec![]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_err()); // Coercion from string is strict

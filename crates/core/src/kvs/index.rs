@@ -34,7 +34,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
-use crate::val::{Object, RecordId, RecordIdKey, Value};
+use crate::val::{Object, RecordId, RecordIdKey, TableName, Value};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -120,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.clone().into());
+				o.insert("error".to_string(), error.into());
 				"error"
 			}
 		};
@@ -135,12 +135,12 @@ type IndexBuilding = Arc<Building>;
 struct IndexKey {
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: String,
+	tb: TableName,
 	ix: IndexId,
 }
 
 impl IndexKey {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: IndexId) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> Self {
 		Self {
 			ns,
 			db,
@@ -265,7 +265,7 @@ impl IndexBuilder {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
@@ -356,7 +356,7 @@ impl Building {
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 		Ok(Self {
 			ctx: Context::new_concurrent(ctx).freeze(),
 			opt,
@@ -588,7 +588,7 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
 				return Ok(());
 			}
@@ -672,7 +672,7 @@ impl Building {
 			if let Some(a) = tx.get(&ia, None).await? {
 				tx.del(&ia).await?;
 				let rid = RecordId {
-					table: self.ikb.table().to_string(),
+					table: self.ikb.table().clone(),
 					key: a.id,
 				};
 				let mut io = IndexOperation::new(

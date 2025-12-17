@@ -10,6 +10,10 @@ use crate::expr::FlowResultExt as _;
 use crate::val::RecordId;
 
 impl Document {
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::computed_fields", skip_all)
+	)]
 	pub(super) async fn computed_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -20,25 +24,29 @@ impl Document {
 		// Get the record id for the document
 		// If the document has no id, it means there
 		// is no schema with computed fields for it either
-		if let Ok(rid) = self.id() {
-			// Get the fields to compute
-			let fields = self.fd(ctx, opt).await?;
+		let Ok(rid) = self.id() else {
+			return Ok(());
+		};
 
-			// Get the document to compute the fields for
-			let doc = match doc_kind {
-				DocKind::Initial => &mut self.initial,
-				DocKind::Current => &mut self.current,
-				DocKind::InitialReduced => &mut self.initial_reduced,
-				DocKind::CurrentReduced => &mut self.current_reduced,
-			};
+		let table_fields = self.fd(ctx, opt).await?;
 
-			Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), fields.as_ref(), doc)
-				.await?;
-		}
+		// Get the document to compute the fields for
+		let doc = match doc_kind {
+			DocKind::Initial => &mut self.initial,
+			DocKind::Current => &mut self.current,
+			DocKind::InitialReduced => &mut self.initial_reduced,
+			DocKind::CurrentReduced => &mut self.current_reduced,
+		};
+
+		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), &table_fields, doc).await?;
 
 		Ok(())
 	}
 
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::computed_fields_inner", skip_all)
+	)]
 	pub(super) async fn computed_fields_inner(
 		stk: &mut Stk,
 		ctx: &FrozenContext,

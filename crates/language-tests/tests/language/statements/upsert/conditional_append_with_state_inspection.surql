@@ -11,6 +11,9 @@ reason = "Tests LET with SELECT count(), IF-ELSE conditional logic, UPSERT with 
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -56,6 +59,8 @@ value = "[{ category: 'multi-sport' }]"
 value = "[{ category: 'multi-sport', id: person:test, sport: ['basketball', 'tennis', 'badminton', 'volleyball'] }]"
 
 */
+
+DEFINE TABLE person;
 
 -- Check if the record exists
 LET $record = (SELECT *, count() AS count FROM person:test);

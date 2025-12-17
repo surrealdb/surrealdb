@@ -14,7 +14,7 @@ use crate::dbs::{MessageBroker, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
-use crate::expr::paths::{AC, RD, TK};
+use crate::expr::paths::{AC, ID, RD, TK};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification};
 use crate::val::{Value, convert_value_to_public_value};
@@ -301,8 +301,16 @@ impl Document {
 			}
 		}
 
+		// Extract the session ID from the session value
+		let session_id = match sess.pick(ID.as_ref()) {
+			Value::Uuid(uuid) => Some(uuid.into()),
+			Value::String(s) => s.parse::<crate::val::Uuid>().ok().map(|uuid| uuid.into()),
+			_ => None,
+		};
+
 		let notification = PublicNotification::new(
 			live_subscription.id.into(),
+			session_id,
 			action,
 			convert_value_to_public_value(Value::RecordId(rid.as_ref().clone()))?,
 			convert_value_to_public_value(result)?,
@@ -350,7 +358,7 @@ impl Document {
 		// Live queries are always
 		if opt.check_perms(crate::iam::Action::View)? {
 			// Get the table
-			let tb = self.tb(ctx, opt).await?;
+			let tb = self.tb().await?;
 			// Process the table permissions
 			match &tb.permissions.select {
 				Permission::None => return Err(IgnoreError::Ignore),

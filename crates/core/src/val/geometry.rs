@@ -406,7 +406,6 @@ impl Geometry {
 }
 
 impl PartialOrd for Geometry {
-	#[rustfmt::skip]
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		fn coord(v: &Coord) -> (f64, f64) {
 			v.x_y()
@@ -492,7 +491,9 @@ impl PartialOrd for Geometry {
 			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
 			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
 			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
+			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => {
+				multipolygon(a).partial_cmp(multipolygon(b))
+			}
 			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
 		}
 	}

@@ -41,7 +41,7 @@ impl Document {
 			_ => return Ok(()),
 		};
 		// Check if the table is a view
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		if tb.drop {
 			return Ok(());
 		}
@@ -64,7 +64,7 @@ impl Document {
 
 			// Update the index entries
 			if o != n {
-				Self::one_index(&db, &tb, stk, ctx, opt, ix, o, n, &rid).await?;
+				Self::one_index(&db, tb, stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
 		// Carry on

@@ -63,12 +63,14 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
+use async_channel::{Receiver, Sender};
 #[doc(inline)]
 pub use err::Error;
 // Removed anyhow::ensure - will implement custom ensure macro if needed
 use method::BoxFuture;
 use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
+use uuid::Uuid;
 
 use self::conn::Router;
 use self::opt::{Endpoint, EndpointKind, WaitFor};
@@ -138,7 +140,7 @@ where
 		Box::pin(async move {
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let client = Client::connect(endpoint, self.capacity).await?;
+			let client = Client::connect(endpoint, self.capacity, None).await?;
 			if endpoint_kind.is_remote() {
 				match client.version().await {
 					Ok(mut version) => {
@@ -172,7 +174,8 @@ where
 			}
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
-			let client = Client::connect(endpoint, self.capacity).await?;
+			let session_clone = self.surreal.inner.session_clone.clone();
+			let client = Client::connect(endpoint, self.capacity, Some(session_clone)).await?;
 			if endpoint_kind.is_remote() {
 				match client.version().await {
 					Ok(mut version) => {
@@ -184,9 +187,7 @@ where
 					Err(e) => return Err(e),
 				}
 			}
-			let inner =
-				Arc::into_inner(client.inner).expect("new connection to have no references");
-			let router = inner.router.into_inner().expect("router to be set");
+			let router = client.inner.router.wait().clone();
 			self.surreal.inner.router.set(router).map_err(|_| Error::AlreadyConnected)?;
 			// Both ends of the channel are still alive at this point
 			self.surreal.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
@@ -202,9 +203,50 @@ pub(crate) enum ExtraFeatures {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
+enum SessionId {
+	Initial(Uuid),
+	Clone {
+		old: Uuid,
+		new: Uuid,
+	},
+	Drop(Uuid),
+}
+
+#[derive(Debug, Clone)]
+struct SessionClone {
+	sender: Sender<SessionId>,
+	#[allow(dead_code)]
+	receiver: Receiver<SessionId>,
+}
+
+impl SessionClone {
+	fn new() -> Self {
+		let (sender, receiver) = async_channel::unbounded();
+		Self {
+			sender,
+			receiver,
+		}
+	}
+}
+
+#[derive(Debug)]
 struct Inner {
 	router: OnceLock<Router>,
 	waiter: Waiter,
+	session_clone: SessionClone,
+}
+
+impl Inner {
+	fn clone_session(&self, old: Uuid, new: Uuid) {
+		self.session_clone
+			.sender
+			.try_send(SessionId::Clone {
+				old,
+				new,
+			})
+			.ok();
+	}
 }
 
 /// A database client instance for embedded or remote databases.
@@ -214,37 +256,8 @@ struct Inner {
 /// performance for the client when working with embedded instances.
 pub struct Surreal<C: Connection> {
 	inner: Arc<Inner>,
+	session_id: Uuid,
 	engine: PhantomData<C>,
-}
-
-impl<C> From<(OnceLock<Router>, Waiter)> for Surreal<C>
-where
-	C: Connection,
-{
-	fn from((router, waiter): (OnceLock<Router>, Waiter)) -> Self {
-		Surreal {
-			inner: Arc::new(Inner {
-				router,
-				waiter,
-			}),
-			engine: PhantomData,
-		}
-	}
-}
-
-impl<C> From<(Router, Waiter)> for Surreal<C>
-where
-	C: Connection,
-{
-	fn from((router, waiter): (Router, Waiter)) -> Self {
-		Surreal {
-			inner: Arc::new(Inner {
-				router: OnceLock::with_value(router),
-				waiter,
-			}),
-			engine: PhantomData,
-		}
-	}
 }
 
 impl<C> From<Arc<Inner>> for Surreal<C>
@@ -252,10 +265,37 @@ where
 	C: Connection,
 {
 	fn from(inner: Arc<Inner>) -> Self {
+		let session_id = Uuid::new_v4();
+		inner.session_clone.sender.try_send(SessionId::Initial(session_id)).ok();
 		Surreal {
 			inner,
+			session_id,
 			engine: PhantomData,
 		}
+	}
+}
+
+impl<C> From<(OnceLock<Router>, Waiter, SessionClone)> for Surreal<C>
+where
+	C: Connection,
+{
+	fn from((router, waiter, session_clone): (OnceLock<Router>, Waiter, SessionClone)) -> Self {
+		Arc::new(Inner {
+			router,
+			waiter,
+			session_clone,
+		})
+		.into()
+	}
+}
+
+impl<C> From<(Router, Waiter, SessionClone)> for Surreal<C>
+where
+	C: Connection,
+{
+	fn from((router, waiter, session_clone): (Router, Waiter, SessionClone)) -> Self {
+		let oncelock = OnceLock::with_value(router);
+		(oncelock, waiter, session_clone).into()
 	}
 }
 
@@ -291,10 +331,22 @@ where
 	C: Connection,
 {
 	fn clone(&self) -> Self {
+		let session_id = Uuid::new_v4();
+		self.inner.clone_session(self.session_id, session_id);
 		Self {
 			inner: self.inner.clone(),
+			session_id,
 			engine: self.engine,
 		}
+	}
+}
+
+impl<C> Drop for Surreal<C>
+where
+	C: Connection,
+{
+	fn drop(&mut self) {
+		self.inner.session_clone.sender.try_send(SessionId::Drop(self.session_id)).ok();
 	}
 }
 
@@ -305,6 +357,7 @@ where
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("Surreal")
 			.field("router", &self.inner.router)
+			.field("session_id", &self.session_id)
 			.field("engine", &self.engine)
 			.finish()
 	}

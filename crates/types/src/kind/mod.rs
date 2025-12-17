@@ -9,9 +9,8 @@ pub use literal::*;
 use serde::{Deserialize, Serialize};
 use surrealdb_types_derive::write_sql;
 
-use crate as surrealdb_types;
 use crate::utils::display::format_seperated;
-use crate::{SqlFormat, ToSql};
+use crate::{self as surrealdb_types, SqlFormat, Table, ToSql};
 
 /// The kind of a SurrealDB value.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -49,9 +48,9 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A table type.
-	Table(Vec<String>),
+	Table(Vec<Table>),
 	/// A record type.
-	Record(Vec<String>),
+	Record(Vec<Table>),
 	/// A geometry type.
 	Geometry(Vec<GeometryKind>),
 	/// An either type.

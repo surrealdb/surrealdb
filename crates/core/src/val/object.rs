@@ -109,7 +109,7 @@ impl TryInto<HeaderMap> for Object {
 	type Error = Error;
 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
 		let mut headermap = HeaderMap::new();
-		for (k, v) in self.into_iter() {
+		for (k, v) in self {
 			let k: HeaderName = k.parse()?;
 			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
 			headermap.insert(k, v);

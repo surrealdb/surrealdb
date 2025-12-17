@@ -82,6 +82,7 @@ pub(crate) enum Subject {
 }
 
 impl Subject {
+	#[instrument(level = "trace", name = "Subject::compute", skip_all)]
 	async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -516,7 +517,7 @@ async fn compute_show(
 		Some(gr) => {
 			let grant = match base {
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
-					Some(val) => val.clone(),
+					Some(val) => val,
 					None => bail!(Error::AccessGrantRootNotFound {
 						ac: stmt.ac.clone(),
 						gr: gr.clone(),
@@ -525,7 +526,7 @@ async fn compute_show(
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
-						Some(val) => val.clone(),
+						Some(val) => val,
 						None => bail!(Error::AccessGrantNsNotFound {
 							ac: stmt.ac.clone(),
 							gr: gr.clone(),
@@ -536,7 +537,7 @@ async fn compute_show(
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
-						Some(val) => val.clone(),
+						Some(val) => val,
 						None => bail!(Error::AccessGrantDbNotFound {
 							ac: stmt.ac.clone(),
 							gr: gr.clone(),

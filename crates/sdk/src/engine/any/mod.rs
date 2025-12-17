@@ -331,12 +331,10 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[allow(clippy::unwrap_used)]
 mod tests {
 
-	use surrealdb_types::{self, Object};
-
 	use super::*;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use crate::types::Value;
+	use crate::types::{Object, Value};
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {

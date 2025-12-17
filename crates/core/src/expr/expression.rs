@@ -24,7 +24,7 @@ use crate::expr::{
 };
 use crate::fnc;
 use crate::types::PublicValue;
-use crate::val::{Array, Range, Table, Value};
+use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
@@ -32,7 +32,7 @@ pub(crate) enum Expr {
 	Param(Param),
 	Idiom(Idiom),
 	// Maybe move into Literal?
-	Table(String),
+	Table(TableName),
 	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
@@ -140,35 +140,32 @@ impl Expr {
 			},
 			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s)),
 			surrealdb_types::Value::Bytes(b) => {
-				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.inner().clone())))
+				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.into_inner())))
 			}
 			surrealdb_types::Value::Duration(d) => {
-				Expr::Literal(Literal::Duration(crate::val::Duration(d.inner())))
+				Expr::Literal(Literal::Duration(crate::val::Duration(d.into_inner())))
 			}
-			surrealdb_types::Value::Datetime(dt) => {
-				Expr::Literal(Literal::Datetime(crate::val::Datetime(dt.inner())))
+			surrealdb_types::Value::Datetime(d) => {
+				Expr::Literal(Literal::Datetime(crate::val::Datetime(d.into_inner())))
 			}
-			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
-			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
-				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-			)),
+			surrealdb_types::Value::Uuid(u) => {
+				Expr::Literal(Literal::Uuid(crate::val::Uuid(u.into_inner())))
+			}
+			surrealdb_types::Value::Array(a) => {
+				Expr::Literal(Literal::Array(a.into_iter().map(Expr::from_public_value).collect()))
+			}
 			surrealdb_types::Value::Set(s) => {
-				// Convert set to array for literal representation since there's no set literal
-				// syntax
-				Expr::Literal(Literal::Array(
-					s.iter().cloned().map(Expr::from_public_value).collect(),
-				))
+				Expr::Literal(Literal::Array(s.into_iter().map(Expr::from_public_value).collect()))
 			}
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
-				o.inner()
-					.iter()
+				o.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k.clone(),
-						value: Expr::from_public_value(v.clone()),
+						key: k,
+						value: Expr::from_public_value(v),
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::Table(t) => Expr::Table(t.into_string()),
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into()),
 			surrealdb_types::Value::RecordId(RecordId {
 				table,
 				key,
@@ -177,35 +174,33 @@ impl Expr {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
-						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
+						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
 					}
-					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-						a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-					),
+					surrealdb_types::RecordIdKey::Array(a) => {
+						RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
+					}
 					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
-						o.inner()
-							.iter()
+						o.into_iter()
 							.map(|(k, v)| ObjectEntry {
-								key: k.clone(),
-								value: Expr::from_public_value(v.clone()),
+								key: k,
+								value: Expr::from_public_value(v),
 							})
 							.collect(),
 					),
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: table.into_string(),
+					table: table.into(),
 					key: key_lit,
 				}))
 			}
 			surrealdb_types::Value::Geometry(g) => Expr::Literal(Literal::Geometry(g.into())),
-			surrealdb_types::Value::File(f) => Expr::Literal(Literal::File(crate::val::File::new(
-				f.bucket().to_string(),
-				f.key().to_string(),
-			))),
+			surrealdb_types::Value::File(f) => {
+				Expr::Literal(Literal::File(crate::val::File::new(f.bucket, f.key)))
+			}
 			surrealdb_types::Value::Range(r) => Expr::from(*r),
 			surrealdb_types::Value::Regex(r) => {
-				Expr::Literal(Literal::Regex(crate::val::Regex(r.0)))
+				Expr::Literal(Literal::Regex(crate::val::Regex(r.into_inner())))
 			}
 		}
 	}
@@ -214,7 +209,7 @@ impl Expr {
 impl From<surrealdb_types::Range> for Expr {
 	fn from(r: surrealdb_types::Range) -> Self {
 		use std::ops::Bound;
-		match (r.start, r.end) {
+		match r.into_inner() {
 			// Unbounded range: ..
 			(Bound::Unbounded, Bound::Unbounded) => Expr::Literal(Literal::UnboundedRange),
 			// Prefix ranges: ..end or ..=end
@@ -327,6 +322,10 @@ impl Expr {
 	}
 
 	/// Process this type returning a computed simple Value
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Expr::compute", skip_all)
+	)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -342,7 +341,7 @@ impl Expr {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(Table::new(ident.clone()))),
+			Expr::Table(ident) => Ok(Value::Table(ident.clone())),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -712,7 +711,7 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.clone(),
+			Expr::Table(ident) => ident.clone().into_string(),
 			_ => self.to_sql(),
 		}
 	}

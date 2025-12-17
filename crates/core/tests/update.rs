@@ -22,7 +22,7 @@ async fn update_merge_and_content() -> Result<()> {
 		UPDATE person:test MERGE { age: 50 };
 		UPDATE person:test MERGE 'some content';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -110,7 +110,7 @@ async fn update_simple_with_input() -> Result<()> {
 		UPDATE person:test SET name = 'Tobie';
 		SELECT * FROM person:test;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -227,7 +227,7 @@ async fn update_with_return_clause() -> Result<()> {
 		UPDATE person:test SET age = 35 RETURN age, name;
 		DELETE person:test RETURN VALUE $before;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -304,7 +304,7 @@ async fn update_with_object_array_string_field_names() -> Result<()> {
 		UPSERT person:one SET field.key = 'value';
 		UPSERT person:two SET field['key'] = 'value';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -376,7 +376,7 @@ async fn update_records_and_arrays_with_json_patch() -> Result<()> {
 			}
 		];
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -590,12 +590,21 @@ async fn common_permissions_checks(auth_enabled: bool) {
 	];
 	let statement = "UPDATE person:test CONTENT { name: 'Name' };";
 
-	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+	for ((level, role), (ns, db), should_succeed, msg) in tests {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		// Test the statement when the table already exists
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+
+			// Define additional namespaces/databases for cross-namespace tests
+			ds.execute(
+				"DEFINE NS OTHER_NS; USE NS OTHER_NS; DEFINE DB DB; USE NS NS; DEFINE DB OTHER_DB;",
+				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
+			)
+			.await
+			.unwrap();
 
 			// Prepare datastore
 			let mut resp = ds
@@ -692,7 +701,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -744,7 +753,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -812,7 +821,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -864,7 +873,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -917,7 +926,7 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn update_field_permissions() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 
 	let sql = r#"
 		DEFINE TABLE data PERMISSIONS FULL;

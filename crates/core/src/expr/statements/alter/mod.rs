@@ -86,6 +86,7 @@ pub(crate) enum AlterStatement {
 
 impl AlterStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "AlterStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

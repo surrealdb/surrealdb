@@ -52,7 +52,7 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -197,7 +197,7 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -333,7 +333,7 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -490,7 +490,7 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap();
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -736,7 +736,7 @@ the database name matches", 			),
 		let statement = format!("ACCESS api ON {base} GRANT FOR USER tobie");
 
 		let test_level = level;
-		for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+		for ((level, role), (ns, db), should_succeed, msg) in tests {
 			let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 			let sess_setup = match *test_level {
 				"ROOT" => Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),
@@ -756,7 +756,7 @@ the database name matches", 			),
 			);
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true);
+				let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(true);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();

@@ -8,7 +8,7 @@ value = "[{ id: person:test, name: 'Tester' }]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ detail: { thing: person:test }, operation: 'Iterate Thing' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { record: person:test }, operation: 'Iterate Record' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ id: person:test, name: 'Tester' }]"

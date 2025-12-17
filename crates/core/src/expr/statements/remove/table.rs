@@ -12,6 +12,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::types::{PublicAction, PublicNotification, PublicValue};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveTableStatement {
@@ -42,7 +43,8 @@ impl RemoveTableStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Compute the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
+		let name =
+			TableName::new(expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?);
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -67,8 +69,7 @@ impl RemoveTableStatement {
 
 		if !fts.is_empty() {
 			let mut message =
-				format!("Cannot delete table `{name}` on which a view is defined, table(s) `")
-					.to_string();
+				format!("Cannot delete table `{name}` on which a view is defined, table(s) `");
 			for (idx, f) in fts.iter().enumerate() {
 				if idx != 0 {
 					message.push_str("`, `")
@@ -138,6 +139,7 @@ impl RemoveTableStatement {
 				sender
 					.send(PublicNotification::new(
 						lv.id.into(),
+						None,
 						PublicAction::Killed,
 						PublicValue::None,
 						PublicValue::None,

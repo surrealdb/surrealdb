@@ -22,7 +22,7 @@ use crate::idx::planner::executor::{
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, Number, TableName, Value};
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
@@ -45,7 +45,7 @@ impl Tree {
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
 		stm_ctx: &'a StatementContext<'a>,
-		table: &'a str,
+		table: &'a TableName,
 	) -> Result<Self> {
 		let mut b = TreeBuilder::new(stm_ctx, table);
 		if let Some(cond) = stm_ctx.cond {
@@ -70,9 +70,9 @@ impl Tree {
 
 struct TreeBuilder<'a> {
 	ctx: &'a StatementContext<'a>,
-	table: &'a str,
+	table: &'a TableName,
 	first_order: Option<&'a Order>,
-	schemas: HashMap<String, SchemaCache>,
+	schemas: HashMap<TableName, SchemaCache>,
 	idioms_indexes: HashMap<String, HashMap<Arc<Idiom>, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
@@ -100,7 +100,7 @@ pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(ctx: &'a StatementContext<'a>, table: &'a str) -> Self {
+	fn new(ctx: &'a StatementContext<'a>, table: &'a TableName) -> Self {
 		let with_indexes = WithIndexes::with_capacity(ctx.with);
 		let first_order = if let Some(Ordering::Order(OrderList(o))) = ctx.order {
 			o.first()
@@ -133,14 +133,14 @@ impl<'a> TreeBuilder<'a> {
 	async fn lazy_load_schema_resolver(
 		&mut self,
 		tx: &Transaction,
-		table: &str,
+		table: &TableName,
 	) -> Result<SchemaCache> {
 		if let Some(sc) = self.schemas.get(table).cloned() {
 			return Ok(sc);
 		}
 		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
 		let sc = SchemaCache::new(ns, db, table, tx).await?;
-		self.schemas.insert(table.to_owned(), sc.clone());
+		self.schemas.insert(table.clone(), sc.clone());
 		Ok(sc)
 	}
 
@@ -175,7 +175,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_count(&mut self, table: &str) -> Result<()> {
+	async fn eval_count(&mut self, table: &TableName) -> Result<()> {
 		if let Some(f) = self.ctx.fields
 			&& f.is_count_all_only()
 			&& let Some(g) = self.ctx.group
@@ -260,8 +260,8 @@ impl<'a> TreeBuilder<'a> {
 					group,
 					exp: exp.clone(),
 					io,
-					left: left.clone(),
-					right: right.clone(),
+					left,
+					right,
 				};
 				self.resolved_expressions.insert(exp, re.clone());
 				Ok(re.into())
@@ -782,7 +782,12 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(ns: NamespaceId, db: DatabaseId, table: &str, tx: &Transaction) -> Result<Self> {
+	async fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableName,
+		tx: &Transaction,
+	) -> Result<Self> {
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

@@ -52,7 +52,7 @@ impl SurrealismCache {
 			}
 		};
 
-		Ok(value.runtime.clone())
+		Ok(value.runtime)
 	}
 }
 
@@ -92,16 +92,17 @@ impl<'a> From<SurrealismCacheLookup<'a>> for SurrealismCacheKey {
 }
 
 impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
-	#[rustfmt::skip]
 	fn equivalent(&self, key: &SurrealismCacheKey) -> bool {
-        match (self, key) {
-            (Self::File(a1, b1, c1, d1), SurrealismCacheKey::File(a2, b2, c2, d2))
-                => a1.0 == a2.0 && b1.0 == b2.0 && c1 == c2 && d1 == d2,
-            (Self::Silo(a1, b1, c1, d1, e1), SurrealismCacheKey::Silo(a2, b2, c2, d2, e2))
-                => a1 == a2 && b1 == b2 && c1 == c2 && d1 == d2 && e1 == e2,
-            _ => false,
-        }
-    }
+		match (self, key) {
+			(Self::File(a1, b1, c1, d1), SurrealismCacheKey::File(a2, b2, c2, d2)) => {
+				a1.0 == a2.0 && b1.0 == b2.0 && c1 == c2 && d1 == d2
+			}
+			(Self::Silo(a1, b1, c1, d1, e1), SurrealismCacheKey::Silo(a2, b2, c2, d2, e2)) => {
+				a1 == a2 && b1 == b2 && c1 == c2 && d1 == d2 && e1 == e2
+			}
+			_ => false,
+		}
+	}
 }
 
 #[derive(Clone)]

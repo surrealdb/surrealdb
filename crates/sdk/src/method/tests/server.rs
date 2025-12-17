@@ -1,9 +1,8 @@
 use async_channel::Receiver;
 use surrealdb_core::dbs::QueryResultBuilder;
-use surrealdb_types::SurrealValue;
 
 use crate::conn::{Command, Route};
-use crate::types::Value;
+use crate::types::{SurrealValue, Value};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -84,6 +83,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				}
 				| Command::ImportFile {
+					..
+				}
+				| Command::Attach {
+					..
+				}
+				| Command::Detach {
 					..
 				} => query_result,
 			};

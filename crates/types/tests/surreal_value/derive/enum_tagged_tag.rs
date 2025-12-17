@@ -92,7 +92,7 @@ fn test_enum_tagged_with_tag_variant_lowercase() {
 	assert_eq!(value, Value::Object(object! { tag: Value::String("foo".to_string()) }));
 
 	// from_value
-	let converted = EnumTaggedWithTagLowercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedWithTagLowercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedWithTagLowercase::Foo);
 
 	// kind_of
@@ -124,7 +124,7 @@ fn test_enum_tagged_with_tag_variant_uppercase() {
 	assert_eq!(value, Value::Object(object! { tag: Value::String("FOO".to_string()) }));
 
 	// from_value
-	let converted = EnumTaggedWithTagUppercase::from_value(value.clone()).unwrap();
+	let converted = EnumTaggedWithTagUppercase::from_value(value).unwrap();
 	assert_eq!(converted, EnumTaggedWithTagUppercase::Foo);
 
 	// kind_of

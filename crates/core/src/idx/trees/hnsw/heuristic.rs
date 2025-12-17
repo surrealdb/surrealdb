@@ -133,7 +133,7 @@ impl Heuristic {
 			ex.insert(i);
 		}
 		let mut ext = Vec::with_capacity(m_max.min(c.len()));
-		for (_, e_id) in c.to_vec().into_iter() {
+		for (_, e_id) in c.to_vec() {
 			if let Some(e_conn) = layer.get_edges(&e_id) {
 				for &e_adj in e_conn.iter() {
 					if e_adj != q_id
