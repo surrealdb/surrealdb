@@ -134,7 +134,7 @@ impl SelectStatement {
 			let res =
 				i.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
-			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			ctx.expect_not_timedout().await?;
 
 			if self.only {
 				match res {

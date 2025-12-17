@@ -93,7 +93,15 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub imports: Vec<String>,
 	pub timeout: Option<BoolOr<u64>>,
+	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
+
+	/// Specifies which backends this test should run on.
+	/// If empty, the test runs on all backends.
+	/// If specified, the test only runs when the selected backend is in this list.
+	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
+	#[serde(default)]
+	pub backend: Vec<String>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -101,7 +109,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-	/// Returns the namespace if the environement specifies one, none otherwise
+	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn namespace(&self) -> Option<&str> {
@@ -112,7 +120,7 @@ impl TestEnv {
 		}
 	}
 
-	/// Returns the namespace if the environement specifies one, none otherwise
+	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn database(&self) -> Option<&str> {
@@ -125,6 +133,10 @@ impl TestEnv {
 
 	pub fn timeout(&self) -> Option<u64> {
 		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+	}
+
+	pub fn context_timeout(&self) -> Option<u64> {
+		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
@@ -225,7 +237,7 @@ pub struct MatchTestResult {
 /// [env]
 /// timeout = true
 ///
-/// # Set the timeout as enabeled with the value of 1000ms
+/// # Set the timeout as enabled with the value of 1000ms
 /// [env]
 /// timeout = 1000
 /// ```
