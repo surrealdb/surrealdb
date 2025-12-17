@@ -541,13 +541,17 @@ impl Iterator {
 						Value::RecordId(rid) => {
 							self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, rid).await?
 						}
+						v if stm_ctx.stm.is_select() => {
+							self.ingest(Iterable::Value(doc_ctx.clone(), v))
+						}
 						Value::Object(o) => {
 							if let Some(id) = o.rid() {
 								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
+							} else {
+								bail!(Error::InvalidStatementTarget {
+									value: Value::Object(o).to_sql(),
+								})
 							}
-						}
-						v if stm_ctx.stm.is_select() => {
-							self.ingest(Iterable::Value(doc_ctx.clone(), v))
 						}
 						v => {
 							bail!(Error::InvalidStatementTarget {
@@ -557,12 +561,16 @@ impl Iterator {
 					}
 				}
 			}
+			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(doc_ctx.clone(), v)),
 			Value::Object(o) => {
 				if let Some(id) = o.rid() {
 					self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
+				} else {
+					bail!(Error::InvalidStatementTarget {
+						value: o.to_sql(),
+					})
 				}
 			}
-			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(doc_ctx.clone(), v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
 					value: v.to_sql(),
