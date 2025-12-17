@@ -122,10 +122,6 @@ allow = ["BUSL-1.1"]
 name = "surrealism-runtime"
 allow = ["BUSL-1.1"]
 
-[[licenses.exceptions]]
-name = "surrealism-types"
-allow = ["BUSL-1.1"]
-
 [[licenses.clarify]]
 name = "surreal"
 expression = "BUSL-1.1"
@@ -163,11 +159,6 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealism-runtime"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealism-types"
 expression = "BUSL-1.1"
 license-files = []
 
