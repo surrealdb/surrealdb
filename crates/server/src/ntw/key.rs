@@ -141,10 +141,7 @@ async fn select_all(
 	let ds = &state.datastore;
 	assert_capabilities(ds, &session).map_err(ResponseError)?;
 	// Ensure a NS and DB are set
-	let (ns, db) = check_ns_db(&session).map_err(ResponseError)?;
-
-	// Check if the table exists
-	ds.ensure_tb_exists(&ns, &db, &table).await.map_err(ResponseError)?;
+	let _ = check_ns_db(&session).map_err(ResponseError)?;
 
 	// Specify the request statement
 	let sql = match query.fields {
@@ -153,7 +150,7 @@ async fn select_all(
 	};
 	// Specify the request variables
 	let vars = vars! {
-		"table": table,
+		"table": Value::Table(table.into()),
 		"start": query.start.unwrap_or(0),
 		"limit": query.limit.unwrap_or(100),
 		"fields": Value::Array(Array::from(query.fields.unwrap_or_default().into_iter().map(SurrealValue::into_value).collect::<Vec<Value>>())),

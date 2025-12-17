@@ -15,7 +15,7 @@ use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
 use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
@@ -388,7 +388,7 @@ impl ToSql for RecordIdKey {
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordId {
-	pub table: String,
+	pub table: TableName,
 	pub key: RecordIdKey,
 }
 
@@ -396,7 +396,7 @@ impl_kv_value_revisioned!(RecordId);
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub(crate) fn new<K>(table: String, key: K) -> Self
+	pub(crate) fn new<K>(table: TableName, key: K) -> Self
 	where
 		RecordIdKey: From<K>,
 	{
@@ -406,7 +406,7 @@ impl RecordId {
 		}
 	}
 
-	pub fn random_for_table(table: String) -> Self {
+	pub fn random_for_table(table: TableName) -> Self {
 		RecordId {
 			table,
 			key: RecordIdKey::rand(),
@@ -421,7 +421,7 @@ impl RecordId {
 		}
 	}
 
-	pub fn is_table_type(&self, tables: &[String]) -> bool {
+	pub fn is_table_type(&self, tables: &[TableName]) -> bool {
 		tables.is_empty() || tables.contains(&self.table)
 	}
 
@@ -460,7 +460,7 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 impl From<crate::types::PublicRecordId> for RecordId {
 	fn from(value: crate::types::PublicRecordId) -> Self {
 		RecordId {
-			table: value.table.into_string(),
+			table: value.table.into(),
 			key: RecordIdKey::from(value.key),
 		}
 	}

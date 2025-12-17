@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied
 /// with a ns/db/tb combo without the cl. The live statement includes the node
@@ -15,6 +16,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Lq<'a> {
 	__: u8,
 	_a: u8,
@@ -22,7 +24,7 @@ pub(crate) struct Lq<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	_e: u8,
 	_f: u8,
@@ -31,17 +33,17 @@ pub(crate) struct Lq<'a> {
 
 impl_kv_key_storekey!(Lq<'_> => SubscriptionDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, lq: Uuid) -> Lq<'_> {
 	Lq::new(ns, db, tb, lq)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!lq\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)
@@ -54,7 +56,7 @@ impl Categorise for Lq<'_> {
 }
 
 impl<'a> Lq<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, lq: Uuid) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -81,9 +83,10 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-		let val = Lq::new(NamespaceId(1), DatabaseId(2), "testtb", live_query_id);
+		let live_query_id =
+			Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+		let tb = TableName::from("testtb");
+		let val = Lq::new(NamespaceId(1), DatabaseId(2), &tb, live_query_id);
 		let enc = Lq::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -93,13 +96,15 @@ mod tests {
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!lq\x00")
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2), &tb).unwrap();
 		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00")
 	}
 }

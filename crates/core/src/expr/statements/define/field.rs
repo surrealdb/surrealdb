@@ -6,7 +6,7 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
@@ -91,7 +91,7 @@ impl DefineFieldStatement {
 
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
-			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
+			table: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into(),
 			field_kind: self.field_kind.clone(),
 			flexible: self.flexible,
 			readonly: self.readonly,
@@ -112,6 +112,7 @@ impl DefineFieldStatement {
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineFieldStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -145,10 +146,13 @@ impl DefineFieldStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
+
 		// Get the name of the field
 		let fd = self.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &definition.what, &fd).await? {
+		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -163,11 +167,6 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-
-		let tb = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(Some(ctx), ns, db, &definition.what).await?
-		};
 
 		// Process the statement
 		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
@@ -199,7 +198,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.what);
+							cache.clear_tb(ns, db, &definition.table);
 						}
 
 						txn.clear_cache();
@@ -229,7 +228,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.what);
+							cache.clear_tb(ns, db, &definition.table);
 						}
 
 						txn.clear_cache();
@@ -246,7 +245,7 @@ impl DefineFieldStatement {
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &definition.what);
+			cache.clear_tb(ns, db, &definition.table);
 		}
 
 		// Clear the cache
@@ -263,7 +262,7 @@ impl DefineFieldStatement {
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &definition.what, None).await.ok();
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await.ok();
 		// Process possible recursive_definitions
 		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = definition.name.clone();
@@ -288,7 +287,7 @@ impl DefineFieldStatement {
 				// Get the field name
 				let fd = name.to_sql();
 				// Set the subtype `DEFINE FIELD` definition
-				let key = crate::key::table::fd::new(ns, db, &definition.what, &fd);
+				let key = crate::key::table::fd::new(ns, db, &definition.table, &fd);
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
@@ -299,7 +298,7 @@ impl DefineFieldStatement {
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: definition.what.clone(),
+						table: definition.table.clone(),
 						field_kind: Some(cur_kind),
 						..Default::default()
 					}
@@ -325,7 +324,7 @@ impl DefineFieldStatement {
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &definition.what, None).await?;
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 		if self.computed.is_some() {
 			// Ensure the field is not the `id` field
 			ensure!(!definition.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
@@ -427,7 +426,7 @@ impl DefineFieldStatement {
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
-		let fds = ctx.tx().all_tb_fields(ns, db, &definition.what, None).await?;
+		let fds = ctx.tx().all_tb_fields(ns, db, &definition.table, None).await?;
 
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
@@ -493,9 +492,9 @@ impl DefineFieldStatement {
 		if self.flexible {
 			// Get the table definition
 			let txn = ctx.tx();
-			let Some(tb) = txn.get_tb(ns, db, &definition.what).await? else {
+			let Some(tb) = txn.get_tb(ns, db, &definition.table).await? else {
 				bail!(Error::TbNotFound {
-					name: definition.what.clone(),
+					name: definition.table.clone(),
 				});
 			};
 

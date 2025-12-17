@@ -170,6 +170,7 @@ pub enum RecursionPlan {
 }
 
 impl<'a> RecursionPlan {
+	#[instrument(level = "trace", name = "RecursionPlan::compute", skip_all)]
 	pub async fn compute(
 		&self,
 		stk: &mut Stk,

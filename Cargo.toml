@@ -11,7 +11,8 @@ members = [
     "crates/surrealism/surrealism-macros",
     "crates/surrealism/surrealism-runtime",
     "crates/surrealism/surrealism-types",
-    "crates/surrealism/demo"
+    "crates/surrealism/demo",
+    "profiling"
 ]
 
 [workspace.package]
@@ -448,3 +449,4 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
+panic = 'unwind'

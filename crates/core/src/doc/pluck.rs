@@ -10,8 +10,9 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
-use crate::expr::{FlowResultExt as _, Operation};
+use crate::expr::{FlowResultExt as _, Idiom, Operation, SelectStatement};
 use crate::iam::Action;
+use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
 impl Document {
@@ -19,7 +20,11 @@ impl Document {
 	/// computed into a result Value This includes some permissions handling,
 	/// output format handling (as specified in statement), field handling
 	/// (like params, links etc).
-	pub(super) async fn pluck(
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::pluck_generic", skip_all)
+	)]
+	pub(super) async fn pluck_generic(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -27,7 +32,7 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
 		// Check if we can view the output
-		self.check_permissions_view(stk, ctx, opt, stm).await?;
+		self.check_output_permissions(stk, ctx, opt, stm).await?;
 		// Process the desired output
 		let mut out = match stm.output() {
 			Some(v) => match v {
@@ -98,24 +103,30 @@ impl Document {
 					stmt,
 					..
 				} => {
-					// Process the permitted documents
-					let current = if self.reduced(stk, ctx, opt, Current).await? {
-						self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
-						&self.current_reduced
+					// FAST PATH: For COUNT operations, skip all field computation and permissions
+					// COUNT operations create synthetic documents with only the count value
+					if matches!(self.record_strategy, RecordStrategy::Count) {
+						Ok(self.current.doc.data.as_ref().clone())
 					} else {
-						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
-						&self.current
-					};
+						// Process the permitted documents
+						let current = if self.reduced(stk, ctx, opt, Current).await? {
+							self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+							&self.current_reduced
+						} else {
+							self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+							&self.current
+						};
 
-					if stmt.group.is_some() {
-						// Field computation with groups is defered to collection.
-						Ok(current.doc.data.as_ref().clone())
-					} else {
-						// Process the SELECT statement fields
-						stmt.expr
-							.compute(stk, ctx, opt, Some(current))
-							.await
-							.map_err(IgnoreError::from)
+						if stmt.group.is_some() {
+							// Field computation with groups is defered to collection.
+							Ok(current.doc.data.as_ref().clone())
+						} else {
+							// Process the SELECT statement fields
+							stmt.expr
+								.compute(stk, ctx, opt, Some(current))
+								.await
+								.map_err(IgnoreError::from)
+						}
 					}
 				}
 				Statement::Create(_)
@@ -136,11 +147,14 @@ impl Document {
 			},
 		}?;
 		// Check if this record exists
-		if self.id.is_some() {
+		// Skip field permissions for COUNT operations - they only need table-level permissions
+		if self.id.is_some() && !matches!(self.record_strategy, RecordStrategy::Count) {
 			// Should we run permissions checks?
 			if opt.check_perms(Action::View)? {
+				let table_fields = self.doc_ctx.fd()?;
+
 				// Loop through all field statements
-				for fd in self.fd(ctx, opt).await?.iter() {
+				for fd in table_fields.iter() {
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
@@ -171,11 +185,91 @@ impl Document {
 				}
 			}
 		}
-		// Remove any omitted fields from output
-		if let Some(fields) = stm.omit() {
-			for field in fields {
-				out.del(stk, ctx, opt, field).await?;
+
+		// Output result
+		Ok(out)
+	}
+
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::pluck_select", skip_all)
+	)]
+	pub(super) async fn pluck_select(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		stmt: &SelectStatement,
+		omit: &[Idiom],
+	) -> Result<Value, IgnoreError> {
+		// Process the desired output
+		let mut out = {
+			// FAST PATH: For COUNT operations, skip all field computation and permissions
+			// COUNT operations create synthetic documents with only the count value
+			if matches!(self.record_strategy, RecordStrategy::Count) {
+				Ok(self.current.doc.data.as_ref().clone())
+			} else {
+				// Process the permitted documents
+				let current = if self.reduced(stk, ctx, opt, Current).await? {
+					self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+					&self.current_reduced
+				} else {
+					self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+					&self.current
+				};
+
+				if stmt.group.is_some() {
+					// Field computation with groups is deferred to collection.
+					Ok(current.doc.data.as_ref().clone())
+				} else {
+					// Process the SELECT statement fields
+					stmt.expr.compute(stk, ctx, opt, Some(current)).await.map_err(IgnoreError::from)
+				}
 			}
+		}?;
+
+		// Only check field permissions if we have a record ID (and thus a table context)
+		// Skip field permissions for COUNT operations - they only need table-level permissions
+		if self.id.is_some() && !matches!(self.record_strategy, RecordStrategy::Count) {
+			let table_fields = self.doc_ctx.fd()?;
+			// Should we run permissions checks?
+			if opt.check_perms(Action::View)? {
+				// Loop through all field statements
+				for fd in table_fields.iter() {
+					// Loop over each field in document
+					for k in out.each(&fd.name).iter() {
+						// Process the field permissions
+						match &fd.select_permission {
+							catalog::Permission::Full => (),
+							catalog::Permission::None => out.del(stk, ctx, opt, k).await?,
+							catalog::Permission::Specific(e) => {
+								// Disable permissions
+								let opt = &opt.new_with_perms(false);
+								// Get the current value
+								let val = Arc::new(self.current.doc.as_ref().pick(k));
+								// Configure the context
+								let mut ctx = Context::new(ctx);
+								ctx.add_value("value", val);
+								let ctx = ctx.freeze();
+								// Process the PERMISSION clause
+								if !stk
+									.run(|stk| e.compute(stk, &ctx, opt, Some(&self.current)))
+									.await
+									.catch_return()?
+									.is_truthy()
+								{
+									out.cut(k);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Remove any omitted fields from output
+		for field in omit {
+			out.del(stk, ctx, opt, field).await?;
 		}
 		// Output result
 		Ok(out)

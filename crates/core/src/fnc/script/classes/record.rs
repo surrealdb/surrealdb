@@ -2,7 +2,7 @@ use js::JsLifetime;
 use js::class::Trace;
 use surrealdb_types::ToSql;
 
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, TableName, Value};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
@@ -17,7 +17,7 @@ impl Record {
 	pub fn new(table: String, key: Value) -> Self {
 		Self {
 			value: RecordId {
-				table,
+				table: TableName::new(table),
 				key: match key {
 					Value::Array(v) => v.into(),
 					Value::Object(v) => v.into(),
@@ -31,7 +31,7 @@ impl Record {
 
 	#[qjs(get)]
 	pub fn tb(&self) -> String {
-		self.value.table.clone()
+		self.value.table.clone().into_string()
 	}
 
 	#[qjs(get)]

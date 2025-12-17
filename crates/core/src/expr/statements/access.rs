@@ -82,6 +82,7 @@ pub(crate) enum Subject {
 }
 
 impl Subject {
+	#[instrument(level = "trace", name = "Subject::compute", skip_all)]
 	async fn compute(
 		&self,
 		stk: &mut Stk,

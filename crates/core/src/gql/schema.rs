@@ -24,7 +24,7 @@ use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::val::{
 	Array as SurArray, Number as SurNumber, Object as SurObject, RecordId as SurRecordId,
-	RecordIdKey as SurRecordIdKey, Set as SurSet, Table, Value as SurValue,
+	RecordIdKey as SurRecordIdKey, Set as SurSet, TableName, Value as SurValue,
 };
 
 pub async fn generate_schema(
@@ -255,14 +255,14 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Table(ref _t) => TypeRef::named(kind.to_sql()),
 		Kind::Record(mut tables) => match tables.len() {
 			0 => TypeRef::named("record"),
-			1 => TypeRef::named(tables.pop().expect("single table in record kind")),
+			1 => TypeRef::named(tables.pop().expect("single table in record kind").into_string()),
 			_ => {
 				let ty_name = tables.join("_or_");
 
 				let mut tmp_union = Union::new(ty_name.clone())
 					.description(format!("A record which is one of: {}", tables.join(", ")));
 				for n in tables {
-					tmp_union = tmp_union.possible_type(n);
+					tmp_union = tmp_union.possible_type(n.into_string());
 				}
 
 				types.push(Type::Union(tmp_union));
@@ -428,7 +428,7 @@ fn convert_static_record_id_key(
 fn convert_static_expr(expr: Expr) -> Result<SurValue, GqlError> {
 	match expr {
 		Expr::Literal(lit) => convert_static_literal(lit),
-		Expr::Table(t) => Ok(SurValue::Table(Table::new(t))),
+		Expr::Table(t) => Ok(SurValue::Table(t)),
 		_ => Err(resolver_error("Only literal values are supported in GraphQL inputs")),
 	}
 }
@@ -658,7 +658,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 		},
 		Kind::Table(ref ts) => match val {
 			GqlValue::String(s) => match ts.contains(&s.as_str().into()) {
-				true => Ok(SurValue::Table(Table::new(s.clone()))),
+				true => Ok(SurValue::Table(TableName::new(s.clone()))),
 				false => Err(type_error(kind, val)),
 			},
 			_ => Err(type_error(kind, val)),

@@ -48,8 +48,12 @@ impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
 		match v {
 			TablesConfig::None => Self::None,
 			TablesConfig::Auto => Self::Auto,
-			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(|t| t.name).collect()),
-			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(|t| t.name).collect()),
+			TablesConfig::Include(cs) => {
+				Self::Include(cs.into_iter().map(|t| t.name.into()).collect())
+			}
+			TablesConfig::Exclude(cs) => {
+				Self::Exclude(cs.into_iter().map(|t| t.name.into()).collect())
+			}
 		}
 	}
 }
@@ -62,14 +66,14 @@ impl From<crate::catalog::GraphQLTablesConfig> for TablesConfig {
 			crate::catalog::GraphQLTablesConfig::Include(cs) => Self::Include(
 				cs.into_iter()
 					.map(|t| TableConfig {
-						name: t,
+						name: t.into_string(),
 					})
 					.collect(),
 			),
 			crate::catalog::GraphQLTablesConfig::Exclude(cs) => Self::Exclude(
 				cs.into_iter()
 					.map(|t| TableConfig {
-						name: t,
+						name: t.into_string(),
 					})
 					.collect(),
 			),

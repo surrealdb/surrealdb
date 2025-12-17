@@ -16,7 +16,7 @@ async fn select_field_value() -> Result<()> {
 		SELECT VALUE name FROM person;
 		SELECT name FROM person;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -80,7 +80,7 @@ async fn select_field_and_omit() -> Result<()> {
 		SELECT * OMIT password, opts.security FROM person;
 		SELECT * FROM person;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -171,7 +171,7 @@ async fn select_expression_value() -> Result<()> {
 		SELECT VALUE !boolean FROM thing;
 		SELECT VALUE !boolean FROM thing EXPLAIN FULL;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -288,7 +288,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 		-- Selecting an object or array index value using the value of another document field as a key
 		SELECT languages[primarylang] AS content FROM documentation;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);
@@ -392,7 +392,7 @@ async fn select_writeable_subqueries() -> Result<()> {
 		LET $id = (SELECT VALUE id FROM (UPSERT tester:test))[0];
 		RETURN $id;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -439,7 +439,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 		SELECT * FROM test WHERE active = true;
 	";
 
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -537,7 +537,7 @@ async fn select_where_field_is_record_and_with_index() -> Result<()> {
 		SELECT * FROM post WHERE author = person:tobie EXPLAIN;
 		SELECT * FROM post WHERE author = person:tobie EXPLAIN FULL;
 		SELECT * FROM post WHERE author = person:tobie;";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -635,7 +635,7 @@ async fn select_where_and_with_index() -> Result<()> {
 		DEFINE INDEX person_name ON TABLE person COLUMNS name;
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm' EXPLAIN;
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -690,7 +690,7 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 		DEFINE INDEX person_name ON TABLE person COLUMNS name UNIQUE;
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm' EXPLAIN;
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm';";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -745,7 +745,7 @@ async fn select_where_explain() -> Result<()> {
 		CREATE software:surreal SET name = 'SurrealDB';
 		SELECT * FROM person,software EXPLAIN;
 		SELECT * FROM person,software EXPLAIN FULL;";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -826,9 +826,10 @@ async fn select_where_explain() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg(feature = "scripting")]
 async fn select_with_function_field() -> Result<()> {
 	let sql = "SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
@@ -973,7 +974,16 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+
+			// Define additional namespaces/databases for cross-namespace tests
+			ds.execute(
+				"DEFINE NS OTHER_NS; USE NS OTHER_NS; DEFINE DB DB; USE NS NS; DEFINE DB OTHER_DB;",
+				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
+			)
+			.await
+			.unwrap();
 
 			// Prepare datastore
 			let mut resp = ds
@@ -1035,7 +1045,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -1063,7 +1073,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -1105,7 +1115,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -1133,7 +1143,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -1168,7 +1178,7 @@ async fn select_issue_3510() -> Result<()> {
 		SELECT link.* FROM b;
 		SELECT link.* FROM b WHERE num = 1;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -1201,7 +1211,7 @@ async fn select_destructure() -> Result<()> {
 		SELECT obj.{ a, c.{ e, f } } FROM person;
 		SELECT * OMIT obj.c.{ d, f } FROM person;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -1276,7 +1286,7 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 
         SELECT VALUE ->b.list FROM a:1;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -1344,7 +1354,7 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 
 #[tokio::test]
 async fn select_field_value_permissions() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 
 	let sql = r#"
 		DEFINE TABLE data PERMISSIONS FULL;
@@ -1435,7 +1445,7 @@ async fn select_field_value_permissions() -> Result<()> {
 
 #[tokio::test]
 async fn select_order_by_rand_large() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 
 	let sql = r#"
 		let $array = <array> 0..1000;

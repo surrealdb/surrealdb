@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 /// Represents an entry in the index compaction queue
 ///
@@ -27,6 +28,7 @@ use crate::kvs::impl_kv_key_storekey;
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct IndexCompactionKey<'key> {
 	__: u8,
 	_a: u8,
@@ -34,7 +36,7 @@ pub(crate) struct IndexCompactionKey<'key> {
 	_c: u8,
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
-	pub tb: Cow<'key, str>,
+	pub tb: Cow<'key, TableName>,
 	pub ix: IndexId,
 	pub nid: Uuid,
 	pub uid: Uuid,
@@ -52,7 +54,7 @@ impl<'key> IndexCompactionKey<'key> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: Cow<'key, str>,
+		tb: Cow<'key, TableName>,
 		ix: IndexId,
 		nid: Uuid,
 		uid: Uuid,
@@ -108,8 +110,14 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = IndexCompactionKey::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed("testtb"), IndexId(3), Uuid::from_u128(1), Uuid::from_u128(2));
+		let val = IndexCompactionKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Owned(TableName::from("testtb")),
+			IndexId(3),
+			Uuid::from_u128(1),
+			Uuid::from_u128(2),
+		);
 		let enc = IndexCompactionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}

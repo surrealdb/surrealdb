@@ -628,7 +628,7 @@ impl FullTextIndex {
 		tx: &Transaction,
 		rid: &RecordId,
 	) -> Result<Option<DocId>> {
-		if rid.table != self.ikb.table() {
+		if rid.table != *self.ikb.table() {
 			return Ok(None);
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
@@ -820,7 +820,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 		for doc_id in self.iter.by_ref() {
 			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
 				let rid = RecordId {
-					table: self.ikb.table().to_string(),
+					table: self.ikb.table().clone(),
 					key,
 				};
 				return Ok(Some((rid, doc_id)));
@@ -1030,7 +1030,7 @@ mod tests {
 				highlight: true,
 			});
 			let nid = Uuid::new_v4();
-			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
 			let opt =
 				Options::new(nid).with_ns(Some("testns".into())).with_db(Some("testdb".into()));
 			let fti = Arc::new(
@@ -1165,8 +1165,8 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc1".to_owned()));
-		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc2".to_owned()));
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

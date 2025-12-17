@@ -36,7 +36,7 @@ impl RecordId {
 	}
 
 	/// Checks if the record id is of the specified type.
-	pub fn is_table_type(&self, tables: &[String]) -> bool {
+	pub fn is_table_type(&self, tables: &[Table]) -> bool {
 		tables.is_empty() || tables.contains(&self.table)
 	}
 

@@ -13,8 +13,6 @@ pub(crate) enum Entry {
 	Any(Arc<dyn Any + Send + Sync>),
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[catalog::EventDefinition]>),
-	/// A slice of DefineFieldStatement specified on a table.
-	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of TableDefinition specified on a table.
 	Fts(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineIndexStatement specified on a table.
@@ -45,14 +43,7 @@ impl Entry {
 			_ => fail!("Unable to convert type into Entry::Evs"),
 		}
 	}
-	/// Converts this cache entry into a slice of [`catalog::FieldDefinition`].
-	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
-	pub(crate) fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
-		match self {
-			Entry::Fds(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Fds"),
-		}
-	}
+
 	/// Converts this cache entry into a slice of [`catalog::IndexDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Ixs`].
 	pub(crate) fn try_into_ixs(self) -> Result<Arc<[catalog::IndexDefinition]>> {

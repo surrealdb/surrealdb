@@ -10,7 +10,7 @@ use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::live::LiveFields;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -97,6 +97,6 @@ impl ToSql for &SubscriptionDefinition {
 pub(crate) struct NodeLiveQuery {
 	pub(crate) ns: NamespaceId,
 	pub(crate) db: DatabaseId,
-	pub(crate) tb: String,
+	pub(crate) tb: TableName,
 }
 impl_kv_value_revisioned!(NodeLiveQuery);

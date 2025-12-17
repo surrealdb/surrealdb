@@ -31,8 +31,10 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Is<'a> {
 	__: u8,
 	_a: u8,
@@ -40,7 +42,7 @@ pub(crate) struct Is<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -61,7 +63,7 @@ impl<'a> Is<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		nid: Uuid,
 	) -> Self {
@@ -90,10 +92,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = Is::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);

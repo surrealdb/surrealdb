@@ -22,7 +22,7 @@ impl Duration {
 	#[qjs(get)]
 	pub fn value(&self) -> String {
 		match &self.value {
-			Some(v) => v.to_raw(),
+			Some(v) => v.to_string(),
 			None => String::from("Invalid Duration"),
 		}
 	}
@@ -34,7 +34,7 @@ impl Duration {
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
 		match &self.value {
-			Some(v) => v.to_raw(),
+			Some(v) => v.to_string(),
 			None => String::from("Invalid Duration"),
 		}
 	}
@@ -42,7 +42,7 @@ impl Duration {
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {
 		match &self.value {
-			Some(v) => v.to_raw(),
+			Some(v) => v.to_string(),
 			None => String::from("Invalid Duration"),
 		}
 	}

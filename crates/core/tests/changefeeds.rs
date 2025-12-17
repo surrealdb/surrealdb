@@ -14,7 +14,7 @@ async fn database_change_feeds() -> Result<()> {
 	let db = format!("database_{identifier}");
 	let sql = format!(
 		"
-	    DEFINE DATABASE {db} CHANGEFEED 1h;
+	    DEFINE DATABASE OVERWRITE {db} CHANGEFEED 1h;
         DEFINE TABLE person;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -37,7 +37,7 @@ async fn database_change_feeds() -> Result<()> {
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds(ns.as_str(), db.as_str()).await?;
 	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
 	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -132,7 +132,7 @@ async fn table_change_feeds() -> Result<()> {
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test-tb-cf", "test-tb-cf").await?;
 	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
@@ -277,13 +277,15 @@ async fn table_change_feeds() -> Result<()> {
 
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<()> {
-	let db = new_ds().await?;
+	let db = new_ds("test-cf-ts", "test-cf-ts").await?;
 	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-	db.execute(sql, &ses, None).await?.remove(0).result?;
+	let mut res = db.execute(sql, &ses, None).await?;
+	res.remove(0).result.unwrap();
+
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';

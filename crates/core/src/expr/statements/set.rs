@@ -31,6 +31,7 @@ impl SetStatement {
 	///
 	/// Will keep the ctx Some unless an error happens in which case the calling
 	/// function should return the error.
+	#[instrument(level = "trace", name = "SetStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

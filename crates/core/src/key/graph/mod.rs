@@ -8,7 +8,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "()")]
@@ -19,7 +19,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
@@ -27,7 +27,7 @@ struct Prefix<'a> {
 impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -51,7 +51,7 @@ struct PrefixEg<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
@@ -60,7 +60,7 @@ struct PrefixEg<'a> {
 impl_kv_key_storekey!(PrefixEg<'_> => Vec<u8>);
 
 impl<'a> PrefixEg<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: &RecordIdKey, eg: &Dir) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -85,7 +85,7 @@ struct PrefixFt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
@@ -98,7 +98,7 @@ impl<'a> PrefixFt<'a> {
 	fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		id: &RecordIdKey,
 		eg: &Dir,
 		ft: &'a str,
@@ -128,11 +128,11 @@ pub(crate) struct Graph<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: Cow<'a, str>,
+	pub ft: Cow<'a, TableName>,
 	pub fk: Cow<'a, RecordIdKey>,
 }
 
@@ -147,7 +147,7 @@ impl Graph<'_> {
 pub fn new<'a>(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &'a str,
+	tb: &'a TableName,
 	id: &RecordIdKey,
 	eg: &Dir,
 	fk: &'a RecordId,
@@ -155,13 +155,23 @@ pub fn new<'a>(
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn prefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn suffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -170,7 +180,7 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Re
 pub fn egprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	eg: &Dir,
 ) -> Result<Vec<u8>> {
@@ -182,7 +192,7 @@ pub fn egprefix(
 pub fn egsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	eg: &Dir,
 ) -> Result<Vec<u8>> {
@@ -194,7 +204,7 @@ pub fn egsuffix(
 pub fn ftprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	eg: &Dir,
 	ft: &str,
@@ -207,7 +217,7 @@ pub fn ftprefix(
 pub fn ftsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	eg: &Dir,
 	ft: &str,
@@ -227,7 +237,7 @@ impl<'a> Graph<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		id: RecordIdKey,
 		eg: Dir,
 		fk: &'a RecordId,
@@ -261,10 +271,11 @@ mod tests {
 			panic!()
 		};
 		let fk = fk.into();
+		let tb: TableName = "testtb".into();
 		let val = Graph::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			"testid".to_owned().into(),
 			Dir::Out,
 			&fk,

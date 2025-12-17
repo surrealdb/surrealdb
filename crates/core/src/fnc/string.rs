@@ -349,8 +349,13 @@ pub mod is {
 	use crate::syn;
 	use crate::val::{Datetime, Value};
 
-	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern"));
-	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").expect("valid regex pattern"));
+	static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern")
+	});
+	static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$")
+			.expect("valid regex pattern")
+	});
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value> {
 		if arg.is_empty() {

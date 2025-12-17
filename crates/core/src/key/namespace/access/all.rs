@@ -47,11 +47,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = AccessRoot::new(
-			NamespaceId(1),
-			"testac",
-		);
+		let val = AccessRoot::new(NamespaceId(1), "testac");
 		let enc = AccessRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01&testac\0");
 	}

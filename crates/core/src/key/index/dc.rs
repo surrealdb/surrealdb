@@ -26,8 +26,10 @@ use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
@@ -35,7 +37,7 @@ pub(crate) struct Dc<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -73,7 +75,7 @@ impl<'a> Dc<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		doc_id: DocId,
 		nid: Uuid,
@@ -116,7 +118,7 @@ impl<'a> Dc<'a> {
 	pub(crate) fn new_root(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 	) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
@@ -140,7 +142,7 @@ impl<'a> Dc<'a> {
 	pub(crate) fn range(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
@@ -153,6 +155,7 @@ impl<'a> Dc<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -160,7 +163,7 @@ struct DcPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -171,7 +174,7 @@ struct DcPrefix<'a> {
 impl_kv_key_storekey!(DcPrefix<'_> => Vec<u8>);
 
 impl<'a> DcPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -196,10 +199,11 @@ mod tests {
 
 	#[test]
 	fn key_with_ids() {
+		let tb = TableName::from("testtb");
 		let val = Dc::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			129,
 			Uuid::from_u128(1),
@@ -211,13 +215,15 @@ mod tests {
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,

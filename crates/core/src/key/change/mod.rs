@@ -8,9 +8,11 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::TableMutations;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Cf<'a> {
 	__: u8,
 	_a: u8,
@@ -21,7 +23,7 @@ pub(crate) struct Cf<'a> {
 	// ts is the timestamp of the change feed entry that is encoded in big-endian.
 	pub ts: Cow<'a, [u8]>,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 }
 impl_kv_key_storekey!(Cf<'_> => TableMutations);
 
@@ -32,7 +34,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a TableName) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -52,7 +54,7 @@ impl<'a> Cf<'a> {
 }
 
 /// Create a complete changefeed key with timestamp
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a str) -> Cf<'a> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a TableName) -> Cf<'a> {
 	Cf::new(ns, db, ts, tb)
 }
 
@@ -148,7 +150,8 @@ mod tests {
 	#[test]
 	fn cf_key() {
 		let ts1 = 12345u64.to_ts_bytes();
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, "test");
+		let tb = TableName::from("test");
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
 		assert_eq!(
@@ -160,7 +163,7 @@ mod tests {
 		);
 
 		let ts2 = 12346u64.to_ts_bytes();
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, "test");
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

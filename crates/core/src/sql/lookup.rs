@@ -224,7 +224,7 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table,
+				table: table.into(),
 				referencing_field,
 			},
 			LookupSubject::Range {
@@ -232,7 +232,7 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 				range,
 				referencing_field,
 			} => Self::Range {
-				table,
+				table: table.into(),
 				range: range.into(),
 				referencing_field,
 			},
@@ -247,7 +247,7 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table,
+				table: table.into_string(),
 				referencing_field,
 			},
 			crate::expr::lookup::LookupSubject::Range {
@@ -255,7 +255,7 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 				range,
 				referencing_field,
 			} => Self::Range {
-				table,
+				table: table.into_string(),
 				range: range.into(),
 				referencing_field,
 			},

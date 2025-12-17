@@ -18,7 +18,7 @@ impl Document {
 		_stm: &Statement<'_>,
 	) -> Result<()> {
 		// Get the table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Check if the table is a view
 		if tb.drop {
 			return Ok(());
