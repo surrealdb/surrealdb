@@ -278,8 +278,12 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		table: &TableName,
 	) -> Result<()> {
-		let tb =
-			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table).await?;
+		let tb = if stm_ctx.stm.requires_table_existence() {
+			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table).await?
+		} else {
+			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table).await?
+		};
+
 		let fields = ctx
 			.tx()
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
@@ -321,14 +325,18 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		rid: RecordId,
 	) -> Result<()> {
-		let tb = ctx
-			.tx()
-			.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
-			.await?;
+		let tb = if stm_ctx.stm.requires_table_existence() {
+			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
+		} else {
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
+				.await?
+		};
 		let fields = ctx
 			.tx()
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
 			.await?;
+
 		let doc_ctx = NsDbTbCtx {
 			ns: Arc::clone(&doc_ctx.ns),
 			db: Arc::clone(&doc_ctx.db),
@@ -440,8 +448,11 @@ impl Iterator {
 		}
 
 		let txn = ctx.tx();
-		let tb =
-			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?;
+		let tb = if stm.requires_table_existence() {
+			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?
+		} else {
+			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?
+		};
 		let fields = txn
 			.all_tb_fields(
 				doc_ctx.ns.namespace_id,
