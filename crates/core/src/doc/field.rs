@@ -487,7 +487,7 @@ impl FieldEditContext<'_> {
 			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
-				Some(v) if v.is_static() => Some(v),
+				Some(v) if v.is_pure() => Some(v),
 				_ => None,
 			},
 		};

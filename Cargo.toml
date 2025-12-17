@@ -36,7 +36,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 [workspace.dependencies]
 # workspace internal dependencies
 surrealdb = { version = "=3.0.0-beta.1", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-beta.1", path = "crates/core", default-features = false }
+surrealdb-core = { version = "=3.0.0-beta.1", path = "crates/core", default-features = false, features = ["trace-doc-ops"] }
 surrealdb-macros = { version = "=3.0.0-beta.1", path = "crates/macros" }
 surrealdb-server = { version = "=3.0.0-beta.1", path = "crates/server", default-features = false }
 surrealdb-types = { version = "=3.0.0-beta.1", path = "crates/types" }

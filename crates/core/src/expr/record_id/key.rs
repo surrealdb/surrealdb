@@ -61,22 +61,7 @@ impl RecordIdKeyLit {
 			_ => false,
 		}
 	}
-}
 
-impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
-	fn from(v: RecordIdKeyRangeLit) -> Self {
-		Self::Range(Box::new(v))
-	}
-}
-
-impl ToSql for RecordIdKeyLit {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_record_id_key_lit: crate::sql::RecordIdKeyLit = self.clone().into();
-		sql_record_id_key_lit.fmt_sql(f, fmt);
-	}
-}
-
-impl RecordIdKeyLit {
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
 			RecordIdKeyLit::Number(_)
@@ -86,6 +71,18 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Range(record_id_key_range_lit) => record_id_key_range_lit.is_static(),
 			RecordIdKeyLit::Array(exprs) => exprs.iter().all(|x| x.is_static()),
 			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.is_static()),
+		}
+	}
+
+	pub(crate) fn is_pure(&self) -> bool {
+		match self {
+			RecordIdKeyLit::Number(_)
+			| RecordIdKeyLit::String(_)
+			| RecordIdKeyLit::Uuid(_)
+			| RecordIdKeyLit::Generate(_) => true,
+			RecordIdKeyLit::Range(record_id_key_range_lit) => record_id_key_range_lit.is_static(),
+			RecordIdKeyLit::Array(exprs) => exprs.iter().all(|x| x.is_pure()),
+			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.is_pure()),
 		}
 	}
 
@@ -126,6 +123,19 @@ impl RecordIdKeyLit {
 				Ok(RecordIdKey::Range(Box::new(range)))
 			}
 		}
+	}
+}
+
+impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
+	fn from(v: RecordIdKeyRangeLit) -> Self {
+		Self::Range(Box::new(v))
+	}
+}
+
+impl ToSql for RecordIdKeyLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_record_id_key_lit: crate::sql::RecordIdKeyLit = self.clone().into();
+		sql_record_id_key_lit.fmt_sql(f, fmt);
 	}
 }
 

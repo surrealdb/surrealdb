@@ -31,11 +31,9 @@ pub(crate) enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
 	String(String),
 	Bytes(Bytes),
-	//TODO: Possibly remove wrapper.
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
@@ -70,6 +68,30 @@ impl Literal {
 			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Set(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
+		}
+	}
+
+	pub(crate) fn is_pure(&self) -> bool {
+		match self {
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::String(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::File(_)
+			| Literal::Geometry(_) => true,
+			Literal::RecordId(record_id_lit) => record_id_lit.is_pure(),
+			Literal::Array(exprs) => exprs.iter().all(|x| x.is_pure()),
+			Literal::Set(exprs) => exprs.iter().all(|x| x.is_pure()),
+			Literal::Object(items) => items.iter().all(|x| x.value.is_pure()),
 		}
 	}
 

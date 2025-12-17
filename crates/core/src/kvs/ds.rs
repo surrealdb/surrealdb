@@ -50,7 +50,7 @@ use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilde
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
-use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, Optimiser, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
@@ -129,6 +129,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+
+	optimiser: Arc<Optimiser>,
 }
 
 #[derive(Clone)]
@@ -617,14 +619,17 @@ impl Datastore {
 		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
+
+		let optimiser = Arc::new(Optimiser::all());
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets, clock)
+		Self::new_with_builder(builder, buckets, clock, optimiser)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
+		optimiser: Arc<Optimiser>,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
 		let id = Uuid::new_v4();
@@ -646,6 +651,7 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets,
 			sequences: Sequences::new(tf, id),
+			optimiser,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
@@ -673,6 +679,7 @@ impl Datastore {
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			optimiser: self.optimiser,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
@@ -1678,8 +1685,19 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
-		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars).await
+		let plan: LogicalPlan = ast.into();
+
+		// Apply optimisations
+		let optimised_plan = match self.optimiser.optimise(plan) {
+			Ok(optimised) => optimised,
+			Err(e) => {
+				// If optimisation fails, log it and fail the query
+				tracing::error!("Optimisation failed: {}", e);
+				return Err(DbResultError::InternalError(format!("Optimisation error: {}", e)));
+			}
+		};
+
+		self.process_plan(optimised_plan, sess, vars).await
 	}
 
 	pub(crate) async fn process_plan(
