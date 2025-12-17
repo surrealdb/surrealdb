@@ -40,14 +40,16 @@ pub(crate) struct Document {
 	pub(super) input_data: Option<ComputedData>,
 }
 
+/// Data required to access a database.
 #[derive(Clone, Debug)]
-pub(crate) struct NsDbCtx {
+pub(crate) struct DatabaseContext {
 	pub(crate) ns: Arc<NamespaceDefinition>,
 	pub(crate) db: Arc<DatabaseDefinition>,
 }
 
+/// Data required to access a table.
 #[derive(Clone, Debug)]
-pub(crate) struct NsDbTbCtx {
+pub(crate) struct TableContext {
 	pub(crate) ns: Arc<NamespaceDefinition>,
 	pub(crate) db: Arc<DatabaseDefinition>,
 	pub(crate) tb: Arc<TableDefinition>,
@@ -56,40 +58,40 @@ pub(crate) struct NsDbTbCtx {
 
 #[derive(Clone, Debug)]
 pub(crate) enum DocumentContext {
-	NsDbCtx(NsDbCtx),
-	NsDbTbCtx(NsDbTbCtx),
+	DbCtx(DatabaseContext),
+	TableCtx(TableContext),
 }
 
 impl DocumentContext {
 	pub(crate) fn ns(&self) -> &Arc<NamespaceDefinition> {
 		match self {
-			DocumentContext::NsDbCtx(ctx) => &ctx.ns,
-			DocumentContext::NsDbTbCtx(ctx) => &ctx.ns,
+			DocumentContext::DbCtx(ctx) => &ctx.ns,
+			DocumentContext::TableCtx(ctx) => &ctx.ns,
 		}
 	}
 
 	pub(crate) fn db(&self) -> &Arc<DatabaseDefinition> {
 		match self {
-			DocumentContext::NsDbCtx(ctx) => &ctx.db,
-			DocumentContext::NsDbTbCtx(ctx) => &ctx.db,
+			DocumentContext::DbCtx(ctx) => &ctx.db,
+			DocumentContext::TableCtx(ctx) => &ctx.db,
 		}
 	}
 
 	pub(crate) fn tb(&self) -> Result<&Arc<TableDefinition>> {
 		match self {
-			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
+			DocumentContext::DbCtx(_) => Err(anyhow::anyhow!(
 				"Table not defined in DocumentContext, this is certainly a bug and should be reported."
 			)),
-			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.tb),
+			DocumentContext::TableCtx(ctx) => Ok(&ctx.tb),
 		}
 	}
 
 	pub(crate) fn fd(&self) -> Result<&Arc<[FieldDefinition]>> {
 		match self {
-			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
+			DocumentContext::DbCtx(_) => Err(anyhow::anyhow!(
 				"Fields not defined in DocumentContext, this is certainly a bug and should be reported."
 			)),
-			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.fields),
+			DocumentContext::TableCtx(ctx) => Ok(&ctx.fields),
 		}
 	}
 }

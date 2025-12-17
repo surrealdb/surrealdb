@@ -7,7 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::{CursorDoc, NsDbCtx};
+use crate::doc::{CursorDoc, DatabaseContext};
 use crate::err::Error;
 use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -82,7 +82,7 @@ impl CreateStatement {
 		let txn = ctx.tx();
 		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
 		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
-		let doc_ctx = NsDbCtx {
+		let doc_ctx = DatabaseContext {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),
 		};

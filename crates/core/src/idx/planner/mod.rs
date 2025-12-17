@@ -16,7 +16,7 @@ use reblessive::tree::Stk;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::NsDbTbCtx;
+use crate::doc::TableContext;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
@@ -276,7 +276,7 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: TableContext,
 		t: &TableName,
 		gp: GrantedPermission,
 		it: &mut Iterator,
@@ -361,7 +361,7 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: TableContext,
 		tb: TableName,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
