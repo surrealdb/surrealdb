@@ -119,9 +119,25 @@ args = [
 [tasks.release]
 category = "LOCAL USAGE"
 description = "Build the SurrealDB database server in release mode"
+dependencies = ["release-build", "fix-macos-libs"]
+
+[tasks.release-build]
+private = true
 command = "cargo"
 args = [
     "build",
     "--release",
     "${@}",
 ]
+
+[tasks.fix-macos-libs]
+category = "LOCAL USAGE"
+description = "Fix hardcoded library paths in macOS binaries (runs automatically after release builds)"
+script = '''
+    #!/bin/bash
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if [[ -f "target/release/surreal" ]]; then
+            ./scripts/fix-macos-libs.sh target/release/surreal
+        fi
+    fi
+'''

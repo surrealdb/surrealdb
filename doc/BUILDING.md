@@ -26,6 +26,8 @@ cargo build --release --locked --target x86_64-apple-darwin
 cargo build --release --locked --target aarch64-apple-darwin
 ```
 
+**Note:** When building on macOS, the release build process automatically fixes hardcoded library paths (like Homebrew's `/opt/homebrew/opt/xz/lib/liblzma.5.dylib`) to use relative paths. This ensures the binary works on systems without Homebrew or with libraries installed in different locations. If you're building manually and encounter library loading errors, you can run `./scripts/fix-macos-libs.sh target/release/surreal` to fix the paths.
+
 ### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
 ```bash
 # Run Docker
