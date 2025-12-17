@@ -38,6 +38,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::cnf::dynamic::DynamicConfiguration;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -99,7 +100,7 @@ pub struct Datastore {
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
-	query_timeout: Option<Duration>,
+	dynamic_configuration: DynamicConfiguration,
 	/// The slow log configuration determining when a query should be logged
 	slow_log: Option<SlowLog>,
 	/// The maximum duration timeout for running multiple statements in a
@@ -631,7 +632,7 @@ impl Datastore {
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: false,
-			query_timeout: None,
+			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -657,7 +658,7 @@ impl Datastore {
 		Self {
 			id: self.id,
 			auth_enabled: self.auth_enabled,
-			query_timeout: self.query_timeout,
+			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
@@ -690,8 +691,8 @@ impl Datastore {
 	}
 
 	/// Set a global query timeout for this Datastore
-	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
-		self.query_timeout = duration;
+	pub fn with_query_timeout(self, duration: Option<Duration>) -> Self {
+		self.dynamic_configuration.set_query_timeout(duration);
 		self
 	}
 
@@ -871,11 +872,12 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new(self.id).with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let opt = Options::new(self.id, self.dynamic_configuration.clone())
+				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = Context::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
-			let mut stack = reblessive::TreeStack::new();
+			let mut stack = TreeStack::new();
 			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
 			catch!(txn, res);
 			// We added a user, so commit the transaction
@@ -1739,7 +1741,7 @@ impl Datastore {
 			Some(Error::Channel(msg)) => {
 				DbResultError::InternalError(format!("Channel error: {}", msg))
 			}
-			Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
@@ -1843,7 +1845,9 @@ impl Datastore {
 				Some(Error::Channel(msg)) => {
 					DbResultError::InternalError(format!("Channel error: {}", msg))
 				}
-				Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+				Some(Error::QueryTimedout(timeout)) => {
+					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
+				}
 				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 				Some(Error::QueryNotExecuted {
 					message,
@@ -1962,7 +1966,7 @@ impl Datastore {
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
+		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
@@ -2099,7 +2103,7 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::new(self.id)
+		Options::new(self.id, self.dynamic_configuration.clone())
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
@@ -2109,7 +2113,7 @@ impl Datastore {
 
 	pub fn setup_ctx(&self) -> Result<Context> {
 		let mut ctx = Context::from_ds(
-			self.query_timeout,
+			self.dynamic_configuration.get_query_timeout(),
 			self.slow_log.clone(),
 			self.capabilities.clone(),
 			self.index_stores.clone(),
@@ -2405,7 +2409,7 @@ mod test {
 
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
-		let opt = Options::new(dbs.id())
+		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)

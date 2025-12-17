@@ -54,6 +54,14 @@ pub(crate) struct ParamVisitor<'a> {
 impl Visitor for ParamVisitor<'_> {
 	type Error = ();
 
+	// Empty implementations so that the visitor won't recurse into permissions.
+	fn visit_permissions(&mut self, _: &Permissions) -> Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_permission(&mut self, _: &Permission) -> Result<(), Self::Error> {
+		Ok(())
+	}
 	fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), Self::Error> {
 		if !self.slow_log.is_param_allowed(param) {
 			return Ok(());
@@ -70,14 +78,6 @@ impl Visitor for ParamVisitor<'_> {
 			write!(&mut self.params, "{}={}", param.to_sql(), value)
 				.expect("Writing into a string cannot fail");
 		}
-		Ok(())
-	}
-
-	// Empty implementations so that the visitor won't recurse into permissions.
-	fn visit_permissions(&mut self, _: &Permissions) -> Result<(), Self::Error> {
-		Ok(())
-	}
-	fn visit_permission(&mut self, _: &Permission) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }

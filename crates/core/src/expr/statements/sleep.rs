@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tokio::time::timeout;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -23,18 +24,23 @@ impl SleepStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
-		// Calculate the sleep duration
-		let dur = match (ctx.timeout(), self.duration.0) {
-			(Some(t), d) if t < d => t,
-			(_, d) => d,
-		};
-		// Sleep for the specified time
-		#[cfg(target_family = "wasm")]
-		wasmtimer::tokio::sleep(dur).await;
-		#[cfg(not(target_family = "wasm"))]
-		tokio::time::sleep(dur).await;
+		// Is there a timeout?
+		if let Some(t) = ctx.timeout() {
+			println!("{t:?} - {:?}", self.duration.0);
+			timeout(t, self.sleep()).await?;
+		} else {
+			self.sleep().await;
+		}
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	// Sleep for the specified time
+	async fn sleep(&self) {
+		#[cfg(target_family = "wasm")]
+		wasmtimer::tokio::sleep(self.duration.0).await;
+		#[cfg(not(target_family = "wasm"))]
+		tokio::time::sleep(self.duration.0).await;
 	}
 }
 

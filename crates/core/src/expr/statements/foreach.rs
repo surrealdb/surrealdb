@@ -66,8 +66,8 @@ impl ForeachStatement {
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout().await? {
-				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout)));
+			if let Some(d) = ctx.is_timedout().await? {
+				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
 			}
 			// Duplicate context
 			let ctx = Context::new(ctx).freeze();
