@@ -474,7 +474,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 			}
 
 			quote! {
-				surrealdb_types::Kind::Table(vec![#(#tables.to_string()),*])
+				surrealdb_types::Kind::Table(vec![#(#tables.into()),*])
 			}
 		}
 		"record" => {
@@ -497,7 +497,7 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 			}
 
 			quote! {
-				surrealdb_types::Kind::Record(vec![#(#tables.to_string()),*])
+				surrealdb_types::Kind::Record(vec![#(#tables.into()),*])
 			}
 		}
 		"array" => {

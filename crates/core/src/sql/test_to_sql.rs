@@ -44,7 +44,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
-#[case::value_record_id(Value::RecordId(RecordId::new("table".to_string(), "123".to_string())), "table:`123`", "table:`123`")]
+#[case::value_record_id(Value::RecordId(RecordId::new("table".into(), "123".to_string())), "table:`123`", "table:`123`")]
 #[case::value_regex(Value::Regex("hello".parse().unwrap()), "/hello/", "/hello/")]
 // Expression: Literals
 #[case::expr_lit_none(Expr::Literal(Literal::None), "NONE", "NONE")]

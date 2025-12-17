@@ -18,7 +18,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the table for this record
-		let tbv = self.tb(ctx, opt).await?;
+		let tbv = self.tb().await?;
 		// Get the database for this record
 		let dbv = self.db(ctx, opt).await?;
 		// Get the changefeed definition on the database
@@ -32,7 +32,7 @@ impl Document {
 				ctx.tx().changefeed_buffer_record_change(
 					ns,
 					db,
-					tbv.name.as_str(),
+					&tbv.name,
 					id.as_ref(),
 					self.initial.doc.clone(),
 					self.current.doc.clone(),

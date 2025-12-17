@@ -37,7 +37,7 @@ macro_rules! assert_delta {
 
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
 	let err = dbs.execute(query, &session, None).await.unwrap_err();
@@ -239,12 +239,16 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 async fn function_record_exists() -> Result<()> {
 	let sql = r#"
 		USE NS test DB test;
+		DEFINE TABLE person;
 		RETURN record::exists(r"person:tobie");
 		CREATE ONLY person:tobie;
 		RETURN record::exists(r"person:tobie");
 	"#;
 	let mut test = Test::new(sql).await?;
 	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
+	// DEFINE TABLE person;
 	let tmp = test.next()?.result;
 	tmp.unwrap();
 	// RETURN record::exists(r"person:tobie");
@@ -3876,7 +3880,7 @@ pub async fn function_http_disabled() -> Result<()> {
 #[tokio::test]
 async fn function_outside_database() -> Result<()> {
 	let sql = "RETURN fn::does_not_exist();";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 

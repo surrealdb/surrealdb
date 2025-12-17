@@ -55,12 +55,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = TableIdGeneratorStateKey::new(
-			NamespaceId(123),
-			DatabaseId(234),
-		Uuid::from_u128(15)
-		);
+		let val =
+			TableIdGeneratorStateKey::new(NamespaceId(123), DatabaseId(234), Uuid::from_u128(15));
 		let enc = TableIdGeneratorStateKey::encode_key(&val).unwrap();
 		assert_eq!(
 			&enc,

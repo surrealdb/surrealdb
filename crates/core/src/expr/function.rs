@@ -72,6 +72,7 @@ impl Function {
 		}
 	}
 
+	#[instrument(level = "trace", name = "Function::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -234,6 +235,7 @@ impl FunctionCall {
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive
+	#[instrument(level = "trace", name = "FunctionCall::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

@@ -366,7 +366,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -381,7 +381,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -395,7 +395,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(i64::MIN),
 			}
 		);
@@ -409,7 +409,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(i64::MAX),
 			}
 		);
@@ -424,7 +424,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String(max_str),
 			}
 		);
@@ -439,7 +439,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String(min_str),
 			}
 		);
@@ -456,7 +456,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -470,7 +470,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -485,7 +485,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -500,7 +500,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -515,7 +515,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Object(vec![
 					sql::literal::ObjectEntry {
 						key: "location".to_string(),
@@ -539,7 +539,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Array(vec![
 					sql::Expr::Literal(sql::Literal::String("GBR".to_owned())),
 					sql::Expr::Literal(sql::Literal::Integer(2022)),

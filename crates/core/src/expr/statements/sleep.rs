@@ -15,6 +15,7 @@ pub(crate) struct SleepStatement {
 
 impl SleepStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "SleepStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		ctx: &FrozenContext,

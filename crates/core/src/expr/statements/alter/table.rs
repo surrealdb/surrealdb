@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Executes `ALTER TABLE` operations against an existing table.
@@ -31,7 +31,7 @@ use crate::val::Value;
 /// - When `compact` is true, underlying storage for this table is compacted.
 pub(crate) struct AlterTableStatement {
 	/// Table name.
-	pub name: String,
+	pub name: TableName,
 	/// If true, do nothing (and succeed) when the table does not exist.
 	pub if_exists: bool,
 	/// Switch `SCHEMAFULL` on (`Set`) or switch to `SCHEMALESS` (`Drop`).
@@ -57,6 +57,7 @@ impl AlterTableStatement {
 	/// - May write table definition metadata
 	/// - May compact the underlying storage if `compact` is true
 	/// - May create relation helper fields when switching to `RELATION`
+	#[instrument(level = "trace", name = "AlterTableStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;

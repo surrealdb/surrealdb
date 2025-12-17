@@ -33,7 +33,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -216,7 +216,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -318,7 +318,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -433,7 +433,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 

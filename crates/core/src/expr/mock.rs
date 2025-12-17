@@ -1,10 +1,10 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::val::range::{IntegerRangeIter, TypedRange};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub(crate) struct IntoIter {
-	table: String,
+	table: TableName,
 	key: IntoIterKey,
 }
 
@@ -66,9 +66,17 @@ impl Iterator for IntoIter {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Mock {
-	Count(String, i64),
-	Range(String, TypedRange<i64>),
-	// Add new variants here
+	Count(TableName, i64),
+	Range(TableName, TypedRange<i64>),
+}
+
+impl Mock {
+	pub(crate) fn table(&self) -> &TableName {
+		match self {
+			Mock::Count(t, _) => t,
+			Mock::Range(t, _) => t,
+		}
+	}
 }
 
 impl IntoIterator for Mock {

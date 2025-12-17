@@ -2,6 +2,9 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "false"
 
 [[test.results]]

@@ -1,6 +1,5 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -12,6 +11,7 @@ use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveFieldStatement {
@@ -42,7 +42,9 @@ impl RemoveFieldStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Compute the table name
-		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?;
+		let table_name = TableName::new(
+			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?,
+		);
 		// Compute the name
 		let name = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		// Get the NS and DB
@@ -72,7 +74,7 @@ impl RemoveFieldStatement {
 		// Refresh the table cache for fields
 		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
 			return Err(Error::TbNotFound {
-				name: self.table_name.to_sql(),
+				name: table_name,
 			}
 			.into());
 		};

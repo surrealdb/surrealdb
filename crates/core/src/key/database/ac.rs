@@ -67,12 +67,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Ac::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testac",
-		);
+		let val = Ac::new(NamespaceId(1), DatabaseId(2), "testac");
 		let enc = Ac::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!actestac\0");
 	}

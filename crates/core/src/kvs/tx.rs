@@ -30,7 +30,7 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -655,7 +655,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		dt: &TableDefinition,
 	) {
 		self.cf.changefeed_buffer_table_change(ns, db, tb, dt)
@@ -670,7 +670,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordId,
 		previous: CursorRecord,
 		current: CursorRecord,
@@ -736,7 +736,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 	) {
@@ -1440,7 +1440,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::TableDefinition]>> {
 		let qey = cache::tx::Lookup::Fts(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1460,13 +1460,12 @@ impl TableProvider for Transaction {
 	/// Get or add a table with a default configuration, only if we are in
 	/// dynamic mode.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
-	async fn get_or_add_tb_upwards(
+	async fn get_or_add_tb(
 		&self,
 		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
-		tb: &str,
-		upwards: bool,
+		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
 		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1474,24 +1473,10 @@ impl TableProvider for Transaction {
 			Some(val) => val.try_into_type(),
 			// The entry is not in the cache
 			None => {
-				let db_def = if upwards {
-					self.get_or_add_db_upwards(ctx, ns, db, upwards).await?
-				} else {
-					if self.get_ns_by_name(ns).await?.is_none() {
-						return Err(Error::NsNotFound {
-							name: ns.to_owned(),
-						}
-						.into());
-					}
-					match self.get_db_by_name(ns, db).await? {
-						Some(db_def) => db_def,
-						None => {
-							return Err(Error::DbNotFound {
-								name: db.to_owned(),
-							}
-							.into());
-						}
-					}
+				let Some(db_def) = self.get_db_by_name(ns, db).await? else {
+					return Err(anyhow::anyhow!(Error::DbNotFound {
+						name: db.to_owned(),
+					}));
 				};
 
 				let table_key =
@@ -1515,7 +1500,7 @@ impl TableProvider for Transaction {
 					db_def.namespace_id,
 					db_def.database_id,
 					self.get_next_tb_id(ctx, db_def.namespace_id, db_def.database_id).await?,
-					tb.to_owned(),
+					tb.clone(),
 				);
 				self.put_tb(ns, db, &tb_def).await
 			}
@@ -1526,7 +1511,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: &str,
 		db: &str,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
 		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1586,10 +1571,10 @@ impl TableProvider for Transaction {
 		Ok(cached_tb)
 	}
 
-	async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	async fn del_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()> {
 		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
 			return Err(Error::TbNotFound {
-				name: tb.to_string(),
+				name: tb.clone(),
 			}
 			.into());
 		};
@@ -1606,10 +1591,10 @@ impl TableProvider for Transaction {
 		Ok(())
 	}
 
-	async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	async fn clr_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()> {
 		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
 			return Err(Error::TbNotFound {
-				name: tb.to_string(),
+				name: tb.clone(),
 			}
 			.into());
 		};
@@ -1632,7 +1617,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		let qey = cache::tx::Lookup::Evs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1655,7 +1640,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		let qey = cache::tx::Lookup::Fds(ns, db, tb);
@@ -1679,7 +1664,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1702,7 +1687,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1725,7 +1710,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1749,7 +1734,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ev: &str,
 	) -> Result<Arc<catalog::EventDefinition>> {
 		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
@@ -1774,7 +1759,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>> {
 		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
@@ -1797,7 +1782,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &catalog::FieldDefinition,
 	) -> Result<()> {
 		let name = fd.name.to_raw_string();
@@ -1812,7 +1797,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
@@ -1835,7 +1820,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let key = crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix);
@@ -1850,7 +1835,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &catalog::IndexDefinition,
 	) -> Result<()> {
 		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
@@ -1871,7 +1856,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<()> {
 		// Get the index definition
@@ -1898,7 +1883,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Record>> {
@@ -1957,7 +1942,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<bool> {
 		let key = crate::key::record::new(ns, db, tb, id);
@@ -1969,7 +1954,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -1985,7 +1970,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -2004,7 +1989,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<()> {
 		// Delete the value in the datastore

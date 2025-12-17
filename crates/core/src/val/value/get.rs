@@ -626,7 +626,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(RecordId {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKey::String("tobie".to_owned())
 			})
 		);
@@ -652,7 +652,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(RecordId {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKey::String("jaime".to_owned())
 			})
 		);

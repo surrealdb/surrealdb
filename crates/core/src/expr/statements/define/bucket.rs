@@ -36,6 +36,7 @@ impl Default for DefineBucketStatement {
 }
 
 impl DefineBucketStatement {
+	#[instrument(level = "trace", name = "DefineBucketStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

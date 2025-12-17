@@ -105,6 +105,7 @@ impl AlterStatement {
 	///
 	/// All `ALTER` statements currently return `Value::None` on success and may
 	/// perform side effects such as storage compaction or metadata updates.
+	#[instrument(level = "trace", name = "AlterStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

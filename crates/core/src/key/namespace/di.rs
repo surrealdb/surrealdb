@@ -56,10 +56,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = DatabaseIdGeneratorStateKey::new(
-			NamespaceId(123),Uuid::from_u128(15)
-		);
+		let val = DatabaseIdGeneratorStateKey::new(NamespaceId(123), Uuid::from_u128(15));
 		let enc = DatabaseIdGeneratorStateKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x7B!di\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0F");
 	}

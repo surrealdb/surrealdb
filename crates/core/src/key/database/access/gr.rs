@@ -72,13 +72,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = AccessGrantKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testac",
-			"testgr",
-		);
+		let val = AccessGrantKey::new(NamespaceId(1), DatabaseId(2), "testac", "testgr");
 		let enc = AccessGrantKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0!grtestgr\0");
 	}

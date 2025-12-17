@@ -31,7 +31,7 @@ mod tests {
 	async fn rid_some() {
 		let val = parse_val!("{ id: test:id, test: { other: null, something: 123 } }");
 		let res = Value::RecordId(RecordId {
-			table: String::from("test"),
+			table: "test".into(),
 			key: RecordIdKey::String("id".to_owned()),
 		});
 		assert_eq!(res, val.rid());

@@ -7,7 +7,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "()")]
@@ -18,7 +18,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
@@ -26,7 +26,7 @@ struct Prefix<'a> {
 impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -50,7 +50,7 @@ struct PrefixFt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub ft: Cow<'a, str>,
@@ -61,7 +61,13 @@ impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
 // Code here is used in references which is temporarly disabled
 #[allow(dead_code)]
 impl<'a> PrefixFt<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, ft: &'a str) -> Self {
+	fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		id: &RecordIdKey,
+		ft: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -86,7 +92,7 @@ struct PrefixFf<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub ft: Cow<'a, str>,
@@ -101,7 +107,7 @@ impl<'a> PrefixFf<'a> {
 	fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		id: &RecordIdKey,
 		ft: &'a str,
 		ff: &'a str,
@@ -136,10 +142,10 @@ pub(crate) struct Ref<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub id: Cow<'a, RecordIdKey>,
-	pub ft: Cow<'a, str>,
+	pub ft: Cow<'a, TableName>,
 	pub ff: Cow<'a, str>,
 	pub fk: Cow<'a, RecordIdKey>,
 }
@@ -155,22 +161,32 @@ impl Ref<'_> {
 pub fn new<'a>(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &'a str,
+	tb: &'a TableName,
 	id: &'a RecordIdKey,
-	ft: &'a str,
+	ft: &'a TableName,
 	ff: &'a str,
 	fk: &'a RecordIdKey,
 ) -> Ref<'a> {
-	Ref::new(ns, db, tb, id, ft, ff, fk)
+	Ref::new_impl(ns, db, tb, id, ft, ff, fk)
 }
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn prefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+pub fn suffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+) -> Result<Vec<u8>> {
 	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
@@ -179,7 +195,7 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Re
 pub fn ftprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	ft: &str,
 ) -> Result<Vec<u8>> {
@@ -191,7 +207,7 @@ pub fn ftprefix(
 pub fn ftsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	ft: &str,
 ) -> Result<Vec<u8>> {
@@ -203,7 +219,7 @@ pub fn ftsuffix(
 pub fn ffprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	ft: &str,
 	ff: &str,
@@ -216,7 +232,7 @@ pub fn ffprefix(
 pub fn ffsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
 	ft: &str,
 	ff: &str,
@@ -229,25 +245,25 @@ pub fn ffsuffix(
 pub fn refprefix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
-	ft: &str,
+	ft: &TableName,
 	ff: &str,
 	fk: &RecordIdKey,
 ) -> Result<Vec<u8>> {
-	Ref::new(ns, db, tb, id, ft, ff, fk).encode_key()
+	Ref::new_impl(ns, db, tb, id, ft, ff, fk).encode_key()
 }
 
 pub fn refsuffix(
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &str,
+	tb: &TableName,
 	id: &RecordIdKey,
-	ft: &str,
+	ft: &TableName,
 	ff: &str,
 	fk: &RecordIdKey,
 ) -> Result<Vec<u8>> {
-	let mut k = Ref::new(ns, db, tb, id, ft, ff, fk).encode_key()?;
+	let mut k = Ref::new_impl(ns, db, tb, id, ft, ff, fk).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -259,12 +275,12 @@ impl Categorise for Ref<'_> {
 }
 
 impl<'a> Ref<'a> {
-	pub fn new(
+	pub fn new_impl(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		id: &'a RecordIdKey,
-		ft: &'a str,
+		ft: &'a TableName,
 		ff: &'a str,
 		fk: &'a RecordIdKey,
 	) -> Self {
@@ -291,15 +307,16 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let binding = RecordIdKey::String("testid".into());
 		let other_binding = RecordIdKey::String("otherid".into());
-		let val = Ref::new(
+		let tb: TableName = "testtb".into();
+		let ft: TableName = "othertb".into();
+		let val = Ref::new_impl(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			&binding,
-			"othertb",
+			&ft,
 			"test.*",
 			&other_binding,
 		);

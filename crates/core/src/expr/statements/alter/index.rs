@@ -13,6 +13,7 @@ use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Value};
 use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
+use crate::val::TableName;
 
 /// Represents an `ALTER INDEX` statement.
 ///
@@ -26,7 +27,7 @@ use crate::iam::{Action, ResourceKind};
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterIndexStatement {
 	pub name: String,
-	pub table: String,
+	pub table: TableName,
 	pub if_exists: bool,
 	/// If true, marks the index as decommissioned
 	pub prepare_remove: bool,
@@ -34,6 +35,7 @@ pub(crate) struct AlterIndexStatement {
 }
 
 impl AlterIndexStatement {
+	#[instrument(level = "trace", name = "AlterIndexStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;

@@ -34,6 +34,27 @@ use serde_json::json;
 const HDR_SURREAL: &str = "surreal-id";
 const HDR_REQUEST: &str = "x-request-id";
 
+/// Helper function to ensure namespace and database exist before use
+async fn ensure_namespace_and_database(
+	socket: &mut Socket,
+	ns: &str,
+	db: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+	// Create namespace at ROOT level (before USE)
+	socket.send_message_query(&format!("DEFINE NAMESPACE `{ns}`")).await?;
+
+	// USE the namespace to create the database within it
+	socket.send_message_use(Some(ns), None).await?;
+
+	// Create database within the namespace
+	socket.send_message_query(&format!("DEFINE DATABASE `{db}`")).await?;
+
+	// Reset to ROOT level so the test can USE the namespace/database itself
+	socket.send_message_use(None, None).await?;
+
+	Ok(())
+}
+
 pub async fn ping(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -695,8 +716,12 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -772,8 +797,12 @@ pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -842,8 +871,12 @@ pub async fn live_query_diff(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE DIFF command
 	let res = socket.send_request("query", json!(["LIVE SELECT DIFF FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -961,8 +994,12 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1096,8 +1133,12 @@ pub async fn live_table_removal(cfg_server: Option<Format>, cfg_format: Format) 
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1133,8 +1174,12 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	let mut socket1 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket1.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket1, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket1.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket1.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket1.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1144,6 +1189,8 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	let mut socket2 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket2.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database (already exists, but ensure it's set up)
+	ensure_namespace_and_database(&mut socket2, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket2.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a new test record
@@ -1181,8 +1228,12 @@ pub async fn variable_auth_live_query(cfg_server: Option<Format>, cfg_format: Fo
 	let mut socket_permanent = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket_permanent.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket_permanent, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket_permanent.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket_permanent.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Define a user record access method
 	socket_permanent
 		.send_message_query(
@@ -2431,6 +2482,8 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
@@ -2492,8 +2545,26 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	assert_eq!(res["result"][0]["result"], "value_from_session1", "result: {res:?}");
 
 	// Test 3: Namespace/database isolation
+	// Create namespace and database for session1
+	socket
+		.send_request_with_session("query", json!(["DEFINE NAMESPACE `test_ns1`"]), session1)
+		.await
+		.unwrap();
+	socket
+		.send_request_with_session("use", json!(["test_ns1", None::<String>]), session1)
+		.await
+		.unwrap();
+	socket
+		.send_request_with_session("query", json!(["DEFINE DATABASE `test_db1`"]), session1)
+		.await
+		.unwrap();
 	socket
 		.send_request_with_session("use", json!(["test_ns1", "test_db1"]), session1)
+		.await
+		.unwrap();
+	// Create the table before using it
+	socket
+		.send_request_with_session("query", json!(["DEFINE TABLE test"]), session1)
 		.await
 		.unwrap();
 
@@ -2507,8 +2578,19 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 		.unwrap();
 
 	// Default session should not see the record (different ns/db)
+	// The default session is still using NS/DB, so querying test:one will fail because
+	// the table doesn't exist in that namespace/database
 	let res = socket.send_request("query", json!(["SELECT * FROM test:one"])).await.unwrap();
-	assert_eq!(res["result"][0]["result"], json!([]), "result: {res:?}");
+	// When table doesn't exist in the namespace/database, we get an error
+	// Check for either empty result or error about table not existing
+	if res["result"][0]["status"] == "ERR" {
+		assert!(
+			res["result"][0]["result"].as_str().unwrap().contains("does not exist"),
+			"result: {res:?}"
+		);
+	} else {
+		assert_eq!(res["result"][0]["result"], json!([]), "result: {res:?}");
+	}
 
 	// Session 1 can see its own record
 	let res = socket

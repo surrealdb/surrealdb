@@ -64,7 +64,7 @@ impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIn
 	fn from(v: RebuildIndexStatement) -> Self {
 		Self {
 			name: v.name,
-			what: v.what,
+			table: v.what.into(),
 			if_exists: v.if_exists,
 			concurrently: v.concurrently,
 		}
@@ -75,7 +75,7 @@ impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIn
 	fn from(v: crate::expr::statements::rebuild::RebuildIndexStatement) -> Self {
 		Self {
 			name: v.name,
-			what: v.what,
+			what: v.table.into_string(),
 			if_exists: v.if_exists,
 			concurrently: v.concurrently,
 		}

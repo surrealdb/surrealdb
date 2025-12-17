@@ -43,7 +43,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let val = Kv::new();
 		let enc = Kv::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/");

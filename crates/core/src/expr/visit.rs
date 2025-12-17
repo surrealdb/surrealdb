@@ -664,8 +664,8 @@ implement_visitor! {
 	}
 
 	fn visit_insert(this, i: &InsertStatement){
-		if let Some(v) = i.into.as_ref(){
-			this.visit_expr(v)?;
+		if let Some(into) = &i.into {
+			this.visit_expr(into)?;
 		}
 		this.visit_data(&i.data)?;
 		if let Some(update) = i.update.as_ref(){
@@ -2075,8 +2075,8 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_insert(this, i: &mut InsertStatement){
-		if let Some(v) = i.into.as_mut(){
-			this.visit_mut_expr(v)?;
+		if let Some(into) = &mut i.into {
+			this.visit_mut_expr(into)?;
 		}
 		this.visit_mut_data(&mut i.data)?;
 		if let Some(update) = i.update.as_mut(){

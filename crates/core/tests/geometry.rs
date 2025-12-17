@@ -10,7 +10,7 @@ async fn geometry_point() -> Result<()> {
 		UPSERT city:london SET centre = (-0.118092, 51.509865);
 		SELECT * FROM city:london;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -69,7 +69,7 @@ async fn geometry_polygon() -> Result<()> {
 		};
 		SELECT * FROM city:london;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -165,7 +165,7 @@ async fn geometry_multipoint() -> Result<()> {
 		};
 		SELECT * FROM city:london;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -246,7 +246,7 @@ async fn geometry_multipolygon() -> Result<()> {
 		};
 		SELECT * FROM university:oxford;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -354,7 +354,7 @@ async fn geometry_inner_access() -> Result<()> {
 			],
 		};
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);

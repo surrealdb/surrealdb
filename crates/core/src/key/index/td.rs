@@ -24,8 +24,10 @@ use crate::idx::ft::fulltext::TermDocument;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct TdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -33,7 +35,7 @@ pub(crate) struct TdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -54,7 +56,7 @@ impl<'a> TdRoot<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		term: &'a str,
 	) -> Self {
@@ -77,6 +79,7 @@ impl<'a> TdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Td<'a> {
 	__: u8,
 	_a: u8,
@@ -84,7 +87,7 @@ pub(crate) struct Td<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -119,7 +122,7 @@ impl<'a> Td<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		term: &'a str,
 		id: DocId,
@@ -150,14 +153,16 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term");
+		let tb = TableName::from("testtb");
+		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term");
 		let enc = TdRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0");
 	}
 
 	#[test]
 	fn key() {
-		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term", 129);
+		let tb = TableName::from("testtb");
+		let val = Td::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term", 129);
 		let enc = Td::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

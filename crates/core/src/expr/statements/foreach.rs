@@ -39,6 +39,7 @@ impl ForeachStatement {
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive
+	#[instrument(level = "trace", name = "ForeachStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

@@ -3,9 +3,10 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
-use crate::doc::CursorDoc;
+use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
@@ -71,6 +72,7 @@ impl SelectStatement {
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "SelectStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -110,10 +112,19 @@ impl SelectStatement {
 		let mut planner = QueryPlanner::new();
 
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
+
+		let txn = ctx.tx();
+		let ns = txn.expect_ns_by_name(opt.ns()?).await?;
+		let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
+		let doc_ctx = NsDbCtx {
+			ns: Arc::clone(&ns),
+			db: Arc::clone(&db),
+		};
+
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
-			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, w).await?;
+			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
 		}
 
 		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {

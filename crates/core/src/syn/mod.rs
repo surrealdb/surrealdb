@@ -208,12 +208,12 @@ pub fn record_id(input: &str) -> Result<PublicRecordId> {
 
 /// Parse a table name from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn table(input: &str) -> Result<crate::val::Table> {
+pub fn table(input: &str) -> Result<crate::val::TableName> {
 	trace!(target: TARGET, "Parsing SurrealQL table name");
 
 	parse_with(input.as_bytes(), async |parser, _stk| {
 		let ident = parser.parse_ident()?;
-		Ok(crate::val::Table::new(ident))
+		Ok(crate::val::TableName::new(ident))
 	})
 }
 

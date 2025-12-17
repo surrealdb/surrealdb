@@ -798,14 +798,10 @@ pub trait RpcProtocol {
 			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
+			PublicValue::Null | PublicValue::None => None,
+			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
 			PublicValue::String(x) => Some(Expr::Table(x)),
-			x => {
-				if x.is_nullish() {
-					None
-				} else {
-					Some(Expr::from_public_value(x))
-				}
-			}
+			x => Some(Expr::from_public_value(x)),
 		};
 
 		// Specify the SQL query string
@@ -813,7 +809,12 @@ pub trait RpcProtocol {
 			into,
 			data: SqlData::SingleExpression(Expr::from_public_value(data)),
 			output: Some(Output::After),
-			..Default::default()
+			ignore: false,
+			update: None,
+			timeout: Expr::Literal(Literal::None),
+			parallel: false,
+			relation: false,
+			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -841,8 +842,9 @@ pub trait RpcProtocol {
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.to_vec())
 			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
 
-		let what = match what {
+		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
+			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
 			PublicValue::String(x) => Some(Expr::Table(x)),
 			x => Some(Expr::from_public_value(x)),
 		};
@@ -852,7 +854,7 @@ pub trait RpcProtocol {
 		// Specify the SQL query string
 		let sql = InsertStatement {
 			relation: true,
-			into: what,
+			into: table_name,
 			data,
 			output: Some(Output::After),
 			ignore: false,

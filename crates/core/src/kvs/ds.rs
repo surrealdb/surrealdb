@@ -1389,7 +1389,7 @@ impl Datastore {
 							let ft = FullTextIndex::new(
 								&self.index_stores,
 								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
+								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
 								p,
 							)
 							.await?;
@@ -2221,18 +2221,6 @@ impl Datastore {
 		Ok(model)
 	}
 
-	/// Get a table by name.
-	///
-	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
-	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
-		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
-
-		tx.expect_tb_by_name(ns, db, tb).await?;
-		tx.cancel().await?;
-
-		Ok(())
-	}
-
 	/// Invoke an API handler.
 	///
 	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
@@ -2342,6 +2330,7 @@ mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
 	use crate::types::{PublicValue, PublicVariables};
+	use crate::val::TableName;
 
 	#[tokio::test]
 	async fn test_setup_superuser() {
@@ -2473,9 +2462,10 @@ mod test {
 			res.remove(0).result.unwrap();
 			// Obtain the initial uuids
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-			let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let tb = TableName::from("test");
+			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let initial_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
 			(initial, initial_live_query_version)
 		};
@@ -2504,9 +2494,10 @@ mod test {
 		// Obtain the uuids after definitions
 		let (after_define, after_define_live_query_version) = {
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-			let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let tb = TableName::from("test");
+			let after_define = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let after_define_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
@@ -2539,9 +2530,10 @@ mod test {
 		// Obtain the uuids after definitions
 		{
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-			let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let tb = TableName::from("test");
+			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let after_remove_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			drop(txn);
 			// Compare uuids after definitions
 			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);

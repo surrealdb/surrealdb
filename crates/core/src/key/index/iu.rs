@@ -34,6 +34,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 /// A key representing a delta applied to the total item count of an index.
 ///
@@ -45,6 +46,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 /// - `pos`: Direction of the delta: `true` for a positive increment, `false` for a decrement.
 /// - `count`: Magnitude of the delta.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct IndexCountKey<'a> {
 	__: u8,
 	_a: u8,
@@ -52,7 +54,7 @@ pub(crate) struct IndexCountKey<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -83,7 +85,7 @@ impl<'a> IndexCountKey<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		uid: Option<(Uuid, Uuid)>,
 		pos: bool,
@@ -120,7 +122,7 @@ impl<'a> IndexCountKey<'a> {
 	pub(crate) fn range(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 	) -> Result<Range<Vec<u8>>> {
 		let mut beg = Prefix::new(ns, db, tb, ix).encode_key()?;
@@ -132,6 +134,7 @@ impl<'a> IndexCountKey<'a> {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -139,7 +142,7 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -150,7 +153,7 @@ struct Prefix<'a> {
 impl_kv_key_storekey!(Prefix<'_> => ());
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -175,10 +178,11 @@ mod tests {
 
 	#[test]
 	fn key() {
+		let tb = TableName::from("testtb");
 		let val = IndexCountKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
-			"testtb",
+			&tb,
 			IndexId(3),
 			Some((
 				Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
@@ -193,15 +197,9 @@ mod tests {
 
 	#[test]
 	fn compacted_key() {
-		let val = IndexCountKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			None,
-			true,
-			65535,
-		);
+		let tb = TableName::from("testtb");
+		let val =
+			IndexCountKey::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), None, true, 65535);
 		let enc = IndexCountKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\0\0\0\0\xff\xff",
@@ -211,7 +209,8 @@ mod tests {
 
 	#[test]
 	fn range() {
-		let r = IndexCountKey::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let tb = TableName::from("testtb");
+		let r = IndexCountKey::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(
 			r.start, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\0",
 			"start"

@@ -12,7 +12,7 @@ use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
 use crate::kvs::KVKey;
-use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName};
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
@@ -63,17 +63,18 @@ impl ToSql for LookupKind {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum LookupSubject {
 	Table {
-		table: String,
+		table: TableName,
 		referencing_field: Option<String>,
 	},
 	Range {
-		table: String,
+		table: TableName,
 		range: RecordIdKeyRangeLit,
 		referencing_field: Option<String>,
 	},
 }
 
 impl LookupSubject {
+	#[instrument(level = "trace", name = "LookupSubject::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -106,11 +107,11 @@ impl LookupSubject {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedLookupSubject {
 	Table {
-		table: String,
+		table: TableName,
 		referencing_field: Option<String>,
 	},
 	Range {
-		table: String,
+		table: TableName,
 		range: RecordIdKeyRange,
 		referencing_field: Option<String>,
 	},
@@ -144,7 +145,7 @@ impl ComputedLookupSubject {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		kind: &LookupKind,
 	) -> Result<(Vec<u8>, Vec<u8>)> {

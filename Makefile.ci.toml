@@ -579,7 +579,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks,cli,graphql",
     "--workspace",
 ]
 

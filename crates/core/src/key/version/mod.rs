@@ -50,7 +50,6 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
 		let val = Version::new();
 		let enc = Version::encode_key(&val).unwrap();
 		assert_eq!(enc, b"!v");

@@ -12,7 +12,7 @@ use crate::catalog::{
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
+use crate::doc::{CursorDoc, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
@@ -25,7 +25,7 @@ use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
 	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
 	IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult, MatchesThingIterator,
-	ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	RecordIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
 	UniqueRangeReverseThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
@@ -34,7 +34,7 @@ use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
-use crate::val::{Array, Number, Object, RecordId, Value};
+use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
 
@@ -86,7 +86,7 @@ enum PerMatchRefEntry {
 }
 
 pub(super) struct InnerQueryExecutor {
-	table: String,
+	table: TableName,
 	ir_map: HashMap<IndexReference, PerIndexReferenceIndex>,
 	mr_entries: HashMap<MatchRef, PerMatchRefEntry>,
 	exp_entries: HashMap<Arc<Expr>, PerExpressionEntry>,
@@ -125,11 +125,11 @@ impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn new(
-		db: &DatabaseDefinition,
+		doc_ctx: &NsDbTbCtx,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		table: &str,
+		table: TableName,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -158,9 +158,9 @@ impl InnerQueryExecutor {
 						Entry::Vacant(e) => {
 							let ix: &IndexDefinition = e.key();
 							let ikb = IndexKeyBase::new(
-								db.namespace_id,
-								db.database_id,
-								&ix.table_name,
+								doc_ctx.ns.namespace_id,
+								doc_ctx.db.database_id,
+								ix.table_name.clone(),
 								ix.index_id,
 							);
 							let ft = FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p)
@@ -197,7 +197,7 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
 										HnswEntry::new(
-											db,
+											&doc_ctx.db,
 											stk,
 											ctx,
 											opt,
@@ -217,16 +217,16 @@ impl InnerQueryExecutor {
 								let tb = ctx
 									.tx()
 									.expect_tb(
-										db.namespace_id,
-										db.database_id,
+										doc_ctx.ns.namespace_id,
+										doc_ctx.db.database_id,
 										&index_reference.table_name,
 									)
 									.await?;
 								let hi = ctx
 									.get_index_stores()
 									.get_index_hnsw(
-										db.namespace_id,
-										db.database_id,
+										doc_ctx.ns.namespace_id,
+										doc_ctx.db.database_id,
 										ctx,
 										tb.table_id,
 										index_reference,
@@ -237,7 +237,7 @@ impl InnerQueryExecutor {
 								hi.write().await.check_state(&ctx.tx()).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
-									db,
+									&doc_ctx.db,
 									stk,
 									ctx,
 									opt,
@@ -268,7 +268,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.to_owned(),
+			table,
 			ir_map,
 			mr_entries,
 			exp_entries,
@@ -325,7 +325,7 @@ impl QueryExecutor {
 		result
 	}
 
-	pub(crate) fn is_table(&self, tb: &str) -> bool {
+	pub(crate) fn is_table(&self, tb: &TableName) -> bool {
 		self.0.table.eq(tb)
 	}
 
@@ -363,7 +363,7 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ir: IteratorRef,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
@@ -389,7 +389,7 @@ impl QueryExecutor {
 		db: DatabaseId,
 		irf: IteratorRef,
 		io: &IndexOption,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		match io.index_reference().index {
 			Index::Idx | Index::Count(_) => {
 				Ok(self.new_index_iterator(ns, db, irf, io.clone()).await?)
@@ -432,7 +432,7 @@ impl QueryExecutor {
 		db: DatabaseId,
 		ir: IteratorRef,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		let ix = io.index_reference();
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
@@ -441,29 +441,31 @@ impl QueryExecutor {
 			}
 			IndexOperator::Union(values) => {
 				let fds = Self::union_to_fds(values);
-				Some(ThingIterator::IndexUnion(IndexUnionThingIterator::new(ir, ns, db, ix, &fds)?))
+				Some(RecordIterator::IndexUnion(IndexUnionThingIterator::new(
+					ir, ns, db, ix, &fds,
+				)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, ir, ios).await?;
 				let index_join =
 					Box::new(IndexJoinThingIterator::new(ir, ns, db, ix.clone(), iterators)?);
-				Some(ThingIterator::IndexJoin(index_join))
+				Some(RecordIterator::IndexJoin(index_join))
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					Some(ThingIterator::IndexRangeReverse(
+					Some(RecordIterator::IndexRangeReverse(
 						IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 					))
 				} else {
-					Some(ThingIterator::IndexRange(IndexRangeThingIterator::full_range(
+					Some(RecordIterator::IndexRange(IndexRangeThingIterator::full_range(
 						ir, ns, db, ix,
 					)?))
 				}
 			}
-			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::IndexRange(
+			IndexOperator::Range(prefix, ranges) => Some(RecordIterator::IndexRange(
 				IndexRangeThingIterator::compound_range(ir, ns, db, ix, prefix, ranges)?,
 			)),
-			IndexOperator::Count => Some(ThingIterator::IndexCount(IndexCountThingIterator::new(
+			IndexOperator::Count => Some(RecordIterator::IndexCount(IndexCountThingIterator::new(
 				ns,
 				db,
 				&ix.table_name,
@@ -479,8 +481,8 @@ impl QueryExecutor {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		fd: &Array,
-	) -> Result<ThingIterator> {
-		Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
+	) -> Result<RecordIterator> {
+		Ok(RecordIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
 	}
 
 	#[expect(clippy::too_many_arguments)]
@@ -493,7 +495,7 @@ impl QueryExecutor {
 		from: RangeValue,
 		to: RangeValue,
 		sc: ScanDirection,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		match ix.index {
 			Index::Idx => {
 				return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, from, to, sc)?));
@@ -514,12 +516,12 @@ impl QueryExecutor {
 		from: RangeValue,
 		to: RangeValue,
 		sc: ScanDirection,
-	) -> Result<ThingIterator> {
+	) -> Result<RecordIterator> {
 		Ok(match sc {
 			ScanDirection::Forward => {
-				ThingIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
+				RecordIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			ScanDirection::Backward => ThingIterator::IndexRangeReverse(
+			ScanDirection::Backward => RecordIterator::IndexRangeReverse(
 				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
@@ -533,12 +535,12 @@ impl QueryExecutor {
 		from: RangeValue,
 		to: RangeValue,
 		sc: ScanDirection,
-	) -> Result<ThingIterator> {
+	) -> Result<RecordIterator> {
 		Ok(match sc {
-			ScanDirection::Forward => {
-				ThingIterator::UniqueRange(UniqueRangeThingIterator::new(ir, ns, db, ix, from, to)?)
-			}
-			ScanDirection::Backward => ThingIterator::UniqueRangeReverse(
+			ScanDirection::Forward => RecordIterator::UniqueRange(UniqueRangeThingIterator::new(
+				ir, ns, db, ix, from, to,
+			)?),
+			ScanDirection::Backward => RecordIterator::UniqueRangeReverse(
 				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
@@ -550,7 +552,7 @@ impl QueryExecutor {
 		db: DatabaseId,
 		irf: IteratorRef,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let fd = Self::equality_to_fd(value);
@@ -558,7 +560,7 @@ impl QueryExecutor {
 			}
 			IndexOperator::Union(values) => {
 				let fds = Self::union_to_fds(values);
-				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
+				Some(RecordIterator::UniqueUnion(UniqueUnionThingIterator::new(
 					irf,
 					ns,
 					db,
@@ -575,11 +577,11 @@ impl QueryExecutor {
 					io.index_reference().clone(),
 					iterators,
 				)?);
-				Some(ThingIterator::UniqueJoin(unique_join))
+				Some(RecordIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order(reverse) => {
 				if *reverse {
-					Some(ThingIterator::UniqueRangeReverse(
+					Some(RecordIterator::UniqueRangeReverse(
 						UniqueRangeReverseThingIterator::full_range(
 							irf,
 							ns,
@@ -588,7 +590,7 @@ impl QueryExecutor {
 						)?,
 					))
 				} else {
-					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
+					Some(RecordIterator::UniqueRange(UniqueRangeThingIterator::full_range(
 						irf,
 						ns,
 						db,
@@ -597,7 +599,7 @@ impl QueryExecutor {
 				}
 			}
 			IndexOperator::Range(prefix, ranges) => {
-				Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::compound_range(
+				Some(RecordIterator::UniqueRange(UniqueRangeThingIterator::compound_range(
 					irf,
 					ns,
 					db,
@@ -616,14 +618,14 @@ impl QueryExecutor {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		fd: &Array,
-	) -> Result<ThingIterator> {
+	) -> Result<RecordIterator> {
 		if ix.cols.len() > 1 {
 			// If the index is unique and the index is a composite index,
 			// then we have the opportunity to iterate on the first column of the index
 			// and consider it as a standard index (rather than a unique one)
-			Ok(ThingIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
+			Ok(RecordIterator::IndexEqual(IndexEqualThingIterator::new(irf, ns, db, ix, fd)?))
 		} else {
-			Ok(ThingIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, fd)?))
+			Ok(RecordIterator::UniqueEqual(UniqueEqualThingIterator::new(irf, ns, db, ix, fd)?))
 		}
 	}
 
@@ -631,7 +633,7 @@ impl QueryExecutor {
 		&self,
 		ir: IteratorRef,
 		io: IndexOption,
-	) -> Result<Option<ThingIterator>> {
+	) -> Result<Option<RecordIterator>> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir)
 			&& let Matches(
 				_,
@@ -646,17 +648,17 @@ impl QueryExecutor {
 		{
 			let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
 			let it = MatchesThingIterator::new(ir, hits);
-			return Ok(Some(ThingIterator::FullTextMatches(it)));
+			return Ok(Some(RecordIterator::FullTextMatches(it)));
 		}
 		Ok(None)
 	}
 
-	fn new_hnsw_index_ann_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
+	fn new_hnsw_index_ann_iterator(&self, ir: IteratorRef) -> Option<RecordIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir)
 			&& let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp)
 		{
 			let it = KnnIterator::new(ir, he.res.clone());
-			return Some(ThingIterator::Knn(it));
+			return Some(RecordIterator::Knn(it));
 		}
 		None
 	}
@@ -667,7 +669,7 @@ impl QueryExecutor {
 		db: DatabaseId,
 		irf: IteratorRef,
 		ios: &[IndexOption],
-	) -> Result<VecDeque<ThingIterator>> {
+	) -> Result<VecDeque<RecordIterator>> {
 		let mut iterators = VecDeque::with_capacity(ios.len());
 		for io in ios {
 			if let Some(it) = Box::pin(self.new_single_iterator(ns, db, irf, io)).await? {

@@ -63,11 +63,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Us::new(
-			NamespaceId(1),
-			"testuser",
-		);
+		let val = Us::new(NamespaceId(1), "testuser");
 		let enc = Us::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01!ustestuser\0");
 	}
