@@ -546,7 +546,8 @@ impl Iterator {
 						}
 						Value::Object(o) => {
 							if let Some(id) = o.rid() {
-								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
+								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id)
+									.await?;
 							} else {
 								bail!(Error::InvalidStatementTarget {
 									value: Value::Object(o).to_sql(),
