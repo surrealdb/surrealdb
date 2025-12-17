@@ -27,14 +27,7 @@ impl Value {
 					}
 					Part::All => {
 						let path = path.next();
-						*v = v
-							.iter()
-							.map(|(k, v)| {
-								let mut v = v.clone();
-								v.put(path, val.clone());
-								(k.clone(), v)
-							})
-							.collect();
+						v.iter_mut().for_each(|(_, v)| v.put(path, val.clone()));
 					}
 					x => {
 						if let Some(idx) = x.as_old_index() {

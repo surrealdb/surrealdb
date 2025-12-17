@@ -35,13 +35,9 @@ impl Value {
 						}
 						_ => {
 							let path = path.next();
-							let mut entries = Vec::new();
-							for (k, v) in v.iter() {
-								let mut v = v.clone();
+							for v in v.values_mut() {
 								stk.run(|stk| v.del(stk, ctx, opt, path)).await?;
-								entries.push((k.clone(), v));
 							}
-							*v = entries.into_iter().collect();
 							Ok(())
 						}
 					},

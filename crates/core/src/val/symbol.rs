@@ -29,7 +29,7 @@ fn intern(s: String) -> Arc<str> {
 	// they are more likely to be unique and
 	// unlikely to be shared across documents.
 	if s.len() >= 32 {
-		return Arc::from(s.as_str());
+		return Arc::<str>::from(s);
 	}
 	// Hash the string for the cache
 	let hash = {
@@ -49,7 +49,7 @@ fn intern(s: String) -> Arc<str> {
 			}
 		}
 		// Cache miss: create new Arc for the string
-		let arc: Arc<str> = Arc::from(s.as_str());
+		let arc: Arc<str> = Arc::<str>::from(s);
 		// Insert the new entry into the cache
 		cache.put(hash, arc.clone());
 		// Return the new Arc
@@ -206,6 +206,11 @@ impl Eq for Symbol {}
 impl PartialEq for Symbol {
 	#[inline]
 	fn eq(&self, other: &Self) -> bool {
+		// Fast path: check if pointers are equal
+		if Arc::ptr_eq(&self.0, &other.0) {
+			return true;
+		}
+		// Slow path: compare string contents
 		self.0.as_ref() == other.0.as_ref()
 	}
 }
@@ -234,6 +239,11 @@ impl PartialEq<&str> for Symbol {
 impl Ord for Symbol {
 	#[inline]
 	fn cmp(&self, other: &Self) -> Ordering {
+		// Fast path: check if pointers are equal
+		if Arc::ptr_eq(&self.0, &other.0) {
+			return Ordering::Equal;
+		}
+		// Slow path: compare string contents
 		self.0.as_ref().cmp(other.0.as_ref())
 	}
 }
@@ -241,7 +251,12 @@ impl Ord for Symbol {
 impl PartialOrd for Symbol {
 	#[inline]
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
+		// Fast path: check if pointers are equal
+		if Arc::ptr_eq(&self.0, &other.0) {
+			return Some(Ordering::Equal);
+		}
+		// Slow path: compare string contents
+		Some(self.0.as_ref().cmp(other.0.as_ref()))
 	}
 }
 

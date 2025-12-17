@@ -1,5 +1,6 @@
+use std::collections::btree_map::Entry;
+
 use anyhow::Result;
-use imbl::ordmap::Entry;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
@@ -175,25 +176,13 @@ impl Value {
 							.await?;
 						}
 						Value::Object(v) => {
-							let entries: Vec<_> =
-								v.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-							let mut results = Vec::new();
-
 							stk.scope(|scope| {
-								let futs = entries.into_iter().map(|(k, mut v)| {
-									let val = val.clone();
-									scope.run(move |stk| async move {
-										v.set(stk, ctx, opt, path, val).await?;
-										Ok::<_, anyhow::Error>((k, v))
-									})
+								let futs = v.iter_mut().map(|(_, v)| {
+									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
 								});
 								try_join_all_buffered(futs)
 							})
-							.await?
-							.into_iter()
-							.for_each(|r| results.push(r));
-
-							*v = results.into_iter().collect();
+							.await?;
 						}
 						_ => (),
 					};

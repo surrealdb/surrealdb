@@ -1,10 +1,10 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_graphql::dynamic::{
 	Enum, Interface, InterfaceField, Object, Scalar, Schema, Type, TypeRef, Union,
 };
 use async_graphql::{Name, Value as GqlValue};
-use imbl::OrdMap;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
@@ -408,7 +408,7 @@ fn convert_static_record_id_key(
 			Ok(SurRecordIdKey::Array(SurArray(vals?)))
 		}
 		RecordIdKeyLit::Object(entries) => {
-			let mut map = OrdMap::new();
+			let mut map = BTreeMap::new();
 			for entry in entries {
 				map.insert(entry.key, convert_static_expr(entry.value)?);
 			}
@@ -464,7 +464,7 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 			Ok(SurValue::Set(SurSet::from(vals?)))
 		}
 		Literal::Object(entries) => {
-			let mut map = OrdMap::new();
+			let mut map = BTreeMap::new();
 			for entry in entries {
 				map.insert(entry.key, convert_static_expr(entry.value)?);
 			}
@@ -621,7 +621,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 		},
 		Kind::Object => match val {
 			GqlValue::Object(o) => {
-				let out: Result<OrdMap<String, SurValue>, GqlError> = o
+				let out: Result<BTreeMap<String, SurValue>, GqlError> = o
 					.iter()
 					.map(|(k, v)| gql_to_sql_kind(v, Kind::Any).map(|sqlv| (k.to_string(), sqlv)))
 					.collect();
@@ -633,7 +633,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 
 				match expr {
 					Expr::Literal(Literal::Object(o)) => {
-						let mut map = OrdMap::new();
+						let mut map = BTreeMap::new();
 						for entry in o {
 							map.insert(entry.key, convert_static_expr(entry.value)?);
 						}
