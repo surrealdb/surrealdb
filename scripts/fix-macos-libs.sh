@@ -33,7 +33,26 @@ fi
 
 echo "Fixing library paths in $BINARY..."
 
-# Fix each library path
+# Add rpaths to common library locations so @rpath can find libraries
+# These are the standard locations where Homebrew and other package managers install libraries
+RPATHS=(
+    "/opt/homebrew/lib"      # Apple Silicon Homebrew
+    "/usr/local/lib"         # Intel Homebrew and other installers
+)
+
+for rpath in "${RPATHS[@]}"; do
+    # Check if rpath already exists
+    if otool -l "$BINARY" | grep -q "path $rpath"; then
+        echo "  rpath $rpath already exists"
+    else
+        echo "  Adding rpath: $rpath"
+        install_name_tool -add_rpath "$rpath" "$BINARY" || {
+            echo "Warning: Failed to add rpath $rpath" >&2
+        }
+    fi
+done
+
+# Fix each library path to use @rpath
 while IFS= read -r lib_path; do
     if [[ -z "$lib_path" ]]; then
         continue
@@ -42,10 +61,10 @@ while IFS= read -r lib_path; do
     # Extract library name (e.g., liblzma.5.dylib from /opt/homebrew/opt/xz/lib/liblzma.5.dylib)
     lib_name=$(basename "$lib_path")
 
-    # Change to just the library name - macOS will search in standard locations
-    # This allows the binary to work on systems without Homebrew or with xz installed elsewhere
-    echo "  Changing $lib_path -> $lib_name"
-    install_name_tool -change "$lib_path" "$lib_name" "$BINARY" || {
+    # Change to @rpath so macOS searches in the rpaths we added above
+    # This allows the binary to work on systems with libraries in different locations
+    echo "  Changing $lib_path -> @rpath/$lib_name"
+    install_name_tool -change "$lib_path" "@rpath/$lib_name" "$BINARY" || {
         echo "Warning: Failed to change $lib_path" >&2
     }
 done <<< "$LIBS"
