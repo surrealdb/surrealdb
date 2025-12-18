@@ -3,11 +3,19 @@
 
 name: Release
 
-run-name: "${{ github.event_name == 'schedule' && 'Nightly release' || format('Release {0} (nightly: {1}, publish: {2}, latest: {3})', inputs.git-ref, inputs.nightly-release, inputs.publish, inputs.latest) }}"
+run-name: "${{ github.event_name == 'schedule' && 'Nightly release' || format('Release {0} (type: {1}, publish: {2}, latest: {3})', inputs.git-ref, inputs.release-type, inputs.publish, inputs.latest) }}"
 
 on:
   workflow_dispatch:
     inputs:
+      release-type:
+        required: true
+        type: choice
+        default: nightly
+        description: "Type of release"
+        options:
+          - nightly
+          - versioned
       git-ref:
         required: true
         type: string
@@ -16,22 +24,17 @@ on:
       release-version:
         required: false
         type: string
-        description: "Version to release (e.g., 3.0.0-beta.1). If provided, will bump version and tag"
-      nightly-release:
-        required: false
-        type: boolean
-        default: true
-        description: "Make this a nightly release"
+        description: "Version to release (e.g., 3.0.0-beta.1). Required for versioned releases."
       update-main:
         required: false
         type: boolean
         default: false
-        description: "Create PR to update main branch (for phase transitions)"
+        description: "[Versioned only] Create PR to update main branch (for phase transitions)"
       latest:
         required: false
         type: boolean
         default: false
-        description: "Make this the latest release"
+        description: "[Versioned only] Make this the latest release"
       extra-features:
         required: false
         type: string
@@ -55,12 +58,44 @@ permissions:
 
 jobs:
   # ----------------------------------------
+  # Validate inputs
+  # ----------------------------------------
+
+  validate-inputs:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
+            if [[ -z "${{ inputs.release-version }}" ]]; then
+              echo "Error: 'release-version' is required when release-type is 'versioned'"
+              echo "Please provide a version number (e.g., 3.0.0-beta.1)"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
+            if [[ -n "${{ inputs.release-version }}" ]]; then
+              echo "Warning: 'release-version' is ignored for nightly releases"
+            fi
+            if [[ "${{ inputs.update-main }}" == "true" ]]; then
+              echo "Warning: 'update-main' is ignored for nightly releases"
+            fi
+            if [[ "${{ inputs.latest }}" == "true" ]]; then
+              echo "Warning: 'latest' is ignored for nightly releases"
+            fi
+          fi
+
+  # ----------------------------------------
   # Bump version (optional)
   # ----------------------------------------
 
   bump-version:
+    needs: [validate-inputs]
     name: Bump version
-    if: ${{ inputs.release-version != '' && inputs.release-version != null }}
+    if: ${{ inputs.release-type == 'versioned' }}
     runs-on: ubuntu-latest
     outputs:
       release-branch: ${{ steps.bump.outputs.release-branch }}
@@ -108,7 +143,7 @@ jobs:
           echo "release-branch=${RELEASE_BRANCH}" >> $GITHUB_OUTPUT
 
       - name: Create PR to update main
-        if: ${{ inputs.update-main == true }}
+        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
         run: |
           gh pr create \
             --base main \
@@ -131,8 +166,8 @@ jobs:
 
   prepare-vars:
     name: Prepare vars
-    needs: [bump-version]
-    if: ${{ always() }}
+    needs: [validate-inputs, bump-version]
+    if: ${{ always() && needs.validate-inputs.result == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.vars.outputs.name }}
@@ -164,8 +199,16 @@ jobs:
             else
               echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
             fi
-            echo "nightly-release=${{ inputs.nightly-release }}" >> $GITHUB_OUTPUT
-            echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
+            # Derive nightly-release from release-type
+            if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
+              echo "nightly-release=true" >> $GITHUB_OUTPUT
+              # Force latest to false for nightly releases
+              echo "latest=false" >> $GITHUB_OUTPUT
+            else
+              echo "nightly-release=false" >> $GITHUB_OUTPUT
+              # Respect latest input for versioned releases
+              echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
+            fi
             echo "extra-features=${{ inputs.extra-features }}" >> $GITHUB_OUTPUT
             echo "publish=${{ inputs.publish }}" >> $GITHUB_OUTPUT
           fi
