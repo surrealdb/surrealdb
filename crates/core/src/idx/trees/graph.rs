@@ -94,8 +94,11 @@ where
 	}
 
 	pub(super) fn reload(&mut self, val: &[u8]) -> Result<()> {
-		let mut buf = BytesMut::from(val);
 		self.nodes.clear();
+		if val.is_empty() {
+			return Ok(());
+		}
+		let mut buf = BytesMut::from(val);
 		let len = buf.get_u32() as usize;
 		for _ in 0..len {
 			let e = buf.get_u64();
@@ -215,5 +218,21 @@ mod tests {
 	#[test]
 	fn test_undirected_graph_hash() {
 		test_undirected_graph::<AHashSet>(10);
+	}
+
+	/// Test that reload handles empty buffer gracefully.
+	/// This can happen when a layer has no stored chunks yet (chunks == 0).
+	#[test]
+	fn test_reload_empty_buffer() {
+		let mut g = UndirectedGraph::<ArraySet<10>>::new(10);
+
+		// Add some data first
+		g.add_empty_node(1);
+		g.add_empty_node(2);
+		assert_eq!(g.len(), 2);
+
+		// Reload with empty buffer should clear the graph, not panic
+		g.reload(&[]).unwrap();
+		assert_eq!(g.len(), 0);
 	}
 }
