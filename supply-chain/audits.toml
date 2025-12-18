@@ -1304,24 +1304,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-16"
 end = "2026-09-23"
 
-[[trusted.surrealism]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-02-13"
-end = "2026-11-20"
-
-[[trusted.surrealism-cli]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-05"
-end = "2026-11-20"
-
-[[trusted.surrealism-macros]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-05"
-end = "2026-11-20"
-
 [[trusted.surrealism-runtime]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
