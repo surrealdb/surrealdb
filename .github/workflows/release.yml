@@ -194,7 +194,7 @@ jobs:
           else
             # Manual workflow dispatch
             # If version was bumped, use the release branch
-            if [[ -n "${{ needs.bump-version.outputs.release-branch }}" ]]; then
+            if [[ "${{ needs.bump-version.result }}" == "success" ]] && [[ -n "${{ needs.bump-version.outputs.release-branch }}" ]]; then
               echo "git-ref=${{ needs.bump-version.outputs.release-branch }}" >> $GITHUB_OUTPUT
             else
               echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
