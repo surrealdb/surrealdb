@@ -284,134 +284,420 @@ fn try_fold_prefix(op: &PrefixOperator, value: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
+	use std::f64::consts as f64c;
+
+	use rstest::rstest;
+
 	use super::*;
+	use crate::expr::Constant;
 	use crate::val::Number;
 
 	fn int_value(n: i64) -> Expr {
 		Expr::Value(Value::Number(Number::Int(n)))
 	}
 
+	fn float_value(f: f64) -> Expr {
+		Expr::Value(Value::Number(Number::Float(f)))
+	}
+
 	fn bool_value(b: bool) -> Expr {
 		Expr::Value(Value::Bool(b))
 	}
 
-	#[test]
-	fn test_add_integers() {
-		let expr = Expr::Binary {
-			left: Box::new(int_value(1)),
-			op: BinaryOperator::Add,
-			right: Box::new(int_value(2)),
-		};
+	fn string_value(s: &str) -> Expr {
+		Expr::Value(Value::String(s.to_string()))
+	}
+
+	fn binary_expr(left: Expr, op: BinaryOperator, right: Expr) -> Expr {
+		Expr::Binary {
+			left: Box::new(left),
+			op,
+			right: Box::new(right),
+		}
+	}
+
+	fn prefix_expr(op: PrefixOperator, expr: Expr) -> Expr {
+		Expr::Prefix {
+			op,
+			expr: Box::new(expr),
+		}
+	}
+
+	#[rstest]
+	// Constant conversion tests
+	#[case::math_pi(Expr::Constant(Constant::MathPi), float_value(f64c::PI))]
+	#[case::math_e(Expr::Constant(Constant::MathE), float_value(f64c::E))]
+	#[case::math_tau(Expr::Constant(Constant::MathTau), float_value(f64c::TAU))]
+	#[case::math_inf(Expr::Constant(Constant::MathInf), float_value(f64::INFINITY))]
+	#[case::math_neg_inf(Expr::Constant(Constant::MathNegInf), float_value(f64::NEG_INFINITY))]
+	// Arithmetic operations - Add
+	#[case::add_integers(
+		binary_expr(int_value(5), BinaryOperator::Add, int_value(3)),
+		int_value(8)
+	)]
+	#[case::add_negative_integers(
+		binary_expr(int_value(-5), BinaryOperator::Add, int_value(3)),
+		int_value(-2)
+	)]
+	#[case::add_floats(
+		binary_expr(float_value(2.5), BinaryOperator::Add, float_value(1.5)),
+		float_value(4.0)
+	)]
+	// Arithmetic operations - Subtract
+	#[case::subtract_integers(
+		binary_expr(int_value(10), BinaryOperator::Subtract, int_value(3)),
+		int_value(7)
+	)]
+	#[case::subtract_negative(
+		binary_expr(int_value(5), BinaryOperator::Subtract, int_value(10)),
+		int_value(-5)
+	)]
+	// Arithmetic operations - Multiply
+	#[case::multiply_integers(
+		binary_expr(int_value(4), BinaryOperator::Multiply, int_value(3)),
+		int_value(12)
+	)]
+	#[case::multiply_by_zero(
+		binary_expr(int_value(100), BinaryOperator::Multiply, int_value(0)),
+		int_value(0)
+	)]
+	#[case::multiply_negative(
+		binary_expr(int_value(-5), BinaryOperator::Multiply, int_value(3)),
+		int_value(-15)
+	)]
+	// Arithmetic operations - Divide
+	#[case::divide_integers(
+		binary_expr(int_value(15), BinaryOperator::Divide, int_value(3)),
+		int_value(5)
+	)]
+	#[case::divide_floats(
+		binary_expr(float_value(10.0), BinaryOperator::Divide, float_value(2.0)),
+		float_value(5.0)
+	)]
+	// Arithmetic operations - Remainder
+	#[case::remainder_integers(
+		binary_expr(int_value(10), BinaryOperator::Remainder, int_value(3)),
+		int_value(1)
+	)]
+	#[case::remainder_exact(
+		binary_expr(int_value(10), BinaryOperator::Remainder, int_value(5)),
+		int_value(0)
+	)]
+	// Arithmetic operations - Power
+	#[case::power_integers(
+		binary_expr(int_value(2), BinaryOperator::Power, int_value(3)),
+		int_value(8)
+	)]
+	#[case::power_zero(
+		binary_expr(int_value(5), BinaryOperator::Power, int_value(0)),
+		int_value(1)
+	)]
+	// Comparison operations - Equal
+	#[case::equal_true(
+		binary_expr(int_value(5), BinaryOperator::Equal, int_value(5)),
+		bool_value(true)
+	)]
+	#[case::equal_false(
+		binary_expr(int_value(5), BinaryOperator::Equal, int_value(3)),
+		bool_value(false)
+	)]
+	#[case::equal_strings_true(
+		binary_expr(string_value("hello"), BinaryOperator::Equal, string_value("hello")),
+		bool_value(true)
+	)]
+	#[case::equal_strings_false(
+		binary_expr(string_value("hello"), BinaryOperator::Equal, string_value("world")),
+		bool_value(false)
+	)]
+	// Comparison operations - NotEqual
+	#[case::not_equal_true(
+		binary_expr(int_value(5), BinaryOperator::NotEqual, int_value(3)),
+		bool_value(true)
+	)]
+	#[case::not_equal_false(
+		binary_expr(int_value(5), BinaryOperator::NotEqual, int_value(5)),
+		bool_value(false)
+	)]
+	// Comparison operations - LessThan
+	#[case::less_than_true(
+		binary_expr(int_value(3), BinaryOperator::LessThan, int_value(5)),
+		bool_value(true)
+	)]
+	#[case::less_than_false(
+		binary_expr(int_value(5), BinaryOperator::LessThan, int_value(3)),
+		bool_value(false)
+	)]
+	#[case::less_than_equal(
+		binary_expr(int_value(5), BinaryOperator::LessThan, int_value(5)),
+		bool_value(false)
+	)]
+	// Comparison operations - LessThanEqual
+	#[case::less_than_equal_true(
+		binary_expr(int_value(3), BinaryOperator::LessThanEqual, int_value(5)),
+		bool_value(true)
+	)]
+	#[case::less_than_equal_equal(
+		binary_expr(int_value(5), BinaryOperator::LessThanEqual, int_value(5)),
+		bool_value(true)
+	)]
+	#[case::less_than_equal_false(
+		binary_expr(int_value(5), BinaryOperator::LessThanEqual, int_value(3)),
+		bool_value(false)
+	)]
+	// Comparison operations - MoreThan
+	#[case::more_than_true(
+		binary_expr(int_value(5), BinaryOperator::MoreThan, int_value(3)),
+		bool_value(true)
+	)]
+	#[case::more_than_false(
+		binary_expr(int_value(3), BinaryOperator::MoreThan, int_value(5)),
+		bool_value(false)
+	)]
+	// Comparison operations - MoreThanEqual
+	#[case::more_than_equal_true(
+		binary_expr(int_value(5), BinaryOperator::MoreThanEqual, int_value(3)),
+		bool_value(true)
+	)]
+	#[case::more_than_equal_equal(
+		binary_expr(int_value(5), BinaryOperator::MoreThanEqual, int_value(5)),
+		bool_value(true)
+	)]
+	#[case::more_than_equal_false(
+		binary_expr(int_value(3), BinaryOperator::MoreThanEqual, int_value(5)),
+		bool_value(false)
+	)]
+	// Logical operations - And
+	#[case::and_true_true(
+		binary_expr(bool_value(true), BinaryOperator::And, bool_value(true)),
+		bool_value(true)
+	)]
+	#[case::and_true_false(
+		binary_expr(bool_value(true), BinaryOperator::And, bool_value(false)),
+		bool_value(false)
+	)]
+	#[case::and_false_true(
+		binary_expr(bool_value(false), BinaryOperator::And, bool_value(true)),
+		bool_value(false)
+	)]
+	#[case::and_false_false(
+		binary_expr(bool_value(false), BinaryOperator::And, bool_value(false)),
+		bool_value(false)
+	)]
+	#[case::and_short_circuit_left(
+		binary_expr(bool_value(false), BinaryOperator::And, int_value(42)),
+		bool_value(false)
+	)]
+	#[case::and_passthrough_right(
+		binary_expr(bool_value(true), BinaryOperator::And, int_value(42)),
+		int_value(42)
+	)]
+	// Logical operations - Or
+	#[case::or_true_true(
+		binary_expr(bool_value(true), BinaryOperator::Or, bool_value(true)),
+		bool_value(true)
+	)]
+	#[case::or_true_false(
+		binary_expr(bool_value(true), BinaryOperator::Or, bool_value(false)),
+		bool_value(true)
+	)]
+	#[case::or_false_true(
+		binary_expr(bool_value(false), BinaryOperator::Or, bool_value(true)),
+		bool_value(true)
+	)]
+	#[case::or_false_false(
+		binary_expr(bool_value(false), BinaryOperator::Or, bool_value(false)),
+		bool_value(false)
+	)]
+	#[case::or_short_circuit_left(
+		binary_expr(bool_value(true), BinaryOperator::Or, int_value(42)),
+		bool_value(true)
+	)]
+	#[case::or_passthrough_right(
+		binary_expr(bool_value(false), BinaryOperator::Or, int_value(42)),
+		int_value(42)
+	)]
+	// Logical operations - NullCoalescing
+	#[case::null_coalescing_null_left(
+		binary_expr(Expr::Value(Value::Null), BinaryOperator::NullCoalescing, int_value(42)),
+		int_value(42)
+	)]
+	#[case::null_coalescing_none_left(
+		binary_expr(Expr::Value(Value::None), BinaryOperator::NullCoalescing, int_value(42)),
+		int_value(42)
+	)]
+	#[case::null_coalescing_value_left(
+		binary_expr(int_value(10), BinaryOperator::NullCoalescing, int_value(42)),
+		int_value(10)
+	)]
+	// Prefix operations - Not
+	#[case::not_true(prefix_expr(PrefixOperator::Not, bool_value(true)), bool_value(false))]
+	#[case::not_false(prefix_expr(PrefixOperator::Not, bool_value(false)), bool_value(true))]
+	// Prefix operations - Negate
+	#[case::negate_positive(
+		prefix_expr(PrefixOperator::Negate, int_value(5)),
+		int_value(-5)
+	)]
+	#[case::negate_negative(
+		prefix_expr(PrefixOperator::Negate, int_value(-5)),
+		int_value(5)
+	)]
+	#[case::negate_zero(prefix_expr(PrefixOperator::Negate, int_value(0)), int_value(0))]
+	#[case::negate_float(
+		prefix_expr(PrefixOperator::Negate, float_value(std::f64::consts::PI)),
+		float_value(-std::f64::consts::PI)
+	)]
+	// Prefix operations - Positive
+	#[case::positive_integer(prefix_expr(PrefixOperator::Positive, int_value(5)), int_value(5))]
+	#[case::positive_negative(
+		prefix_expr(PrefixOperator::Positive, int_value(-5)),
+		int_value(-5)
+	)]
+	// Nested operations
+	#[case::nested_arithmetic(
+		binary_expr(
+			binary_expr(int_value(2), BinaryOperator::Add, int_value(3)),
+			BinaryOperator::Multiply,
+			int_value(4)
+		),
+		int_value(20)
+	)]
+	#[case::nested_comparison(
+		binary_expr(
+			binary_expr(int_value(5), BinaryOperator::Add, int_value(3)),
+			BinaryOperator::Equal,
+			int_value(8)
+		),
+		bool_value(true)
+	)]
+	#[case::nested_logical(
+		binary_expr(
+			binary_expr(int_value(5), BinaryOperator::MoreThan, int_value(3)),
+			BinaryOperator::And,
+			binary_expr(int_value(2), BinaryOperator::LessThan, int_value(10))
+		),
+		bool_value(true)
+	)]
+	#[case::nested_prefix_and_binary(
+		binary_expr(
+			prefix_expr(PrefixOperator::Negate, int_value(5)),
+			BinaryOperator::Add,
+			int_value(10)
+		),
+		int_value(5)
+	)]
+	// Mixed constant and value operations
+	#[case::constant_in_binary(
+		binary_expr(
+			Expr::Constant(Constant::MathPi),
+			BinaryOperator::Multiply,
+			int_value(2)
+		),
+		float_value(f64c::PI * 2.0)
+	)]
+	// Already optimized values - should not change
+	#[case::already_value(int_value(42), int_value(42))]
+	fn test_constant_folding(#[case] expr: Expr, #[case] expected: Expr) {
 		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
+		assert_eq!(result.data, expected);
+	}
+
+	// Test set operations separately due to complexity
+	#[test]
+	fn test_constant_folding_contain() {
+		let array = Expr::Value(Value::Array(crate::val::Array(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		])));
+		let value = int_value(2);
+		let expr = binary_expr(array, BinaryOperator::Contain, value);
+		let result = ConstantFolding.optimise_expr(expr).unwrap();
+		assert_eq!(result.data, bool_value(true));
+	}
+
+	#[test]
+	fn test_constant_folding_not_contain() {
+		let array = Expr::Value(Value::Array(crate::val::Array(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		])));
+		let value = int_value(5);
+		let expr = binary_expr(array, BinaryOperator::NotContain, value);
+		let result = ConstantFolding.optimise_expr(expr).unwrap();
+		assert_eq!(result.data, bool_value(true));
+	}
+
+	#[test]
+	fn test_constant_folding_inside() {
+		let value = int_value(2);
+		let array = Expr::Value(Value::Array(crate::val::Array(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		])));
+		let expr = binary_expr(value, BinaryOperator::Inside, array);
+		let result = ConstantFolding.optimise_expr(expr).unwrap();
+		assert_eq!(result.data, bool_value(true));
+	}
+
+	// Test that range operations are NOT folded
+	#[test]
+	fn test_constant_folding_range_not_folded() {
+		let expr = binary_expr(int_value(1), BinaryOperator::Range, int_value(10));
+		let result = ConstantFolding.optimise_expr(expr).unwrap();
+		// Should still be a Binary expression, not folded to a value
 		match result.data {
-			Expr::Value(Value::Number(Number::Int(3))) => (),
-			other => panic!("Expected Value(3), got {:?}", other),
+			Expr::Binary {
+				..
+			} => {} // Expected
+			_ => panic!("Range operations should not be folded"),
 		}
 	}
 
 	#[test]
-	fn test_multiply_integers() {
-		let expr = Expr::Binary {
-			left: Box::new(int_value(10)),
-			op: BinaryOperator::Multiply,
-			right: Box::new(int_value(5)),
-		};
+	fn test_constant_folding_prefix_range_not_folded() {
+		let expr = prefix_expr(PrefixOperator::Range, int_value(10));
 		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
+		// Should still be a Prefix expression, not folded
 		match result.data {
-			Expr::Value(Value::Number(Number::Int(50))) => (),
-			other => panic!("Expected Value(50), got {:?}", other),
+			Expr::Prefix {
+				..
+			} => {} // Expected
+			_ => panic!("Prefix range operations should not be folded"),
 		}
 	}
 
+	// Test ExactEqual (strict equality)
 	#[test]
-	fn test_nested_arithmetic() {
-		// (1 + 2) * 3
-		let inner = Expr::Binary {
-			left: Box::new(int_value(1)),
-			op: BinaryOperator::Add,
-			right: Box::new(int_value(2)),
-		};
-		let expr = Expr::Binary {
-			left: Box::new(inner),
-			op: BinaryOperator::Multiply,
-			right: Box::new(int_value(3)),
-		};
+	fn test_constant_folding_exact_equal() {
+		let expr = binary_expr(int_value(5), BinaryOperator::ExactEqual, int_value(5));
 		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(Value::Number(Number::Int(9))) => (),
-			other => panic!("Expected Value(9), got {:?}", other),
-		}
+		assert_eq!(result.data, bool_value(true));
 	}
 
+	// Test AllEqual
 	#[test]
-	fn test_boolean_and() {
-		let expr = Expr::Binary {
-			left: Box::new(bool_value(true)),
-			op: BinaryOperator::And,
-			right: Box::new(bool_value(false)),
-		};
+	fn test_constant_folding_all_equal() {
+		let array =
+			Expr::Value(Value::Array(crate::val::Array(vec![Value::Number(Number::Int(5))])));
+		let value = int_value(5);
+		let expr = binary_expr(array, BinaryOperator::AllEqual, value);
 		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(Value::Bool(false)) => (),
-			other => panic!("Expected Value(false), got {:?}", other),
-		}
+		assert_eq!(result.data, bool_value(true));
 	}
 
+	// Test AnyEqual
 	#[test]
-	fn test_comparison() {
-		let expr = Expr::Binary {
-			left: Box::new(int_value(5)),
-			op: BinaryOperator::MoreThan,
-			right: Box::new(int_value(3)),
-		};
+	fn test_constant_folding_any_equal() {
+		let array = Expr::Value(Value::Array(crate::val::Array(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(5)),
+			Value::Number(Number::Int(10)),
+		])));
+		let value = int_value(5);
+		let expr = binary_expr(array, BinaryOperator::AnyEqual, value);
 		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(Value::Bool(true)) => (),
-			other => panic!("Expected Value(true), got {:?}", other),
-		}
-	}
-
-	#[test]
-	fn test_negation() {
-		let expr = Expr::Prefix {
-			op: PrefixOperator::Negate,
-			expr: Box::new(int_value(42)),
-		};
-		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(Value::Number(Number::Int(-42))) => (),
-			other => panic!("Expected Value(-42), got {:?}", other),
-		}
-	}
-
-	#[test]
-	fn test_not_boolean() {
-		let expr = Expr::Prefix {
-			op: PrefixOperator::Not,
-			expr: Box::new(bool_value(true)),
-		};
-		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(Value::Bool(false)) => (),
-			other => panic!("Expected Value(false), got {:?}", other),
-		}
-	}
-
-	#[test]
-	fn test_non_constant_unchanged() {
-		let expr = Expr::Binary {
-			left: Box::new(Expr::Param(crate::expr::Param::new("x".to_string()))),
-			op: BinaryOperator::Add,
-			right: Box::new(int_value(2)),
-		};
-		let result = ConstantFolding.optimise_expr(expr).unwrap();
-		assert!(!result.transformed);
+		assert_eq!(result.data, bool_value(true));
 	}
 }

@@ -222,46 +222,374 @@ fn optimise_object_entries(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+	use std::str::FromStr;
+
+	use rstest::rstest;
+	use rust_decimal::Decimal;
+
 	use super::*;
-	use crate::val::Number;
+	use crate::expr::ObjectEntry;
+	use crate::val::{
+		Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, TableName,
+		Uuid, Value,
+	};
 
-	#[test]
-	fn test_static_integer_literal() {
-		let expr = Expr::Literal(Literal::Integer(42));
+	#[rstest]
+	// Simple static literals
+	#[case::none(Expr::Literal(Literal::None), Transformed::yes(Expr::Value(Value::None)))]
+	#[case::null(Expr::Literal(Literal::Null), Transformed::yes(Expr::Value(Value::Null)))]
+	#[case::unbounded_range(
+		Expr::Literal(Literal::UnboundedRange),
+		Transformed::yes(Expr::Value(Value::Range(Box::new(Range::unbounded()))))
+	)]
+	#[case::bool_true(
+		Expr::Literal(Literal::Bool(true)),
+		Transformed::yes(Expr::Value(Value::Bool(true)))
+	)]
+	#[case::bool_false(
+		Expr::Literal(Literal::Bool(false)),
+		Transformed::yes(Expr::Value(Value::Bool(false)))
+	)]
+	#[case::integer(
+		Expr::Literal(Literal::Integer(42)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Int(42))))
+	)]
+	#[case::integer_negative(
+		Expr::Literal(Literal::Integer(-123)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Int(-123))))
+	)]
+	#[case::integer_zero(
+		Expr::Literal(Literal::Integer(0)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Int(0))))
+	)]
+	#[case::float(
+		Expr::Literal(Literal::Float(std::f64::consts::PI)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Float(std::f64::consts::PI))))
+	)]
+	#[case::float_negative(
+		Expr::Literal(Literal::Float(-2.5)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Float(-2.5))))
+	)]
+	#[case::float_zero(
+		Expr::Literal(Literal::Float(0.0)),
+		Transformed::yes(Expr::Value(Value::Number(Number::Float(0.0))))
+	)]
+	#[case::decimal(
+		Expr::Literal(Literal::Decimal(Decimal::new(12345, 2))),
+		Transformed::yes(Expr::Value(Value::Number(Number::Decimal(Decimal::new(12345, 2)))))
+	)]
+	#[case::string_empty(
+		Expr::Literal(Literal::String(String::new())),
+		Transformed::yes(Expr::Value(Value::String(String::new())))
+	)]
+	#[case::string(
+		Expr::Literal(Literal::String("hello world".to_string())),
+		Transformed::yes(Expr::Value(Value::String("hello world".to_string())))
+	)]
+	#[case::bytes_empty(
+		Expr::Literal(Literal::Bytes(Bytes::default())),
+		Transformed::yes(Expr::Value(Value::Bytes(Bytes::default())))
+	)]
+	#[case::bytes(
+		Expr::Literal(Literal::Bytes(Bytes::from(vec![1, 2, 3, 4]))),
+		Transformed::yes(Expr::Value(Value::Bytes(Bytes::from(vec![1, 2, 3, 4]))))
+	)]
+	#[case::regex(
+		Expr::Literal(Literal::Regex(Regex::from_str(r"^test$").unwrap())),
+		Transformed::yes(Expr::Value(Value::Regex(Regex::from_str(r"^test$").unwrap())))
+	)]
+	#[case::duration(
+		Expr::Literal(Literal::Duration(Duration::from_secs(60))),
+		Transformed::yes(Expr::Value(Value::Duration(Duration::from_secs(60))))
+	)]
+	#[case::uuid(
+		Expr::Literal(Literal::Uuid(Uuid::nil())),
+		Transformed::yes(Expr::Value(Value::Uuid(Uuid::nil())))
+	)]
+	#[case::geometry(
+		Expr::Literal(Literal::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0)))),
+		Transformed::yes(Expr::Value(Value::Geometry(Geometry::Point(geo::Point::new(
+			1.0, 2.0
+		)))))
+	)]
+	#[case::file(
+		Expr::Literal(Literal::File(File::new("bucket".to_string(), "key".to_string()))),
+		Transformed::yes(Expr::Value(Value::File(File::new("bucket".to_string(), "key".to_string()))))
+	)]
+	// Empty collections
+	#[case::array_empty(
+		Expr::Literal(Literal::Array(vec![])),
+		Transformed::yes(Expr::Value(Value::Array(Array(vec![]))))
+	)]
+	#[case::set_empty(
+		Expr::Literal(Literal::Set(vec![])),
+		Transformed::yes(Expr::Value(Value::Set(crate::val::Set::new())))
+	)]
+	#[case::object_empty(
+		Expr::Literal(Literal::Object(vec![])),
+		Transformed::yes(Expr::Value(Value::Object(Object(BTreeMap::new()))))
+	)]
+	// Arrays with static values
+	#[case::array_with_integers(
+		Expr::Literal(Literal::Array(vec![
+			Expr::Literal(Literal::Integer(1)),
+			Expr::Literal(Literal::Integer(2)),
+			Expr::Literal(Literal::Integer(3))
+		])),
+		Transformed::yes(Expr::Value(Value::Array(Array(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3))
+		]))))
+	)]
+	#[case::array_mixed_types(
+		Expr::Literal(Literal::Array(vec![
+			Expr::Literal(Literal::Integer(42)),
+			Expr::Literal(Literal::String("test".to_string())),
+			Expr::Literal(Literal::Bool(true))
+		])),
+		Transformed::yes(Expr::Value(Value::Array(Array(vec![
+			Value::Number(Number::Int(42)),
+			Value::String("test".to_string()),
+			Value::Bool(true)
+		]))))
+	)]
+	// Nested arrays
+	#[case::array_nested(
+		Expr::Literal(Literal::Array(vec![
+			Expr::Literal(Literal::Array(vec![
+				Expr::Literal(Literal::Integer(1)),
+				Expr::Literal(Literal::Integer(2))
+			])),
+			Expr::Literal(Literal::Array(vec![
+				Expr::Literal(Literal::Integer(3)),
+				Expr::Literal(Literal::Integer(4))
+			]))
+		])),
+		Transformed::yes(Expr::Value(Value::Array(Array(vec![
+			Value::Array(Array(vec![
+				Value::Number(Number::Int(1)),
+				Value::Number(Number::Int(2))
+			])),
+			Value::Array(Array(vec![
+				Value::Number(Number::Int(3)),
+				Value::Number(Number::Int(4))
+			]))
+		]))))
+	)]
+	// Sets with static values
+	#[case::set_with_integers(
+		Expr::Literal(Literal::Set(vec![
+			Expr::Literal(Literal::Integer(1)),
+			Expr::Literal(Literal::Integer(2)),
+			Expr::Literal(Literal::Integer(3))
+		])),
+		Transformed::yes(Expr::Value(Value::Set({
+			let mut s = crate::val::Set::new();
+			s.insert(Value::Number(Number::Int(1)));
+			s.insert(Value::Number(Number::Int(2)));
+			s.insert(Value::Number(Number::Int(3)));
+			s
+		})))
+	)]
+	// Objects with static values
+	#[case::object_single_field(
+		Expr::Literal(Literal::Object(vec![
+			ObjectEntry {
+				key: "name".to_string(),
+				value: Expr::Literal(Literal::String("Alice".to_string()))
+			}
+		])),
+		Transformed::yes(Expr::Value(Value::Object(Object({
+			let mut m = BTreeMap::new();
+			m.insert("name".to_string(), Value::String("Alice".to_string()));
+			m
+		}))))
+	)]
+	#[case::object_multiple_fields(
+		Expr::Literal(Literal::Object(vec![
+			ObjectEntry {
+				key: "id".to_string(),
+				value: Expr::Literal(Literal::Integer(42))
+			},
+			ObjectEntry {
+				key: "name".to_string(),
+				value: Expr::Literal(Literal::String("Bob".to_string()))
+			},
+			ObjectEntry {
+				key: "active".to_string(),
+				value: Expr::Literal(Literal::Bool(true))
+			}
+		])),
+		Transformed::yes(Expr::Value(Value::Object(Object({
+			let mut m = BTreeMap::new();
+			m.insert("id".to_string(), Value::Number(Number::Int(42)));
+			m.insert("name".to_string(), Value::String("Bob".to_string()));
+			m.insert("active".to_string(), Value::Bool(true));
+			m
+		}))))
+	)]
+	// Nested objects
+	#[case::object_nested(
+		Expr::Literal(Literal::Object(vec![
+			ObjectEntry {
+				key: "user".to_string(),
+				value: Expr::Literal(Literal::Object(vec![
+					ObjectEntry {
+						key: "name".to_string(),
+						value: Expr::Literal(Literal::String("Charlie".to_string()))
+					}
+				]))
+			}
+		])),
+		Transformed::yes(Expr::Value(Value::Object(Object({
+			let mut outer = BTreeMap::new();
+			let mut inner = BTreeMap::new();
+			inner.insert("name".to_string(), Value::String("Charlie".to_string()));
+			outer.insert("user".to_string(), Value::Object(Object(inner)));
+			outer
+		}))))
+	)]
+	// Already a value - should not be transformed
+	#[case::value_unchanged(
+		Expr::Value(Value::Number(Number::Int(42))),
+		Transformed::no(Expr::Value(Value::Number(Number::Int(42))))
+	)]
+	fn test_static_literal_folding(#[case] expr: Expr, #[case] expected: Transformed<Expr>) {
 		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(v) => assert_eq!(v, crate::val::Value::Number(Number::Int(42))),
-			_ => panic!("Expected Value"),
-		}
+		assert_eq!(result, expected);
+	}
+
+	// Test datetime separately due to value equality requirements
+	#[test]
+	fn test_static_literal_folding_datetime() {
+		let dt = Datetime::now();
+		let expr = Expr::Literal(Literal::Datetime(dt.clone()));
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+		let expected = Transformed::yes(Expr::Value(Value::Datetime(dt)));
+		assert_eq!(result, expected);
+	}
+
+	// Test RecordId separately as it requires more complex setup
+	#[test]
+	fn test_static_literal_folding_record_id() {
+		use crate::expr::{RecordIdKeyLit, RecordIdLit};
+		use crate::val::{RecordId, RecordIdKey};
+
+		// RecordId with string key
+		let expr = Expr::Literal(Literal::RecordId(RecordIdLit {
+			table: TableName::new("users".to_string()),
+			key: RecordIdKeyLit::String("john".to_string()),
+		}));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		let expected_record_id = RecordId {
+			table: TableName::new("users".to_string()),
+			key: RecordIdKey::String("john".to_string()),
+		};
+		let expected = Transformed::yes(Expr::Value(Value::RecordId(expected_record_id)));
+
+		assert_eq!(result, expected);
 	}
 
 	#[test]
-	fn test_static_string_literal() {
-		let expr = Expr::Literal(Literal::String("hello".to_string()));
+	fn test_static_literal_folding_record_id_number() {
+		use crate::expr::{RecordIdKeyLit, RecordIdLit};
+		use crate::val::{RecordId, RecordIdKey};
+
+		// RecordId with number key
+		let expr = Expr::Literal(Literal::RecordId(RecordIdLit {
+			table: TableName::new("items".to_string()),
+			key: RecordIdKeyLit::Number(123),
+		}));
+
 		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(v) => assert_eq!(v, crate::val::Value::String("hello".to_string())),
-			_ => panic!("Expected Value"),
-		}
+
+		let expected_record_id = RecordId {
+			table: TableName::new("items".to_string()),
+			key: RecordIdKey::Number(123),
+		};
+		let expected = Transformed::yes(Expr::Value(Value::RecordId(expected_record_id)));
+
+		assert_eq!(result, expected);
 	}
 
 	#[test]
-	fn test_static_bool_literal() {
-		let expr = Expr::Literal(Literal::Bool(true));
+	fn test_static_literal_folding_record_id_uuid() {
+		use crate::expr::{RecordIdKeyLit, RecordIdLit};
+		use crate::val::{RecordId, RecordIdKey};
+
+		// RecordId with UUID key
+		let uuid = Uuid::nil();
+		let expr = Expr::Literal(Literal::RecordId(RecordIdLit {
+			table: TableName::new("entities".to_string()),
+			key: RecordIdKeyLit::Uuid(uuid),
+		}));
+
 		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
-		assert!(result.transformed);
-		match result.data {
-			Expr::Value(v) => assert_eq!(v, crate::val::Value::Bool(true)),
-			_ => panic!("Expected Value"),
+
+		let expected_record_id = RecordId {
+			table: TableName::new("entities".to_string()),
+			key: RecordIdKey::Uuid(uuid),
+		};
+		let expected = Transformed::yes(Expr::Value(Value::RecordId(expected_record_id)));
+
+		assert_eq!(result, expected);
+	}
+
+	// Test that optimization recurses through composite expressions
+	#[test]
+	fn test_static_literal_folding_in_binary_expr() {
+		use crate::expr::BinaryOperator;
+
+		let expr = Expr::Binary {
+			left: Box::new(Expr::Literal(Literal::Integer(5))),
+			op: BinaryOperator::Add,
+			right: Box::new(Expr::Literal(Literal::Integer(3))),
+		};
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Both literals should be converted to values
+		if let Expr::Binary {
+			left,
+			right,
+			..
+		} = result.data
+		{
+			assert!(matches!(*left, Expr::Value(Value::Number(Number::Int(5)))));
+			assert!(matches!(*right, Expr::Value(Value::Number(Number::Int(3)))));
+		} else {
+			panic!("Expected Binary expression");
 		}
+
+		assert!(result.transformed);
 	}
 
 	#[test]
-	fn test_param_not_optimised() {
-		let expr = Expr::Param(crate::expr::Param::new("test".to_string()));
+	fn test_static_literal_folding_in_function_call() {
+		use crate::expr::{Function, FunctionCall};
+
+		let expr = Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("test".to_string()),
+			arguments: vec![
+				Expr::Literal(Literal::String("arg1".to_string())),
+				Expr::Literal(Literal::Integer(42)),
+			],
+		}));
+
 		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
-		assert!(!result.transformed);
+
+		// Arguments should be converted to values
+		if let Expr::FunctionCall(call) = result.data {
+			assert!(matches!(call.arguments[0], Expr::Value(Value::String(_))));
+			assert!(matches!(call.arguments[1], Expr::Value(Value::Number(Number::Int(42)))));
+		} else {
+			panic!("Expected FunctionCall expression");
+		}
+
+		assert!(result.transformed);
 	}
 }
