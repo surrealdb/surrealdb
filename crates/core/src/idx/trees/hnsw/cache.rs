@@ -199,3 +199,95 @@ impl VectorCache {
 		self.0.vectors.contains_key(&(table_id, index_id, element_id))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use ndarray::Array1;
+
+	use super::*;
+	use crate::idx::trees::vector::Vector;
+
+	/// Test that cache eviction works correctly within an async runtime.
+	///
+	/// This test verifies the fix for a panic that occurred when using
+	/// `tokio::sync::RwLock::blocking_write()` inside the eviction callback.
+	/// The `blocking_write()` method panics when called from within an async
+	/// runtime, which happened during cache eviction triggered by `insert()`.
+	///
+	/// The fix was to replace `tokio::sync::RwLock` with `parking_lot::RwLock`,
+	/// which works safely in both sync and async contexts.
+	#[tokio::test]
+	async fn test_eviction_in_async_context() {
+		// Create a very small cache (1KB) to force evictions quickly
+		let cache = VectorCache::new(1024);
+
+		let table_id = TableId(1);
+		let index_id = IndexId(1);
+
+		let dimensions = 128;
+
+		for i in 0..100u64 {
+			let data: Vec<f32> = (0..dimensions).map(|j| (i * dimensions + j) as f32).collect();
+			let vector = Vector::F32(Array1::from_vec(data));
+			let shared = SharedVector::from(vector);
+
+			cache.insert(table_id, index_id, i, shared).await;
+		}
+
+		assert!(cache.len(table_id, index_id).await < 100);
+	}
+
+	#[tokio::test]
+	async fn test_cache_insert_get_remove() {
+		let cache = VectorCache::new(1024 * 1024); // 1MB cache
+
+		let table_id = TableId(1);
+		let index_id = IndexId(1);
+		let element_id = 42u64;
+
+		let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+		let vector = Vector::F32(Array1::from_vec(data));
+		let shared = SharedVector::from(vector);
+
+		// Insert
+		cache.insert(table_id, index_id, element_id, shared.clone()).await;
+		assert!(cache.contains(table_id, index_id, element_id).await);
+		assert_eq!(cache.len(table_id, index_id).await, 1);
+
+		// Get
+		let retrieved = cache.get(table_id, index_id, element_id).await;
+		assert!(retrieved.is_some());
+		assert_eq!(retrieved.unwrap(), shared);
+
+		// Remove
+		cache.remove(table_id, index_id, element_id).await;
+		assert!(!cache.contains(table_id, index_id, element_id).await);
+		assert_eq!(cache.len(table_id, index_id).await, 0);
+	}
+
+	#[tokio::test]
+	async fn test_remove_index() {
+		let cache = VectorCache::new(1024 * 1024);
+
+		let table_id = TableId(1);
+		let index_id = IndexId(1);
+
+		// Insert multiple vectors
+		for i in 0..10u64 {
+			let data: Vec<f32> = vec![i as f32; 4];
+			let vector = Vector::F32(Array1::from_vec(data));
+			let shared = SharedVector::from(vector);
+			cache.insert(table_id, index_id, i, shared).await;
+		}
+
+		assert_eq!(cache.len(table_id, index_id).await, 10);
+
+		// Remove entire index
+		cache.remove_index(table_id, index_id).await;
+
+		// All vectors should be gone
+		for i in 0..10u64 {
+			assert!(!cache.contains(table_id, index_id, i).await);
+		}
+	}
+}
