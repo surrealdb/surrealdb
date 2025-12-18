@@ -34,18 +34,6 @@ audit-as-crates-io = true
 [policy.surrealdb-server]
 audit-as-crates-io = false
 
-[policy.surrealdb-types]
-audit-as-crates-io = true
-
-[policy.surrealdb-types-derive]
-audit-as-crates-io = true
-
-[policy.surrealism-runtime]
-audit-as-crates-io = true
-
-[policy.surrealism-types]
-audit-as-crates-io = true
-
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
