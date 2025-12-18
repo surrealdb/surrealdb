@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::expr::optimise::utils::literal_to_value;
+use crate::expr::optimise::utils::{LiteralConversion, literal_to_value};
 use crate::expr::optimise::{OptimiserRule, Transformed};
 use crate::expr::{Expr, Literal};
 
@@ -48,13 +48,13 @@ fn optimise_expr_recursive(expr: Expr) -> Result<Transformed<Expr>> {
 			};
 
 			// Now convert to value
-			if let Expr::Literal(ref lit) = optimised.0 {
+			if let Expr::Literal(lit) = optimised.0 {
 				match literal_to_value(lit) {
-					Ok(value) => Ok(Transformed::yes(Expr::Value(value))),
-					Err(_) => {
+					LiteralConversion::Value(value) => Ok(Transformed::yes(Expr::Value(value))),
+					LiteralConversion::Literal(lit) => {
 						// If conversion fails, keep the original
 						Ok(Transformed {
-							data: optimised.0,
+							data: Expr::Literal(lit),
 							transformed: optimised.1,
 						})
 					}

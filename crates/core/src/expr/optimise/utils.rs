@@ -5,6 +5,16 @@ use anyhow::Result;
 use crate::expr::{Expr, Literal, RecordIdKeyLit, RecordIdLit};
 use crate::val::{Array, Number, Object, Range, RecordId, RecordIdKey, Value};
 
+/// Result of attempting to convert a Literal to a Value.
+///
+/// The purpose of this is to avoid cloning the literal when possible.
+pub(super) enum LiteralConversion {
+	/// Successfully converted to a Value
+	Value(Value),
+	/// Could not convert, returning the original Literal
+	Literal(Literal),
+}
+
 /// Convert a static literal to a Value synchronously.
 ///
 /// This function mirrors the logic of `Literal::compute()` but works
@@ -12,29 +22,31 @@ use crate::val::{Array, Number, Object, Range, RecordId, RecordIdKey, Value};
 ///
 /// For arrays and objects, the children must already be converted to
 /// `Expr::Value` by the recursive traversal.
-pub(super) fn literal_to_value(literal: &Literal) -> Result<Value> {
+///
+/// Takes ownership of the literal to avoid cloning. Returns either the
+/// converted Value or the original Literal if conversion fails.
+pub(super) fn literal_to_value(literal: Literal) -> LiteralConversion {
 	let value = match literal {
 		Literal::None => Value::None,
 		Literal::Null => Value::Null,
 		Literal::UnboundedRange => Value::Range(Box::new(Range::unbounded())),
-		Literal::Bool(x) => Value::Bool(*x),
-		Literal::Float(x) => Value::Number(Number::Float(*x)),
-		Literal::Integer(i) => Value::Number(Number::Int(*i)),
-		Literal::Decimal(d) => Value::Number(Number::Decimal(*d)),
-		Literal::String(strand) => Value::String(strand.clone()),
-		Literal::Bytes(bytes) => Value::Bytes(bytes.clone()),
-		Literal::Regex(regex) => Value::Regex(regex.clone()),
-		Literal::RecordId(record_id_lit) => {
-			Value::RecordId(record_id_key_lit_to_record_id(record_id_lit)?)
-		}
+		Literal::Bool(x) => Value::Bool(x),
+		Literal::Float(x) => Value::Number(Number::Float(x)),
+		Literal::Integer(i) => Value::Number(Number::Int(i)),
+		Literal::Decimal(d) => Value::Number(Number::Decimal(d)),
+		Literal::String(strand) => Value::String(strand),
+		Literal::Bytes(bytes) => Value::Bytes(bytes),
+		Literal::Regex(regex) => Value::Regex(regex),
+		Literal::RecordId(record_id_lit) => match record_id_key_lit_to_record_id(&record_id_lit) {
+			Ok(record_id) => Value::RecordId(record_id),
+			Err(_) => return LiteralConversion::Literal(Literal::RecordId(record_id_lit)),
+		},
 		Literal::Array(exprs) => {
 			let mut array = Vec::with_capacity(exprs.len());
 			for e in exprs.iter() {
 				match e {
 					Expr::Value(v) => array.push(v.clone()),
-					_ => {
-						anyhow::bail!("Array contains non-value expression in static literal")
-					}
+					_ => return LiteralConversion::Literal(Literal::Array(exprs)),
 				}
 			}
 			Value::Array(Array(array))
@@ -46,7 +58,7 @@ pub(super) fn literal_to_value(literal: &Literal) -> Result<Value> {
 					Expr::Value(v) => {
 						set.insert(v.clone());
 					}
-					_ => anyhow::bail!("Set contains non-value expression in static literal"),
+					_ => return LiteralConversion::Literal(Literal::Set(exprs)),
 				}
 			}
 			Value::Set(set)
@@ -58,20 +70,18 @@ pub(super) fn literal_to_value(literal: &Literal) -> Result<Value> {
 					Expr::Value(v) => {
 						map.insert(i.key.clone(), v.clone());
 					}
-					_ => {
-						anyhow::bail!("Object contains non-value expression in static literal")
-					}
+					_ => return LiteralConversion::Literal(Literal::Object(items)),
 				}
 			}
 			Value::Object(Object(map))
 		}
-		Literal::Duration(duration) => Value::Duration(*duration),
-		Literal::Datetime(datetime) => Value::Datetime(datetime.clone()),
-		Literal::Uuid(uuid) => Value::Uuid(*uuid),
-		Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
-		Literal::File(file) => Value::File(file.clone()),
+		Literal::Duration(duration) => Value::Duration(duration),
+		Literal::Datetime(datetime) => Value::Datetime(datetime),
+		Literal::Uuid(uuid) => Value::Uuid(uuid),
+		Literal::Geometry(geometry) => Value::Geometry(geometry),
+		Literal::File(file) => Value::File(file),
 	};
-	Ok(value)
+	LiteralConversion::Value(value)
 }
 
 /// Convert a RecordIdLit to a RecordId synchronously
