@@ -185,13 +185,11 @@ impl Optimiser {
 	/// - StaticLiteralFolding: Converts static literals to pre-computed values
 	/// - ConstantFolding: Evaluates constant expressions at compile time
 	///
-	/// The number of passes is configured via the SURREAL_OPTIMISER_MAX_PASSES
-	/// environment variable (default: 3).
+	/// Note: The max_passes should be set by the caller using with_max_passes().
+	/// When used through the Datastore, it will be configured from EngineOptions.
 	pub fn all() -> Self {
-		Self::new()
-			.add_rule(Box::new(StaticLiteralFolding))
-			.add_rule(Box::new(ConstantFolding))
-			.with_max_passes(*crate::cnf::OPTIMISER_MAX_PASSES)
+		Self::new().add_rule(Box::new(StaticLiteralFolding)).add_rule(Box::new(ConstantFolding))
+		// Caller should set max_passes via with_max_passes()
 	}
 
 	/// Add an optimisation rule to the optimiser

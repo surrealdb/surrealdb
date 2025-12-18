@@ -733,7 +733,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
+	let dbs = Datastore::new_with_clock::<C>(composer, &opt.path, None, canceller, opt.engine)
 		.await?
 		.with_notifications()
 		.with_query_timeout(query_timeout)
