@@ -25,10 +25,6 @@ use crate::val::Value;
 pub(crate) struct ConstantFolding;
 
 impl OptimiserRule for ConstantFolding {
-	fn name(&self) -> &str {
-		"constant_folding"
-	}
-
 	fn optimise_expr(&self, expr: Expr) -> Result<Transformed<Expr>> {
 		optimise_expr_recursive(expr)
 	}

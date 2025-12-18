@@ -18,10 +18,6 @@ use crate::expr::{Expr, Literal};
 pub(crate) struct StaticLiteralFolding;
 
 impl OptimiserRule for StaticLiteralFolding {
-	fn name(&self) -> &str {
-		"static_literal_folding"
-	}
-
 	fn optimise_expr(&self, expr: Expr) -> Result<Transformed<Expr>> {
 		optimise_expr_recursive(expr)
 	}

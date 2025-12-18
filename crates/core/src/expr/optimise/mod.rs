@@ -10,9 +10,6 @@ mod utils;
 pub(crate) use rules::{ConstantFolding, StaticLiteralFolding};
 
 /// Tracks whether a transformation occurred during optimisation.
-///
-/// Inspired by DataFusion's Transformed type, this wrapper indicates
-/// whether an expression or plan was modified during an optimisation pass.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Transformed<T> {
 	pub data: T,
@@ -60,14 +57,7 @@ impl<T> Transformed<T> {
 }
 
 /// Trait for optimisation rules that can transform expressions and plans.
-///
-/// Following DataFusion's OptimiserRule pattern, each rule implements
-/// a specific optimisation strategy.
 pub(crate) trait OptimiserRule: Send + Sync {
-	/// Returns the name of this optimisation rule
-	#[allow(dead_code)]
-	fn name(&self) -> &str;
-
 	/// Optimise an expression, returning the potentially transformed expression
 	fn optimise_expr(&self, expr: Expr) -> Result<Transformed<Expr>>;
 
