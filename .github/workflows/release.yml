@@ -84,7 +84,7 @@ jobs:
           set -e
 
           VERSION="${{ inputs.release-version }}"
-          RELEASE_BRANCH="releases/v${VERSION}"
+          RELEASE_BRANCH="release/v${VERSION}"
 
           # Configure git
           git config user.name "github-actions[bot]"
