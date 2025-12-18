@@ -28,9 +28,17 @@ use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
+	// An exact value that is already computed.
+	Value(Value),
+	/// A literal value that needs to be computed.
+	///
+	/// A literal is a value that may have additional expressions in use.
 	Literal(Literal),
+	/// A parameter, such as `$name`.
 	Param(Param),
+	/// An idiom, such as `a->b.c()`.
 	Idiom(Idiom),
+	/// A table, such as `users`.
 	// Maybe move into Literal?
 	Table(TableName),
 	// This type can probably be removed in favour of range expressions.
@@ -82,7 +90,8 @@ impl Expr {
 	/// Check if this expression does only reads.
 	pub(crate) fn read_only(&self) -> bool {
 		match self {
-			Expr::Literal(_)
+			Expr::Value(_)
+			| Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
@@ -253,30 +262,77 @@ impl From<surrealdb_types::Range> for Expr {
 }
 
 impl Expr {
-	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
+	/// Checks if a expression is 'static' i.e. can resolve to a static value without running
+	/// compute.
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
+			Expr::Value(_) => true,
 			Expr::Literal(literal) => literal.is_static(),
+			Expr::Constant(_) => true,
+			Expr::Table(_) => true,
+			Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => true,
+		}
+	}
+
+	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
+	pub(crate) fn is_pure(&self) -> bool {
+		match self {
+			Expr::Value(_) => true,
+			Expr::Literal(literal) => literal.is_pure(),
 			Expr::Constant(_) => true,
 			Expr::Prefix {
 				expr,
 				..
-			} => expr.is_static(),
+			} => expr.is_pure(),
 			Expr::Postfix {
 				expr,
 				..
-			} => expr.is_static(),
+			} => expr.is_pure(),
 			Expr::Binary {
 				left,
 				right,
 				..
-			} => left.is_static() && right.is_static(),
+			} => left.is_pure() && right.is_pure(),
 			Expr::FunctionCall(x) => {
 				// This is not correct as functions like http::get are not 'pure' but this is
 				// replicating previous behavior.
 				//
 				// TODO: Fix this discrepency and weird static/non-static behavior.
-				x.arguments.iter().all(|x| x.is_static())
+				x.arguments.iter().all(|x| x.is_pure())
 			}
 			Expr::Param(_)
 			| Expr::Idiom(_)
@@ -336,6 +392,7 @@ impl Expr {
 		let opt = opt.dive(1).map_err(anyhow::Error::new)?;
 
 		match self {
+			Expr::Value(value) => Ok(value.clone()),
 			Expr::Literal(literal) => literal.compute(stk, ctx, &opt, doc).await,
 			Expr::Param(param) => {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
@@ -713,55 +770,6 @@ impl Expr {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
 			Expr::Table(ident) => ident.clone().into_string(),
 			_ => self.to_sql(),
-		}
-	}
-
-	// NOTE: Changes to this function also likely require changes to
-	// crate::sql::Expr::needs_parentheses
-	/// Returns if this expression needs to be parenthesized when inside another expression.
-	#[allow(dead_code)]
-	fn needs_parentheses(&self) -> bool {
-		match self {
-			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
-			| Expr::Closure(_)
-			| Expr::Break
-			| Expr::Continue
-			| Expr::Throw(_)
-			| Expr::Return(_)
-			| Expr::IfElse(_)
-			| Expr::Select(_)
-			| Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Delete(_)
-			| Expr::Relate(_)
-			| Expr::Insert(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Upsert(_)
-			| Expr::Alter(_)
-			| Expr::Info(_)
-			| Expr::Foreach(_)
-			| Expr::Let(_)
-			| Expr::Sleep(_) => true,
-
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
 		}
 	}
 }

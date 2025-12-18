@@ -7,7 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::{CursorDoc, NsDbTbCtx};
+use crate::doc::{CursorDoc, TableContext};
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
@@ -106,7 +106,7 @@ impl InsertStatement {
 			let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb).await?;
 			let fields =
 				ctx.tx().all_tb_fields(ns.namespace_id, db.database_id, tb, opt.version).await?;
-			doc_ctx = Some(NsDbTbCtx {
+			doc_ctx = Some(TableContext {
 				ns: Arc::clone(&ns),
 				db: Arc::clone(&db),
 				tb: tb_def,
@@ -138,7 +138,7 @@ impl InsertStatement {
 							let fields = txn
 								.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version)
 								.await?;
-							Some(NsDbTbCtx {
+							Some(TableContext {
 								ns: Arc::clone(&ns),
 								db: Arc::clone(&db),
 								tb: tb_def,
@@ -180,7 +180,7 @@ impl InsertStatement {
 											opt.version,
 										)
 										.await?;
-									Some(NsDbTbCtx {
+									Some(TableContext {
 										ns: Arc::clone(&ns),
 										db: Arc::clone(&db),
 										tb: tb_def,
@@ -216,7 +216,7 @@ impl InsertStatement {
 										opt.version,
 									)
 									.await?;
-								Some(NsDbTbCtx {
+								Some(TableContext {
 									ns: Arc::clone(&ns),
 									db: Arc::clone(&db),
 									tb: tb_def,
@@ -269,7 +269,7 @@ impl ToSql for InsertStatement {
 }
 
 fn iterable(
-	doc_ctx: NsDbTbCtx,
+	doc_ctx: TableContext,
 	tb: TableName,
 	id: Option<RecordIdKey>,
 	v: Value,

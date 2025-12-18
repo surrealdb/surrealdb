@@ -16,7 +16,7 @@ use crate::catalog::{
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbTbCtx};
+use crate::doc::{self, CursorDoc, Document, DocumentContext, TableContext};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
@@ -152,7 +152,7 @@ impl DefineTableStatement {
 		// Clear the cache
 		txn.clear_cache();
 
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let doc_ctx = DocumentContext::TableCtx(TableContext {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),
 			tb,
@@ -317,7 +317,7 @@ impl DefineTableStatement {
 				.tx()
 				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 				.await?;
-			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			let doc_ctx = DocumentContext::TableCtx(TableContext {
 				ns: Arc::clone(ns),
 				db: Arc::clone(db),
 				tb,

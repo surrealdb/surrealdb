@@ -50,7 +50,7 @@ use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilde
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
-use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, Optimiser, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
@@ -129,6 +129,9 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+
+	optimiser: Arc<Optimiser>,
+	engine_options: crate::options::EngineOptions,
 }
 
 #[derive(Clone)]
@@ -589,7 +592,14 @@ impl Datastore {
 		path: &str,
 		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(composer, path, None, canceller).await
+		Self::new_with_clock::<F>(
+			composer,
+			path,
+			None,
+			canceller,
+			crate::options::EngineOptions::default(),
+		)
+		.await
 	}
 
 	/// Creates a new datastore instance with a custom factory and clock.
@@ -605,29 +615,32 @@ impl Datastore {
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub(crate) async fn new_with_clock<
-		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
-	>(
+	pub async fn new_with_clock<C: TransactionBuilderFactory + BucketStoreProvider + 'static>(
 		composer: C,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 		canceller: CancellationToken,
+		engine_options: crate::options::EngineOptions,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
 		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
+
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets, clock)
+		Self::new_with_builder(builder, buckets, clock, engine_options)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
+		engine_options: crate::options::EngineOptions,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
 		let id = Uuid::new_v4();
+		let optimiser =
+			Arc::new(Optimiser::all().with_max_passes(engine_options.optimiser_max_passes));
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
@@ -646,6 +659,8 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets,
 			sequences: Sequences::new(tf, id),
+			optimiser,
+			engine_options,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
@@ -655,6 +670,8 @@ impl Datastore {
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
+		let optimiser =
+			Arc::new(Optimiser::all().with_max_passes(self.engine_options.optimiser_max_passes));
 		Self {
 			id: self.id,
 			auth_enabled: self.auth_enabled,
@@ -673,6 +690,8 @@ impl Datastore {
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			optimiser,
+			engine_options: self.engine_options,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
@@ -1678,8 +1697,19 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
-		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars).await
+		let plan: LogicalPlan = ast.into();
+
+		// Apply optimisations
+		let optimised_plan = match self.optimiser.optimise(plan) {
+			Ok(optimised) => optimised,
+			Err(e) => {
+				// If optimisation fails, log it and fail the query
+				tracing::error!("Optimisation failed: {}", e);
+				return Err(DbResultError::InternalError(format!("Optimisation error: {}", e)));
+			}
+		};
+
+		self.process_plan(optimised_plan, sess, vars).await
 	}
 
 	pub(crate) async fn process_plan(

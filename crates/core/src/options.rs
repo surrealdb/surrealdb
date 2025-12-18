@@ -23,6 +23,14 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
+	/// Maximum number of optimiser passes to run on queries
+	///
+	/// The optimiser runs multiple passes to simplify and optimize query
+	/// expressions. Each pass applies a set of optimization rules until
+	/// either no more changes occur or the maximum number of passes is reached.
+	///
+	/// Default: 3 passes
+	pub optimiser_max_passes: usize,
 }
 
 impl Default for EngineOptions {
@@ -33,6 +41,7 @@ impl Default for EngineOptions {
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
+			optimiser_max_passes: 3,
 		}
 	}
 }
@@ -57,6 +66,11 @@ impl EngineOptions {
 
 	pub fn with_index_compaction_interval(mut self, interval: Duration) -> Self {
 		self.index_compaction_interval = interval;
+		self
+	}
+
+	pub fn with_optimiser_max_passes(mut self, passes: usize) -> Self {
+		self.optimiser_max_passes = passes;
 		self
 	}
 }

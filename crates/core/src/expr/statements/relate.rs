@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::{CursorDoc, NsDbTbCtx};
+use crate::doc::{CursorDoc, TableContext};
 use crate::err::Error;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
@@ -165,7 +165,7 @@ impl RelateStatement {
 				let fields = txn
 					.all_tb_fields(ns.namespace_id, db.database_id, through_table, opt.version)
 					.await?;
-				let doc_ctx = NsDbTbCtx {
+				let doc_ctx = TableContext {
 					ns: Arc::clone(&ns),
 					db: Arc::clone(&db),
 					tb,

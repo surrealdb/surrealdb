@@ -69,6 +69,13 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
 	index_compaction_interval: Duration,
+	#[arg(
+		help = "The maximum number of optimiser passes to run on queries",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_OPTIMISER_MAX_PASSES", long = "optimiser-max-passes")]
+	#[arg(default_value = "3")]
+	optimiser_max_passes: usize,
 	//
 	// Authentication
 	#[arg(
@@ -178,6 +185,7 @@ pub async fn init<
 		node_membership_cleanup_interval,
 		changefeed_gc_interval,
 		index_compaction_interval,
+		optimiser_max_passes,
 		no_banner,
 		no_identification_headers,
 		..
@@ -208,7 +216,8 @@ pub async fn init<
 		.with_node_membership_check_interval(node_membership_check_interval)
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
 		.with_changefeed_gc_interval(changefeed_gc_interval)
-		.with_index_compaction_interval(index_compaction_interval);
+		.with_index_compaction_interval(index_compaction_interval)
+		.with_optimiser_max_passes(optimiser_max_passes);
 	// Configure the config
 	let Some(bind) = listen_addresses.first().copied() else {
 		return Err(anyhow::anyhow!("No listen address provided"));

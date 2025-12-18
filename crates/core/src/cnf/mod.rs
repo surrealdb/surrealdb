@@ -41,6 +41,10 @@ pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
 pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_QUERY_PARSING_DEPTH", u32, 20);
 
+/// The maximum number of optimiser passes to run on queries (default: 3)
+pub static OPTIMISER_MAX_PASSES: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_OPTIMISER_MAX_PASSES", usize, 3);
+
 /// The maximum recursive idiom path depth allowed (default: 256)
 pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_IDIOM_RECURSION_LIMIT", usize, 256);

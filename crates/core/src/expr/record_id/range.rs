@@ -19,8 +19,8 @@ pub(crate) struct RecordIdKeyRangeLit {
 impl RecordIdKeyRangeLit {
 	pub(crate) fn is_static(&self) -> bool {
 		let res = match &self.start {
-			Bound::Included(x) => x.is_static(),
-			Bound::Excluded(x) => x.is_static(),
+			Bound::Included(x) => x.is_pure(),
+			Bound::Excluded(x) => x.is_pure(),
 			Bound::Unbounded => true,
 		};
 
@@ -29,8 +29,8 @@ impl RecordIdKeyRangeLit {
 		}
 
 		match &self.end {
-			Bound::Included(x) => x.is_static(),
-			Bound::Excluded(x) => x.is_static(),
+			Bound::Included(x) => x.is_pure(),
+			Bound::Excluded(x) => x.is_pure(),
 			Bound::Unbounded => true,
 		}
 	}

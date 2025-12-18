@@ -227,6 +227,7 @@ implement_visitor! {
 
 	fn visit_expr(this, s: &Expr){
 		match s {
+			Expr::Value(_) => {}
 			Expr::Literal(literal) => {
 				this.visit_literal(literal)?;
 			}
@@ -1638,6 +1639,7 @@ implement_visitor_mut! {
 
 	fn visit_mut_expr(this, s: &mut Expr){
 		match s {
+			Expr::Value(value) => {}
 			Expr::Literal(literal) => {
 				this.visit_mut_liter_mutal(literal)?;
 			}

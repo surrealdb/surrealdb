@@ -52,6 +52,7 @@ pub(crate) mod with;
 
 pub(crate) mod decimal;
 pub(crate) mod module;
+pub(crate) mod optimise;
 
 mod closure;
 pub(crate) mod statements;
@@ -85,6 +86,7 @@ pub(crate) use self::model::Model;
 pub(crate) use self::module::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::operation::Operation;
 pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
+pub(crate) use self::optimise::Optimiser;
 pub(crate) use self::order::Order;
 pub(crate) use self::output::Output;
 pub(crate) use self::param::Param;

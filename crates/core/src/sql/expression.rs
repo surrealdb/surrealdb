@@ -541,6 +541,7 @@ impl From<Expr> for crate::expr::Expr {
 impl From<crate::expr::Expr> for Expr {
 	fn from(v: crate::expr::Expr) -> Self {
 		match v {
+			crate::expr::Expr::Value(v) => v.into_literal().into(),
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),

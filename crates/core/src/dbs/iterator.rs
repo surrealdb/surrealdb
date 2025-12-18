@@ -12,7 +12,9 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx, NsDbTbCtx};
+use crate::doc::{
+	CursorDoc, DatabaseContext, Document, DocumentContext, IgnoreError, TableContext,
+};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::statements::relate::RelateThrough;
@@ -31,34 +33,34 @@ pub(crate) enum Iterable {
 	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbitrary
 	/// SurrealQL value, object, or array of values.
-	Value(NsDbCtx, Value),
+	Value(DatabaseContext, Value),
 	/// An iterable which does not actually fetch the record
 	/// data from storage. This is used in CREATE statements
 	/// where we attempt to write data without first checking
 	/// if the record exists, throwing an error on failure.
-	Defer(NsDbTbCtx, RecordId),
+	Defer(TableContext, RecordId),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	GenerateRecordId(NsDbTbCtx, TableName),
+	GenerateRecordId(TableContext, TableName),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
-	RecordId(NsDbTbCtx, RecordId),
+	RecordId(TableContext, RecordId),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
 	Lookup {
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: TableContext,
 		kind: LookupKind,
 		from: RecordId,
 		what: Vec<ComputedLookupSubject>,
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(NsDbTbCtx, TableName, RecordStrategy, ScanDirection),
+	Table(TableContext, TableName, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(NsDbTbCtx, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
+	Range(TableContext, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -69,7 +71,7 @@ pub(crate) enum Iterable {
 	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
 	///   there_is: 'no id set' }`
 	/// - The value for the record
-	Mergeable(NsDbTbCtx, TableName, Option<RecordIdKey>, Value),
+	Mergeable(TableContext, TableName, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -79,12 +81,12 @@ pub(crate) enum Iterable {
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
 	/// relation
-	Relatable(NsDbTbCtx, RecordId, RelateThrough, RecordId, Option<Value>),
+	Relatable(TableContext, RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(NsDbTbCtx, TableName, IteratorRef, RecordStrategy),
+	Index(TableContext, TableName, IteratorRef, RecordStrategy),
 }
 
 /// Operable
@@ -194,7 +196,7 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		val: &Expr,
 	) -> Result<()> {
 		// Match the values
@@ -275,7 +277,7 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		table: &TableName,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
@@ -288,7 +290,7 @@ impl Iterator {
 			.tx()
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
 			.await?;
-		let doc_ctx = NsDbTbCtx {
+		let doc_ctx = TableContext {
 			ns: Arc::clone(&doc_ctx.ns),
 			db: Arc::clone(&doc_ctx.db),
 			tb,
@@ -322,7 +324,7 @@ impl Iterator {
 		opt: &Options,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		rid: RecordId,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
@@ -337,7 +339,7 @@ impl Iterator {
 			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
 			.await?;
 
-		let doc_ctx = NsDbTbCtx {
+		let doc_ctx = TableContext {
 			ns: Arc::clone(&doc_ctx.ns),
 			db: Arc::clone(&doc_ctx.db),
 			tb,
@@ -369,7 +371,7 @@ impl Iterator {
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		mock: &Mock,
 	) -> Result<()> {
 		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
@@ -393,7 +395,7 @@ impl Iterator {
 				opt.version,
 			)
 			.await?;
-		let doc_ctx = NsDbTbCtx {
+		let doc_ctx = TableContext {
 			ns: Arc::clone(&doc_ctx.ns),
 			db: Arc::clone(&doc_ctx.db),
 			tb,
@@ -423,7 +425,7 @@ impl Iterator {
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		from: RecordId,
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,
@@ -462,7 +464,7 @@ impl Iterator {
 			)
 			.await?;
 
-		let doc_ctx = NsDbTbCtx {
+		let doc_ctx = TableContext {
 			ns: Arc::clone(&doc_ctx.ns),
 			db: Arc::clone(&doc_ctx.db),
 			tb,
@@ -485,7 +487,7 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: TableContext,
 		rid: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
@@ -520,7 +522,7 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		expr: &Expr,
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
@@ -591,7 +593,7 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: &NsDbCtx,
+		doc_ctx: &DatabaseContext,
 		v: &[Expr],
 	) -> Result<()> {
 		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);

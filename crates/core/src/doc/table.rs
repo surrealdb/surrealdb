@@ -9,7 +9,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbTbCtx};
+use crate::doc::{Action, CursorDoc, Document, DocumentContext, TableContext};
 use crate::err::Error;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
@@ -389,7 +389,7 @@ impl Document {
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let doc_ctx = DocumentContext::TableCtx(TableContext {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
 			tb,
@@ -456,7 +456,7 @@ impl Document {
 				.tx()
 				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 				.await?;
-			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			let doc_ctx = DocumentContext::TableCtx(TableContext {
 				ns: Arc::clone(ns),
 				db: Arc::clone(db),
 				tb,
@@ -750,7 +750,7 @@ impl Document {
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let doc_ctx = DocumentContext::TableCtx(TableContext {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
 			tb,
@@ -1147,7 +1147,7 @@ impl Document {
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
 			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let doc_ctx = DocumentContext::TableCtx(TableContext {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
 			tb,

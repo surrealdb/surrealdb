@@ -12,7 +12,7 @@ use crate::catalog::{
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{CursorDoc, NsDbTbCtx};
+use crate::doc::{CursorDoc, TableContext};
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
@@ -125,7 +125,7 @@ impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn new(
-		doc_ctx: &NsDbTbCtx,
+		doc_ctx: &TableContext,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,

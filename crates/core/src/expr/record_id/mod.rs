@@ -25,6 +25,10 @@ impl RecordIdLit {
 		self.key.is_static()
 	}
 
+	pub(crate) fn is_pure(&self) -> bool {
+		self.key.is_pure()
+	}
+
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

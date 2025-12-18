@@ -80,6 +80,7 @@ mod mem {
 			path,
 			Some(clock),
 			CancellationToken::new(),
+			crate::options::EngineOptions::default(),
 		)
 		.await
 		.unwrap()
@@ -107,6 +108,7 @@ mod rocksdb {
 	use super::{ClockType, Kvs};
 	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
+	use crate::options::EngineOptions;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
@@ -118,6 +120,7 @@ mod rocksdb {
 			&path,
 			Some(clock),
 			CancellationToken::new(),
+			EngineOptions::default(),
 		)
 		.await
 		.unwrap()
@@ -146,6 +149,7 @@ mod surrealkv {
 	use super::{ClockType, Kvs};
 	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
+	use crate::options::EngineOptions;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
@@ -157,6 +161,7 @@ mod surrealkv {
 			&path,
 			Some(clock),
 			CancellationToken::new(),
+			EngineOptions::default(),
 		)
 		.await
 		.unwrap()
@@ -183,6 +188,7 @@ mod tikv {
 	use super::{ClockType, Kvs};
 	use crate::CommunityComposer;
 	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::options::EngineOptions;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
@@ -193,6 +199,7 @@ mod tikv {
 			path,
 			Some(clock),
 			CancellationToken::new(),
+			EngineOptions::default(),
 		)
 		.await
 		.unwrap()
