@@ -47,13 +47,12 @@ runs:
         # Create a temporary branch in case the git ref is not a branch
         git checkout -b crate
 
-        extra_args=""
-
         if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
-          # Dry run to test publishing
-          extra_args="${extra_args} --dry-run"
+          # Dry run - use cargo publish directly as it works better for testing
+          cargo publish --workspace --dry-run
+        else
+          # Real publish - use release-plz for retry logic
+          release-plz release --config /tmp/release-plz.toml
         fi
-
-        release-plz release --config /tmp/release-plz.toml ${extra_args}
 
 
