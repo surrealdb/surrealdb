@@ -13,11 +13,20 @@ on:
         type: string
         default: main
         description: "The git ref of this release"
+      release-version:
+        required: false
+        type: string
+        description: "Version to release (e.g., 3.0.0-beta.1). If provided, will bump version and tag"
       nightly-release:
         required: false
         type: boolean
         default: true
         description: "Make this a nightly release"
+      update-main:
+        required: false
+        type: boolean
+        default: false
+        description: "Create PR to update main branch (for phase transitions)"
       latest:
         required: false
         type: boolean
@@ -41,17 +50,89 @@ defaults:
     shell: bash
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
+  # ----------------------------------------
+  # Bump version (optional)
+  # ----------------------------------------
+
+  bump-version:
+    name: Bump version
+    if: ${{ inputs.release-version != '' && inputs.release-version != null }}
+    runs-on: ubuntu-latest
+    outputs:
+      release-branch: ${{ steps.bump.outputs.release-branch }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Bump version and commit
+        id: bump
+        run: |
+          set -e
+
+          VERSION="${{ inputs.release-version }}"
+          RELEASE_BRANCH="releases/v${VERSION}"
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create release branch
+          git checkout -b "${RELEASE_BRANCH}"
+
+          # Bump version in workspace
+          cargo set-version --workspace "${VERSION}"
+          # Update lock file (only touch workspace crates, not dependencies)
+          cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
+
+          # Commit changes
+          git add Cargo.toml Cargo.lock crates/*/Cargo.toml profiling/Cargo.toml
+          git commit -m "Prepare v${VERSION} release"
+
+          # Push branch (tag will be created later after successful release)
+          git push origin "${RELEASE_BRANCH}"
+
+          echo "release-branch=${RELEASE_BRANCH}" >> $GITHUB_OUTPUT
+
+      - name: Create PR to update main
+        if: ${{ inputs.update-main == true }}
+        run: |
+          gh pr create \
+            --base main \
+            --head ${{ steps.bump.outputs.release-branch }} \
+            --title "chore: release v${{ inputs.release-version }}" \
+            --body "Automated version bump for release v${{ inputs.release-version }}.
+
+          **This PR updates the main branch to reflect the new release version.**
+
+          - Version: `${{ inputs.release-version }}`
+          - Release branch: `${{ steps.bump.outputs.release-branch }}`
+
+          Review and merge this PR to update the main branch version for the next development cycle."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ----------------------------------------
   # Prepare release variables
   # ----------------------------------------
 
   prepare-vars:
-    permissions:
-      contents: write
     name: Prepare vars
+    needs: [bump-version]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.vars.outputs.name }}
@@ -77,7 +158,12 @@ jobs:
             echo "publish=true" >> $GITHUB_OUTPUT
           else
             # Manual workflow dispatch
-            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
+            # If version was bumped, use the release branch
+            if [[ -n "${{ needs.bump-version.outputs.release-branch }}" ]]; then
+              echo "git-ref=${{ needs.bump-version.outputs.release-branch }}" >> $GITHUB_OUTPUT
+            else
+              echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
+            fi
             echo "nightly-release=${{ inputs.nightly-release }}" >> $GITHUB_OUTPUT
             echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
             echo "extra-features=${{ inputs.extra-features }}" >> $GITHUB_OUTPUT
@@ -397,3 +483,17 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+  # ----------------------------------------
+  # Cleanup release branch
+  # ----------------------------------------
+
+  cleanup-release-branch:
+    name: Delete release branch
+    needs: [ bump-version, propagate, prepare-vars ]
+    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && needs.propagate.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete release branch
+        run: |
+          git push origin --delete "${{ needs.bump-version.outputs.release-branch }}"
