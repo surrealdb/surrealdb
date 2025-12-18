@@ -592,4 +592,281 @@ mod tests {
 
 		assert!(result.transformed);
 	}
+
+	// Test IfElse optimization
+	#[test]
+	fn test_static_literal_folding_in_ifelse() {
+		use crate::expr::statements::IfelseStatement;
+
+		let expr = Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![
+				(Expr::Literal(Literal::Bool(true)), Expr::Literal(Literal::Integer(1))),
+				(Expr::Literal(Literal::Bool(false)), Expr::Literal(Literal::Integer(2))),
+			],
+			close: Some(Expr::Literal(Literal::Integer(3))),
+		}));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// All literals should be converted to values
+		if let Expr::IfElse(ifelse) = result.data {
+			// Check first condition and then branch
+			assert!(matches!(ifelse.exprs[0].0, Expr::Value(Value::Bool(true))));
+			assert!(matches!(ifelse.exprs[0].1, Expr::Value(Value::Number(Number::Int(1)))));
+			// Check second condition and then branch
+			assert!(matches!(ifelse.exprs[1].0, Expr::Value(Value::Bool(false))));
+			assert!(matches!(ifelse.exprs[1].1, Expr::Value(Value::Number(Number::Int(2)))));
+			// Check else branch
+			assert!(matches!(ifelse.close, Some(Expr::Value(Value::Number(Number::Int(3))))));
+		} else {
+			panic!("Expected IfElse expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test Block optimization
+	#[test]
+	fn test_static_literal_folding_in_block() {
+		use crate::expr::Block;
+
+		let expr = Expr::Block(Box::new(Block(vec![
+			Expr::Literal(Literal::Integer(1)),
+			Expr::Literal(Literal::String("hello".to_string())),
+			Expr::Literal(Literal::Bool(true)),
+		])));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// All literals in block should be converted to values
+		if let Expr::Block(block) = result.data {
+			assert!(matches!(block.0[0], Expr::Value(Value::Number(Number::Int(1)))));
+			assert!(matches!(block.0[1], Expr::Value(Value::String(_))));
+			assert!(matches!(block.0[2], Expr::Value(Value::Bool(true))));
+		} else {
+			panic!("Expected Block expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test Return optimization
+	#[test]
+	fn test_static_literal_folding_in_return() {
+		use crate::expr::statements::OutputStatement;
+
+		let expr = Expr::Return(Box::new(OutputStatement {
+			what: Expr::Literal(Literal::Integer(42)),
+			fetch: None,
+		}));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Literal in return should be converted to value
+		if let Expr::Return(output) = result.data {
+			assert!(matches!(output.what, Expr::Value(Value::Number(Number::Int(42)))));
+		} else {
+			panic!("Expected Return expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test Throw optimization
+	#[test]
+	fn test_static_literal_folding_in_throw() {
+		let expr = Expr::Throw(Box::new(Expr::Literal(Literal::String("error".to_string()))));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Literal in throw should be converted to value
+		if let Expr::Throw(inner) = result.data {
+			assert!(matches!(*inner, Expr::Value(Value::String(_))));
+		} else {
+			panic!("Expected Throw expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test Prefix recursion
+	#[test]
+	fn test_static_literal_folding_in_prefix() {
+		use crate::expr::PrefixOperator;
+
+		let expr = Expr::Prefix {
+			op: PrefixOperator::Not,
+			expr: Box::new(Expr::Literal(Literal::Bool(true))),
+		};
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Literal should be converted to value
+		if let Expr::Prefix {
+			expr: inner,
+			..
+		} = result.data
+		{
+			assert!(matches!(*inner, Expr::Value(Value::Bool(true))));
+		} else {
+			panic!("Expected Prefix expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test Postfix recursion
+	#[test]
+	fn test_static_literal_folding_in_postfix() {
+		use crate::expr::PostfixOperator;
+
+		let expr = Expr::Postfix {
+			expr: Box::new(Expr::Literal(Literal::Integer(5))),
+			op: PostfixOperator::Range,
+		};
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Literal in the expression should be converted to value
+		if let Expr::Postfix {
+			expr: inner,
+			..
+		} = result.data
+		{
+			assert!(matches!(*inner, Expr::Value(Value::Number(Number::Int(5)))));
+		} else {
+			panic!("Expected Postfix expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test nested composite expressions
+	#[test]
+	fn test_static_literal_folding_deeply_nested() {
+		use crate::expr::Block;
+		use crate::expr::statements::IfelseStatement;
+
+		// Block containing IfElse containing literals
+		let expr = Expr::Block(Box::new(Block(vec![Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(
+				Expr::Literal(Literal::Bool(true)),
+				Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(42))]))),
+			)],
+			close: None,
+		}))])));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Check that deeply nested literals are converted
+		if let Expr::Block(block) = result.data {
+			if let Expr::IfElse(ifelse) = &block.0[0] {
+				assert!(matches!(ifelse.exprs[0].0, Expr::Value(Value::Bool(true))));
+				if let Expr::Block(inner_block) = &ifelse.exprs[0].1 {
+					assert!(matches!(
+						inner_block.0[0],
+						Expr::Value(Value::Number(Number::Int(42)))
+					));
+				} else {
+					panic!("Expected nested Block");
+				}
+			} else {
+				panic!("Expected IfElse inside Block");
+			}
+		} else {
+			panic!("Expected Block expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test that non-static literals are not fully transformed but static children are
+	#[test]
+	fn test_static_literal_folding_non_static_literal() {
+		// Array with a parameter is not static overall
+		let expr = Expr::Literal(Literal::Array(vec![
+			Expr::Literal(Literal::Integer(1)),
+			Expr::Param(crate::expr::Param::new("x".to_string())),
+		]));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Should remain a Literal (not converted to Value) because it contains a param
+		if let Expr::Literal(Literal::Array(items)) = result.data {
+			// But the static integer should be converted to a value
+			assert!(matches!(items[0], Expr::Value(Value::Number(Number::Int(1)))));
+			// The param should remain unchanged
+			assert!(matches!(items[1], Expr::Param(_)));
+		} else {
+			panic!("Expected Literal::Array");
+		}
+		// Transformation should occur because the child integer was converted
+		assert!(result.transformed);
+	}
+
+	// Test empty collections are properly handled
+	#[test]
+	fn test_static_literal_folding_empty_block() {
+		use crate::expr::Block;
+
+		let expr = Expr::Block(Box::new(Block(vec![])));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Should remain a Block with empty vec
+		if let Expr::Block(block) = result.data {
+			assert!(block.0.is_empty());
+		} else {
+			panic!("Expected Block expression");
+		}
+
+		assert!(!result.transformed);
+	}
+
+	// Test IfElse without else clause
+	#[test]
+	fn test_static_literal_folding_ifelse_no_else() {
+		use crate::expr::statements::IfelseStatement;
+
+		let expr = Expr::IfElse(Box::new(IfelseStatement {
+			exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Literal(Literal::Integer(1)))],
+			close: None,
+		}));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		if let Expr::IfElse(ifelse) = result.data {
+			assert!(matches!(ifelse.exprs[0].0, Expr::Value(Value::Bool(true))));
+			assert!(matches!(ifelse.exprs[0].1, Expr::Value(Value::Number(Number::Int(1)))));
+			assert!(ifelse.close.is_none());
+		} else {
+			panic!("Expected IfElse expression");
+		}
+
+		assert!(result.transformed);
+	}
+
+	// Test that already optimized expressions don't get marked as transformed
+	#[test]
+	fn test_static_literal_folding_already_value_in_block() {
+		use crate::expr::Block;
+
+		let expr = Expr::Block(Box::new(Block(vec![
+			Expr::Value(Value::Number(Number::Int(1))),
+			Expr::Value(Value::Bool(true)),
+		])));
+
+		let result = StaticLiteralFolding.optimise_expr(expr).unwrap();
+
+		// Should remain unchanged
+		if let Expr::Block(block) = result.data {
+			assert!(matches!(block.0[0], Expr::Value(Value::Number(Number::Int(1)))));
+			assert!(matches!(block.0[1], Expr::Value(Value::Bool(true))));
+		} else {
+			panic!("Expected Block expression");
+		}
+
+		// No transformation occurred
+		assert!(!result.transformed);
+	}
 }
