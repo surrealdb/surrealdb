@@ -43,6 +43,9 @@ audit-as-crates-io = true
 [policy.surrealism-runtime]
 audit-as-crates-io = true
 
+[policy.surrealism-types]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"

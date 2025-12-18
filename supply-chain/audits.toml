@@ -1310,6 +1310,12 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-11-05"
 end = "2026-11-20"
 
+[[trusted.surrealism-types]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)

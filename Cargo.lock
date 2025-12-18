@@ -6245,7 +6245,7 @@ dependencies = [
  "surrealdb",
  "surrealdb-core",
  "surrealdb-server",
- "surrealdb-types 3.0.0-beta.1",
+ "surrealdb-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -6293,7 +6293,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb-core",
- "surrealdb-types 3.0.0-beta.1",
+ "surrealdb-types",
  "temp-dir",
  "test-log",
  "thiserror 1.0.69",
@@ -6403,7 +6403,7 @@ dependencies = [
  "surrealdb-protocol",
  "surrealdb-rocksdb",
  "surrealdb-tikv-client",
- "surrealdb-types 3.0.0-beta.1",
+ "surrealdb-types",
  "surrealism-runtime",
  "surrealkv",
  "surrealml-core",
@@ -6455,7 +6455,7 @@ dependencies = [
  "chrono",
  "clap",
  "surrealdb",
- "surrealdb-types 3.0.0-beta.1",
+ "surrealdb-types",
  "tokio",
  "tracing-perfetto",
  "tracing-subscriber",
@@ -6539,7 +6539,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
- "surrealdb-types 3.0.0-beta.1",
+ "surrealdb-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -6591,6 +6591,8 @@ dependencies = [
 [[package]]
 name = "surrealdb-types"
 version = "3.0.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cb800d8a4df97620e123b5836dd1ef416bf95091a8eec50a04a7426d0358ede"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -6605,50 +6607,14 @@ dependencies = [
  "papaya",
  "regex",
  "regex-syntax",
- "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",
  "serde_json",
  "surrealdb-protocol",
- "surrealdb-types-derive 3.0.0-beta.1",
+ "surrealdb-types-derive",
  "ulid",
  "uuid",
-]
-
-[[package]]
-name = "surrealdb-types"
-version = "3.0.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb800d8a4df97620e123b5836dd1ef416bf95091a8eec50a04a7426d0358ede"
-dependencies = [
- "anyhow",
- "bytes",
- "chrono",
- "flatbuffers",
- "geo 0.28.0",
- "hex",
- "http 1.3.1",
- "nanoid",
- "papaya",
- "regex",
- "rstest",
- "rust_decimal",
- "serde",
- "serde_json",
- "surrealdb-protocol",
- "surrealdb-types-derive 3.0.0-beta.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "ulid",
- "uuid",
-]
-
-[[package]]
-name = "surrealdb-types-derive"
-version = "3.0.0-beta.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.110",
 ]
 
 [[package]]
@@ -6672,7 +6638,7 @@ dependencies = [
  "async-trait",
  "semver",
  "serde",
- "surrealdb-types 3.0.0-beta.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "surrealdb-types",
  "surrealism-types",
  "tar",
  "toml",
@@ -6690,7 +6656,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "surrealdb-types 3.0.0-beta.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "surrealdb-types",
 ]
 
 [[package]]
