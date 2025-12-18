@@ -6,9 +6,9 @@ use sysinfo::System;
 /// Should we sync writes to disk before acknowledgement
 pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
 
-/// Whether to enable value log separation (default: true)
+/// Whether to enable value log separation (default: false)
 pub(super) static SURREALKV_ENABLE_VLOG: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, true);
+	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, false);
 
 /// The block size in bytes (default: 64 KiB)
 pub(super) static SURREALKV_BLOCK_SIZE: LazyLock<usize> =
