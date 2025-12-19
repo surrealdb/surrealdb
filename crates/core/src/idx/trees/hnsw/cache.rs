@@ -45,11 +45,7 @@ impl ElementsPerIndex {
 			0
 		}
 	}
-	fn remove_index(
-		&self,
-		table_id: TableId,
-		index_id: IndexId,
-	) -> Option<RwLock<RoaringTreemap>> {
+	fn remove_index(&self, table_id: TableId, index_id: IndexId) -> Option<RwLock<RoaringTreemap>> {
 		self.0.remove(&(table_id, index_id)).map(|entry| entry.1)
 	}
 	fn remove_element(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
@@ -171,7 +167,8 @@ impl VectorCache {
 	pub(crate) async fn remove_index(&self, table_id: TableId, index_id: IndexId) {
 		let mut count = 0;
 		if let Some(elements_ids) = self.0.indexes.remove_index(table_id, index_id) {
-			for element_id in elements_ids.read().iter() {
+			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
+			for element_id in ids {
 				self.0.vectors.remove(&(table_id, index_id, element_id));
 				// Yield control every 1000 removals to prevent blocking other async tasks
 				// during bulk operations
