@@ -1,30 +1,33 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
 use std::task::Poll;
 
 use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
-use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
-use surrealdb_types::Variables;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::conn::{self, Route, Router};
-use crate::engine::local::Db;
+use crate::engine::local::{Db, SessionError};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::types::HashMap;
+use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 impl crate::Connection for Db {}
 impl conn::Sealed for Db {
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	#[allow(private_interfaces)]
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -33,8 +36,9 @@ impl conn::Sealed for Db {
 
 			let (conn_tx, conn_rx) = async_channel::bounded(1);
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(address, conn_tx, route_rx));
+			tokio::spawn(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
 			conn_rx.recv().await??;
 
@@ -47,10 +51,9 @@ impl conn::Sealed for Db {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
 	}
 }
@@ -59,6 +62,7 @@ pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
@@ -112,17 +116,9 @@ pub(crate) async fn run_router(
 	#[cfg(storage)]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
-	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(Variables::default()));
-	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
-	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
-
 	let router_state = super::RouterState {
-		kvs: kvs.clone(),
-		vars: vars.clone(),
-		live_queries: live_queries.clone(),
-		session: session.clone(),
-		transactions: Arc::new(RwLock::new(HashMap::new())),
+		kvs: Arc::new(kvs),
+		sessions: HashMap::new(),
 	};
 
 	let canceller = CancellationToken::new();
@@ -140,9 +136,9 @@ pub(crate) async fn run_router(
 	if let Some(interval) = address.config.changefeed_gc_interval {
 		opt.changefeed_gc_interval = interval;
 	}
-	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
+	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
 
-	let mut notifications = kvs.notifications().map(Box::pin);
+	let mut notifications = router_state.kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
@@ -151,50 +147,96 @@ pub(crate) async fn run_router(
 	});
 
 	loop {
-		let router_state = router_state.clone();
-
 		tokio::select! {
+			biased;
+
+			session = session_rx.recv() => {
+				let Ok(session_id) = session else {
+					break
+				};
+				match session_id {
+					SessionId::Initial(session_id) => {
+						router_state.handle_session_initial(session_id);
+					}
+					SessionId::Clone { old, new } => {
+						router_state.handle_session_clone(old, new).await;
+					}
+					SessionId::Drop(session_id) => {
+						router_state.handle_session_drop(session_id);
+					}
+				}
+			}
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
-				tokio::spawn(async move {
-					match super::router(route.request, router_state)
-						.await
-					{
-						Ok(value) => {
-							route.response.send(Ok(value)).await.ok();
-						}
-						Err(error) => {
-							route.response.send(Err(error.into())).await.ok();
-						}
+				match router_state.sessions.get(&route.request.session_id) {
+					Some(Ok(state)) => {
+						let kvs = router_state.kvs.clone();
+						tokio::spawn(async move {
+							match super::router(&kvs, &state, route.request.command)
+								.await
+							{
+								Ok(value) => {
+									route.response.send(Ok(value)).await.ok();
+								}
+								Err(error) => {
+									route.response.send(Err(error.into())).await.ok();
+								}
+							}
+						});
 					}
-				});
+					Some(Err(error)) => {
+						route.response.send(Err(crate::Error::from(error).into())).await.ok();
+					}
+					None => {
+						let error = crate::Error::from(SessionError::NotFound(route.request.session_id));
+						route.response.send(Err(error.into())).await.ok();
+					}
+				}
 			}
 			notification = notification_stream.next() => {
 				let Some(notification) = notification else {
-					// TODO: Maybe we should do something more then ignore a closed notifications
-					// channel?
+					continue
+				};
+				let Some(session_id) = notification.session.map(|x| x.into_inner()) else {
 					continue
 				};
 
-				let kvs_clone = kvs.clone();
-				let vars_clone = vars.clone();
-				let session_clone = session.clone();
-				let live_queries_clone = live_queries.clone();
-				tokio::spawn(async move {
-					let id = notification.id.into_inner();
-					if let Some(sender) = live_queries_clone.read().await.get(&id)
+				let live_query_id = notification.id.into_inner();
 
-						&& sender.send(Ok(notification)).await.is_err() {
-							live_queries_clone.write().await.remove(&id);
-							if let Err(error) =
-								super::kill_live_query(&kvs_clone, id, &*session_clone.read().await, vars_clone.read().await.clone()).await
-							{
-								warn!("Failed to kill live query '{id}'; {error}");
+				match router_state.sessions.get(&session_id) {
+					Some(Ok(state)) => {
+						match state.live_queries.get(&live_query_id) {
+							Some(sender) => {
+								let kvs = router_state.kvs.clone();
+								let vars = state.vars.read().await.clone();
+								let session = state.session.read().await.clone();
+								tokio::spawn(async move {
+									if sender.send(Ok(notification)).await.is_err() {
+										state.live_queries.remove(&live_query_id);
+										if let Err(error) =
+											super::kill_live_query(&kvs, live_query_id, &session, vars).await
+										{
+											warn!("Failed to kill live query '{live_query_id}'; {error}");
+										}
+									}
+								});
+							}
+							None => {
+								warn!("Failed to find live query '{live_query_id}' for session '{session_id:?}'");
 							}
 						}
-				});
+					}
+					Some(Err(error)) => {
+						let error = crate::Error::from(error);
+						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
+					}
+					None => {
+						let error = crate::Error::from(SessionError::NotFound(session_id));
+						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
+					}
+				}
 			}
 		}
 	}
@@ -203,5 +245,5 @@ pub(crate) async fn run_router(
 	// Wait for background tasks to finish
 	tasks.resolve().await.ok();
 	// Delete this node from the cluster
-	kvs.shutdown().await.ok();
+	router_state.kvs.shutdown().await.ok();
 }

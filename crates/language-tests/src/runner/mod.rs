@@ -66,7 +66,7 @@ impl Schedular {
 
 	pub async fn join_all(mut self) {
 		while let Some(x) = self.join.join_next().await {
-			x.expect("Run task paniced!");
+			x.expect("Run task panicked!");
 		}
 	}
 }

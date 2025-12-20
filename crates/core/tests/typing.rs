@@ -19,7 +19,7 @@ async fn strict_typing_inline() -> Result<()> {
 		UPSERT person:test SET scores = <set<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 		UPSERT person:test SET scores = <array<float, 5>> [1,1,2,2,3,3,4,4,5,5];
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -135,7 +135,7 @@ async fn strict_typing_defined() -> Result<()> {
 		UPSERT person:test SET age = 18, enabled = true, name = NONE, scores = <set>[1,1,2,2,3,3,4,4,5,5];
 		UPSERT person:test SET age = 18, enabled = true, name = 'Tobie Morgan Hitchcock', scores = <set>[1,1,2,2,3,3,4,4,5,5];
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);

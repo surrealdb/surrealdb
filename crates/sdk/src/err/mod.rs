@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use serde::Serialize;
 use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use surrealdb_core::rpc::DbResultError;
-use surrealdb_types::Value;
 use thiserror::Error;
 
 use crate::IndexedResults;
+use crate::types::Value;
 
 /// A specialized `Result` type
 #[allow(dead_code)]
@@ -345,7 +345,7 @@ impl From<DbResultError> for Error {
 			DbResultError::ClientSideError(message) => Error::Query(message),
 			DbResultError::InvalidAuth(message) => Error::Query(message),
 			DbResultError::QueryNotExecuted(message) => Error::Query(message),
-			DbResultError::QueryTimedout => Error::Query("Query timed out".to_string()),
+			DbResultError::QueryTimedout(message) => Error::Query(message),
 			DbResultError::QueryCancelled => Error::Query(
 				"The query was not executed due to a cancelled transaction".to_string(),
 			),
@@ -353,9 +353,9 @@ impl From<DbResultError> for Error {
 	}
 }
 
-// Allow conversion from anyhow::Error (from surrealdb_types) to our Error
-impl From<surrealdb_types::anyhow::Error> for Error {
-	fn from(error: surrealdb_types::anyhow::Error) -> Self {
+// Allow conversion from anyhow::Error (from crate::types) to our Error
+impl From<crate::types::anyhow::Error> for Error {
+	fn from(error: crate::types::anyhow::Error) -> Self {
 		Error::InternalError(error.to_string())
 	}
 }

@@ -184,7 +184,8 @@ impl<'a, I> Scanner<'a, I> {
 		}
 
 		// Check if there is no pending main future task
-		if self.future.is_none() {
+		// to avoid fetching the same range twice
+		if self.future.is_none() && self.prefetch_future.is_none() {
 			// Compute the next batch size (double it, capped at MAX_BATCH_SIZE and limit)
 			let batch_size = match self.limit.map(|v| v as u32) {
 				Some(l) => (self.current_batch_size * 2).min(*MAX_BATCH_SIZE).min(l),
@@ -192,6 +193,11 @@ impl<'a, I> Scanner<'a, I> {
 			};
 			// Prepare a future to scan for results
 			self.future = Some(scan(self.range.clone(), batch_size));
+		}
+
+		// If we have no main future (because prefetch is pending), wait for prefetch
+		if self.future.is_none() {
+			return Poll::Pending;
 		}
 
 		// Try to resolve the main future

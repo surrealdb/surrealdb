@@ -16,7 +16,7 @@ pub struct CustomFilter {
 impl Clone for CustomFilter {
 	fn clone(&self) -> Self {
 		Self {
-			env: EnvFilter::builder().parse(self.env.to_string()).unwrap_or(EnvFilter::new("none")),
+			env: EnvFilter::builder().parse(self.env.to_string()).unwrap_or_default(),
 			spans: self.spans.clone(),
 		}
 	}
@@ -24,7 +24,7 @@ impl Clone for CustomFilter {
 
 impl CustomFilter {
 	pub fn env(&self) -> EnvFilter {
-		EnvFilter::builder().parse(self.env.to_string()).unwrap_or(EnvFilter::new("none"))
+		EnvFilter::builder().parse(self.env.to_string()).unwrap_or_default()
 	}
 
 	pub fn span_filter<S>(

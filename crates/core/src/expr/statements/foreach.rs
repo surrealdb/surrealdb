@@ -39,6 +39,7 @@ impl ForeachStatement {
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive
+	#[instrument(level = "trace", name = "ForeachStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -65,8 +66,8 @@ impl ForeachStatement {
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout().await? {
-				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout)));
+			if let Some(d) = ctx.is_timedout().await? {
+				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
 			}
 			// Duplicate context
 			let ctx = Context::new(ctx).freeze();

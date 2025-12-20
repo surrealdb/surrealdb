@@ -176,6 +176,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::Analyzer;
+	use crate::cnf::dynamic::DynamicConfiguration;
 	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::expr::DefineAnalyzerStatement;
@@ -203,7 +204,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::new(ds.id());
+		let opts = Options::new(ds.id(), DynamicConfiguration::default());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(

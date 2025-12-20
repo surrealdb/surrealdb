@@ -16,10 +16,11 @@ pub use endpoint::*;
 pub use export::*;
 pub use query::*;
 pub use resource::*;
-use surrealdb_types::{SurrealValue, Value};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 pub use websocket::*;
+
+use crate::types::{SurrealValue, Value};
 
 #[derive(Debug, SurrealValue)]
 #[surreal(untagged, lowercase)]
@@ -43,7 +44,7 @@ pub enum PatchOp {
 
 impl From<PatchOp> for Value {
 	fn from(op: PatchOp) -> Value {
-		let mut obj = surrealdb_types::Object::new();
+		let mut obj = crate::types::Object::new();
 		match op {
 			PatchOp::Add {
 				path,

@@ -11,6 +11,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 
 [[test.results]]
@@ -23,6 +26,7 @@ value = "[{ detail: { plan: { index: 'idxPersonName', operator: '@@', value: 'To
 value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 
 */
+DEFINE TABLE person;
 DEFINE ANALYZER edgeNgram TOKENIZERS class FILTERS lowercase,ascii,edgeNgram(1,10);
 DEFINE INDEX idxPersonName ON TABLE person COLUMNS name FULLTEXT ANALYZER edgeNgram BM25;
 DEFINE INDEX idxSecurityNumber ON TABLE person COLUMNS securityNumber UNIQUE;

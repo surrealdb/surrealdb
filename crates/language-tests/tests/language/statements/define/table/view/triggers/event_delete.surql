@@ -5,7 +5,7 @@
 value = "'OK'"
 
 [[test.results]]
-value = "[]"
+error = "The table 'test' does not exist"
 
 [[test.results]]
 value = "[]"

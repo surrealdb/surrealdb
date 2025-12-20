@@ -7,9 +7,10 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::impl_kv_key_storekey;
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct HdRoot<'a> {
 	__: u8,
 	_a: u8,
@@ -17,7 +18,7 @@ pub(crate) struct HdRoot<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -28,7 +29,7 @@ pub(crate) struct HdRoot<'a> {
 impl_kv_key_storekey!(HdRoot<'_> => HnswDocsState);
 
 impl<'a> HdRoot<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -47,6 +48,7 @@ impl<'a> HdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Hd<'a> {
 	__: u8,
 	_a: u8,
@@ -54,7 +56,7 @@ pub(crate) struct Hd<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -66,7 +68,13 @@ pub(crate) struct Hd<'a> {
 impl_kv_key_storekey!(Hd<'_> => RecordIdKey);
 
 impl<'a> Hd<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, doc_id: DocId) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		doc_id: DocId,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -92,21 +100,16 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let tb = TableName::from("testtb");
+		let val = HdRoot::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3));
 		let enc = HdRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hd");
 	}
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Hd::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			7
-		);
+		let tb = TableName::from("testtb");
+		let val = Hd::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7);
 		let enc = Hd::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

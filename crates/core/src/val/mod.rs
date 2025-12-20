@@ -51,7 +51,7 @@ pub(crate) use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub(crate) use self::regex::Regex;
 pub(crate) use self::set::Set;
 pub(crate) use self::symbol::Symbol;
-pub(crate) use self::table::Table;
+pub(crate) use self::table::TableName;
 pub(crate) use self::uuid::Uuid;
 pub(crate) use self::value::{CastError, CoerceError};
 
@@ -86,7 +86,7 @@ pub(crate) enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Table(Table),
+	Table(TableName),
 	RecordId(RecordId),
 	File(File),
 	Regex(Regex),
@@ -171,7 +171,7 @@ impl Value {
 	}
 
 	/// Check if this Value is a RecordId of a specific type
-	pub fn is_record_type(&self, types: &[String]) -> bool {
+	pub fn is_record_type(&self, types: &[TableName]) -> bool {
 		match self {
 			Value::RecordId(v) => v.is_table_type(types),
 			_ => false,
@@ -214,7 +214,7 @@ impl Value {
 	pub fn into_raw_string(self) -> String {
 		match self {
 			Value::String(v) => v.into(),
-			Value::Uuid(v) => v.to_raw(),
+			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
 		}
@@ -223,8 +223,8 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::String(v) => v.into(),
-			Value::Uuid(v) => v.to_raw(),
+			Value::String(v) => v.clone().into(),
+			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
 		}
@@ -358,7 +358,7 @@ impl Value {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Set(v) => v.contains(other),
 			Value::Uuid(v) => match other {
-				Value::String(w) => v.to_raw().contains(w.as_str()),
+				Value::String(w) => v.to_string().contains(w.as_str()),
 				_ => false,
 			},
 			Value::String(v) => match other {
@@ -559,7 +559,7 @@ impl Value {
 				body: closure.body.clone(),
 			})),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(t.into_string()),
+			Value::Table(t) => expr::Expr::Table(t),
 		}
 	}
 }
@@ -871,7 +871,7 @@ subtypes! {
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
 	String(String) => (is_strand,as_strand,into_strand),
-	Table(Table) => (is_table,as_table,into_table),
+	Table(TableName) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
 	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),

@@ -1,3 +1,5 @@
+pub(crate) mod dynamic;
+
 use std::path::PathBuf;
 use std::sync::LazyLock;
 

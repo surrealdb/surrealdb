@@ -19,7 +19,7 @@ thread_local! {
 	/// Stores Arc<str> directly with automatic eviction of least recently used entries
 	/// Size: 4096 entries provides good hit rate while keeping memory bounded (~64KB)
 	static LOCAL_INTERNER: RefCell<LruCache<u64, Arc<str>>> =
-		RefCell::new(LruCache::new(NonZeroUsize::new(4096).unwrap()));
+		RefCell::new(LruCache::new(NonZeroUsize::new(4096).expect("expected non-zero size")));
 }
 
 /// Intern a string, returning a deduplicated Arc<str>
@@ -251,12 +251,7 @@ impl Ord for Symbol {
 impl PartialOrd for Symbol {
 	#[inline]
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		// Fast path: check if pointers are equal
-		if Arc::ptr_eq(&self.0, &other.0) {
-			return Some(Ordering::Equal);
-		}
-		// Slow path: compare string contents
-		Some(self.0.as_ref().cmp(other.0.as_ref()))
+		Some(self.cmp(other))
 	}
 }
 
@@ -398,7 +393,7 @@ mod tests {
 
 		let mut map = HashMap::new();
 		let key = Symbol::from("key");
-		map.insert(key.clone(), 42);
+		map.insert(key, 42);
 
 		assert_eq!(map.get(&Symbol::from("key")), Some(&42));
 	}

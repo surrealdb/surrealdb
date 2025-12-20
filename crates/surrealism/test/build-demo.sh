@@ -1,1 +1,0 @@
-./surrealism build -o demo.surli ../demo

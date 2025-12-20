@@ -17,7 +17,7 @@ async fn define_statement_namespace() -> Result<()> {
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("other", "other").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -29,8 +29,9 @@ async fn define_statement_namespace() -> Result<()> {
 	let val = syn::value(
 		"{
 			accesses: {},
+			config: { 'QUERY_TIMEOUT': None },
 			defaults: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
+			namespaces: { other: 'DEFINE NAMESPACE other', test: 'DEFINE NAMESPACE test' },
 			nodes: {},
 			system: {
 				available_parallelism: 0,
@@ -59,7 +60,7 @@ async fn define_statement_database() -> Result<()> {
 		DEFINE DATABASE test;
 		INFO FOR NS;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "otherdb").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -71,7 +72,7 @@ async fn define_statement_database() -> Result<()> {
 	let val = syn::value(
 		"{
 			accesses: {},
-			databases: { test: 'DEFINE DATABASE test' },
+			databases: { otherdb: 'DEFINE DATABASE otherdb', test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
 	)
@@ -88,7 +89,7 @@ async fn define_statement_index_concurrently_building_status(
 	appended_size: usize,
 ) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
-	let ds = new_ds().await?;
+	let ds = new_ds("test", "test").await?;
 	// Populate initial records
 	for i in 0..initial_size {
 		let mut responses = ds
@@ -243,7 +244,7 @@ async fn define_statement_search_index() -> Result<()> {
 		INFO FOR TABLE blog;
 	"#;
 
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -276,7 +277,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner();
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
@@ -295,7 +296,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_ns() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -366,7 +367,7 @@ async fn define_statement_user_ns() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_db() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -435,8 +436,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -616,8 +617,8 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -799,8 +800,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
-	let check_error = "{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level

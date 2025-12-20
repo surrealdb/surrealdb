@@ -186,7 +186,7 @@ impl Permit {
 					Ok(x) => x,
 					Err(e) => {
 						println!(
-							"Failed to create a new datastore to replaced panicking datastore: {e}"
+							"Failed to create a new datastore to replace panicking datastore: {e}"
 						);
 						return res;
 					}

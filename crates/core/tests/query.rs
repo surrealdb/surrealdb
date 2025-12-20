@@ -13,7 +13,7 @@ async fn query_basic() -> Result<()> {
 		RETURN $test;
 		$test;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -45,7 +45,7 @@ async fn query_basic_with_modification() -> Result<()> {
 		RETURN $test + 11369;
 		$test + 11369;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -77,7 +77,7 @@ async fn query_root_function() -> Result<()> {
 		string::lowercase($test);
 		string::slug($test);
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -109,7 +109,7 @@ async fn query_root_record() -> Result<()> {
 		RELATE person:tobie->knows->person:jaime SET id = 'test', brother = true;
 		person:tobie->knows->person.name;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);

@@ -142,6 +142,7 @@ args = [
     "--each-feature",
     "--exclude-features",
     "kv-indxdb",
+    "--exclude-no-default-features",
 ]
 
 [tasks.ci-feature-check-core]
@@ -176,6 +177,7 @@ args = [
     "storage-indxdb",
     "--include-features",
     "storage-mem",
+    "--exclude-no-default-features",
 ]
 
 [tasks.ci-unused-deps]
@@ -577,7 +579,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks,cli,graphql",
     "--workspace",
 ]
 
@@ -653,7 +655,7 @@ dependencies = ["build-surrealdb"]
 script = """
     #!/bin/bash -ex
 
-    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all --deny-guests &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
     echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 

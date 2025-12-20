@@ -9,7 +9,7 @@ use surrealdb_types::{Action, Kind, RecordId, Value, vars};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
-	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
 
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let sql = "
@@ -78,7 +78,7 @@ async fn live_permissions() -> Result<()> {
 #[tokio::test]
 async fn live_document_reduction() -> Result<()> {
 	// Create a new datastore with notifications enabled
-	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
 	let Some(channel) = dbs.notifications() else {
 		unreachable!("No notification channel");
 	};
@@ -254,7 +254,7 @@ async fn live_document_reduction() -> Result<()> {
 
 #[tokio::test]
 async fn test_live_with_variables() -> Result<()> {
-	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
 	let Some(channel) = dbs.notifications() else {
 		unreachable!("No notification channel");
 	};

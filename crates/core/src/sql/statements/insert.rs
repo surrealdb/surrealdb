@@ -17,22 +17,6 @@ pub struct InsertStatement {
 	pub version: Expr,
 }
 
-impl Default for InsertStatement {
-	fn default() -> Self {
-		Self {
-			into: Default::default(),
-			data: Default::default(),
-			ignore: Default::default(),
-			update: Default::default(),
-			output: Default::default(),
-			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
-			relation: Default::default(),
-			version: Expr::Literal(Literal::None),
-		}
-	}
-}
-
 impl ToSql for InsertStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("INSERT");
@@ -42,8 +26,8 @@ impl ToSql for InsertStatement {
 		if self.ignore {
 			f.push_str(" IGNORE");
 		}
-		if let Some(into) = &self.into {
-			write_sql!(f, fmt, " INTO {}", CoverStmts(into));
+		if let Some(ref v) = self.into {
+			write_sql!(f, fmt, " INTO {}", CoverStmts(v));
 		}
 		write_sql!(f, fmt, " {}", self.data);
 		if let Some(ref v) = self.update {

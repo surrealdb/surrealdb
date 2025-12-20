@@ -76,6 +76,7 @@ impl DefineAnalyzerStatement {
 		}
 	}
 
+	#[instrument(level = "trace", name = "DefineAnalyzerStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

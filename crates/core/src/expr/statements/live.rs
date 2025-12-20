@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use crate::catalog::providers::CatalogProvider;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
@@ -31,6 +31,7 @@ pub(crate) struct LiveStatement {
 
 impl LiveStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "LiveStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -104,7 +105,7 @@ impl LiveStatement {
 				// Ensure that the table definition exists
 				{
 					let (ns, db) = opt.ns_db()?;
-					txn.ensure_ns_db_tb(Some(ctx), ns, db, &tb).await?;
+					txn.expect_tb_by_name(ns, db, &tb).await?;
 				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, live_query_id);
@@ -113,7 +114,7 @@ impl LiveStatement {
 					&NodeLiveQuery {
 						ns,
 						db,
-						tb: tb.to_string(),
+						tb: tb.clone(),
 					},
 				)
 				.await?;
@@ -176,6 +177,10 @@ mod tests {
 		assert!(table_occurrences.is_empty());
 		tx.cancel().await.unwrap();
 
+		// Define the table
+		let define_statement = format!("DEFINE TABLE {tb};");
+		dbs.execute(&define_statement, &ses, None).await.unwrap();
+
 		// Initiate a live query statement
 		let lq_stmt = format!("LIVE SELECT * FROM {}", tb);
 		let live_query_response = &mut dbs.execute(&lq_stmt, &ses, None).await.unwrap();
@@ -222,6 +227,7 @@ mod tests {
 			notification,
 			PublicNotification::new(
 				live_id,
+				None,
 				PublicAction::Create,
 				PublicValue::RecordId(PublicRecordId {
 					table: tb.into(),

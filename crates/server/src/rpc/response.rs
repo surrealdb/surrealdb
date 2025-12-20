@@ -19,6 +19,7 @@ pub async fn send(
 ) {
 	// Get the request id
 	let id = response.id.clone();
+	let session_id = response.session_id;
 	// Create a new tracing span
 	let span = Span::current();
 	// Log the rpc response call
@@ -35,7 +36,7 @@ pub async fn send(
 	let (len, msg) = match fmt.res_ws(response) {
 		Ok((l, m)) => (l, m),
 		Err(err) => fmt
-			.res_ws(DbResponse::failure(id, err))
+			.res_ws(DbResponse::failure(id, session_id, err))
 			.expect("Serialising internal error should always succeed"),
 	};
 	// Send the message to the write channel

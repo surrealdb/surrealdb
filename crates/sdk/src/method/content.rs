@@ -2,11 +2,11 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value};
 use uuid::Uuid;
 
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
+use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
 /// A content future
@@ -58,7 +58,7 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
-				router.$method(command?).await
+				router.$method(client.session_id, command?).await
 			})
 		}
 	};

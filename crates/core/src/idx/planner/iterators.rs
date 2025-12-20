@@ -19,7 +19,7 @@ use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
-use crate::val::{Array, RecordId, Value};
+use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) type IteratorRef = usize;
 
@@ -117,7 +117,7 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 /// Each variant encapsulates a concrete scan strategy (equality, range, union,
 /// join, text search, KNN, etc). Iteration is performed in batches to cap
 /// per-IO work and allow cooperative cancellation via Context.
-pub(crate) enum ThingIterator {
+pub(crate) enum RecordIterator {
 	IndexEqual(IndexEqualThingIterator),
 	IndexRange(IndexRangeThingIterator),
 	IndexRangeReverse(IndexRangeReverseThingIterator),
@@ -133,7 +133,7 @@ pub(crate) enum ThingIterator {
 	Knn(KnnIterator),
 }
 
-impl ThingIterator {
+impl RecordIterator {
 	/// Fetch the next batch of index items.
 	///
 	/// - `size` is a soft upper bound on how many items to fetch. Concrete iterators may return
@@ -547,7 +547,7 @@ impl IndexRangeThingIterator {
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		from: RangeValue,
 	) -> Result<Vec<u8>> {
@@ -584,7 +584,7 @@ impl IndexRangeThingIterator {
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		to: RangeValue,
 	) -> Result<Vec<u8>> {
@@ -657,7 +657,7 @@ impl IndexRangeThingIterator {
 	fn compute_beg_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
 		from: RangeValue,
@@ -681,7 +681,7 @@ impl IndexRangeThingIterator {
 	fn compute_end_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
 		to: RangeValue,
@@ -958,10 +958,10 @@ struct JoinThingIterator {
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: IndexReference,
-	remote_iterators: VecDeque<ThingIterator>,
-	current_remote: Option<ThingIterator>,
+	remote_iterators: VecDeque<RecordIterator>,
+	current_remote: Option<RecordIterator>,
 	current_remote_batch: VecDeque<IndexItemRecord>,
-	current_local: Option<ThingIterator>,
+	current_local: Option<RecordIterator>,
 	distinct: Trie<Key, bool>,
 }
 
@@ -970,7 +970,7 @@ impl JoinThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: IndexReference,
-		remote_iterators: VecDeque<ThingIterator>,
+		remote_iterators: VecDeque<RecordIterator>,
 	) -> Result<Self> {
 		Ok(Self {
 			ns,
@@ -1015,7 +1015,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<bool>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator>,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator>,
 	{
 		let mut count = 0;
 		while !ctx.is_done(None).await? {
@@ -1047,7 +1047,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<B>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator> + Copy,
 	{
 		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -1071,7 +1071,7 @@ impl JoinThingIterator {
 		new_iter: F,
 	) -> Result<usize>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<ThingIterator> + Copy,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator> + Copy,
 	{
 		while !ctx.is_done(None).await? {
 			if let Some(current_local) = &mut self.current_local {
@@ -1096,7 +1096,7 @@ impl IndexJoinThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: IndexReference,
-		remote_iterators: VecDeque<ThingIterator>,
+		remote_iterators: VecDeque<RecordIterator>,
 	) -> Result<Self> {
 		Ok(Self(irf, JoinThingIterator::new(ns, db, ix, remote_iterators)?))
 	}
@@ -1110,7 +1110,7 @@ impl IndexJoinThingIterator {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let fd = Array::from(vec![value]);
 			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
-			Ok(ThingIterator::IndexEqual(it))
+			Ok(RecordIterator::IndexEqual(it))
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
@@ -1124,7 +1124,7 @@ impl IndexJoinThingIterator {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let fd = Array::from(vec![value]);
 			let it = IndexEqualThingIterator::new(self.0, ns, db, ix, &fd)?;
-			Ok(ThingIterator::IndexEqual(it))
+			Ok(RecordIterator::IndexEqual(it))
 		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
@@ -1235,7 +1235,7 @@ impl UniqueRangeThingIterator {
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		from: &Value,
 	) -> Result<Vec<u8>> {
@@ -1248,7 +1248,7 @@ impl UniqueRangeThingIterator {
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix_what: &str,
+		ix_what: &TableName,
 		index_id: IndexId,
 		to: &Value,
 	) -> Result<Vec<u8>> {
@@ -1518,7 +1518,7 @@ impl UniqueJoinThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: IndexReference,
-		remote_iterators: VecDeque<ThingIterator>,
+		remote_iterators: VecDeque<RecordIterator>,
 	) -> Result<Self> {
 		Ok(Self(irf, JoinThingIterator::new(ns, db, ix, remote_iterators)?))
 	}
@@ -1532,7 +1532,7 @@ impl UniqueJoinThingIterator {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let array = Array::from(vec![value]);
 			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::UniqueEqual(it))
+			Ok(RecordIterator::UniqueEqual(it))
 		};
 		self.1.next_batch(ctx, tx, limit, new_iter).await
 	}
@@ -1546,7 +1546,7 @@ impl UniqueJoinThingIterator {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let array = Array::from(vec![value]);
 			let it = UniqueEqualThingIterator::new(self.0, ns, db, ix, &array)?;
-			Ok(ThingIterator::UniqueEqual(it))
+			Ok(RecordIterator::UniqueEqual(it))
 		};
 		self.1.next_count(ctx, tx, limit, new_iter).await
 	}
@@ -1699,7 +1699,7 @@ impl IndexCountThingIterator {
 	pub(in crate::idx) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 	) -> Result<Self> {
 		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))

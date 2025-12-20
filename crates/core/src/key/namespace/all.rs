@@ -44,10 +44,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = NamespaceRoot::new(
-			NamespaceId(1),
-		);
+		let val = NamespaceRoot::new(NamespaceId(1));
 		let enc = NamespaceRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01");
 	}

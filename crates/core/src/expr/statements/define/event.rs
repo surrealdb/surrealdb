@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{EventDefinition, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineEventStatement {
@@ -26,6 +26,7 @@ pub(crate) struct DefineEventStatement {
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineEventStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -34,8 +35,9 @@ impl DefineEventStatement {
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
-		let target_table =
-			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?;
+		let target_table = TableName::new(
+			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?,
+		);
 
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
@@ -60,10 +62,7 @@ impl DefineEventStatement {
 		}
 
 		// Ensure the table exists
-		let tb = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(Some(ctx), ns, db, &target_table).await?
-		};
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table).await?;
 
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, _doc))

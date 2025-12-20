@@ -20,7 +20,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 		SELECT id, search::offsets(1, false) AS content FROM blog WHERE content @1@ 'he';
 		SELECT id, search::offsets(1, true) AS content FROM blog WHERE content @1@ 'he';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -109,7 +109,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 		SELECT id, search::offsets(1, false) AS content FROM blog WHERE content @1@ 'el';
 		SELECT id, search::offsets(1, true) AS content FROM blog WHERE content @1@ 'el';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 10);
@@ -193,7 +193,7 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 		DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		SELECT id, search::offsets(0) AS title, search::offsets(1) AS content FROM blog WHERE title @0@ 'title' AND content @1@ 'Hello Bãr';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);
@@ -231,7 +231,7 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 		DEFINE INDEX blog_title ON blog FIELDS title FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS;
 		SELECT id,search::score(1) AS score FROM blog WHERE title @1@ 'animals';
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -269,7 +269,7 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 			WHERE (title @1@ 'dummy1' AND label = 'test')
 			OR (title @2@ 'dummy2' AND label = 'test');
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);

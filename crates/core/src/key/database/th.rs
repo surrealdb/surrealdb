@@ -72,12 +72,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = TableIdGeneratorBatchKey::new(
-			NamespaceId(123),
-			DatabaseId(234),
-			42
-		);
+		let val = TableIdGeneratorBatchKey::new(NamespaceId(123), DatabaseId(234), 42);
 		let enc = TableIdGeneratorBatchKey::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/*\0\0\0\x7B*\0\0\0\xEA!th\x80\0\0\0\0\0\0\x2A");
 	}

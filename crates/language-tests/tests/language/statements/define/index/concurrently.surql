@@ -1,7 +1,8 @@
 /**
 [env]
 # Extra timeout because this test has a sleep.
-timeout = 2000
+timeout = 5000
+context-timeout = 5000
 
 [test]
 

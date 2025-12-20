@@ -6,14 +6,14 @@ use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{self};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
 	pub(crate) name: String,
-	pub(crate) target_table: String,
+	pub(crate) target_table: TableName,
 	pub(crate) when: Expr,
 	pub(crate) then: Vec<Expr>,
 	pub(crate) comment: Option<String>,
@@ -26,7 +26,7 @@ impl EventDefinition {
 		sql::DefineEventStatement {
 			kind: DefineKind::Default,
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			target_table: sql::Expr::Idiom(sql::Idiom::field(self.target_table.clone())),
+			target_table: sql::Expr::Table(self.target_table.clone().into_string()),
 			when: self.when.clone().into(),
 			then: self.then.iter().cloned().map(Into::into).collect(),
 			comment: self

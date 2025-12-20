@@ -6,6 +6,18 @@ use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+/// AST node for `ALTER TABLE`.
+///
+/// Supported operations include (order-insensitive after the table name):
+/// - `TYPE NORMAL | RELATION [IN <from> [OUT <to>]] | ANY`
+/// - `SCHEMAFULL` / `SCHEMALESS`
+/// - `PERMISSIONS ...`
+/// - `CHANGEFEED ...` / `DROP CHANGEFEED`
+/// - `COMMENT <string>` / `DROP COMMENT`
+/// - `COMPACT` (request table keyspace compaction)
+///
+/// Note: `COMPACT` is parsed and preserved on the expression side, however it is
+/// currently not rendered by this node's `ToSql` implementation.
 pub struct AlterTableStatement {
 	pub name: String,
 	pub if_exists: bool,
@@ -14,6 +26,8 @@ pub struct AlterTableStatement {
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
+	/// Request table‑level compaction when true.
+	pub compact: bool,
 }
 
 impl ToSql for AlterTableStatement {
@@ -76,19 +90,24 @@ impl ToSql for AlterTableStatement {
 		if let Some(permissions) = &self.permissions {
 			write_sql!(f, fmt, " {permissions}");
 		}
+
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
 	}
 }
 
 impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
 	fn from(v: AlterTableStatement) -> Self {
 		crate::expr::statements::alter::AlterTableStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }
@@ -96,13 +115,14 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
 	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
 		AlterTableStatement {
-			name: v.name,
+			name: v.name.into_string(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }

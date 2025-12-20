@@ -7,7 +7,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 /// The config struct as it is stored on disk.
 #[revisioned(revision = 1)]
@@ -98,8 +98,8 @@ pub enum GraphQLTablesConfig {
 	#[default]
 	None,
 	Auto,
-	Include(Vec<String>),
-	Exclude(Vec<String>),
+	Include(Vec<TableName>),
+	Exclude(Vec<TableName>),
 }
 
 impl InfoStructure for GraphQLTablesConfig {
@@ -108,10 +108,10 @@ impl InfoStructure for GraphQLTablesConfig {
 			GraphQLTablesConfig::None => Value::None,
 			GraphQLTablesConfig::Auto => Value::String("AUTO".into()),
 			GraphQLTablesConfig::Include(ts) => Value::from(map!(
-				"include" => Value::Array(ts.into_iter().map(|v| Value::String(v.into())).collect()),
+				"include" => Value::Array(ts.into_iter().map(Value::Table).collect()),
 			)),
 			GraphQLTablesConfig::Exclude(ts) => Value::from(map!(
-				"exclude" => Value::Array(ts.into_iter().map(|v| Value::String(v.into())).collect()),
+				"exclude" => Value::Array(ts.into_iter().map(Value::Table).collect()),
 			)),
 		}
 	}

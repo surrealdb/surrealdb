@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use crate::conn::Command;
 use crate::method::{BoxFuture, Live, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// A select future
@@ -64,11 +64,14 @@ macro_rules! into_future {
 				let what = what.for_sql_query(&mut variables)?;
 
 				router
-					.$method(Command::Query {
-						txn,
-						query: Cow::Owned(format!("SELECT * FROM {what}")),
-						variables,
-					})
+					.$method(
+						client.session_id,
+						Command::Query {
+							txn,
+							query: Cow::Owned(format!("SELECT * FROM {what}")),
+							variables,
+						},
+					)
 					.await
 			})
 		}

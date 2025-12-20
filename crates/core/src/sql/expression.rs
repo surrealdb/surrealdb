@@ -278,7 +278,7 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		}) => {
 			let key = convert_public_record_id_key_to_internal(key);
 			crate::val::Value::RecordId(crate::val::RecordId {
-				table: table.into_string(),
+				table: table.into(),
 				key,
 			})
 		}
@@ -484,7 +484,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t),
+			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -544,7 +544,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t),
+			crate::expr::Expr::Table(t) => Expr::Table(t.into_string()),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),

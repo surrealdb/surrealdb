@@ -16,8 +16,13 @@ use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::{Number, ToSql, Value};
 
-pub async fn new_ds() -> Result<Datastore> {
-	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
+pub async fn new_ds(ns: &str, db: &str) -> Result<Datastore> {
+	let ds =
+		Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications();
+	let sess = Session::owner().with_ns(ns);
+	ds.execute(&format!("DEFINE NS `{ns}`"), &Session::owner(), None).await?;
+	ds.execute(&format!("DEFINE DB `{db}`"), &sess, None).await?;
+	Ok(ds)
 }
 
 #[allow(dead_code)]
@@ -152,7 +157,12 @@ pub async fn iam_check_cases_impl(
 
 		// Auth enabled
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(true);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(true);
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -170,7 +180,12 @@ pub async fn iam_check_cases_impl(
 
 		// Auth disabled
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(false);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(false);
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -200,7 +215,12 @@ pub async fn iam_check_cases_impl(
 					"auth disabled"
 				}
 			);
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
 				expected_anonymous_failure_result
 			} else {
@@ -318,7 +338,7 @@ impl Test {
 	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self> {
-		Self::new_ds(new_ds().await?, sql).await
+		Self::new_ds(new_ds("test", "test").await?, sql).await
 	}
 
 	/// Simulates restarting the Datastore

@@ -62,16 +62,22 @@ where
 
 			if self.is_ml {
 				return router
-					.execute_unit(Command::ImportMl {
-						path: self.file,
-					})
+					.execute_unit(
+						self.client.session_id,
+						Command::ImportMl {
+							path: self.file,
+						},
+					)
 					.await;
 			}
 
 			router
-				.execute_unit(Command::ImportFile {
-					path: self.file,
-				})
+				.execute_unit(
+					self.client.session_id,
+					Command::ImportFile {
+						path: self.file,
+					},
+				)
 				.await
 		})
 	}

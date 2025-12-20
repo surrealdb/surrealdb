@@ -42,10 +42,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = AccessRoot::new(
-			"testac",
-		);
+		let val = AccessRoot::new("testac");
 		let enc = AccessRoot::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0");
 	}

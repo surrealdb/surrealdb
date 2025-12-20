@@ -51,6 +51,7 @@ use crate::key::table::ih::IndexIdGeneratorBatchKey;
 use crate::key::table::is::IndexIdGeneratorStateKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
+use crate::val::TableName;
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
@@ -83,7 +84,7 @@ enum SequenceDomain {
 	/// A sequence generating IDs for tables
 	TablesIds(NamespaceId, DatabaseId),
 	/// A sequence generating IDs for indexes
-	IndexIds(NamespaceId, DatabaseId, String),
+	IndexIds(NamespaceId, DatabaseId, TableName),
 }
 
 impl SequenceDomain {
@@ -107,7 +108,7 @@ impl SequenceDomain {
 		Self::TablesIds(ns, db)
 	}
 
-	pub(crate) fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: String) -> Self {
+	pub(crate) fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: TableName) -> Self {
 		Self::IndexIds(ns, db, tb)
 	}
 
@@ -324,7 +325,7 @@ impl Sequences {
 		ctx: Option<&Context>,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: String,
+		tb: TableName,
 	) -> Result<IndexId> {
 		let domain = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
 		let id = self.next_val(ctx, domain, 0, 100, None).await?;
@@ -519,16 +520,15 @@ impl Sequence {
 		// We check the timeout inherited from the context
 		loop {
 			if let Some(ctx) = ctx {
-				if ctx.is_timedout().await? {
-					break;
-				}
+				ctx.expect_not_timedout().await?;
 			} else {
 				yield_now!();
 			}
 			if let (Some(ref start), Some(ref to)) = (start, to) {
 				// We check the time associated with the sequence
 				if start.elapsed().ge(to) {
-					break;
+					let timeout = (*to).into();
+					return Err(anyhow::Error::new(Error::QueryTimedout(timeout)));
 				}
 			}
 			if let Ok(r) = Self::check_batch_allocation(sqs, seq, next, batch).await {
@@ -541,7 +541,6 @@ impl Sequence {
 				tempo *= 2;
 			}
 		}
-		Err(anyhow::Error::new(Error::QueryTimedout))
 	}
 
 	/// Attempts to allocate a batch of IDs in a single transaction.

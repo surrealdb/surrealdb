@@ -10,7 +10,7 @@ use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RebuildStatement {
@@ -19,6 +19,7 @@ pub(crate) enum RebuildStatement {
 
 impl RebuildStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "RebuildStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
@@ -42,7 +43,7 @@ impl ToSql for RebuildStatement {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct RebuildIndexStatement {
 	pub name: String,
-	pub what: String,
+	pub table: TableName,
 	pub if_exists: bool,
 	pub concurrently: bool,
 }
@@ -54,7 +55,7 @@ impl RebuildIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.table, &self.name).await?;
 		let ix = match res {
 			Some(x) => x,
 			None => {
@@ -68,7 +69,7 @@ impl RebuildIndexStatement {
 				}
 			}
 		};
-		let tb = ctx.tx().expect_tb(ns, db, &self.what).await?;
+		let tb = ctx.tx().expect_tb(ns, db, &self.table).await?;
 
 		// Rebuild the index
 		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;

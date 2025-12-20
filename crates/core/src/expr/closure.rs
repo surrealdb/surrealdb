@@ -27,6 +27,7 @@ impl Ord for ClosureExpr {
 }
 
 impl ClosureExpr {
+	#[instrument(level = "trace", name = "ClosureExpr::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &FrozenContext) -> Result<Value> {
 		let captures = ParameterCapturePass::capture(ctx, &self.body);
 

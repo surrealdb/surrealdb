@@ -1304,24 +1304,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-16"
 end = "2026-09-23"
 
-[[trusted.surrealism]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-02-13"
-end = "2026-11-20"
-
-[[trusted.surrealism-cli]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-05"
-end = "2026-11-20"
-
-[[trusted.surrealism-macros]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-05"
-end = "2026-11-20"
-
 [[trusted.surrealism-runtime]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -1405,6 +1387,18 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-10-09"
 end = "2026-10-12"
+
+[[trusted.thread-id]]
+criteria = "safe-to-deploy"
+user-id = 498 # Ruud van Asseldonk (ruuda)
+start = "2021-03-24"
+end = "2026-12-15"
+
+[[trusted.thread-id]]
+criteria = "safe-to-run"
+user-id = 498 # Ruud van Asseldonk (ruuda)
+start = "2021-03-24"
+end = "2026-12-15"
 
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
@@ -1495,6 +1489,18 @@ criteria = "safe-to-deploy"
 user-id = 172786 # Hayden Stainsby (hds)
 start = "2024-11-25"
 end = "2026-12-10"
+
+[[trusted.tracing-perfetto]]
+criteria = "safe-to-deploy"
+user-id = 17316 # csmoe (csmoe)
+start = "2024-07-01"
+end = "2026-12-15"
+
+[[trusted.tracing-subscriber]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-29"
+end = "2026-12-15"
 
 [[trusted.trice]]
 criteria = "safe-to-deploy"

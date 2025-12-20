@@ -124,7 +124,7 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 	fn from(v: AlterFieldStatement) -> Self {
 		crate::expr::statements::alter::AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what,
+			what: v.what.into(),
 			if_exists: v.if_exists,
 			kind: v.kind.into(),
 			flexible: v.flexible.into(),
@@ -143,7 +143,7 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
 		AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what,
+			what: v.what.into_string(),
 			if_exists: v.if_exists,
 			kind: v.kind.into(),
 			flexible: v.flexible.into(),

@@ -5,10 +5,12 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{ToSql, kind, object};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::dbs;
 use crate::dbs::{QueryResult, QueryType};
 use crate::rpc::RpcError;
+use crate::rpc::request::SESSION_ID;
 use crate::types::{
 	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
 };
@@ -54,6 +56,7 @@ impl SurrealValue for DbResult {
 	fn kind_of() -> PublicKind {
 		kind!(array | {
 			id: uuid,
+			session: uuid | none,
 			action: string,
 			record: any,
 			result: any,
@@ -72,6 +75,7 @@ impl SurrealValue for DbResult {
 			}
 			DbResult::Live(v) => PublicValue::Object(object! {
 				id: PublicValue::Uuid(v.id),
+				session: v.session.map(PublicValue::Uuid),
 				action: v.action.into_value(),
 				record: v.record,
 				result: v.result,
@@ -106,6 +110,11 @@ impl SurrealValue for DbResult {
 						anyhow::bail!("Expected string for action field");
 					};
 
+					let session = match obj.remove(SESSION_ID) {
+						Some(session) => SurrealValue::from_value(session)?,
+						None => None,
+					};
+
 					// Parse action string to PublicAction
 					let action = match action_str.as_str() {
 						"CREATE" => crate::types::PublicAction::Create,
@@ -114,7 +123,9 @@ impl SurrealValue for DbResult {
 						_ => anyhow::bail!("Invalid action: {}", action_str),
 					};
 
-					Ok(DbResult::Live(PublicNotification::new(uuid, action, record, result)))
+					Ok(DbResult::Live(PublicNotification::new(
+						uuid, session, action, record, result,
+					)))
 				} else {
 					Ok(DbResult::Other(PublicValue::Object(obj)))
 				}
@@ -141,7 +152,7 @@ pub enum DbResultError {
 	ClientSideError(String),
 	InvalidAuth(String),
 	QueryNotExecuted(String),
-	QueryTimedout,
+	QueryTimedout(String),
 	QueryCancelled,
 }
 
@@ -181,7 +192,7 @@ impl DbResultError {
 			Self::ClientSideError(_) => Self::CLIENT_SIDE_ERROR,
 			Self::InvalidAuth(_) => Self::INVALID_AUTH,
 			Self::QueryNotExecuted(_) => Self::QUERY_NOT_EXECUTED,
-			Self::QueryTimedout => Self::QUERY_TIMEDOUT,
+			Self::QueryTimedout(_) => Self::QUERY_TIMEDOUT,
 			Self::QueryCancelled => Self::QUERY_CANCELLED,
 		}
 	}
@@ -203,7 +214,7 @@ impl DbResultError {
 			Self::ClientSideError(msg) => msg.clone(),
 			Self::InvalidAuth(msg) => msg.clone(),
 			Self::QueryNotExecuted(msg) => msg.clone(),
-			Self::QueryTimedout => "Query timed out".to_string(),
+			Self::QueryTimedout(timeout) => format!("Query timed out: {timeout}"),
 			Self::QueryCancelled => {
 				"The query was not executed due to a cancelled transaction".to_string()
 			}
@@ -227,7 +238,7 @@ impl DbResultError {
 			Self::CLIENT_SIDE_ERROR => Self::ClientSideError(message),
 			Self::INVALID_AUTH => Self::InvalidAuth(message),
 			Self::QUERY_NOT_EXECUTED => Self::QueryNotExecuted(message),
-			Self::QUERY_TIMEDOUT => Self::QueryTimedout,
+			Self::QUERY_TIMEDOUT => Self::QueryTimedout(message),
 			Self::QUERY_CANCELLED => Self::QueryCancelled,
 			// For any unknown code, map to InternalError
 			_ => Self::InternalError(format!("Unknown error code {code}: {message}")),
@@ -294,6 +305,13 @@ impl From<RpcError> for DbResultError {
 			RpcError::Thrown(message) => DbResultError::Thrown(message),
 			RpcError::Serialize(message) => DbResultError::SerializationError(message),
 			RpcError::Deserialize(message) => DbResultError::DeserializationError(message),
+			RpcError::SessionNotFound(id) => DbResultError::InternalError(match id {
+				Some(id) => format!("Session not found: {id:?}"),
+				None => "Default session not found".to_string(),
+			}),
+			RpcError::SessionExists(id) => {
+				DbResultError::InternalError(format!("Session already exists: {id}"))
+			}
 		}
 	}
 }
@@ -301,27 +319,39 @@ impl From<RpcError> for DbResultError {
 #[derive(Debug)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,
+	pub session_id: Option<Uuid>,
 	pub result: Result<DbResult, DbResultError>,
 }
 
 impl DbResponse {
-	pub fn new(id: Option<PublicValue>, result: Result<DbResult, DbResultError>) -> Self {
+	pub fn new(
+		id: Option<PublicValue>,
+		session_id: Option<Uuid>,
+		result: Result<DbResult, DbResultError>,
+	) -> Self {
 		Self {
 			id,
+			session_id,
 			result,
 		}
 	}
 
-	pub fn failure(id: Option<PublicValue>, error: DbResultError) -> Self {
+	pub fn failure(
+		id: Option<PublicValue>,
+		session_id: Option<Uuid>,
+		error: DbResultError,
+	) -> Self {
 		Self {
 			id,
+			session_id,
 			result: Err(error),
 		}
 	}
 
-	pub fn success(id: Option<PublicValue>, result: DbResult) -> Self {
+	pub fn success(id: Option<PublicValue>, session_id: Option<Uuid>, result: DbResult) -> Self {
 		Self {
 			id,
+			session_id,
 			result: Ok(result),
 		}
 	}
@@ -351,6 +381,9 @@ impl SurrealValue for DbResponse {
 		if let Some(id) = self.id {
 			value.insert("id".to_string(), id);
 		}
+		if let Some(session_id) = self.session_id {
+			value.insert(SESSION_ID.to_string(), PublicValue::Uuid(session_id.into()));
+		}
 		PublicValue::Object(PublicObject::from(value))
 	}
 
@@ -358,6 +391,8 @@ impl SurrealValue for DbResponse {
 		let PublicValue::Object(mut obj) = value else {
 			anyhow::bail!("Expected object for DbResponse");
 		};
+
+		let session_id = SurrealValue::from_value(obj.remove(SESSION_ID).unwrap_or_default())?;
 
 		let id = obj.remove("id");
 
@@ -371,6 +406,7 @@ impl SurrealValue for DbResponse {
 
 		Ok(DbResponse {
 			id,
+			session_id,
 			result,
 		})
 	}

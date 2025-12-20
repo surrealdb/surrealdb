@@ -9,6 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::key::table::all::TableRoot;
 use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 /// Key structure for storing index ID generator batch allocations.
 ///
@@ -16,6 +17,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 /// Each batch allocation represents a range of IDs that have been reserved
 /// by a particular node for generating index identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct IndexIdGeneratorBatchKey<'a> {
 	table_root: TableRoot<'a>,
 	_c: u8,
@@ -40,7 +42,7 @@ impl<'a> IndexIdGeneratorBatchKey<'a> {
 	/// * `db` - The database ID
 	/// * `tb` - The table name
 	/// * `start` - The starting value for this batch allocation
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, start: i64) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, start: i64) -> Self {
 		IndexIdGeneratorBatchKey {
 			table_root: TableRoot::new(ns, db, tb),
 			_c: b'!',
@@ -59,7 +61,11 @@ impl<'a> IndexIdGeneratorBatchKey<'a> {
 	///
 	/// # Returns
 	/// A range of encoded keys covering all possible batch allocations
-	pub fn range(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> anyhow::Result<Range<Vec<u8>>> {
+	pub fn range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+	) -> anyhow::Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, db, tb, i64::MIN).encode_key()?;
 		let end = Self::new(ns, db, tb, i64::MAX).encode_key()?;
 		Ok(beg..end)
@@ -73,21 +79,16 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = IndexIdGeneratorBatchKey::new(
-			NamespaceId(123),
-			DatabaseId(234),
-			"testtb",
-			15
-		);
+		let tb = TableName::from("testtb");
+		let val = IndexIdGeneratorBatchKey::new(NamespaceId(123), DatabaseId(234), &tb, 15);
 		let enc = IndexIdGeneratorBatchKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\x80\0\0\0\0\0\0\x0F");
 	}
 
 	#[test]
 	fn range() {
-		let r =
-			IndexIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234), "testtb").unwrap();
+		let tb = TableName::from("testtb");
+		let r = IndexIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234), &tb).unwrap();
 		assert_eq!(r.start, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\0\0\0\0\0\0\0\0");
 		assert_eq!(r.end, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}

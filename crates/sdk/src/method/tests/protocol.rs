@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicI64;
 
 use tokio::sync::watch;
 use url::Url;
@@ -11,7 +10,7 @@ use crate::conn::Router;
 use crate::method::BoxFuture;
 use crate::opt::endpoint::into_endpoint;
 use crate::opt::{Endpoint, IntoEndpoint};
-use crate::{Connect, ExtraFeatures, OnceLockExt, Result, Surreal, conn};
+use crate::{Connect, ExtraFeatures, OnceLockExt, Result, SessionClone, Surreal, conn};
 
 #[derive(Debug)]
 pub struct Test;
@@ -45,7 +44,12 @@ impl Surreal<Client> {
 impl crate::Connection for Client {}
 
 impl conn::Sealed for Client {
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	#[allow(private_interfaces)]
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = async_channel::bounded(capacity);
 			let mut features = HashSet::new();
@@ -54,10 +58,10 @@ impl conn::Sealed for Client {
 				features,
 				sender: route_tx,
 				config: address.config,
-				last_id: AtomicI64::new(0),
 			};
 			server::mock(route_rx);
-			Ok((OnceLock::with_value(router), watch::channel(None)).into())
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
+			Ok((OnceLock::with_value(router), watch::channel(None), session_clone).into())
 		})
 	}
 }

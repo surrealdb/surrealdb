@@ -12,7 +12,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document, IgnoreError};
+use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::statements::relate::RelateThrough;
@@ -22,7 +22,7 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -31,33 +31,34 @@ pub(crate) enum Iterable {
 	/// Any [Value] which does not exist in storage. This
 	/// could be the result of a query, an arbitrary
 	/// SurrealQL value, object, or array of values.
-	Value(Value),
+	Value(NsDbCtx, Value),
 	/// An iterable which does not actually fetch the record
 	/// data from storage. This is used in CREATE statements
 	/// where we attempt to write data without first checking
 	/// if the record exists, throwing an error on failure.
-	Defer(RecordId),
+	Defer(NsDbTbCtx, RecordId),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	Yield(String),
+	GenerateRecordId(NsDbTbCtx, TableName),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
-	Thing(RecordId),
+	RecordId(NsDbTbCtx, RecordId),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
 	Lookup {
+		doc_ctx: NsDbTbCtx,
 		kind: LookupKind,
 		from: RecordId,
 		what: Vec<ComputedLookupSubject>,
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(String, RecordStrategy, ScanDirection),
+	Table(NsDbTbCtx, TableName, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(String, RecordIdKeyRange, RecordStrategy, ScanDirection),
+	Range(NsDbTbCtx, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -68,7 +69,7 @@ pub(crate) enum Iterable {
 	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
 	///   there_is: 'no id set' }`
 	/// - The value for the record
-	Mergeable(String, Option<RecordIdKey>, Value),
+	Mergeable(NsDbTbCtx, TableName, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -78,22 +79,33 @@ pub(crate) enum Iterable {
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
 	/// relation
-	Relatable(RecordId, RelateThrough, RecordId, Option<Value>),
+	Relatable(NsDbTbCtx, RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(String, IteratorRef, RecordStrategy),
+	Index(NsDbTbCtx, TableName, IteratorRef, RecordStrategy),
 }
 
+/// Operable
 #[derive(Debug)]
 pub(crate) enum Operable {
+	/// CREATE person CONTENT { name: 'John Doe' }
 	Value(Arc<Record>),
+	/// Record is the record we're operating on (eg. )
+	/// Second argument is `ON DUPLICATE KEY` value.
 	Insert(Arc<Record>, Arc<Value>),
+	/// 1. RecordId
+	/// 2. Record
+	/// 3. Relation RecordId
+	/// 4. For update operations if it doesn't exist (TODO: This may be true, maybe not)
 	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
+
 	Count(usize),
 }
 
+/// Workable is used in the Document to get additional information specific to an insert statement
+/// or relate statement.
 #[derive(Debug)]
 pub(crate) enum Workable {
 	Normal,
@@ -102,11 +114,13 @@ pub(crate) enum Workable {
 }
 
 #[derive(Debug)]
-pub(crate) struct Processed {
+pub(crate) struct Processable {
+	/// The document context for this document
+	pub(crate) doc_ctx: DocumentContext,
 	/// Whether this document only fetched keys or just count
-	pub(crate) rs: RecordStrategy,
+	pub(crate) record_strategy: RecordStrategy,
 	/// Whether this document needs to have an ID generated
-	pub(crate) generate: Option<String>,
+	pub(crate) generate: Option<TableName>,
 	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
@@ -118,7 +132,7 @@ pub(crate) struct Processed {
 #[derive(Default)]
 pub(crate) struct Iterator {
 	/// Iterator status
-	run: Canceller,
+	canceller: Canceller,
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
@@ -145,7 +159,7 @@ pub(crate) struct Iterator {
 impl Clone for Iterator {
 	fn clone(&self) -> Self {
 		Self {
-			run: self.run.clone(),
+			canceller: self.canceller.clone(),
 			limit: self.limit,
 			start: self.start,
 			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
@@ -180,25 +194,34 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
+		doc_ctx: &NsDbCtx,
 		val: &Expr,
 	) -> Result<()> {
 		// Match the values
 		match val {
-			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
+			Expr::Mock(mock) => self.prepare_mock(ctx, opt, stm_ctx, doc_ctx, mock).await?,
+			Expr::Table(table_name) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
+			}
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
+						.await;
 				}
 
 				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
+						.await;
 				};
 
 				let Part::Lookup(ref lookup) = x[1] else {
-					return self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, val).await;
+					return self
+						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
+						.await;
 				};
 
 				if lookup.alias.is_none()
@@ -216,26 +239,35 @@ impl Iterator {
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
 						Err(_) => bail!(Error::InvalidControlFlow),
-						//
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
 						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
 					// idiom matches the Edges pattern.
-					self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what)?;
+					self.prepare_lookup(
+						ctx,
+						opt,
+						stm_ctx.stm,
+						doc_ctx,
+						from,
+						lookup.kind.clone(),
+						what,
+					)
+					.await?;
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
-				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, array).await?
+				self.prepare_array(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, array).await?
 			}
-			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, x).await?,
+			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, x).await?,
 		};
 		// All ingested ok
 		Ok(())
 	}
 
 	/// Prepares a value for processing
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_table(
 		&mut self,
 		ctx: &FrozenContext,
@@ -243,62 +275,89 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		table: &str,
+		doc_ctx: &NsDbCtx,
+		table: &TableName,
 	) -> Result<()> {
+		let tb = if stm_ctx.stm.requires_table_existence() {
+			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table).await?
+		} else {
+			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table).await?
+		};
+
+		let fields = ctx
+			.tx()
+			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
+			.await?;
+		let doc_ctx = NsDbTbCtx {
+			ns: Arc::clone(&doc_ctx.ns),
+			db: Arc::clone(&doc_ctx.db),
+			tb,
+			fields,
+		};
+
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(stm_ctx, table).await?;
-		if matches!(p, GrantedPermission::None) {
+		let granted_perms = planner.check_table_permission(stm_ctx, table).await?;
+		if matches!(granted_perms, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
 		if stm_ctx.stm.is_deferable() {
-			ctx.get_db(opt).await?;
-			self.ingest(Iterable::Yield(table.to_string()));
-		} else {
-			if stm_ctx.stm.is_guaranteed() {
-				self.guaranteed = Some(Iterable::Yield(table.to_string()));
-			}
-
-			let db = ctx.get_db(opt).await?;
-
-			// For read-only statements (like SELECT, UPDATE, DELETE), check if the table exists
-			// If it doesn't exist in strict mode, throw an error rather than returning empty
-			// results In non-strict mode, the table will be created if needed, or queries return
-			// empty results UPSERT statements are allowed to create tables even in non-deferable
-			// mode
-			if stm_ctx.stm.requires_table_existence()
-				&& ctx.tx().get_tb(db.namespace_id, db.database_id, table).await?.is_none()
-				&& db.strict
-			{
-				bail!(Error::TbNotFound {
-					name: table.to_string(),
-				});
-			}
-
-			planner.add_iterables(&db, stk, stm_ctx, table.to_string(), p, self).await?;
+			self.ingest(Iterable::GenerateRecordId(doc_ctx, table.clone()));
+			return Ok(());
 		}
-		// All ingested ok
+
+		if stm_ctx.stm.is_guaranteed() {
+			self.guaranteed = Some(Iterable::GenerateRecordId(doc_ctx.clone(), table.clone()));
+		}
+
+		planner.add_iterables(stk, stm_ctx, doc_ctx, table, granted_perms, self).await?;
+
 		Ok(())
 	}
 
-	/// Prepares a value for processing
-	pub(crate) async fn prepare_thing(
+	/// Prepares a RecordId for processing
+	pub(crate) async fn prepare_record_id(
 		&mut self,
+		ctx: &FrozenContext,
+		opt: &Options,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
-		v: RecordId,
+		stm_ctx: &StatementContext<'_>,
+		doc_ctx: &NsDbCtx,
+		rid: RecordId,
 	) -> Result<()> {
-		if v.key.is_range() {
-			return self.prepare_range(planner, ctx, v).await;
+		let tb = if stm_ctx.stm.requires_table_existence() {
+			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
+		} else {
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
+				.await?
+		};
+		let fields = ctx
+			.tx()
+			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
+			.await?;
+
+		let doc_ctx = NsDbTbCtx {
+			ns: Arc::clone(&doc_ctx.ns),
+			db: Arc::clone(&doc_ctx.db),
+			tb,
+			fields,
+		};
+
+		if rid.key.is_range() {
+			return self.prepare_range(planner, stm_ctx, doc_ctx, rid).await;
 		}
 		// We add the iterable only if we have a permission
-		if matches!(planner.check_table_permission(ctx, &v.table).await?, GrantedPermission::None) {
+		if matches!(
+			planner.check_table_permission(stm_ctx, &rid.table).await?,
+			GrantedPermission::None
+		) {
 			return Ok(());
 		}
 		// Add the record to the iterator
-		match ctx.stm.is_deferable() {
-			true => self.ingest(Iterable::Defer(v)),
-			false => self.ingest(Iterable::Thing(v)),
+		match stm_ctx.stm.is_deferable() {
+			true => self.ingest(Iterable::Defer(doc_ctx, rid)),
+			false => self.ingest(Iterable::RecordId(doc_ctx, rid)),
 		}
 		// All ingested ok
 		Ok(())
@@ -307,19 +366,49 @@ impl Iterator {
 	/// Prepares a value for processing
 	pub(crate) async fn prepare_mock(
 		&mut self,
-		ctx: &StatementContext<'_>,
-		v: &Mock,
+		ctx: &FrozenContext,
+		opt: &Options,
+		stm_ctx: &StatementContext<'_>,
+		doc_ctx: &NsDbCtx,
+		mock: &Mock,
 	) -> Result<()> {
-		ensure!(!ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+
+		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
+		let tb = if stm_ctx.stm.is_deferable() {
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, mock.table())
+				.await?
+		} else {
+			ctx.tx()
+				.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table())
+				.await?
+		};
+		let fields = ctx
+			.tx()
+			.all_tb_fields(
+				doc_ctx.ns.namespace_id,
+				doc_ctx.db.database_id,
+				mock.table(),
+				opt.version,
+			)
+			.await?;
+		let doc_ctx = NsDbTbCtx {
+			ns: Arc::clone(&doc_ctx.ns),
+			db: Arc::clone(&doc_ctx.db),
+			tb,
+			fields,
+		};
+
 		// Add the records to the iterator
-		for (count, v) in v.clone().into_iter().enumerate() {
-			if ctx.stm.is_deferable() {
-				self.ingest(Iterable::Defer(v))
+		for (count, rid) in mock.clone().into_iter().enumerate() {
+			if stm_ctx.stm.is_deferable() {
+				self.ingest(Iterable::Defer(doc_ctx.clone(), rid))
 			} else {
-				self.ingest(Iterable::Thing(v))
+				self.ingest(Iterable::RecordId(doc_ctx.clone(), rid))
 			}
 			// Check if the context is finished
-			if ctx.ctx.is_done(Some(count)).await? {
+			if stm_ctx.ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -328,9 +417,13 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_lookup(
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) async fn prepare_lookup(
 		&mut self,
+		ctx: &FrozenContext,
+		opt: &Options,
 		stm: &Statement<'_>,
+		doc_ctx: &NsDbCtx,
 		from: RecordId,
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,
@@ -348,17 +441,41 @@ impl Iterator {
 				}),
 			])
 			.to_sql();
+
 			bail!(Error::InvalidStatementTarget {
 				value,
 			})
 		}
-		let x = Iterable::Lookup {
+
+		let txn = ctx.tx();
+		let tb = if stm.requires_table_existence() {
+			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?
+		} else {
+			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?
+		};
+		let fields = txn
+			.all_tb_fields(
+				doc_ctx.ns.namespace_id,
+				doc_ctx.db.database_id,
+				&from.table,
+				opt.version,
+			)
+			.await?;
+
+		let doc_ctx = NsDbTbCtx {
+			ns: Arc::clone(&doc_ctx.ns),
+			db: Arc::clone(&doc_ctx.db),
+			tb,
+			fields,
+		};
+
+		// Add the record to the iterator
+		self.ingest(Iterable::Lookup {
+			doc_ctx,
 			from,
 			kind,
 			what,
-		};
-		// Add the record to the iterator
-		self.ingest(x);
+		});
 		// All ingested ok
 		Ok(())
 	}
@@ -367,27 +484,28 @@ impl Iterator {
 	pub(crate) async fn prepare_range(
 		&mut self,
 		planner: &mut QueryPlanner,
-		ctx: &StatementContext<'_>,
-		v: RecordId,
+		stm_ctx: &StatementContext<'_>,
+		doc_ctx: NsDbTbCtx,
+		rid: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(ctx, &v.table).await?;
+		let p = planner.check_table_permission(stm_ctx, &rid.table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Check if this is a create statement
 		ensure!(
-			!ctx.stm.is_create(),
+			!stm_ctx.stm.is_create(),
 			Error::InvalidStatementTarget {
-				value: v.to_sql(),
+				value: rid.to_sql(),
 			}
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
-		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction();
+		let rs = stm_ctx.check_record_strategy(false, p)?;
+		let sc = stm_ctx.check_scan_direction();
 		// Add the record to the iterator
-		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
-			self.ingest(Iterable::Range(tb, *v, rs, sc));
+		if let (tb, RecordIdKey::Range(v)) = (rid.table, rid.key) {
+			self.ingest(Iterable::Range(doc_ctx, tb, *v, rs, sc));
 		}
 		// All ingested ok
 		Ok(())
@@ -402,20 +520,40 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
+		doc_ctx: &NsDbCtx,
 		expr: &Expr,
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
-			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-			Value::Array(a) => {
-				for v in a {
+			Value::Table(table_name) => {
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table_name).await?
+			}
+			Value::RecordId(rid) => {
+				self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, rid).await?
+			}
+			Value::Array(array) => {
+				for v in array {
 					match v {
-						Value::Table(v) => {
-							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?
+						Value::Table(table) => {
+							self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table)
+								.await?
 						}
-						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+						Value::RecordId(rid) => {
+							self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, rid).await?
+						}
+						v if stm_ctx.stm.is_select() => {
+							self.ingest(Iterable::Value(doc_ctx.clone(), v))
+						}
+						Value::Object(o) => {
+							if let Some(id) = o.rid() {
+								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id)
+									.await?;
+							} else {
+								bail!(Error::InvalidStatementTarget {
+									value: Value::Object(o).to_sql(),
+								})
+							}
+						}
 						v => {
 							bail!(Error::InvalidStatementTarget {
 								value: v.to_sql(),
@@ -424,7 +562,16 @@ impl Iterator {
 					}
 				}
 			}
-			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(doc_ctx.clone(), v)),
+			Value::Object(o) => {
+				if let Some(id) = o.rid() {
+					self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
+				} else {
+					bail!(Error::InvalidStatementTarget {
+						value: o.to_sql(),
+					})
+				}
+			}
 			v => {
 				bail!(Error::InvalidStatementTarget {
 					value: v.to_sql(),
@@ -444,31 +591,34 @@ impl Iterator {
 		doc: Option<&CursorDoc>,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
+		doc_ctx: &NsDbCtx,
 		v: &[Expr],
 	) -> Result<()> {
 		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
+				Expr::Mock(v) => self.prepare_mock(ctx, opt, stm_ctx, doc_ctx, v).await?,
+				Expr::Table(table_name) => {
+					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
+				}
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
 							.await;
 					}
 
 					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
 							.await;
 					};
 
 					let Part::Lookup(ref lookup) = x[0] else {
 						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v)
+							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
 							.await;
 					};
 
@@ -494,12 +644,24 @@ impl Iterator {
 							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
 						// idiom matches the Edges pattern.
-						return self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what);
+						return self
+							.prepare_lookup(
+								ctx,
+								opt,
+								stm_ctx.stm,
+								doc_ctx,
+								from,
+								lookup.kind.clone(),
+								what,
+							)
+							.await;
 					}
 
-					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?
+					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
 				}
-				v => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, v).await?,
+				v => {
+					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
+				}
 			}
 		}
 		// All ingested ok
@@ -519,7 +681,7 @@ impl Iterator {
 		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = Context::new(ctx);
-		self.run = cancel_ctx.add_cancel();
+		self.canceller = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
@@ -683,7 +845,7 @@ impl Iterator {
 		// START must apply to the filtered set. Therefore, disallow with WHERE
 		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
+			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
 						if exe.is_iterator_expression(*irf, &cond.0) {
@@ -707,7 +869,7 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
-		if let Some(Iterable::Index(_, irf, _)) = self.entries.first()
+		if let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
 			&& qp.is_order(irf)
 		{
@@ -743,7 +905,7 @@ impl Iterator {
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
 		if self.entries.len() == 1
-			&& let Some(Iterable::Index(_, irf, _)) = self.entries.first()
+			&& let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
 			&& qp.is_order(irf)
 		{
@@ -924,15 +1086,16 @@ impl Iterator {
 	}
 
 	/// Process a new record Thing and Value
+	#[instrument(level = "trace", name = "Iterator::process", skip_all)]
 	pub async fn process(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pro: Processed,
+		pro: Processable,
 	) -> Result<()> {
-		let rs = pro.rs;
+		let rs = pro.record_strategy;
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
@@ -941,12 +1104,13 @@ impl Iterator {
 		Ok(())
 	}
 
+	#[instrument(level = "trace", name = "Iterator::extract_value", skip_all)]
 	async fn extract_value(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pro: Processed,
+		pro: Processable,
 	) -> Result<Value, IgnoreError> {
 		// Check if this is a count all
 		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
@@ -954,8 +1118,8 @@ impl Iterator {
 			if let Operable::Count(count) = pro.val {
 				return Ok(count.into());
 			}
-			if matches!(pro.rs, RecordStrategy::KeysOnly) {
-				return Ok(Value::from(map! { "count".to_string() => Value::from(1) }));
+			if matches!(pro.record_strategy, RecordStrategy::KeysOnly) {
+				return Ok(map! { "count".to_string() => Value::from(1) }.into());
 			}
 		}
 		// Otherwise, we process the document
@@ -980,13 +1144,13 @@ impl Iterator {
 			}
 			Err(IgnoreError::Error(e)) => {
 				self.error = Some(e);
-				self.run.cancel();
+				self.canceller.cancel();
 				return;
 			}
 			Ok(v) => {
 				if let Err(e) = self.results.push(stk, ctx, opt, rs, v).await {
 					self.error = Some(e);
-					self.run.cancel();
+					self.canceller.cancel();
 					return;
 				}
 			}
@@ -995,10 +1159,10 @@ impl Iterator {
 		// We use equality here because results are appended one-by-one; once the
 		// threshold is reached, further work would be wasted as START/LIMIT
 		// post-processing (if any) already has enough input to produce the final output.
-		if let Some(l) = self.cancel_threshold
-			&& self.results.len() == l
+		if let Some(cancel_threshold) = self.cancel_threshold
+			&& self.results.len() == cancel_threshold
 		{
-			self.run.cancel()
+			self.canceller.cancel()
 		}
 	}
 }

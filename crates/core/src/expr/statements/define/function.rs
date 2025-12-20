@@ -26,6 +26,7 @@ pub(crate) struct DefineFunctionStatement {
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineFunctionStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

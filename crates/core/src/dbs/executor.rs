@@ -310,7 +310,9 @@ impl Executor {
 		// Catch cancellation during running.
 		match self.ctx.done(true)? {
 			None => res,
-			Some(Reason::Timedout) => Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout))),
+			Some(Reason::Timedout(d)) => {
+				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout(d))))
+			}
 			Some(Reason::Canceled) => {
 				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)))
 			}
@@ -327,8 +329,8 @@ impl Executor {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
-			Some(Reason::Timedout) => {
-				bail!(Error::QueryTimedout);
+			Some(Reason::Timedout(d)) => {
+				bail!(Error::QueryTimedout(d));
 			}
 			Some(Reason::Canceled) => {
 				bail!(Error::QueryCancelled);
@@ -471,7 +473,9 @@ impl Executor {
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout => DbResultError::QueryTimedout,
+							Reason::Timedout(d) => {
+								DbResultError::QueryTimedout(format!("Timed out: {d}"))
+							}
 							Reason::Canceled => DbResultError::QueryCancelled,
 						}),
 						query_type: QueryType::Other,

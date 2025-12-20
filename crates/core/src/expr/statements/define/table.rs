@@ -9,14 +9,14 @@ use super::DefineKind;
 use crate::catalog::aggregation::{
 	self, AggregateFields, Aggregation, AggregationAnalysis, AggregationStat,
 };
-use crate::catalog::providers::TableProvider;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record, RecordType,
 	TableDefinition, TableType, ViewDefinition,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{self, CursorDoc, Document};
+use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
@@ -29,7 +29,7 @@ use crate::expr::{
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
-use crate::val::{Array, Number, RecordId, RecordIdKey, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineTableStatement {
@@ -63,6 +63,7 @@ impl Default for DefineTableStatement {
 }
 
 impl DefineTableStatement {
+	#[instrument(level = "trace", name = "DefineTableStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -74,20 +75,25 @@ impl DefineTableStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 
 		// Process the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
+		let name =
+			TableName::new(expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?);
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let ns = txn.expect_ns_by_name(ns_name).await?;
+		let db = txn.expect_db_by_name(ns_name, db_name).await?;
+
 		// Check if the definition exists
-		let table_id = if let Some(tb) = txn.get_tb(ns, db, &name).await? {
+		let table_id = if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::TbAlreadyExists {
-							name: name.clone(),
+							name: name.clone().into_string(),
 						});
 					}
 				}
@@ -97,7 +103,7 @@ impl DefineTableStatement {
 
 			tb.table_id
 		} else {
-			ctx.try_get_sequences()?.next_table_id(Some(ctx), ns, db).await?
+			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?
 		};
 
 		let comment = stk
@@ -109,8 +115,8 @@ impl DefineTableStatement {
 		// Process the statement
 		let cache_ts = Uuid::now_v7();
 		let mut tb_def = TableDefinition {
-			namespace_id: ns,
-			database_id: db,
+			namespace_id: ns.namespace_id,
+			database_id: db.database_id,
 			table_id,
 			name: name.clone(),
 			drop: self.drop,
@@ -128,26 +134,35 @@ impl DefineTableStatement {
 		};
 
 		// Add table relational fields
-		Self::add_in_out_fields(&txn, ns, db, &mut tb_def).await?;
+		Self::add_in_out_fields(&txn, ns.namespace_id, db.database_id, &mut tb_def).await?;
 
 		// Record definition change
 		if self.changefeed.is_some() {
-			txn.changefeed_buffer_table_change(ns, db, &name, &tb_def);
+			txn.changefeed_buffer_table_change(ns.namespace_id, db.database_id, &name, &tb_def);
 		}
 
 		// Update the catalog
-		txn.put_tb(ns_name, db_name, &tb_def).await?;
+		let tb = txn.put_tb(ns_name, db_name, &tb_def).await?;
+		let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &name, opt.version).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &name);
+			cache.clear_tb(ns.namespace_id, db.database_id, &name);
 		}
 		// Clear the cache
 		txn.clear_cache();
+
+		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			ns: Arc::clone(&ns),
+			db: Arc::clone(&db),
+			tb,
+			fields,
+		});
+
 		// Check if table is a view
 		if let Some(view) = &tb_def.view {
 			// Remove the table data
-			let key = crate::key::table::all::new(ns, db, &name);
+			let key = crate::key::table::all::new(ns.namespace_id, db.database_id, &name);
 			txn.delp(&key).await?;
 
 			let (ViewDefinition::Materialized {
@@ -166,10 +181,11 @@ impl DefineTableStatement {
 			// Process each foreign table
 			for ft in tables.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(ns, db, ft, &name);
+				let key = crate::key::table::ft::new(ns.namespace_id, db.database_id, ft, &name);
 				txn.set(&key, &tb_def, None).await?;
 				// Refresh the table cache
-				let Some(foreign_tb) = txn.get_tb(ns, db, ft).await? else {
+				let Some(foreign_tb) = txn.get_tb(ns.namespace_id, db.database_id, ft).await?
+				else {
 					bail!(Error::TbNotFound {
 						name: ft.clone(),
 					});
@@ -187,17 +203,17 @@ impl DefineTableStatement {
 
 				// Clear the cache
 				if let Some(cache) = ctx.get_cache() {
-					cache.clear_tb(ns, db, ft);
+					cache.clear_tb(ns.namespace_id, db.database_id, ft);
 				}
 				// Clear the cache
 				txn.clear_cache();
 			}
 
-			Self::initialize_view(stk, ctx, opt, &name, view).await?;
+			Self::initialize_view(stk, ctx, opt, &doc_ctx, &name, view).await?;
 		}
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &name);
+			cache.clear_tb(ns.namespace_id, db.database_id, &name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -209,7 +225,8 @@ impl DefineTableStatement {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		doc_ctx: &DocumentContext,
+		view_table_name: &TableName,
 		view: &ViewDefinition,
 	) -> Result<()> {
 		match view {
@@ -225,6 +242,7 @@ impl DefineTableStatement {
 					stk,
 					ctx,
 					opt,
+					doc_ctx,
 					view_table_name,
 					fields,
 					tables,
@@ -242,6 +260,7 @@ impl DefineTableStatement {
 					stk,
 					ctx,
 					opt,
+					doc_ctx,
 					view_table_name,
 					analysis,
 					condition.as_ref(),
@@ -253,13 +272,15 @@ impl DefineTableStatement {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn initialize_materialized_view(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		doc_ctx: &DocumentContext,
+		view_table_name: &TableName,
 		fields: &Fields,
-		tables: &[String],
+		tables: &[TableName],
 		condition: Option<&Expr>,
 	) -> Result<()> {
 		let select = SelectStatement {
@@ -289,10 +310,25 @@ impl DefineTableStatement {
 			let record = Arc::new(Record::new(Value::Object(o).into()));
 			tx.put(&key, &record, None).await?;
 
+			let ns = doc_ctx.ns();
+			let db = doc_ctx.db();
+			let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+			let fields = ctx
+				.tx()
+				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
+				.await?;
+			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+				ns: Arc::clone(ns),
+				db: Arc::clone(db),
+				tb,
+				fields,
+			});
+
 			Document::run_triggers(
 				stk,
 				ctx,
 				opt,
+				doc_ctx.clone(),
 				id.into(),
 				doc::Action::Create,
 				None,
@@ -306,14 +342,16 @@ impl DefineTableStatement {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn initialize_aggregate_view(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		view_table_name: &str,
+		doc_ctx: &DocumentContext,
+		view_table_name: &TableName,
 		analysis: &AggregationAnalysis,
 		condition: Option<&Expr>,
-		tables: &[String],
+		tables: &[TableName],
 	) -> Result<()> {
 		// To initialize the materialized aggregate view we not only need to initialize records in
 		// the view but also find the AggregationStat values.
@@ -685,11 +723,20 @@ impl DefineTableStatement {
 			tx.put_record(ns, db, view_table_name, &key, record.clone(), None).await?;
 
 			let id = Arc::new(RecordId {
-				table: view_table_name.to_owned(),
+				table: view_table_name.clone(),
 				key,
 			});
-			Document::run_triggers(stk, ctx, opt, id, doc::Action::Create, None, Some(record))
-				.await?;
+			Document::run_triggers(
+				stk,
+				ctx,
+				opt,
+				doc_ctx.clone(),
+				id,
+				doc::Action::Create,
+				None,
+				Some(record),
+			)
+			.await?;
 
 			yield_now!();
 		}
@@ -716,7 +763,7 @@ impl DefineTableStatement {
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
-						what: tb.name.clone(),
+						table: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},
@@ -732,7 +779,7 @@ impl DefineTableStatement {
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
-						what: tb.name.clone(),
+						table: tb.name.clone(),
 						field_kind: Some(val),
 						..Default::default()
 					},

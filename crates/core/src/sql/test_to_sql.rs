@@ -44,7 +44,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
-#[case::value_record_id(Value::RecordId(RecordId::new("table".to_string(), "123".to_string())), "table:`123`", "table:`123`")]
+#[case::value_record_id(Value::RecordId(RecordId::new("table".into(), "123".to_string())), "table:`123`", "table:`123`")]
 #[case::value_regex(Value::Regex("hello".parse().unwrap()), "/hello/", "/hello/")]
 // Expression: Literals
 #[case::expr_lit_none(Expr::Literal(Literal::None), "NONE", "NONE")]
@@ -161,7 +161,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Upsert
 #[case::expr_upsert(Expr::Upsert(Box::new(UpsertStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, data: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), parallel: false, explain: None })), "UPSERT user", "UPSERT user")]
 // Expression: Alter
-#[case::expr_alter(Expr::Alter(Box::new(AlterStatement::Table(AlterTableStatement { name: "user".to_string(), if_exists: false, schemafull: AlterKind::None, permissions: None, changefeed: AlterKind::None, comment: AlterKind::None, kind: None }))), "ALTER TABLE user", "ALTER TABLE user")]
+#[case::expr_alter(Expr::Alter(Box::new(AlterStatement::Table(AlterTableStatement { name: "user".to_string(), if_exists: false, schemafull: AlterKind::None, permissions: None, changefeed: AlterKind::None, comment: AlterKind::None, kind: None, compact: false }))), "ALTER TABLE user", "ALTER TABLE user")]
 // Expression: Info
 #[case::expr_info(
 	Expr::Info(Box::new(InfoStatement::Root(false))),

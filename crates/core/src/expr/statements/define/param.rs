@@ -23,6 +23,7 @@ pub(crate) struct DefineParamStatement {
 
 impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineParamStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
