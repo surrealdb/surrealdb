@@ -147,9 +147,7 @@ jobs:
       - name: Bump version and commit
         if: ${{ inputs.release-type == 'versioned' }}
         id: bump
-        run: |
-          release_branch=$(.github/scripts/bump-version.sh "${{ inputs.release-version }}")
-          echo "$release_branch" >> $GITHUB_OUTPUT
+        run: .github/scripts/bump-version.sh "${{ inputs.release-version }}" "$GITHUB_OUTPUT"
 
       - name: Create long-lived patch branch
         if: ${{ inputs.release-type == 'versioned' }}
