@@ -46,7 +46,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::{Node, Timestamp};
-use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::dbs::{Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -1552,7 +1552,7 @@ impl Datastore {
 		ctx.set_transaction(tx);
 
 		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
+		ComputeExecutor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					DbResultError::InvalidAuth("The session has expired".to_string())
@@ -1667,7 +1667,7 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
+		ComputeExecutor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -1787,7 +1787,7 @@ impl Datastore {
 		}
 
 		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
+		ComputeExecutor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					DbResultError::InvalidAuth("The session has expired".to_string())
