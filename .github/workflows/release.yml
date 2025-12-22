@@ -1,4 +1,14 @@
-# Use this workflow to trigger releases (stable, beta, nightly)
+# SurrealDB Release Workflow
+#
+# This workflow handles both nightly and versioned releases with full idempotency.
+# For comprehensive documentation, see doc/RELEASING.md
+#
+# Quick reference:
+# - Nightly: Automated daily builds from main (scheduled at midnight UTC)
+# - Versioned: Pre-releases (alpha/beta/rc), stable releases (X.Y.0), and patches (X.Y.Z)
+# - Always dry-run first (publish: false) before publishing
+# - Workflow is fully idempotent - safe to retry on failure
+#
 # Nightly releases are triggered automatically via schedule
 
 name: Release
