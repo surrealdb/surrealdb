@@ -53,18 +53,25 @@ git commit -m "chore: bump version to ${MAIN_VERSION}"
 
 # Create a branch for the PR
 PR_BRANCH="chore/bump-main-to-v${MAIN_VERSION}"
+
+# Delete PR branch if it exists (idempotency)
+if git ls-remote --exit-code --heads origin "${PR_BRANCH}" >/dev/null 2>&1; then
+	echo "PR branch ${PR_BRANCH} already exists, deleting it"
+	git push origin --delete "${PR_BRANCH}" || true
+fi
+if git show-ref --verify --quiet "refs/heads/${PR_BRANCH}"; then
+	git branch -D "${PR_BRANCH}"
+fi
+
 git checkout -b "${PR_BRANCH}"
 
 # Only push and create PR if publishing
 if [[ "$PUBLISH" == "true" ]]; then
 	git push origin "${PR_BRANCH}"
 
-	# Create PR
-	gh pr create \
-		--base main \
-		--head "${PR_BRANCH}" \
-		--title "chore: bump version to v${MAIN_VERSION}" \
-		--body "Automated version bump to v${MAIN_VERSION} following release v${VERSION}.
+	# Define PR title and body (avoid duplication)
+	PR_TITLE="Bump version to ${MAIN_VERSION}"
+	PR_BODY="Automated version bump to v${MAIN_VERSION} following release v${VERSION}.
 
 **This PR updates the main branch version for the next development cycle.**
 
@@ -73,7 +80,24 @@ if [[ "$PUBLISH" == "true" ]]; then
 
 Review and merge this PR to prepare main for the next phase of development."
 
-	echo "Created PR to update main branch to ${MAIN_VERSION}"
+	# Check if PR already exists
+	existing_pr=$(gh pr list --head "${PR_BRANCH}" --base main --json number -q '.[0].number' 2>/dev/null || echo "")
+
+	if [[ -n "$existing_pr" ]]; then
+		echo "PR #${existing_pr} already exists, updating it"
+		gh pr edit "${existing_pr}" \
+			--title "${PR_TITLE}" \
+			--body "${PR_BODY}"
+	else
+		# Create PR
+		gh pr create \
+			--base main \
+			--head "${PR_BRANCH}" \
+			--title "${PR_TITLE}" \
+			--body "${PR_BODY}"
+
+		echo "Created PR to update main branch to ${MAIN_VERSION}"
+	fi
 else
 	echo "[Dry-run] Would create PR to update main branch to ${MAIN_VERSION}"
 fi

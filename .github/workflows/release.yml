@@ -532,4 +532,5 @@ jobs:
     steps:
       - name: Delete release branch
         run: |
-          git push origin --delete "${{ needs.bump-version.outputs.release-branch }}"
+          # Idempotent: ignore if branch doesn't exist
+          git push origin --delete "${{ needs.bump-version.outputs.release-branch }}" || true

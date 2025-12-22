@@ -16,6 +16,15 @@ RELEASE_BRANCH="release/v${VERSION}"
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"
 
+# Delete release branch if it exists (idempotency)
+if git ls-remote --exit-code --heads origin "${RELEASE_BRANCH}" >/dev/null 2>&1; then
+	echo "Release branch ${RELEASE_BRANCH} already exists, deleting it"
+	git push origin --delete "${RELEASE_BRANCH}" || true
+fi
+if git show-ref --verify --quiet "refs/heads/${RELEASE_BRANCH}"; then
+	git branch -D "${RELEASE_BRANCH}"
+fi
+
 # Create release branch
 git checkout -b "${RELEASE_BRANCH}"
 

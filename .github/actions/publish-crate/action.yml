@@ -52,7 +52,35 @@ runs:
           cargo publish --workspace --dry-run
         else
           # Real publish - use release-plz for retry logic
-          release-plz release --config /tmp/release-plz.toml
+          # If all crates are already published, release-plz will fail
+          # We should treat this as success (idempotency)
+          if ! release-plz release --config /tmp/release-plz.toml; then
+            # Check if the failure was because everything is already published
+            echo "release-plz failed, checking if all crates are already published..."
+
+            # Get all workspace crates
+            all_published=true
+            for crate in $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[].name'); do
+              version=$(cargo metadata --format-version 1 --no-deps | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+              echo "Checking if $crate@$version is published..."
+
+              if ! cargo search "$crate" --limit 1 | grep -q "^$crate = \"$version\""; then
+                echo "  $crate@$version is NOT published"
+                all_published=false
+                break
+              else
+                echo "  $crate@$version is already published"
+              fi
+            done
+
+            if [[ "$all_published" == "true" ]]; then
+              echo "All crates are already published. Treating as success (idempotent)."
+              exit 0
+            else
+              echo "Some crates failed to publish. Failing."
+              exit 1
+            fi
+          fi
         fi
 
 

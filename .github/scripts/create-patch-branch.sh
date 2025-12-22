@@ -20,6 +20,15 @@ if [[ "$patch" == "0" ]] && [[ ! "$VERSION" =~ - ]]; then
 	PATCH_BRANCH="release/${major}.${minor}"
 	echo "Stable x.y.0 release detected: creating long-lived patch branch ${PATCH_BRANCH}"
 
+	# Delete patch branch if it exists (idempotency)
+	if git ls-remote --exit-code --heads origin "${PATCH_BRANCH}" >/dev/null 2>&1; then
+		echo "Patch branch ${PATCH_BRANCH} already exists, deleting it"
+		git push origin --delete "${PATCH_BRANCH}" || true
+	fi
+	if git show-ref --verify --quiet "refs/heads/${PATCH_BRANCH}"; then
+		git branch -D "${PATCH_BRANCH}"
+	fi
+
 	# Create the long-lived branch for future patches
 	git checkout -b "${PATCH_BRANCH}"
 
