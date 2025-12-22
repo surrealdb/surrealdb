@@ -476,6 +476,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true
@@ -488,6 +489,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true
@@ -500,6 +502,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true

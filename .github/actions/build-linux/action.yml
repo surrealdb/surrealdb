@@ -11,6 +11,10 @@ inputs:
   name:
     description: 'The name of output'
     required: true
+  version-override:
+    description: 'Version override (for nightly builds)'
+    required: false
+    default: ''
   build-metadata:
     description: 'Build metadata'
     required: false
@@ -104,6 +108,7 @@ runs:
     - name: Build binary
       shell: bash
       env:
+        SURREAL_BUILD_VERSION: ${{ inputs.version-override }}
         SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
       run: |
         set -x
@@ -138,6 +143,7 @@ runs:
         docker run \
           --rm -t \
           -v $(pwd):/surrealdb \
+          -e SURREAL_BUILD_VERSION=$SURREAL_BUILD_VERSION \
           -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
           -e RUSTFLAGS="${RUSTFLAGS}" \
           -e ORT_STRATEGY=$ORT_STRATEGY \
