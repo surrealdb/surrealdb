@@ -148,137 +148,18 @@ jobs:
         if: ${{ inputs.release-type == 'versioned' }}
         id: bump
         run: |
-          set -e
-
-          VERSION="${{ inputs.release-version }}"
-          RELEASE_BRANCH="release/v${VERSION}"
-
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create release branch
-          git checkout -b "${RELEASE_BRANCH}"
-
-          # Bump version in workspace
-          cargo set-version --workspace "${VERSION}"
-          # Update lock file (only touch workspace crates, not dependencies)
-          cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
-
-          # Commit changes
-          git add -A
-          git commit -m "Prepare v${VERSION} release"
-
-          # Push branch (tag will be created later after successful release)
-          git push origin "${RELEASE_BRANCH}"
-
-          echo "release-branch=${RELEASE_BRANCH}" >> $GITHUB_OUTPUT
+          release_branch=$(.github/scripts/bump-version.sh "${{ inputs.release-version }}")
+          echo "$release_branch" >> $GITHUB_OUTPUT
 
       - name: Create long-lived patch branch
         if: ${{ inputs.release-type == 'versioned' }}
-        run: |
-          VERSION="${{ inputs.release-version }}"
-          PUBLISH="${{ inputs.publish }}"
-
-          # Check if this is a stable x.y.0 release (no pre-release, patch = 0)
-          major=$(echo $VERSION | tr "." "\n" | sed -n 1p)
-          minor=$(echo $VERSION | tr "." "\n" | sed -n 2p)
-          patch=$(echo $VERSION | tr "." "\n" | sed -n 3p)
-
-          # Check if patch part is just "0" (no pre-release suffix like "0-beta")
-          if [[ "$patch" == "0" ]] && [[ ! "$VERSION" =~ - ]]; then
-            PATCH_BRANCH="release/${major}.${minor}"
-            echo "Stable x.y.0 release detected: creating long-lived patch branch ${PATCH_BRANCH}"
-
-            # Create the long-lived branch for future patches
-            git checkout -b "${PATCH_BRANCH}"
-
-            # Only push if publishing
-            if [[ "$PUBLISH" == "true" ]]; then
-              git push origin "${PATCH_BRANCH}"
-              echo "Pushed ${PATCH_BRANCH} for future patch releases (${major}.${minor}.1, ${major}.${minor}.2, etc.)"
-            else
-              echo "[Dry-run] Would push ${PATCH_BRANCH} for future patch releases"
-            fi
-          else
-            echo "Not a stable x.y.0 release, skipping patch branch creation"
-          fi
+        run: .github/scripts/create-patch-branch.sh "${{ inputs.release-version }}" "${{ inputs.publish }}"
 
       - name: Create PR to update main
         if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
-        run: |
-          VERSION="${{ inputs.release-version }}"
-          PUBLISH="${{ inputs.publish }}"
-          MAIN_VERSION_INPUT="${{ inputs.main-version }}"
-
-          # Determine the appropriate version for main
-          if [[ -n "$MAIN_VERSION_INPUT" ]]; then
-            # User specified exact version for main
-            MAIN_VERSION="$MAIN_VERSION_INPUT"
-            echo "Using specified main version: ${MAIN_VERSION}"
-          else
-            # Auto-calculate based on release version
-            major=$(echo $VERSION | tr "." "\n" | sed -n 1p)
-            minor=$(echo $VERSION | tr "." "\n" | sed -n 2p)
-            patch=$(echo $VERSION | tr "." "\n" | sed -n 3p)
-
-            # Check if this is a stable x.y.0 release (no hyphen = no pre-release)
-            if [[ "$patch" == "0" ]] && [[ ! "$VERSION" =~ - ]]; then
-              # Stable x.y.0 release -> bump main to next minor alpha
-              next_minor=$((minor + 1))
-              MAIN_VERSION="${major}.${next_minor}.0-alpha"
-              echo "Stable release: auto-bumping main from ${VERSION} to ${MAIN_VERSION} for next development cycle"
-            elif [[ "$VERSION" =~ - ]]; then
-              # Pre-release (contains hyphen) -> strip to first 3 parts (e.g., 3.0.0-beta.1 -> 3.0.0-beta)
-              MAIN_VERSION="${major}.${minor}.${patch}"
-              echo "Pre-release: auto-stripping patch from ${VERSION} to ${MAIN_VERSION} for main branch"
-            else
-              # Other stable releases (e.g., 3.0.1) - use as-is
-              MAIN_VERSION="$VERSION"
-              echo "Using full version ${MAIN_VERSION} for main branch"
-            fi
-          fi
-
-          # Check out main and update version
-          git checkout main
-          git pull origin main
-
-          # Bump version to the main-appropriate version
-          cargo set-version --workspace "${MAIN_VERSION}"
-          cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
-
-          # Commit changes locally (always test this logic)
-          git add -A
-          git commit -m "chore: bump version to ${MAIN_VERSION}"
-
-          # Create a branch for the PR
-          PR_BRANCH="chore/bump-main-to-v${MAIN_VERSION}"
-          git checkout -b "${PR_BRANCH}"
-
-          # Only push and create PR if publishing
-          if [[ "$PUBLISH" == "true" ]]; then
-            git push origin "${PR_BRANCH}"
-
-            # Create PR
-            gh pr create \
-              --base main \
-              --head "${PR_BRANCH}" \
-              --title "chore: bump version to v${MAIN_VERSION}" \
-              --body "Automated version bump to v${MAIN_VERSION} following release v${VERSION}.
-
-            **This PR updates the main branch version for the next development cycle.**
-
-            - Release version: \`${VERSION}\`
-            - Main branch version: \`${MAIN_VERSION}\`
-
-            Review and merge this PR to prepare main for the next phase of development."
-
-            echo "Created PR to update main branch to ${MAIN_VERSION}"
-          else
-            echo "[Dry-run] Would create PR to update main branch to ${MAIN_VERSION}"
-          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/update-main-version.sh "${{ inputs.release-version }}" "${{ inputs.publish }}" "${{ inputs.main-version }}"
 
   # ----------------------------------------
   # Prepare release variables
