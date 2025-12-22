@@ -62,7 +62,7 @@ jobs:
           components: rustfmt
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.18.2
+        run: cargo install --debug --locked cargo-deny@0.18.9
 
       - name: Check dependencies for known issues
         run: cargo deny check
