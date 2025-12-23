@@ -540,6 +540,9 @@ jobs:
     if: ${{ always() && needs.bump-version.outputs.release-branch != '' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
       - name: Delete release branch
         run: |
           # Idempotent: ignore if branch doesn't exist
