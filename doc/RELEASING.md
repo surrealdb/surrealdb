@@ -74,7 +74,13 @@ Versioned releases come in several flavors:
 - **Type**: Choice (`nightly` or `versioned`)
 - **Description**: Type of release to perform
 - **Default**: `nightly`
-- **Note**: Determines which other inputs are available
+- **Note**: Determines which other inputs are relevant
+
+#### `release-version`
+- **Type**: String
+- **Description**: Semantic version for the release (e.g., `3.0.0-beta.1`)
+- **Required**: For versioned releases
+- **Validation**: Automatically validated by workflow
 
 #### `git-ref`
 - **Type**: String
@@ -84,41 +90,40 @@ Versioned releases come in several flavors:
 	- `main` - for pre-releases and new stable releases
 	- `release/3.0` - for patch releases
 
-#### `release-version`
-- **Type**: String
-- **Description**: Semantic version for the release
-- **Format**: Must be valid semver (e.g., `3.0.0`, `3.0.0-beta.1`)
-- **Required**: For versioned releases
-- **Validation**: Automatically validated by workflow
-
 ### Optional Inputs
+
+#### `publish`
+- **Type**: Boolean
+- **Description**: Publish the release (false for dry-run)
+- **Default**: `false`
+- **When to use**: After verifying dry-run succeeds
+
+#### `latest`
+- **Type**: Boolean
+- **Description**: Mark as latest release
+- **Default**: `false`
+- **When to use**: For the most recent stable release only
+- **Note**: Not applicable for nightly releases
 
 #### `update-main`
 - **Type**: Boolean
-- **Description**: Create PR to update main branch version
+- **Description**: Update main branch version after release
 - **Default**: `false`
 - **When to use**: For releases from main branch (pre-releases and stable releases)
 - **Note**: Not applicable for patch releases or nightly releases
 
 #### `main-version`
 - **Type**: String
-- **Description**: Override the auto-calculated main branch version
+- **Description**: Override auto-calculated main version
 - **Default**: Auto-calculated based on release type
 - **When to use**: Only when bumping to next major version (e.g., `4.0.0-alpha`)
 - **Example**: Release `3.5.0`, but set main to `4.0.0-alpha` instead of `3.6.0-alpha`
 
-#### `latest`
-- **Type**: Boolean
-- **Description**: Mark this release as "latest"
-- **Default**: `false`
-- **When to use**: For the most recent stable release only
-- **Note**: Not applicable for nightly releases
-
-#### `publish`
-- **Type**: Boolean
-- **Description**: Actually publish artifacts (false for dry-run)
-- **Default**: `false`
-- **When to use**: After verifying dry-run succeeds
+#### `extra-features`
+- **Type**: String
+- **Description**: Extra features enabled in the binary
+- **Default**: `storage-tikv,jwks,ml`
+- **When to use**: For custom feature combinations
 
 ## Branching Strategy
 

@@ -26,39 +26,39 @@ on:
         options:
           - nightly
           - versioned
+      release-version:
+        required: false
+        type: string
+        description: "Semantic version (e.g., 3.0.0-beta.1)"
       git-ref:
         required: true
         type: string
         default: main
         description: "The git ref of this release"
-      release-version:
-        required: false
-        type: string
-        description: "Semantic version (e.g., 3.0.0-beta.1)"
-      update-main:
-        required: false
-        type: boolean
-        default: false
-        description: "Update main branch version after release"
-      main-version:
-        required: false
-        type: string
-        description: "Override auto-calculated main version"
-      latest:
-        required: false
-        type: boolean
-        default: false
-        description: "Mark as latest release"
-      extra-features:
-        required: false
-        type: string
-        default: storage-tikv,jwks,ml
-        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
         default: false
         description: "Publish the release"
+      latest:
+        required: false
+        type: boolean
+        default: false
+        description: "Mark as latest release"
+      update-main:
+        required: false
+        type: boolean
+        default: false
+        description: "Update main branch version"
+      main-version:
+        required: false
+        type: string
+        description: "Override auto-calculated main version"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,jwks,ml
+        description: "Extra features enabled in the binary"
   schedule:
     - cron: "0 0 * * *"
 
