@@ -34,21 +34,21 @@ on:
       release-version:
         required: false
         type: string
-        description: "Version to release"
+        description: "Semantic version (e.g., 3.0.0-beta.1)"
       update-main:
         required: false
         type: boolean
         default: false
-        description: "Create PR to update main branch"
+        description: "Update main branch version after release"
       main-version:
         required: false
         type: string
-        description: "Version for main branch"
+        description: "Override auto-calculated main version"
       latest:
         required: false
         type: boolean
         default: false
-        description: "Make this the latest release"
+        description: "Mark as latest release"
       extra-features:
         required: false
         type: string
