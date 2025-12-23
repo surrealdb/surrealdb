@@ -137,6 +137,9 @@ where
 							Stream::new(client.inner.clone().into(), live_query_id.into(), Some(rx))
 						});
 						indexed_results.live_queries.insert(index, live_stream);
+						indexed_results
+							.results
+							.insert(index, (stats, Ok(Value::Uuid(live_query_id))));
 					}
 					QueryType::Kill => {}
 				}
