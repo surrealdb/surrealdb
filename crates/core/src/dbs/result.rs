@@ -33,6 +33,7 @@ impl Results {
 		stm: &Statement<'_>,
 		start: Option<u32>,
 		limit: Option<u32>,
+		index_provides_order: bool,
 	) -> Result<Self> {
 		if stm.expr().is_some() && stm.group().is_some() {
 			return Ok(Self::Groups(GroupCollector::new(stm)?));
@@ -47,6 +48,9 @@ impl Results {
 			return match ordering {
 				Ordering::Random => Ok(Self::MemoryRandom(MemoryRandom::new(None))),
 				Ordering::Order(orders) => {
+					if index_provides_order {
+						return Ok(Self::Memory(Default::default()));
+					}
 					if let Some(limit) = limit {
 						let limit = start.unwrap_or(0) + limit;
 						// Use the priority-queue optimization only when both conditions hold:
