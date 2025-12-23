@@ -39,7 +39,8 @@ else
 	fi
 fi
 
-# Check out main and update version
+# Fetch and check out main (may not exist locally if we're on a patch branch)
+git fetch origin main
 git checkout main
 git pull origin main
 
@@ -47,9 +48,14 @@ git pull origin main
 cargo set-version --workspace "${MAIN_VERSION}"
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
-# Commit changes locally (always test this logic)
-git add -A
-git commit -m "chore: bump version to ${MAIN_VERSION}"
+# Commit changes only if there are any (idempotency)
+if git diff --quiet; then
+	echo "No version changes detected - version already set to ${MAIN_VERSION}"
+	echo "Script completed successfully - no version update needed"
+	exit 0
+else
+	git commit -am "Bump version to ${MAIN_VERSION}"
+fi
 
 # Create a branch for the PR
 PR_BRANCH="chore/bump-main-to-v${MAIN_VERSION}"

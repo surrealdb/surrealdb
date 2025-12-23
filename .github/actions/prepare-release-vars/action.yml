@@ -40,7 +40,7 @@ runs:
 
         if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
           # Nightly release - compute version based on main's version
-          nightly_version=$(../../.github/scripts/compute-nightly-version.sh "$cargo_version")
+          nightly_version=$(./.github/scripts/compute-nightly-version.sh "$cargo_version")
           echo "version=${nightly_version}" >> $GITHUB_OUTPUT
 
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)

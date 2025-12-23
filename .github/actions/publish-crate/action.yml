@@ -58,9 +58,9 @@ runs:
             # Check if the failure was because everything is already published
             echo "release-plz failed, checking if all crates are already published..."
 
-            # Get all workspace crates
+            # Get all workspace crates (exclude crates with publish = false)
             all_published=true
-            for crate in $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[].name'); do
+            for crate in $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.publish != []) | .name'); do
               version=$(cargo metadata --format-version 1 --no-deps | jq -r ".packages[] | select(.name == \"$crate\") | .version")
               echo "Checking if $crate@$version is published..."
 
