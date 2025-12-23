@@ -11,7 +11,8 @@ use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::planner::tree::{
-	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, WithIndexes,
+	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, OrderColumns,
+	WithIndexes,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
 use crate::val::{Array, Number, Object, Value};
@@ -39,6 +40,7 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
+	pub(super) order_columns: OrderColumns,
 }
 
 impl PlanBuilder {
@@ -75,7 +77,7 @@ impl PlanBuilder {
 		}
 
 		if let Some(io) = p.index_count {
-			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
+			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count, false));
 		}
 
 		//Analyse the query AST to discover indexable conditions and collect
@@ -87,35 +89,35 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some(&e), p.gp).await;
 		}
 
-		//Optimisation path 1: All conditions connected by AND operators
-		// This enables single-index optimisations and compound index usage
 		if p.all_and {
-			// Priority 1: Find the best compound index that covers multiple queries
-			// conditions Compound indexes are highly efficient as they can satisfy
-			// multiple WHERE clauses in a single index scan, significantly reducing I/O
-			// operations
-			let mut compound_index = None;
+			let mut compound_index: Option<(IdiomCol, IndexOption, bool)> = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
-					// Prefer indexes that cover more columns (higher selectivity)
-					if let Some((c, _)) = &compound_index
-						&& cols <= *c
-					{
-						continue; // Skip if this index covers fewer columns
-					}
-					// Only consider true compound indexes (multiple columns)
-					if cols > 1 {
-						compound_index = Some((cols, io));
+				if let Some((cols, io, provides_order)) =
+					b.check_compound_index_all_and(&ixr, vals, &p.order_columns)
+				{
+					if cols > 1 || provides_order {
+						let dominated = if let Some((c, _, has_order)) = &compound_index {
+							if provides_order && !has_order {
+								false
+							} else if !provides_order && *has_order {
+								true
+							} else {
+								cols <= *c
+							}
+						} else {
+							false
+						};
+						if !dominated {
+							compound_index = Some((cols, io, provides_order));
+						}
 					}
 				}
 			}
 
-			if let Some((_, io)) = compound_index {
-				// Evaluate whether we can use index-only access (no table lookups needed)
+			if let Some((_, io, provides_order)) = compound_index {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Return optimized single compound index plan
-				return Ok(Plan::SingleIndex(None, io, record_strategy));
+				return Ok(Plan::SingleIndex(None, io, record_strategy, provides_order));
 			}
 
 			// Select the first available range query (deterministic group order)
@@ -143,22 +145,19 @@ impl PlanBuilder {
 				));
 			}
 
-			// Otherwise, pick a non-range single-index
-			// option (heuristic)
-			if let Some((e, i)) = b.non_range_indexes.pop() {
-				// Evaluate the record strategy
+			if let Some((e, io)) = b.non_range_indexes.pop() {
+				let is_order = io.is_order()
+					|| p.order_columns
+						.get(io.index_reference())
+						.is_some_and(|(col, _)| *col == 0);
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Return the plan
-				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
+				return Ok(Plan::SingleIndex(Some(e), io, record_strategy, is_order));
 			}
-			// If there is an order option
 			if let Some(o) = p.order_limit {
-				// Evaluate the record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Return the plan
-				return Ok(Plan::SingleIndex(None, o, record_strategy));
+				return Ok(Plan::SingleIndex(None, o, record_strategy, true));
 			}
 		}
 		// If every expression is backed by an index we can use the MultiIndex plan
@@ -200,23 +199,18 @@ impl PlanBuilder {
 		ScanDirection::Forward
 	}
 
-	/// Check if a compound index can be used.
-	/// Returns the number of columns involved, and the index option
 	fn check_compound_index_all_and(
 		&self,
 		index_reference: &IndexReference,
 		columns: Vec<Vec<IndexOperator>>,
-	) -> Option<(IdiomCol, IndexOption)> {
-		// Check the index can be used
+		order_columns: &OrderColumns,
+	) -> Option<(IdiomCol, IndexOption, bool)> {
 		if !self.with_indexes.allowed_index(index_reference.index_id) {
 			return None;
 		}
-		// Count contiguous values (from the left) that will be part of an equal search
 		let mut continues_equals_values = 0;
-		// Collect the range parts for any column
 		let mut range_parts = vec![];
 		for vals in &columns {
-			// If the column is empty, we can stop here.
 			if vals.is_empty() {
 				break;
 			}
@@ -244,6 +238,10 @@ impl PlanBuilder {
 			continues_equals_values += 1;
 		}
 
+		let provides_ordering = order_columns
+			.get(index_reference)
+			.is_some_and(|(order_col, _)| *order_col == continues_equals_values);
+
 		if continues_equals_values == 0 {
 			if !range_parts.is_empty() {
 				return Some((
@@ -254,6 +252,7 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(vec![], range_parts),
 					),
+					provides_ordering,
 				));
 			}
 			return None;
@@ -272,6 +271,7 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(equals, range_parts),
 					),
+					provides_ordering,
 				));
 			}
 			return Some((
@@ -282,6 +282,7 @@ impl PlanBuilder {
 					IdiomPosition::None,
 					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
+				provides_ordering,
 			));
 		}
 		let vals: Vec<Value> = equal_combinations
@@ -299,6 +300,7 @@ impl PlanBuilder {
 				IdiomPosition::None,
 				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
 			),
+			provides_ordering,
 		))
 	}
 
@@ -366,29 +368,13 @@ impl PlanBuilder {
 }
 
 pub(super) enum Plan {
-	/// Table full scan
-	/// 1: An optional reason
-	/// 2: A record strategy
 	TableIterator(Option<String>, RecordStrategy, ScanDirection),
-	/// Index scan filtered on records matching a given expression
-	/// 1: The optional expression associated with the index
-	/// 2: A record strategy
-	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy),
-	/// Union of filtered index scans
-	/// 1: A list of expression and index options
-	/// 2: A list of index ranges
-	/// 3: A record strategy
+	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy, bool),
 	MultiIndex(
 		Vec<(Arc<Expr>, IndexOption)>,
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
 		RecordStrategy,
 	),
-	/// Index scan for records matching a given range
-	/// 1. The index id
-	/// 2. The index range
-	/// 3. A record strategy
-	/// 4. The scan direction
-	/// 5. True if it matches an order option
 	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, ScanDirection, bool),
 }
 

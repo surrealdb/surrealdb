@@ -149,14 +149,19 @@ impl<'a> TreeBuilder<'a> {
 			&& let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await?
 		{
 			for (index_reference, id_col) in &irf {
-				if *id_col == 0 && index_reference.index.supports_order() {
-					self.index_map.order_limit = Some(IndexOption::new(
-						index_reference.clone(),
-						Some(id),
-						IdiomPosition::None,
-						IndexOperator::Order(!o.direction),
-					));
-					break;
+				if index_reference.index.supports_order() {
+					self.index_map
+						.order_columns
+						.insert(index_reference.clone(), (*id_col, !o.direction));
+
+					if *id_col == 0 && self.index_map.order_limit.is_none() {
+						self.index_map.order_limit = Some(IndexOption::new(
+							index_reference.clone(),
+							Some(id.clone()),
+							IdiomPosition::None,
+							IndexOperator::Order(!o.direction),
+						));
+					}
 				}
 			}
 		}
@@ -708,6 +713,7 @@ impl WithIndexes {
 }
 
 pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<IndexOperator>>>;
+pub(super) type OrderColumns = HashMap<IndexReference, (IdiomCol, bool)>;
 
 #[derive(Default)]
 pub(super) struct IndexesMap {
@@ -719,6 +725,9 @@ pub(super) struct IndexesMap {
 	pub(super) order_limit: Option<IndexOption>,
 	/// Is there an index candidate for index count?
 	pub(super) index_count: Option<IndexOption>,
+	/// For each index, which column (if any) matches the ORDER BY clause.
+	/// This enables composite indexes to provide ordering when leading columns have equality.
+	pub(super) order_columns: OrderColumns,
 }
 
 impl IndexesMap {
