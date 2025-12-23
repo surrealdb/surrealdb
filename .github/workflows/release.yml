@@ -34,21 +34,21 @@ on:
       release-version:
         required: false
         type: string
-        description: "Version to release (e.g., 3.0.0-beta.1). Required for versioned releases."
+        description: "Version to release"
       update-main:
         required: false
         type: boolean
         default: false
-        description: "[Versioned only] Create PR to update main branch (for phase transitions)"
+        description: "Create PR to update main branch"
       main-version:
         required: false
         type: string
-        description: "[Optional] Version for main branch (e.g., 4.0.0-alpha). If omitted, auto-bumps to next minor alpha for stable releases."
+        description: "Version for main branch"
       latest:
         required: false
         type: boolean
         default: false
-        description: "[Versioned only] Make this the latest release"
+        description: "Make this the latest release"
       extra-features:
         required: false
         type: string
