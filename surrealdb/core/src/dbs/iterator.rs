@@ -687,6 +687,7 @@ impl Iterator {
 		self.setup_limit(stk, &cancel_ctx, opt, stm).await?;
 		// Process the query START clause
 		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
+		let index_provides_order = self.index_provides_order(ctx);
 		// Prepare the results with possible optimisations on groups
 		self.results = self.results.prepare(
 			#[cfg(storage)]
@@ -694,6 +695,7 @@ impl Iterator {
 			stm,
 			self.start,
 			self.limit,
+			index_provides_order,
 		)?;
 
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or
@@ -751,11 +753,13 @@ impl Iterator {
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt).await?;
 			// Process any ORDER BY clause
-			if let Some(orders) = stm.order() {
-				#[cfg(not(target_family = "wasm"))]
-				self.results.sort(orders).await?;
-				#[cfg(target_family = "wasm")]
-				self.results.sort(orders);
+			if !index_provides_order {
+				if let Some(orders) = stm.order() {
+					#[cfg(not(target_family = "wasm"))]
+					self.results.sort(orders).await?;
+					#[cfg(target_family = "wasm")]
+					self.results.sort(orders);
+				}
 			}
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
@@ -904,6 +908,17 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
+		if self.entries.len() == 1
+			&& let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
+			&& let Some(qp) = ctx.get_query_planner()
+			&& qp.is_order(irf)
+		{
+			return true;
+		}
+		false
+	}
+
+	fn index_provides_order(&self, ctx: &FrozenContext) -> bool {
 		if self.entries.len() == 1
 			&& let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
