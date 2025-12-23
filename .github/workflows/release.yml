@@ -536,8 +536,8 @@ jobs:
 
   cleanup-release-branch:
     name: Delete release branch
-    needs: [ bump-version, propagate, prepare-vars ]
-    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && needs.propagate.result == 'success' }}
+    needs: [ bump-version, propagate ]
+    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete release branch
