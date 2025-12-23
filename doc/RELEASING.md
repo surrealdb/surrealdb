@@ -611,11 +611,6 @@ All multi-line bash logic is extracted to `.github/scripts/`:
 
 ## Additional Resources
 
-- [GitHub Actions Workflow](.github/workflows/release.yml)
+- [GitHub Actions Workflow](../.github/workflows/release.yml)
 - [Build Documentation](BUILDING.md)
 - [Contributing Guidelines](../CONTRIBUTING.md)
-
----
-
-**Last Updated**: December 2025
-
