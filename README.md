@@ -467,6 +467,8 @@ Join our growing community around the world, for help, ideas, and discussions re
 
 We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to get involved with SurrealDB development! If you wish to help, you can learn more about how you can contribute to this project in the [contribution guide](CONTRIBUTING.md).
 
+**For maintainers**: See the [release process documentation](doc/RELEASING.md) for information about performing releases.
+
 <h2><img height="20" src="./img/security.svg">&nbsp;&nbsp;Security</h2>
 
 For security issues, view our [vulnerability policy](https://github.com/surrealdb/surrealdb/security/policy), view our [Trust and Security page](https://surrealdb.com/legal/category/security), and kindly email us at [security@surrealdb.com](mailto:security@surrealdb.com) instead of posting a public issue on GitHub.

@@ -1,38 +1,64 @@
-# Use this workflow to trigger releases (stable, beta, nightly)
+# SurrealDB Release Workflow
+#
+# This workflow handles both nightly and versioned releases with full idempotency.
+# For comprehensive documentation, see doc/RELEASING.md
+#
+# Quick reference:
+# - Nightly: Automated daily builds from main (scheduled at midnight UTC)
+# - Versioned: Pre-releases (alpha/beta/rc), stable releases (X.Y.0), and patches (X.Y.Z)
+# - Always dry-run first (publish: false) before publishing
+# - Workflow is fully idempotent - safe to retry on failure
+#
 # Nightly releases are triggered automatically via schedule
 
 name: Release
 
-run-name: "${{ github.event_name == 'schedule' && 'Nightly release' || format('Release {0} (nightly: {1}, publish: {2}, latest: {3})', inputs.git-ref, inputs.nightly-release, inputs.publish, inputs.latest) }}"
+run-name: "${{ github.event_name == 'schedule' && 'Nightly release' || format('Release {0} (type: {1}, publish: {2}, latest: {3})', inputs.git-ref, inputs.release-type, inputs.publish, inputs.latest) }}"
 
 on:
   workflow_dispatch:
     inputs:
+      release-type:
+        required: true
+        type: choice
+        default: nightly
+        description: "Type of release"
+        options:
+          - nightly
+          - versioned
+      release-version:
+        required: false
+        type: string
+        description: "Semantic version (e.g., 3.0.0-beta.1)"
       git-ref:
         required: true
         type: string
         default: main
         description: "The git ref of this release"
-      nightly-release:
-        required: false
-        type: boolean
-        default: true
-        description: "Make this a nightly release"
-      latest:
-        required: false
-        type: boolean
-        default: false
-        description: "Make this the latest release"
-      extra-features:
-        required: false
-        type: string
-        default: storage-tikv,jwks,ml
-        description: "Extra features enabled in the binary"
       publish:
         required: false
         type: boolean
         default: false
         description: "Publish the release"
+      latest:
+        required: false
+        type: boolean
+        default: false
+        description: "Mark as latest release"
+      update-main:
+        required: false
+        type: boolean
+        default: false
+        description: "Update main branch version"
+      main-version:
+        required: false
+        type: string
+        description: "Override auto-calculated main version"
+      extra-features:
+        required: false
+        type: string
+        default: storage-tikv,jwks,ml
+        description: "Extra features enabled in the binary"
   schedule:
     - cron: "0 0 * * *"
 
@@ -41,17 +67,122 @@ defaults:
     shell: bash
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
+  # ----------------------------------------
+  # Validate inputs
+  # ----------------------------------------
+
+  validate-inputs:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release inputs
+        shell: bash
+        env:
+          SEMVER_REGEX: '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
+        run: |
+          if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
+            if [[ -z "${{ inputs.release-version }}" ]]; then
+              echo "Error: 'release-version' is required when release-type is 'versioned'"
+              echo "Please provide a version number (e.g., 3.0.0-beta.1)"
+              exit 1
+            fi
+            # Validate release-version format
+            if [[ ! "${{ inputs.release-version }}" =~ $SEMVER_REGEX ]]; then
+              echo "Error: 'release-version' must be a valid semver (e.g., 3.0.0-beta.1, 3.0.0)"
+              exit 1
+            fi
+          fi
+
+          if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
+            if [[ -n "${{ inputs.release-version }}" ]]; then
+              echo "Warning: 'release-version' is ignored for nightly releases"
+            fi
+            if [[ "${{ inputs.update-main }}" == "true" ]]; then
+              echo "Warning: 'update-main' is ignored for nightly releases"
+            fi
+            if [[ "${{ inputs.latest }}" == "true" ]]; then
+              echo "Warning: 'latest' is ignored for nightly releases"
+            fi
+            if [[ -n "${{ inputs.main-version }}" ]]; then
+              echo "Warning: 'main-version' is ignored for nightly releases"
+            fi
+          fi
+
+          # Validate main-version if provided
+          if [[ -n "${{ inputs.main-version }}" ]]; then
+            if [[ "${{ inputs.update-main }}" != "true" ]]; then
+              echo "Warning: 'main-version' is specified but 'update-main' is false - it will be ignored"
+            fi
+            # Basic format validation - should look like a semver
+            if [[ ! "${{ inputs.main-version }}" =~ $SEMVER_REGEX ]]; then
+              echo "Error: 'main-version' must be a valid semver (e.g., 4.0.0-alpha, 3.1.0-beta)"
+              exit 1
+            fi
+          fi
+
+  # ----------------------------------------
+  # Bump version (optional)
+  # ----------------------------------------
+  # Release branch strategy:
+  # - Temporary branches: release/v{version} (e.g., release/v3.0.0-beta.1)
+  # - Long-lived patch branches: release/{major}.{minor} (e.g., release/3.0)
+  #   * Created automatically for stable x.y.0 releases
+  #   * Used as git-ref for future patch releases (3.0.1, 3.0.2, etc.)
+  # - Main branch version (when update-main is true):
+  #   * If main-version specified: uses that exact version
+  #   * Pre-releases: auto-strips patch (3.0.0-beta.1 -> 3.0.0-beta)
+  #   * Stable x.y.0: auto-bumps to next minor alpha (3.0.0 -> 3.1.0-alpha)
+  #   * For major transitions, specify main-version explicitly (e.g., 4.0.0-alpha)
+
+  bump-version:
+    needs: [validate-inputs]
+    name: Bump version
+    runs-on: ubuntu-latest
+    outputs:
+      release-branch: ${{ steps.bump.outputs.release-branch }}
+    steps:
+      - name: Checkout sources
+        if: ${{ inputs.release-type == 'versioned' }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.git-ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup environment
+        if: ${{ inputs.release-type == 'versioned' }}
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        if: ${{ inputs.release-type == 'versioned' }}
+        run: cargo install cargo-edit
+
+      - name: Bump version and commit
+        if: ${{ inputs.release-type == 'versioned' }}
+        id: bump
+        run: .github/scripts/bump-version.sh "${{ inputs.release-version }}" "$GITHUB_OUTPUT"
+
+      - name: Create long-lived patch branch
+        if: ${{ inputs.release-type == 'versioned' }}
+        run: .github/scripts/create-patch-branch.sh "${{ inputs.release-version }}" "${{ inputs.publish }}"
+
+      - name: Create PR to update main
+        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/update-main-version.sh "${{ inputs.release-version }}" "${{ inputs.publish }}" "${{ inputs.main-version }}"
+
   # ----------------------------------------
   # Prepare release variables
   # ----------------------------------------
 
   prepare-vars:
-    permissions:
-      contents: write
     name: Prepare vars
+    needs: [validate-inputs, bump-version]
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.vars.outputs.name }}
@@ -77,9 +208,19 @@ jobs:
             echo "publish=true" >> $GITHUB_OUTPUT
           else
             # Manual workflow dispatch
-            echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
-            echo "nightly-release=${{ inputs.nightly-release }}" >> $GITHUB_OUTPUT
-            echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
+            # If version was bumped (versioned release), use the release branch
+            if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
+              echo "git-ref=${{ needs.bump-version.outputs.release-branch }}" >> $GITHUB_OUTPUT
+              echo "nightly-release=false" >> $GITHUB_OUTPUT
+              # Respect latest input for versioned releases
+              echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
+            else
+              # Nightly release - use the input git-ref
+              echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
+              echo "nightly-release=true" >> $GITHUB_OUTPUT
+              # Force latest to false for nightly releases
+              echo "latest=false" >> $GITHUB_OUTPUT
+            fi
             echo "extra-features=${{ inputs.extra-features }}" >> $GITHUB_OUTPUT
             echo "publish=${{ inputs.publish }}" >> $GITHUB_OUTPUT
           fi
@@ -231,6 +372,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true
@@ -243,6 +385,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true
@@ -255,6 +398,7 @@ jobs:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
           name: ${{ needs.prepare-vars.outputs.name }}
+          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
           build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
           extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
           upload: true
@@ -315,42 +459,39 @@ jobs:
   # Docker images
   # ----------------------------------------
 
-  docker-prepare:
-    name: Prepare Docker build
-    needs: [ prepare-vars, publish ]
-    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
-    runs-on: ubuntu-latest
-    outputs:
-      tag-prefix: ${{ steps.prepare.outputs.tag-prefix }}
-      matrix: ${{ steps.prepare.outputs.matrix }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Prepare Docker build
-        id: prepare
-        uses: ./.github/actions/docker-prepare
-        with:
-          tag-prefix: ${{ needs.prepare-vars.outputs.name }}
-
   docker:
     name: Build ${{ matrix.name }} (${{ matrix.build-target }})
-    needs: [ prepare-vars, publish, docker-prepare ]
+    needs: [ prepare-vars, publish ]
     if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
     environment: ${{ needs.prepare-vars.outputs.release-name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.docker-prepare.outputs.matrix) }}
+      matrix:
+        include:
+          - name: Prod image
+            build-target: prod-ci
+            tag-suffix: ''
+          - name: Dev image
+            build-target: dev-ci
+            tag-suffix: -dev
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+
+      - name: Sanitize tag prefix
+        id: tag
+        run: |
+          tag_prefix=$(echo '${{ needs.prepare-vars.outputs.name }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "tag-prefix=${tag_prefix}" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: ./.github/actions/docker-build
         with:
           environment: ${{ needs.prepare-vars.outputs.release-name }}
-          tag-prefix: ${{ needs.docker-prepare.outputs.tag-prefix }}
+          tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
           build-target: ${{ matrix.build-target }}
           tag-suffix: ${{ matrix.tag-suffix }}
           push: true
@@ -365,10 +506,13 @@ jobs:
   package-macos:
     name: Package and publish macOS universal binary
     needs: [ prepare-vars, publish ]
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
     runs-on: macos-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
       - name: Package macOS universal binary
         uses: ./.github/actions/package-macos-universal
@@ -391,9 +535,29 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-ref }}
 
       - name: Propagate binaries
         uses: ./.github/actions/propagate-binaries
         with:
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+  # ----------------------------------------
+  # Cleanup release branch
+  # ----------------------------------------
+
+  cleanup-release-branch:
+    name: Delete release branch
+    needs: [ bump-version, propagate ]
+    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Delete release branch
+        run: |
+          # Idempotent: ignore if branch doesn't exist
+          git push origin --delete "${{ needs.bump-version.outputs.release-branch }}" || true
