@@ -3,8 +3,7 @@
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 use tokio::time::Duration;
@@ -36,7 +35,7 @@ async fn access_bearer_grant() {
 	];
 
 	for level in &test_levels {
-		let base = level.base.to_string();
+		let base = level.base.clone();
 		println!("Test level: {}", base);
 		let sql = format!(
 			"
@@ -53,9 +52,7 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -84,7 +81,7 @@ async fn access_bearer_grant() {
 		} else {
 			format!(
 				"The user 'jaime' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
+				level.base.clone().to_lowercase()
 			)
 		};
 		assert_eq!(tmp.to_string(), expected);
@@ -95,7 +92,7 @@ async fn access_bearer_grant() {
 		} else {
 			format!(
 				"The user 'jaime' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
+				level.base.clone().to_lowercase()
 			)
 		};
 		assert_eq!(tmp.to_string(), expected);
@@ -200,9 +197,7 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -338,9 +333,7 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -497,9 +490,7 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("test", "test").await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -745,7 +736,7 @@ the database name matches", 			),
 		let statement = format!("ACCESS api ON {base} GRANT FOR USER tobie");
 
 		let test_level = level;
-		for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+		for ((level, role), (ns, db), should_succeed, msg) in tests {
 			let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 			let sess_setup = match *test_level {
 				"ROOT" => Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),
@@ -765,10 +756,7 @@ the database name matches", 			),
 			);
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(true);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();

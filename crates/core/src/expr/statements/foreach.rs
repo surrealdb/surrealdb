@@ -1,12 +1,10 @@
-use std::fmt::{self, Display};
-
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
@@ -41,10 +39,11 @@ impl ForeachStatement {
 	/// Process this type returning a computed simple Value
 	///
 	/// Was marked recursive
+	#[instrument(level = "trace", name = "ForeachStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -60,21 +59,21 @@ impl ForeachStatement {
 
 			v => {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})));
 			}
 		};
 
 		// Loop over the values
 		for v in iter {
-			if ctx.is_timedout().await? {
-				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout)));
+			if let Some(d) = ctx.is_timedout().await? {
+				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
 			}
 			// Duplicate context
-			let ctx = MutableContext::new(ctx).freeze();
+			let ctx = Context::new(ctx).freeze();
 			// Set the current parameter
 			let key = self.param.as_str().to_owned();
-			let mut ctx = MutableContext::unfreeze(ctx)?;
+			let mut ctx = Context::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
 			let mut ctx = Some(ctx.freeze());
 			// Loop over the code block statements
@@ -82,7 +81,17 @@ impl ForeachStatement {
 				// Compute each block entry
 				let res = match v {
 					Expr::Let(x) => x.compute(stk, &mut ctx, opt, doc).await,
-					v => stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await,
+					v => {
+						stk.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await
+					}
 				};
 				// Catch any special errors
 				match res {
@@ -97,19 +106,5 @@ impl ForeachStatement {
 		}
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-impl VisitExpression for ForeachStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.range.visit(visitor);
-		self.block.visit(visitor);
-	}
-}
-impl Display for ForeachStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
 	}
 }

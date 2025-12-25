@@ -1,6 +1,6 @@
-use std::fmt::{self, Display, Formatter, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -65,20 +65,16 @@ impl PermissionKind {
 	}
 }
 
-impl Display for PermissionKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		f.write_str(self.as_str())
-	}
-}
-
-impl Display for Permissions {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "PERMISSIONS")?;
+impl surrealdb_types::ToSql for Permissions {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("PERMISSIONS");
 		if self.is_none() {
-			return write!(f, " NONE");
+			f.push_str(" NONE");
+			return;
 		}
 		if self.is_full() {
-			return write!(f, " FULL");
+			f.push_str(" FULL");
+			return;
 		}
 		let mut lines = Vec::<(Vec<PermissionKind>, &Permission)>::new();
 		for (c, permission) in [
@@ -90,11 +86,8 @@ impl Display for Permissions {
 		.into_iter()
 		.zip([&self.select, &self.create, &self.update, &self.delete])
 		{
-			// Alternate permissions display implementation ignores delete permission
-			// This display is used to show field permissions, where delete has no effect
-			// Displaying the permission could mislead users into thinking it has an effect
-			// Additionally, including the permission will cause a parsing error in 3.0.0
-			if f.alternate() && matches!(c, PermissionKind::Delete) {
+			// Skip delete permission if it's Full (default), since catalog fields don't track it
+			if matches!(c, PermissionKind::Delete) && matches!(permission, Permission::Full) {
 				continue;
 			}
 
@@ -104,37 +97,44 @@ impl Display for Permissions {
 				lines.push((vec![c], permission));
 			}
 		}
-		let indent = if is_pretty() {
-			Some(pretty_indent())
+		if fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = fmt.increment();
+			inner_fmt.write_indent(f);
 		} else {
-			f.write_char(' ')?;
-			None
-		};
+			f.push(' ');
+		}
 		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
 			if i > 0 {
-				if is_pretty() {
-					pretty_sequence_item();
+				if fmt.is_pretty() {
+					f.push(',');
+					f.push('\n');
+					let inner_fmt = fmt.increment();
+					inner_fmt.write_indent(f);
 				} else {
-					f.write_str(", ")?;
+					f.push_str(", ");
 				}
 			}
-			write!(f, "FOR ")?;
+			f.push_str("FOR ");
 			for (i, kind) in kinds.into_iter().enumerate() {
 				if i > 0 {
-					f.write_str(", ")?;
+					f.push_str(", ");
 				}
-				f.write_str(kind.as_str())?;
+				f.push_str(kind.as_str());
 			}
 			match permission {
-				Permission::Specific(_) if is_pretty() => {
-					let _indent = pretty_indent();
-					Display::fmt(permission, f)?;
+				Permission::Specific(v) if fmt.is_pretty() => {
+					f.push_str(" WHERE ");
+					CoverStmts(v).fmt_sql(f, fmt);
 				}
-				_ => write!(f, " {permission}")?,
+				Permission::None => f.push_str(" NONE"),
+				Permission::Full => f.push_str(" FULL"),
+				Permission::Specific(v) => {
+					f.push_str(" WHERE ");
+					CoverStmts(v).fmt_sql(f, fmt);
+				}
 			}
 		}
-		drop(indent);
-		Ok(())
 	}
 }
 
@@ -169,12 +169,12 @@ pub(crate) enum Permission {
 	Specific(Expr),
 }
 
-impl Display for Permission {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Permission {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::None => f.write_str("NONE"),
-			Self::Full => f.write_str("FULL"),
-			Self::Specific(v) => write!(f, "WHERE {v}"),
+			Self::None => f.push_str("NONE"),
+			Self::Full => f.push_str("FULL"),
+			Self::Specific(v) => write_sql!(f, sql_fmt, "WHERE {}", CoverStmts(v)),
 		}
 	}
 }

@@ -4,7 +4,7 @@
   inherit target;
 
   features = with util.features;
-    [ default storage-tikv storage-fdb ];
+    [ default storage-tikv ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
@@ -14,7 +14,7 @@
 
       nativeBuildInputs = [ pkg-config ];
 
-      buildInputs = [ openssl onnxruntime foundationdb ];
+      buildInputs = [ openssl onnxruntime ];
 
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 

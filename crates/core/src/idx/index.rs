@@ -1,5 +1,5 @@
 //! This module applies index mutations for a single document across different
-//! index types (UNIQUE, regular, search, fulltext, MTree, Hnsw). Index keys are
+//! index types (UNIQUE, regular, search, fulltext, Hnsw). Index keys are
 //! constructed via key::index and field values are encoded using
 //! key::value::Array.
 //!
@@ -15,29 +15,30 @@
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{
-	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, MTreeParams, NamespaceId,
+	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
-use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
-use crate::kvs::{Transaction, TransactionType};
+use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) struct IndexOperation<'a> {
-	ctx: &'a Context,
+	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: TableId,
 	ix: &'a IndexDefinition,
 	ikb: IndexKeyBase,
 	/// The old values (if existing)
@@ -50,10 +51,11 @@ pub(crate) struct IndexOperation<'a> {
 impl<'a> IndexOperation<'a> {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn new(
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
@@ -64,8 +66,9 @@ impl<'a> IndexOperation<'a> {
 			opt,
 			ns,
 			db,
+			tb,
 			ix,
-			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
+			ikb: IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id),
 			o,
 			n,
 			rid,
@@ -82,7 +85,6 @@ impl<'a> IndexOperation<'a> {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
-			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
 			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
@@ -111,9 +113,8 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
-		// Lock the transaction
-		let tx = self.ctx.tx();
-		let mut txn = tx.lock().await;
+		// Get the transaction
+		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -121,7 +122,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
@@ -139,7 +143,8 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let rid: RecordId = txn.get(&key, None).await?.unwrap();
+						let rid: RecordId =
+							txn.get(&key, None).await?.expect("record should exist");
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -150,8 +155,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_non_unique(&mut self) -> Result<()> {
 		// Lock the transaction
-		let tx = self.ctx.tx();
-		let mut txn = tx.lock().await;
+		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -159,7 +163,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
@@ -219,11 +226,11 @@ impl<'a> IndexOperation<'a> {
 			self.db,
 			&self.ix.table_name,
 			self.ix.index_id,
-			Some((self.opt.id()?, uuid::Uuid::now_v7())),
+			Some((self.opt.id(), uuid::Uuid::now_v7())),
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
-		self.ctx.tx().lock().await.put(&key, &(), None).await?;
+		self.ctx.tx().put(&key, &(), None).await?;
 		*require_compaction = true;
 		Ok(())
 	}
@@ -241,10 +248,10 @@ impl<'a> IndexOperation<'a> {
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			record: rid,
-			index: self.ix.name.to_string(),
+			index: self.ix.name.clone(),
 			value: match n.0.len() {
-				1 => n.0.remove(0).to_string(),
-				_ => n.to_string(),
+				1 => n.0.remove(0).to_sql(),
+				_ => n.to_sql(),
 			},
 		})
 	}
@@ -257,14 +264,9 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<()> {
 		let mut rc = false;
 		// Build a FullText instance
-		let fti = FullTextIndex::new(
-			self.opt.id()?,
-			self.ctx.get_index_stores(),
-			&self.ctx.tx(),
-			self.ikb.clone(),
-			p,
-		)
-		.await?;
+		let fti =
+			FullTextIndex::new(self.ctx.get_index_stores(), &self.ctx.tx(), self.ikb.clone(), p)
+				.await?;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
 			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
@@ -288,22 +290,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
-		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
-	}
-
-	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
-		let txn = self.ctx.tx();
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
-		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write, self.opt.id()?).await?;
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			mt.remove_document(stk, &txn, self.rid, &o).await?;
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			mt.index_document(stk, self.ctx, &txn, self.rid, &n).await?;
-		}
-		mt.finish(&txn).await
+		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()).await
 	}
 
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
@@ -311,7 +298,7 @@ impl<'a> IndexOperation<'a> {
 		let hnsw = self
 			.ctx
 			.get_index_stores()
-			.get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p)
+			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data

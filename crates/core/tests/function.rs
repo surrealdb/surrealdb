@@ -4,7 +4,7 @@ use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_types::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Table, Value};
 
 use crate::helpers::Test;
 
@@ -37,7 +37,7 @@ macro_rules! assert_delta {
 
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
 	let err = dbs.execute(query, &session, None).await.unwrap_err();
@@ -239,12 +239,16 @@ async fn function_rand_uuid_v7_from_datetime() -> Result<()> {
 async fn function_record_exists() -> Result<()> {
 	let sql = r#"
 		USE NS test DB test;
+		DEFINE TABLE person;
 		RETURN record::exists(r"person:tobie");
 		CREATE ONLY person:tobie;
 		RETURN record::exists(r"person:tobie");
 	"#;
 	let mut test = Test::new(sql).await?;
 	// USE NS test DB test;
+	let tmp = test.next()?.result;
+	tmp.unwrap();
+	// DEFINE TABLE person;
 	let tmp = test.next()?.result;
 	tmp.unwrap();
 	// RETURN record::exists(r"person:tobie");
@@ -3066,11 +3070,11 @@ async fn function_type_table() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::String("person".to_string());
+	let val = Value::Table(Table::new("person".to_string()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::String("animal".to_string());
+	let val = Value::Table(Table::new("animal".to_string()));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3876,7 +3880,7 @@ pub async fn function_http_disabled() -> Result<()> {
 #[tokio::test]
 async fn function_outside_database() -> Result<()> {
 	let sql = "RETURN fn::does_not_exist();";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
@@ -3924,7 +3928,7 @@ async fn function_custom_typed_returns() -> Result<()> {
 		RETURN fn::two();
 		RETURN fn::two_bad_type();
 	"#;
-	let error = "Couldn't coerce return value from function `two_bad_type`: Expected `string` but found `2`";
+	let error = "Couldn't coerce return value from function `fn::two_bad_type`: Expected `string` but found `2`";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?

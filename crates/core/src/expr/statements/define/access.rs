@@ -1,15 +1,13 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
 use crate::catalog::{self, AccessDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -18,11 +16,12 @@ use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
+use crate::expr::{
+	AccessType, Algorithm, Base, Expr, FlowResultExt, Idiom, JwtAccess, Literal, RecordAccess,
+};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Value};
+use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineAccessStatement {
@@ -32,18 +31,7 @@ pub(crate) struct DefineAccessStatement {
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineAccessStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.authenticate.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
+	pub comment: Expr,
 }
 
 impl Default for DefineAccessStatement {
@@ -55,7 +43,7 @@ impl Default for DefineAccessStatement {
 			access_type: AccessType::default(),
 			authenticate: None,
 			duration: AccessDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -128,15 +116,22 @@ impl DefineAccessStatement {
 			duration: AccessDuration {
 				grant: def
 					.grant_duration
-					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 				token: def
 					.token_duration
-					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 				session: def
 					.session_duration
-					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 			},
-			comment: def.comment.clone().map(|x| Expr::Literal(Literal::String(x))),
+			comment: def
+				.comment
+				.clone()
+				.map(|x| Expr::Literal(Literal::String(x)))
+				.unwrap_or(Expr::Literal(Literal::None)),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -158,7 +153,7 @@ impl DefineAccessStatement {
 	async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<AccessDefinition> {
@@ -182,7 +177,7 @@ impl DefineAccessStatement {
 
 		async fn convert_jwt_access(
 			stk: &mut Stk,
-			ctx: &Context,
+			ctx: &FrozenContext,
 			opt: &Options,
 			doc: Option<&CursorDoc>,
 			access: &JwtAccess,
@@ -192,25 +187,33 @@ impl DefineAccessStatement {
 					JwtAccessVerify::Key(k) => {
 						catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
 							alg: convert_algorithm(&k.alg),
-							key: compute_to!(stk, ctx, opt, doc, k.key => String),
+							key: stk
+								.run(|stk| k.key.compute(stk, ctx, opt, doc))
+								.await
+								.catch_return()?
+								.coerce_to::<String>()?,
 						})
 					}
 					JwtAccessVerify::Jwks(j) => {
 						catalog::JwtAccessVerify::Jwks(catalog::JwtAccessVerifyJwks {
-							url: compute_to!(stk, ctx, opt, doc, j.url => String),
+							url: stk
+								.run(|stk| j.url.compute(stk, ctx, opt, doc))
+								.await
+								.catch_return()?
+								.cast_to()?,
 						})
 					}
 				},
 				issue: map_opt!(x as &access.issue => catalog::JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: compute_to!(stk, ctx, opt, doc, x.key => String),
+					key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
 				}),
 			})
 		}
 
 		async fn convert_bearer_access(
 			stk: &mut Stk,
-			ctx: &Context,
+			ctx: &FrozenContext,
 			opt: &Options,
 			doc: Option<&CursorDoc>,
 			access: &BearerAccess,
@@ -228,13 +231,37 @@ impl DefineAccessStatement {
 			})
 		}
 
+		let grant_duration = stk
+			.run(|stk| self.duration.grant.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+		let token_duration = stk
+			.run(|stk| self.duration.token.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+		let session_duration = stk
+			.run(|stk| self.duration.session.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(AccessDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
 			base: self.base.into(),
-			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
-			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
-			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			grant_duration,
+			token_duration,
+			session_duration,
+			comment,
 			authenticate: self.authenticate.clone(),
 			access_type: match &self.access_type {
 				AccessType::Record(record_access) => {
@@ -258,10 +285,11 @@ impl DefineAccessStatement {
 
 impl DefineAccessStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineAccessStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -280,7 +308,7 @@ impl DefineAccessStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -307,7 +335,7 @@ impl DefineAccessStatement {
 							if !opt.import {
 								bail!(Error::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -317,7 +345,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -336,7 +364,7 @@ impl DefineAccessStatement {
 								bail!(Error::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -358,10 +386,10 @@ impl DefineAccessStatement {
 	/// Remove information from the access definition which should not be displayed.
 	pub fn redact(mut self) -> Self {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
-			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
-				if v.alg.is_symmetric() {
-					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				}
+			if let JwtAccessVerify::Key(ref mut v) = acc.verify
+				&& v.alg.is_symmetric()
+			{
+				v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 			if let Some(ref mut s) = acc.issue {
 				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
@@ -386,61 +414,9 @@ impl DefineAccessStatement {
 	}
 }
 
-impl Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS",)?;
-		match self.kind {
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::Default => {}
-		}
-		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
-		// The additional authentication clause
-		if let Some(ref v) = self.authenticate {
-			write!(f, " AUTHENTICATE {v}")?
-		}
-		// Always print relevant durations so defaults can be changed in the future
-		// If default values were not printed, exports would not be forward compatible
-		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		if self.access_type.can_issue_grants() {
-			write!(
-				f,
-				" FOR GRANT {},",
-				match self.duration.grant {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		if self.access_type.can_issue_tokens() {
-			write!(
-				f,
-				" FOR TOKEN {},",
-				match self.duration.token {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineAccessStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

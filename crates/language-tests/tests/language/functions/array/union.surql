@@ -11,8 +11,7 @@ error = "Incorrect arguments for function array::union(). Argument 1 was the wro
 value = "[1, 2, 6, 3, 4, 5]"
 
 [[test.results]]
-# TODO: Look into the result her sometimes being inconsistant, sometimes the normal `1` is being omitted.
-value = "[{  }, 1d, 'foo', 1f, 1h, '', 1dec, 1]"
+value = "[{  }, 1d, 'foo', 1f, 1h, '']"
 
 [[test.results]]
 value = "[1]"

@@ -31,6 +31,3 @@ impl Parser<'_> {
 		})
 	}
 }
-
-#[cfg(test)]
-mod test {}

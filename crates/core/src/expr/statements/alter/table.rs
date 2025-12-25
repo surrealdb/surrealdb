@@ -1,41 +1,64 @@
-use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
-use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Executes `ALTER TABLE` operations against an existing table.
+///
+/// Supported operations include:
+/// - toggle `SCHEMAFULL`/`SCHEMALESS`
+/// - update `PERMISSIONS`
+/// - set/drop `CHANGEFEED`
+/// - set/drop table `COMMENT`
+/// - change table `TYPE` (`NORMAL`/`RELATION`/`ANY`)
+/// - request a table-level storage `COMPACT`
+///
+/// Notes:
+/// - When switching to a `RELATION` table type, in/out fields are created as needed via
+///   `DefineTableStatement::add_in_out_fields`.
+/// - When `compact` is true, underlying storage for this table is compacted.
 pub(crate) struct AlterTableStatement {
-	pub name: String,
+	/// Table name.
+	pub name: TableName,
+	/// If true, do nothing (and succeed) when the table does not exist.
 	pub if_exists: bool,
+	/// Switch `SCHEMAFULL` on (`Set`) or switch to `SCHEMALESS` (`Drop`).
 	pub(crate) schemafull: AlterKind<()>,
+	/// New table permissions, if provided.
 	pub permissions: Option<Permissions>,
+	/// Set/drop changefeed definition.
 	pub(crate) changefeed: AlterKind<ChangeFeed>,
+	/// Set/drop human‑readable comment.
 	pub(crate) comment: AlterKind<String>,
+	/// Request a compaction of the table’s keyspace.
+	pub(crate) compact: bool,
+	/// Change the table type (`NORMAL` / `RELATION` / `ANY`).
 	pub kind: Option<TableType>,
 }
 
 impl AlterTableStatement {
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	/// Computes the effect of the `ALTER TABLE` statement.
+	///
+	/// Permissions: requires `Action::Edit` on `ResourceKind::Table`.
+	///
+	/// Side effects:
+	/// - May write table definition metadata
+	/// - May compact the underlying storage if `compact` is true
+	/// - May create relation helper fields when switching to `RELATION`
+	#[instrument(level = "trace", name = "AlterTableStatement::compute", skip_all)]
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
@@ -52,7 +75,7 @@ impl AlterTableStatement {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::TbNotFound {
-						name: self.name.to_string(),
+						name: self.name.clone(),
 					}
 					.into());
 				}
@@ -97,7 +120,12 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
+		}
+
+		if self.compact {
+			let key = crate::key::table::all::new(ns, db, &self.name);
+			txn.compact(Some(key)).await?;
 		}
 
 		// Set the table definition
@@ -110,73 +138,9 @@ impl AlterTableStatement {
 	}
 }
 
-impl Display for AlterTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER TABLE")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
-		if let Some(kind) = &self.kind {
-			write!(f, " TYPE")?;
-			match &kind {
-				TableType::Normal => {
-					f.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					f.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(f, " IN ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								" | ".fmt(f)?
-							}
-							k.fmt(f)?
-						}
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(f, " OUT ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								" | ".fmt(f)?
-							}
-							k.fmt(f)?
-						}
-					}
-				}
-				TableType::Any => {
-					f.write_str(" ANY")?;
-				}
-			}
-		}
-
-		match self.schemafull {
-			AlterKind::Set(_) => writeln!(f, " SCHEMAFULL")?,
-			AlterKind::Drop => writeln!(f, " SCHEMALESS")?,
-			AlterKind::None => {}
-		}
-
-		match self.comment {
-			AlterKind::Set(ref x) => writeln!(f, " COMMENT {x}")?,
-			AlterKind::Drop => writeln!(f, " DROP COMMENT")?,
-			AlterKind::None => {}
-		}
-
-		match self.changefeed {
-			AlterKind::Set(ref x) => writeln!(f, " CHANGEFEED {x}")?,
-			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
-			AlterKind::None => {}
-		}
-
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
-		}
-		Ok(())
+impl ToSql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::alter::AlterTableStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

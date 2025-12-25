@@ -3,7 +3,7 @@ use reblessive;
 
 use crate::catalog;
 use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::statements::access;
@@ -38,7 +38,7 @@ pub(crate) async fn authenticate_record(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxRetryable) => {
+				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
@@ -84,7 +84,7 @@ pub(crate) async fn authenticate_generic(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxRetryable) => {
+				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
@@ -115,7 +115,7 @@ pub(crate) async fn create_refresh_token_record(
 	let sess = Session::owner().with_ns(ns).with_db(db);
 	let opt = kvs.setup_options(&sess);
 	// Create a new context with a writeable transaction
-	let mut ctx = MutableContext::background();
+	let mut ctx = Context::background();
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
@@ -151,7 +151,7 @@ pub async fn revoke_refresh_token_record(
 	let sess = Session::owner().with_ns(ns).with_db(db);
 	let opt = kvs.setup_options(&sess);
 	// Create a new context with a writeable transaction
-	let mut ctx = MutableContext::background();
+	let mut ctx = Context::background();
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();

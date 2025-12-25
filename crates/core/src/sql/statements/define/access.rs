@@ -1,11 +1,11 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr};
+use crate::sql::{AccessType, Base, Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -13,63 +13,49 @@ pub(crate) struct DefineAccessStatement {
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
-impl Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS")?;
+impl ToSql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE ACCESS");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {
-				write!(f, " OVERWRITE")?;
+				write_sql!(f, fmt, " OVERWRITE");
 			}
 			DefineKind::IfNotExists => {
-				write!(f, " IF NOT EXISTS")?;
+				write_sql!(f, fmt, " IF NOT EXISTS");
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
+		write_sql!(
+			f,
+			fmt,
+			" {} ON {} TYPE {}",
+			CoverStmts(&self.name),
+			self.base,
+			self.access_type
+		);
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
-			write!(f, " AUTHENTICATE {v}")?
+			write_sql!(f, fmt, " AUTHENTICATE {}", CoverStmts(v))
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
+		write_sql!(f, fmt, " DURATION");
 		if self.access_type.can_issue_grants() {
-			write!(
-				f,
-				" FOR GRANT {},",
-				match self.duration.grant {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
+			write_sql!(f, fmt, " FOR GRANT {},", CoverStmts(&self.duration.grant));
 		}
 		if self.access_type.can_issue_tokens() {
-			write!(
-				f,
-				" FOR TOKEN {},",
-				match self.duration.token {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
+			write_sql!(f, fmt, " FOR TOKEN {},", CoverStmts(&self.duration.token));
 		}
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+
+		write_sql!(f, fmt, " FOR SESSION {}", CoverStmts(&self.duration.session));
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		Ok(())
 	}
 }
 
@@ -82,7 +68,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -96,7 +82,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment.into(),
 		}
 	}
 }

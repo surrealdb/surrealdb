@@ -1,25 +1,24 @@
 use std::cmp::Ordering;
-use std::fmt;
 use std::ops::Bound;
 
 use nanoid::nanoid;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use ulid::Ulid;
 
 use crate::cnf::ID_CHARS;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordIdKeyRange {
@@ -59,20 +58,19 @@ impl Ord for RecordIdKeyRange {
 	}
 }
 
-impl fmt::Display for RecordIdKeyRange {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for RecordIdKeyRange {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self.start {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "{x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}>")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "{x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}>"),
 		}
-		write!(f, "..")?;
+		write_sql!(f, sql_fmt, "..");
 		match self.end {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "={x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "={x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}"),
 		}
-		Ok(())
 	}
 }
 
@@ -181,10 +179,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::sql::Id")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum RecordIdKey {
@@ -375,28 +370,25 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-impl fmt::Display for RecordIdKey {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for RecordIdKey {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			RecordIdKey::Number(n) => write!(f, "{n}"),
-			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
-			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
-			RecordIdKey::Object(object) => object.fmt(f),
-			RecordIdKey::Array(array) => array.fmt(f),
-			RecordIdKey::Range(rid) => rid.fmt(f),
+			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v)),
+			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
+			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
+			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
+			RecordIdKey::Range(rid) => write_sql!(f, sql_fmt, "{}", rid),
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::RecordId")]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordId {
-	pub table: String,
+	pub table: TableName,
 	pub key: RecordIdKey,
 }
 
@@ -404,7 +396,7 @@ impl_kv_value_revisioned!(RecordId);
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub(crate) fn new<K>(table: String, key: K) -> Self
+	pub(crate) fn new<K>(table: TableName, key: K) -> Self
 	where
 		RecordIdKey: From<K>,
 	{
@@ -414,7 +406,7 @@ impl RecordId {
 		}
 	}
 
-	pub fn random_for_table(table: String) -> Self {
+	pub fn random_for_table(table: TableName) -> Self {
 		RecordId {
 			table,
 			key: RecordIdKey::rand(),
@@ -429,14 +421,14 @@ impl RecordId {
 		}
 	}
 
-	pub fn is_table_type(&self, tables: &[String]) -> bool {
+	pub fn is_table_type(&self, tables: &[TableName]) -> bool {
 		tables.is_empty() || tables.contains(&self.table)
 	}
 
 	pub(crate) async fn select_document(
 		self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> anyhow::Result<Option<Object>> {
@@ -454,12 +446,6 @@ impl RecordId {
 	}
 }
 
-impl fmt::Display for RecordId {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
-	}
-}
-
 impl TryFrom<RecordId> for crate::types::PublicRecordId {
 	type Error = anyhow::Error;
 
@@ -474,8 +460,14 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 impl From<crate::types::PublicRecordId> for RecordId {
 	fn from(value: crate::types::PublicRecordId) -> Self {
 		RecordId {
-			table: value.table.into_string(),
+			table: value.table.into(),
 			key: RecordIdKey::from(value.key),
 		}
+	}
+}
+
+impl ToSql for RecordId {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}:{}", EscapeRidKey(&self.table), self.key)
 	}
 }

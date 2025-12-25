@@ -1,10 +1,10 @@
-use std::fmt;
 use std::ops::Bound;
+
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::RecordIdKeyLit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,
 	pub end: Bound<RecordIdKeyLit>,
@@ -28,18 +28,26 @@ impl From<crate::expr::RecordIdKeyRangeLit> for RecordIdKeyRangeLit {
 	}
 }
 
-impl fmt::Display for RecordIdKeyRangeLit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for RecordIdKeyRangeLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self.start {
-			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{v}"),
-			Bound::Excluded(v) => write!(f, "{v}>"),
-		}?;
+			Bound::Unbounded => {}
+			Bound::Included(v) => v.fmt_sql(f, fmt),
+			Bound::Excluded(v) => {
+				v.fmt_sql(f, fmt);
+				f.push('>');
+			}
+		}
 		match &self.end {
-			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{v}"),
-			Bound::Included(v) => write!(f, "..={v}"),
-		}?;
-		Ok(())
+			Bound::Unbounded => f.push_str(".."),
+			Bound::Excluded(v) => {
+				f.push_str("..");
+				v.fmt_sql(f, fmt);
+			}
+			Bound::Included(v) => {
+				f.push_str("..=");
+				v.fmt_sql(f, fmt);
+			}
+		}
 	}
 }

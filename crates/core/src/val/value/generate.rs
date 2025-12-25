@@ -1,10 +1,11 @@
 use anyhow::Result;
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
-use crate::val::{RecordId, RecordIdKey, Value};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 impl Value {
-	pub(crate) fn generate(self, tb: String, retable: bool) -> Result<RecordId> {
+	pub(crate) fn generate(self, tb: TableName, retable: bool) -> Result<RecordId> {
 		match self {
 			// There is a floating point number for the id field
 			Value::Number(id) if id.is_float() => Ok(RecordId {
@@ -65,7 +66,7 @@ impl Value {
 			}
 			// Any other value is wrong
 			id => Err(anyhow::Error::new(Error::IdInvalid {
-				value: id.to_string(),
+				value: id.to_sql(),
 			})),
 		}
 	}

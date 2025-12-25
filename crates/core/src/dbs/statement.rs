@@ -1,11 +1,11 @@
 use std::borrow::Cow;
-use std::fmt;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::cond::Cond;
@@ -19,6 +19,7 @@ use crate::expr::output::Output;
 use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
+use crate::expr::statements::LiveFields;
 use crate::expr::statements::access::AccessStatement;
 use crate::expr::statements::create::CreateStatement;
 use crate::expr::statements::delete::DeleteStatement;
@@ -29,8 +30,9 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Idiom, Timeout, With};
+use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
 use crate::idx::planner::QueryPlanner;
+use crate::val::Duration;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
@@ -103,22 +105,52 @@ impl<'a> From<&'a AccessStatement> for Statement<'a> {
 	}
 }
 
-impl fmt::Display for Statement<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Statement<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Statement::Live(v) => write!(f, "{v}"),
-			Statement::Show(v) => write!(f, "{v}"),
+			Statement::Live(v) => {
+				let sql_stmt: crate::sql::statements::LiveStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Show(v) => {
+				let sql_stmt: crate::sql::statements::ShowStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
 			Statement::Select {
 				stmt,
 				..
-			} => write!(f, "{stmt}"),
-			Statement::Create(v) => write!(f, "{v}"),
-			Statement::Upsert(v) => write!(f, "{v}"),
-			Statement::Update(v) => write!(f, "{v}"),
-			Statement::Relate(v) => write!(f, "{v}"),
-			Statement::Delete(v) => write!(f, "{v}"),
-			Statement::Insert(v) => write!(f, "{v}"),
-			Statement::Access(v) => write!(f, "{v}"),
+			} => {
+				let sql_stmt: crate::sql::statements::SelectStatement = (*stmt).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Create(v) => {
+				let sql_stmt: crate::sql::statements::CreateStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Upsert(v) => {
+				let sql_stmt: crate::sql::statements::UpsertStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Update(v) => {
+				let sql_stmt: crate::sql::statements::UpdateStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Relate(v) => {
+				let sql_stmt: crate::sql::statements::RelateStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Delete(v) => {
+				let sql_stmt: crate::sql::statements::DeleteStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Insert(v) => {
+				let sql_stmt: crate::sql::statements::InsertStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
+			Statement::Access(v) => {
+				let sql_stmt: crate::sql::statements::AccessStatement = (*v).clone().into();
+				sql_stmt.fmt_sql(f, fmt);
+			}
 		}
 	}
 }
@@ -234,6 +266,33 @@ impl Statement<'_> {
 		}
 	}
 
+	/// Returns whether the statement requires the table to exist in the database
+	/// before executing or if it may be able to create it if it doesn't exist.
+	///
+	/// SELECT statements, for example, require the table to exist in the database
+	/// before executing, regardless of whether the db is strict or not.
+	///
+	/// UPSERT statements, on the other hand, may be allowed to create the table if it doesn't exist
+	/// depending on the db's strictness.
+	pub(crate) fn requires_table_existence(&self) -> bool {
+		match self {
+			Statement::Live(_)
+			| Statement::Show(_)
+			| Statement::Select {
+				..
+			}
+			| Statement::Update {
+				..
+			}
+			| Statement::Access(_)
+			| Statement::Delete(_) => true,
+			Statement::Create(_)
+			| Statement::Upsert(_)
+			| Statement::Relate(_)
+			| Statement::Insert(_) => false,
+		}
+	}
+
 	/// Returns whether the document retrieval for
 	/// this statement should attempt to loop over
 	/// existing document to update, or is guaranteed
@@ -255,18 +314,10 @@ impl Statement<'_> {
 				stmt,
 				..
 			} => Some(&stmt.expr),
-			Statement::Live(v) => Some(&v.fields),
-			_ => None,
-		}
-	}
-
-	/// Returns any OMIT clause if specified
-	pub(crate) fn omit(&self) -> Option<&Vec<Idiom>> {
-		match self {
-			Statement::Select {
-				omit,
-				..
-			} => Some(omit),
+			Statement::Live(v) => match &v.fields {
+				LiveFields::Diff => None,
+				LiveFields::Select(x) => Some(x),
+			},
 			_ => None,
 		}
 	}
@@ -450,31 +501,38 @@ impl Statement<'_> {
 		}
 	}
 
-	pub(crate) fn timeout(&self) -> Option<&Timeout> {
+	pub(crate) fn timeout(&self) -> Option<&Expr> {
 		match self {
-			Statement::Create(s) => s.timeout.as_ref(),
-			Statement::Delete(s) => s.timeout.as_ref(),
-			Statement::Insert(s) => s.timeout.as_ref(),
+			Statement::Create(s) => Some(&s.timeout),
+			Statement::Delete(s) => Some(&s.timeout),
+			Statement::Insert(s) => Some(&s.timeout),
 			Statement::Select {
 				stmt,
 				..
-			} => stmt.timeout.as_ref(),
-			Statement::Update(s) => s.timeout.as_ref(),
-			Statement::Upsert(s) => s.timeout.as_ref(),
+			} => Some(&stmt.timeout),
+			Statement::Update(s) => Some(&s.timeout),
+			Statement::Upsert(s) => Some(&s.timeout),
 			_ => None,
 		}
 	}
 	pub(crate) async fn setup_timeout<'a>(
 		&self,
 		stk: &mut Stk,
-		ctx: &'a Context,
+		ctx: &'a FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Cow<'a, Context>> {
+	) -> Result<Cow<'a, FrozenContext>> {
 		if let Some(t) = self.timeout() {
-			let x = t.compute(stk, ctx, opt, doc).await?.0;
-			let mut ctx = MutableContext::new(ctx);
-			ctx.add_timeout(x)?;
+			let Some(x) = stk
+				.run(|stk| t.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to::<Option<Duration>>()?
+			else {
+				return Ok(Cow::Borrowed(ctx));
+			};
+			let mut ctx = Context::new(ctx);
+			ctx.add_timeout(x.0)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
 			Ok(Cow::Borrowed(ctx))
@@ -484,12 +542,12 @@ impl Statement<'_> {
 	pub(crate) fn setup_query_planner<'a>(
 		&self,
 		planner: QueryPlanner,
-		ctx: Cow<'a, Context>,
-	) -> Cow<'a, Context> {
+		ctx: Cow<'a, FrozenContext>,
+	) -> Cow<'a, FrozenContext> {
 		// Add query executors if any
 		if planner.has_executors() {
 			// Create a new context
-			let mut ctx = MutableContext::new(&ctx);
+			let mut ctx = Context::new(&ctx);
 			ctx.set_query_planner(planner);
 			Cow::Owned(ctx.freeze())
 		} else {
@@ -499,7 +557,7 @@ impl Statement<'_> {
 
 	pub(crate) async fn from_select<'a>(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		stmt: &'a SelectStatement,

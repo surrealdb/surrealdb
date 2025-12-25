@@ -1,11 +1,9 @@
-use std::fmt;
-
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Value;
 use super::statements::info::InfoStructure;
 use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -13,18 +11,10 @@ pub(crate) struct Reference {
 	pub(crate) on_delete: ReferenceDeleteStrategy,
 }
 
-impl VisitExpression for Reference {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.on_delete.visit(visitor);
-	}
-}
-
-impl fmt::Display for Reference {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ON DELETE {}", &self.on_delete)
+impl ToSql for Reference {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_reference: crate::sql::reference::Reference = self.clone().into();
+		sql_reference.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -47,30 +37,16 @@ pub(crate) enum ReferenceDeleteStrategy {
 	Custom(Expr),
 }
 
-impl VisitExpression for ReferenceDeleteStrategy {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Self::Custom(expr) = self {
-			expr.visit(visitor);
-		}
-	}
-}
-impl fmt::Display for ReferenceDeleteStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
-			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
-			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-			ReferenceDeleteStrategy::Unset => write!(f, "UNSET"),
-			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
-		}
+impl ToSql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_reference_delete_strategy: crate::sql::reference::ReferenceDeleteStrategy =
+			self.clone().into();
+		sql_reference_delete_strategy.fmt_sql(f, sql_fmt);
 	}
 }
 
 impl InfoStructure for ReferenceDeleteStrategy {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }

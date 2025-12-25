@@ -6,9 +6,6 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use surrealdb_types::{
-	self, Action, Notification as CoreNotification, RecordId, SurrealValue, Value, Variables,
-};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use uuid::Uuid;
@@ -21,6 +18,9 @@ use crate::err::Error;
 use crate::method::{BoxFuture, Live, OnceLockExt, Select};
 use crate::notification::Notification;
 use crate::opt::Resource;
+use crate::types::{
+	Action, Notification as CoreNotification, RecordId, SurrealValue, Value, Variables,
+};
 use crate::{Connection, ExtraFeatures, Result, Surreal};
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
@@ -116,11 +116,14 @@ where
 
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
-			.execute_query(Command::RawQuery {
-				query: Cow::Owned(query),
-				txn: None,
-				variables,
-			})
+			.execute_query(
+				client.session_id,
+				Command::Query {
+					query: Cow::Owned(query),
+					txn: None,
+					variables,
+				},
+			)
 			.await?;
 
 		// Get the first result which should be the UUID
@@ -147,7 +150,7 @@ where
 			}
 		};
 
-		let rx = register(router, id).await?;
+		let rx = register(router, id, client.session_id).await?;
 		Ok(Stream::new(client.inner.clone().into(), id, Some(rx)))
 	})
 }
@@ -155,13 +158,17 @@ where
 pub(crate) async fn register(
 	router: &Router,
 	id: Uuid,
+	session_id: Uuid,
 ) -> Result<Receiver<Result<CoreNotification>>> {
 	let (tx, rx) = async_channel::unbounded();
 	router
-		.execute_unit(Command::SubscribeLive {
-			uuid: id,
-			notification_sender: tx,
-		})
+		.execute_unit(
+			session_id,
+			Command::SubscribeLive {
+				uuid: id,
+				notification_sender: tx,
+			},
+		)
 		.await?;
 	Ok(rx)
 }
@@ -322,9 +329,12 @@ where
 	spawn(async move {
 		if let Ok(router) = client.inner.router.extract() {
 			router
-				.execute_unit(Command::Kill {
-					uuid,
-				})
+				.execute_unit(
+					client.session_id,
+					Command::Kill {
+						uuid,
+					},
+				)
 				.await
 				.ok();
 		}

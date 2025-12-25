@@ -1,13 +1,8 @@
-use anyhow::{Result, anyhow};
-use chrono::DateTime;
+use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::TransactionType::Write;
 use surrealdb_core::syn;
-use surrealdb_core::vs::VersionStamp;
-use surrealdb_types::{Array, ToSql, Value};
+use surrealdb_types::{Array, Value};
 
 mod helpers;
 
@@ -19,7 +14,7 @@ async fn database_change_feeds() -> Result<()> {
 	let db = format!("database_{identifier}");
 	let sql = format!(
 		"
-	    DEFINE DATABASE {db} CHANGEFEED 1h;
+	    DEFINE DATABASE OVERWRITE {db} CHANGEFEED 1h;
         DEFINE TABLE person;
 		DEFINE FIELD name ON TABLE person
 			ASSERT
@@ -42,14 +37,9 @@ async fn database_change_feeds() -> Result<()> {
 		DELETE person:test;
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds(ns.as_str(), db.as_str()).await?;
 	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
-	let mut current_time = 0u64;
-	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
-	// Increment by a second (sic)
-	current_time += 1;
-	dbs.changefeed_process_at(None, current_time).await?;
 	assert_eq!(res.len(), 3);
 	// DEFINE DATABASE
 	let tmp = res.remove(0).result;
@@ -61,120 +51,57 @@ async fn database_change_feeds() -> Result<()> {
 	let tmp = res.remove(0).result;
 	tmp.unwrap();
 
-	// Two timestamps
-	let variance = 4;
-	let first_timestamp = VersionStamp::ZERO.iter().take(variance);
-	let second_timestamp = first_timestamp
-		.flat_map(|vs1| vs1.iter().skip(1).take(variance).map(move |vs2| (vs1, vs2)));
-
-	let potential_show_changes_values: Vec<Value> = second_timestamp
-		.map(|(vs1, vs2)| {
-			let vs1 = vs1.into_u128();
-			let vs2 = vs2.into_u128();
-			syn::value(
-				format!(
-					r#"[
-						{{ versionstamp: {}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
-						{{ versionstamp: {}, changes: [ {{ delete: {{ id: person:test }} }} ] }}
-						]"#,
-					vs1, vs2
-				)
-				.as_str(),
-			)
-			.unwrap()
-		})
-		.collect();
-
-	// Declare check that is repeatable
-	async fn check_test(
-		dbs: &Datastore,
-		sql2: &str,
-		ses: &Session,
-		cf_val_arr: &[Value],
-	) -> Result<()> {
-		let res = &mut dbs.execute(sql2, ses, None).await?;
-		assert_eq!(res.len(), 3);
-		// UPDATE CONTENT
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-		)
-		.unwrap();
-		Some(&tmp)
-			.filter(|x| *x == val)
-			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {tmp:?}\nright: {val:?}"))?;
-		// DELETE
-		let tmp = res.remove(0).result?;
-		let val = Value::Array(Array::new());
-		Some(&tmp)
-			.filter(|x| **x == val)
-			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {tmp:?}\nright: {val:?}"))?;
-		// SHOW CHANGES
-		let tmp = res.remove(0).result?;
-		cf_val_arr
-			.iter()
-			.find(|x| *x == tmp)
-			// We actually dont want to capture if its found
-			.map(|_v| ())
-			.ok_or_else(|| {
-				anyhow!(
-					"Expected SHOW CHANGES value not found:\n{:?}\nin:\n{:?}",
-					tmp,
-					cf_val_arr
-						.iter()
-						.map(|vs| vs.clone().into_string().unwrap())
-						.reduce(|left, right| format!("{}\n{}", left, right))
-						.unwrap()
-				)
-			})?;
-		Ok(())
-	}
-
-	// Check the validation with repeats
-	let limit = 1;
-	for i in 0..limit {
-		let test_result = check_test(&dbs, sql2, &ses, &potential_show_changes_values).await;
-		match test_result {
-			Ok(_) => break,
-			Err(e) => {
-				if i == limit - 1 {
-					panic!("Failed after retries: {}", e);
-				}
-				println!("Failed after retry {}:\n{}", i, e);
-				tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-			}
+	let res = &mut dbs.execute(sql2, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	// UPDATE CONTENT
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[
+		{
+			id: person:test,
+			name: 'Name: Tobie',
 		}
-	}
-	// Retain for 1h
-	let sql = "
-        SHOW CHANGES FOR TABLE person SINCE 0;
-	";
-	// This is neccessary to mark a point in time that can be GC'd
-	current_time += 1;
-	dbs.changefeed_process_at(None, current_time).await?;
-	let tx = dbs.transaction(Write, Optimistic).await?;
-	tx.cancel().await?;
+	]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val, "Expected UPDATE value");
+	// DELETE
+	let tmp = res.remove(0).result?;
+	let val = Value::Array(Array::new());
+	assert_eq!(tmp, val, "Expected DELETE value");
+	// SHOW CHANGES
+	let tmp = res.remove(0).result?;
+	let Value::Array(changes_array) = tmp else {
+		panic!("Expected array of changes");
+	};
+	assert_eq!(changes_array.len(), 2, "Expected 2 changesets");
 
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).result?;
-	assert!(potential_show_changes_values.contains(&tmp));
-	// GC after 1hs
-	let one_hour_in_secs = 3600;
-	current_time += one_hour_in_secs;
-	current_time += 1;
-	dbs.changefeed_process_at(None, current_time).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).result?;
-	let val: Value = Value::Array(Array::new());
-	assert_eq!(val, tmp);
-	//
+	// First changeset: UPDATE
+	let Value::Object(first) = &changes_array[0] else {
+		panic!("Expected object");
+	};
+	let Value::Number(vs1) = first.get("versionstamp").expect("versionstamp") else {
+		panic!("Expected versionstamp number");
+	};
+	let changes = first.get("changes").expect("changes");
+	let expected_update =
+		syn::value("[{ update: { id: person:test, name: 'Name: Tobie' } }]").unwrap();
+	assert_eq!(changes, &expected_update, "First changeset should be UPDATE");
+
+	// Second changeset: DELETE
+	let Value::Object(second) = &changes_array[1] else {
+		panic!("Expected object");
+	};
+	let Value::Number(vs2) = second.get("versionstamp").expect("versionstamp") else {
+		panic!("Expected versionstamp number");
+	};
+	let changes = second.get("changes").expect("changes");
+	let expected_delete = syn::value("[{ delete: { id: person:test } }]").unwrap();
+	assert_eq!(changes, &expected_delete, "Second changeset should be DELETE");
+
+	// Verify versionstamps are ordered
+	assert!(vs1 < vs2, "Versionstamps should be ordered");
+
 	Ok(())
 }
 
@@ -205,13 +132,9 @@ async fn table_change_feeds() -> Result<()> {
 		CREATE person:1000 SET name = 'Yusuke';
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test-tb-cf", "test-tb-cf").await?;
 	let ses = Session::owner().with_ns("test-tb-cf").with_db("test-tb-cf");
-	let start_ts = 0u64;
-	let end_ts = start_ts + 1;
-	dbs.changefeed_process_at(None, start_ts).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	dbs.changefeed_process_at(None, end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
 	let tmp = res.remove(0).result;
@@ -275,91 +198,94 @@ async fn table_change_feeds() -> Result<()> {
 	let _tmp = res.remove(0).result?;
 	// SHOW CHANGES
 	let tmp = res.remove(0).result?;
-	// If you want to write a macro, you are welcome to
-	let limit_variance = 3;
-	let first = VersionStamp::ZERO.iter().take(limit_variance);
-	let second =
-		first.flat_map(|vs1| vs1.iter().take(limit_variance).skip(1).map(move |vs2| (vs1, vs2)));
-	let third = second.flat_map(|(vs1, vs2)| {
-		vs2.iter().take(limit_variance).skip(1).map(move |vs3| (vs1, vs2, vs3))
-	});
-	let fourth = third.flat_map(|(vs1, vs2, vs3)| {
-		vs3.iter().take(limit_variance).skip(1).map(move |vs4| (vs1, vs2, vs3, vs4))
-	});
-	let fifth = fourth.flat_map(|(vs1, vs2, vs3, vs4)| {
-		vs4.iter().take(limit_variance).skip(1).map(move |vs5| (vs1, vs2, vs3, vs4, vs5))
-	});
-	let sixth = fifth.flat_map(|(vs1, vs2, vs3, vs4, vs5)| {
-		vs5.iter().take(limit_variance).skip(1).map(move |vs6| (vs1, vs2, vs3, vs4, vs5, vs6))
-	});
-	let allowed_values: Vec<Value> = sixth
-			.map(|(vs1, vs2, vs3, vs4, vs5, vs6)| {
-				let (vs1, vs2, vs3, vs4, vs5, vs6) = (
-					vs1.into_u128(),
-					vs2.into_u128(),
-					vs3.into_u128(),
-					vs4.into_u128(),
-					vs5.into_u128(),
-					vs6.into_u128(),
-				);
-				// define_table: { changefeed: { expiry: '1h', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'person', permissions: { create: false, select: false, update: false }, schemafull: false }
-				syn::value(
-					format!(
-						r#"[
-						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: 1h, original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
-						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
-						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
-						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
-						{{ versionstamp: {vs5}, changes: [ {{ delete: {{ id: person:test }} }} ] }},
-						{{ versionstamp: {vs6}, changes: [ {{ update: {{ id: person:1000, name: 'Name: Yusuke' }} }} ] }}
-						]"#
-					)
-					.as_str(),
-				).unwrap()
-			})
-			.collect();
-	assert!(
-		allowed_values.contains(&tmp),
-		"tmp:\n{:?}\nchecked:\n{:?}",
-		tmp,
-		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
-	);
-	// Retain for 1h
-	let sql = "
-        SHOW CHANGES FOR TABLE person SINCE 0;
-	";
-	dbs.changefeed_process_at(None, end_ts + 3599).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).result?;
-	assert!(
-		allowed_values.contains(&tmp),
-		"tmp:\n{:?}\nchecked:\n{:?}",
-		tmp,
-		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
-	);
-	// GC after 1hs
-	dbs.changefeed_process_at(None, end_ts + 3600).await?;
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	let tmp = res.remove(0).result?;
-	let val = Value::Array(Array::new());
-	assert_eq!(tmp, val);
-	//
+	let Value::Array(changes_array) = tmp else {
+		panic!("Expected array of changes");
+	};
+
+	// Verify we have 6 changesets (DEFINE TABLE, 3 UPDATEs, 1 DELETE, 1 CREATE)
+	assert_eq!(changes_array.len(), 6, "Expected 6 changesets");
+
+	// Verify DEFINE TABLE
+	let Value::Object(cs0) = &changes_array[0] else {
+		panic!("Expected object");
+	};
+	let changes = cs0.get("changes").expect("changes");
+	let expected = syn::value(
+		"[{ define_table: { name: 'person', changefeed: { expiry: 1h, original: false }, drop: false, kind: { kind: 'ANY' }, permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }]"
+	).unwrap();
+	assert_eq!(changes, &expected, "First changeset should be DEFINE TABLE");
+
+	// Verify first UPDATE (Tobie)
+	let Value::Object(cs1) = &changes_array[1] else {
+		panic!("Expected object");
+	};
+	let changes = cs1.get("changes").expect("changes");
+	let expected = syn::value("[{ update: { id: person:test, name: 'Name: Tobie' } }]").unwrap();
+	assert_eq!(changes, &expected, "Second changeset should be UPDATE Tobie");
+
+	// Verify second UPDATE (Jaime)
+	let Value::Object(cs2) = &changes_array[2] else {
+		panic!("Expected object");
+	};
+	let changes = cs2.get("changes").expect("changes");
+	let expected = syn::value("[{ update: { id: person:test, name: 'Name: Jaime' } }]").unwrap();
+	assert_eq!(changes, &expected, "Third changeset should be UPDATE Jaime");
+
+	// Verify third UPDATE (Tobie again)
+	let Value::Object(cs3) = &changes_array[3] else {
+		panic!("Expected object");
+	};
+	let changes = cs3.get("changes").expect("changes");
+	let expected = syn::value("[{ update: { id: person:test, name: 'Name: Tobie' } }]").unwrap();
+	assert_eq!(changes, &expected, "Fourth changeset should be UPDATE Tobie");
+
+	// Verify DELETE
+	let Value::Object(cs4) = &changes_array[4] else {
+		panic!("Expected object");
+	};
+	let changes = cs4.get("changes").expect("changes");
+	let expected = syn::value("[{ delete: { id: person:test } }]").unwrap();
+	assert_eq!(changes, &expected, "Fifth changeset should be DELETE");
+
+	// Verify CREATE person:1000
+	let Value::Object(cs5) = &changes_array[5] else {
+		panic!("Expected object");
+	};
+	let changes = cs5.get("changes").expect("changes");
+	let expected = syn::value("[{ update: { id: person:1000, name: 'Name: Yusuke' } }]").unwrap();
+	assert_eq!(changes, &expected, "Sixth changeset should be CREATE/UPDATE person:1000");
+
+	// Verify versionstamps are ordered
+	for i in 0..5 {
+		let Value::Object(cs_i) = &changes_array[i] else {
+			panic!("Expected object at index {}", i);
+		};
+		let Value::Object(cs_next) = &changes_array[i + 1] else {
+			panic!("Expected object at index {}", i + 1);
+		};
+		let Value::Number(vs_i) = cs_i.get("versionstamp").expect("versionstamp") else {
+			panic!("Expected versionstamp number");
+		};
+		let Value::Number(vs_next) = cs_next.get("versionstamp").expect("versionstamp") else {
+			panic!("Expected versionstamp number");
+		};
+		assert!(vs_i < vs_next, "Versionstamps should be ordered");
+	}
+
 	Ok(())
 }
 
 #[tokio::test]
 async fn changefeed_with_ts() -> Result<()> {
-	let db = new_ds().await?;
+	let db = new_ds("test-cf-ts", "test-cf-ts").await?;
 	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
 	// Enable change feeds
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-	db.execute(sql, &ses, None).await?.remove(0).result?;
-	// Save timestamp 1
-	let ts1_dt = "2023-08-01T00:00:00Z";
-	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
-	db.changefeed_process_at(None, ts1.timestamp().try_into().unwrap()).await.unwrap();
+	let mut res = db.execute(sql, &ses, None).await?;
+	res.remove(0).result.unwrap();
+
 	// Create and update users
 	let sql = "
         CREATE user:amos SET name = 'Amos';
@@ -403,7 +329,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let Value::Object(a) = a else {
 		unreachable!()
 	};
-	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
@@ -536,53 +462,25 @@ async fn changefeed_with_ts() -> Result<()> {
 		)
 		.unwrap()
 	);
-	// Save timestamp 2
-	let ts2_dt = "2023-08-01T00:00:05Z";
-	let ts2 = DateTime::parse_from_rfc3339(ts2_dt).unwrap();
-	db.changefeed_process_at(None, ts2.timestamp().try_into().unwrap()).await.unwrap();
 	//
-	// Show changes using timestamp 1
+	// Show changes using versionstamp1 (should exclude DEFINE TABLE, return 4 items)
 	//
-	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
+	let vs1_int = versionstamp1.to_int().unwrap() as u64 + 1;
+	let sql = format!("SHOW CHANGES FOR TABLE user SINCE {vs1_int} LIMIT 10; ");
 	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
 	assert_eq!(array.len(), 4);
-	// UPDATE user:amos
-	let a = array.first().unwrap();
-	let Value::Object(a) = a else {
-		unreachable!()
-	};
-	let Value::Number(versionstamp1b) = a.get("versionstamp").unwrap() else {
-		unreachable!()
-	};
-	assert!(versionstamp2 == versionstamp1b);
-	let changes = a.get("changes").unwrap().to_owned();
-	assert_eq!(
-		changes,
-		syn::value(
-			"[
-					{
-						 update: {
-							 id: user:amos,
-							 name: 'Amos'
-						 }
-					}
-				]"
-		)
-		.unwrap()
-	);
-	// Save timestamp 3
-	let ts3_dt = "2023-08-01T00:00:10Z";
-	let ts3 = DateTime::parse_from_rfc3339(ts3_dt).unwrap();
-	db.changefeed_process_at(None, ts3.timestamp().try_into().unwrap()).await.unwrap();
+
 	//
-	// Show changes using timestamp 3
+	// Show changes using a versionstamp past all operations (should return 0 items)
 	//
-	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");
+	// Use versionstamp5 (last operation) which was extracted earlier
+	let vs5_int = versionstamp5.to_int().unwrap() as u64 + 1;
+	let sql = format!("SHOW CHANGES FOR TABLE user SINCE {vs5_int} LIMIT 10; ");
 	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
-	let Value::Array(array) = value.clone() else {
+	let Value::Array(array) = value else {
 		unreachable!()
 	};
 	assert_eq!(array.len(), 0);

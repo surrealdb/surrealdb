@@ -10,10 +10,10 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub(in crate::idx) struct HnswDocs {
-	tb: String,
+	tb: TableName,
 	ikb: IndexKeyBase,
 	state_updated: bool,
 	state: HnswDocsState,
@@ -29,7 +29,7 @@ pub(crate) struct HnswDocsState {
 impl HnswDocs {
 	pub(in crate::idx) async fn new(
 		tx: &Transaction,
-		tb: String,
+		tb: TableName,
 		ikb: IndexKeyBase,
 	) -> Result<Self> {
 		let state_key = ikb.new_hd_root_key();
@@ -207,15 +207,15 @@ impl VecDocs {
 	) -> Result<()> {
 		let ser_vec = o.into();
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(mut ed) = tx.get(&key, None).await? {
-			if let Some(new_docs) = ed.docs.remove(d) {
-				if new_docs.is_empty() {
-					tx.del(&key).await?;
-					h.remove(tx, ed.e_id).await?;
-				} else {
-					ed.docs = new_docs;
-					tx.set(&key, &ed, None).await?;
-				}
+		if let Some(mut ed) = tx.get(&key, None).await?
+			&& let Some(new_docs) = ed.docs.remove(d)
+		{
+			if new_docs.is_empty() {
+				tx.del(&key).await?;
+				h.remove(tx, ed.e_id).await?;
+			} else {
+				ed.docs = new_docs;
+				tx.set(&key, &ed, None).await?;
 			}
 		};
 		Ok(())

@@ -1,19 +1,16 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -65,9 +62,17 @@ pub(crate) struct AccessStatementRevoke {
 pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
-	pub expired: bool,
-	pub revoked: bool,
+	pub kind: PurgeKind,
 	pub grace: Duration,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PurgeKind {
+	#[default]
+	Expired,
+	Revoked,
+	Both,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -77,10 +82,11 @@ pub(crate) enum Subject {
 }
 
 impl Subject {
+	#[instrument(level = "trace", name = "Subject::compute", skip_all)]
 	async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<catalog::Subject> {
@@ -176,7 +182,7 @@ pub async fn create_grant(
 	access: String,
 	base: Option<Base>,
 	subject: catalog::Subject,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<catalog::AccessGrant> {
 	let base = match &base {
@@ -196,19 +202,18 @@ pub async fn create_grant(
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
-				ac: access.to_string(),
-				// The namespace is expected above so this unwrap should not be able to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
+				ac: access.clone(),
+				// The namespace is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
-				ac: access.to_string(),
-				// The namespace and database is expected above so these unwraps should not be able
-				// to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
-				db: opt.db.as_deref().unwrap().to_owned(),
+				ac: access.clone(),
+				// The namespace and database is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
+				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
 			})?
 		}
 	};
@@ -276,7 +281,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -314,10 +322,12 @@ pub async fn create_grant(
 							let ns_id = ctx.get_ns_id(opt).await?;
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
-									name: user.to_string(),
-									// We just retrieved the ns_id above so we should have a
-									// namespace.
-									ns: opt.ns().unwrap().to_owned(),
+									name: user.clone(),
+									// We just retrieved the ns_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by get_ns_id")
+										.to_owned(),
 								}
 							})?
 						}
@@ -325,11 +335,16 @@ pub async fn create_grant(
 							let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
-									name: user.to_string(),
-									// We just retrieved the ns_id and db_id above so we should have
-									// a namespace and database.
-									ns: opt.ns().unwrap().to_owned(),
-									db: opt.db().unwrap().to_owned(),
+									name: user.clone(),
+									// We just retrieved the ns_id and db_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by expect_ns_db_ids")
+										.to_owned(),
+									db: opt
+										.db()
+										.expect("database validated by expect_ns_db_ids")
+										.to_owned(),
 								}
 							})?
 						}
@@ -376,14 +391,14 @@ pub async fn create_grant(
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -401,7 +416,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -429,7 +447,7 @@ pub async fn create_grant(
 async fn compute_grant(
 	stmt: &AccessStatementGrant,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 ) -> FlowResult<Value> {
@@ -443,7 +461,7 @@ async fn compute_grant(
 async fn compute_show(
 	stmt: &AccessStatementShow,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -466,22 +484,29 @@ async fn compute_show(
 			let ns = ctx.expect_ns_id(opt).await?;
 			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
-					ac: stmt.ac.to_string(),
-					// We expected a namespace above so this unwrap shouldn't be able to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
+					ac: stmt.ac.clone(),
+					// We expected a namespace above
+					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 				});
 			}
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			// We expected a namespace above so this unwrap shouldn't be able to trigger.
+			// We expected a namespace above
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
-					ac: stmt.ac.to_string(),
-					// We expected a namespace and database above so these unwrap shouldn't be able
-					// to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
-					db: opt.db.as_deref().unwrap().to_owned(),
+					ac: stmt.ac.clone(),
+					// We expected a namespace and database above
+					ns: opt
+						.ns
+						.as_deref()
+						.expect("namespace validated by expect_ns_db_ids")
+						.to_owned(),
+					db: opt
+						.db
+						.as_deref()
+						.expect("database validated by expect_ns_db_ids")
+						.to_owned(),
 				});
 			}
 		}
@@ -492,7 +517,7 @@ async fn compute_show(
 		Some(gr) => {
 			let grant = match base {
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
-					Some(val) => val.clone(),
+					Some(val) => val,
 					None => bail!(Error::AccessGrantRootNotFound {
 						ac: stmt.ac.clone(),
 						gr: gr.clone(),
@@ -501,7 +526,7 @@ async fn compute_show(
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
-						Some(val) => val.clone(),
+						Some(val) => val,
 						None => bail!(Error::AccessGrantNsNotFound {
 							ac: stmt.ac.clone(),
 							gr: gr.clone(),
@@ -512,7 +537,7 @@ async fn compute_show(
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
-						Some(val) => val.clone(),
+						Some(val) => val,
 						None => bail!(Error::AccessGrantDbNotFound {
 							ac: stmt.ac.clone(),
 							gr: gr.clone(),
@@ -582,7 +607,7 @@ async fn compute_show(
 pub async fn revoke_grant(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value> {
 	let base = match &stmt.base {
@@ -660,13 +685,13 @@ pub async fn revoke_grant(
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key = crate::key::namespace::access::gr::new(ns.namespace_id, &stmt.ac, gr);
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -750,7 +775,7 @@ pub async fn revoke_grant(
 						txn.set(&key, &gr, None).await?;
 					}
 					Base::Ns => {
-						let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 						let key = crate::key::namespace::access::gr::new(
 							ns.namespace_id,
 							&stmt.ac,
@@ -760,7 +785,7 @@ pub async fn revoke_grant(
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
-						let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 						let key = crate::key::database::access::gr::new(
 							db.namespace_id,
@@ -794,7 +819,7 @@ pub async fn revoke_grant(
 async fn compute_revoke(
 	stmt: &AccessStatementRevoke,
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -804,7 +829,7 @@ async fn compute_revoke(
 
 async fn compute_purge(
 	stmt: &AccessStatementPurge,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
@@ -850,12 +875,12 @@ async fn compute_purge(
 		// Revocation times should never exceed the current time.
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
-		let purge_expired = stmt.expired
+		let purge_expired = matches!(stmt.kind, PurgeKind::Expired | PurgeKind::Both)
 			&& gr.expiration.as_ref().is_some_and(|exp| {
 				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
 				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 				             });
-		let purge_revoked = stmt.revoked
+		let purge_revoked = matches!(stmt.kind, PurgeKind::Revoked | PurgeKind::Both)
 			&& gr.revocation.as_ref().is_some_and(|rev| {
 				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
 				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
@@ -896,7 +921,7 @@ impl AccessStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -915,69 +940,9 @@ impl AccessStatement {
 	}
 }
 
-impl Display for AccessStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " GRANT")?;
-				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
-					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
-				}
-				Ok(())
-			}
-			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " SHOW")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " REVOKE")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " PURGE")?;
-				match (stmt.expired, stmt.revoked) {
-					(true, false) => write!(f, " EXPIRED")?,
-					(false, true) => write!(f, " REVOKED")?,
-					(true, true) => write!(f, " EXPIRED, REVOKED")?,
-					// This case should not parse.
-					(false, false) => write!(f, " NONE")?,
-				};
-				if !stmt.grace.is_zero() {
-					write!(f, " FOR {}", stmt.grace)?;
-				}
-				Ok(())
-			}
-		}
+impl ToSql for AccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::AccessStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }

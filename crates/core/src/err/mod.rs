@@ -14,6 +14,7 @@ use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use storekey::DecodeError;
+use surrealdb_types::ToSql;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
@@ -23,13 +24,14 @@ use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
+use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
-use crate::val::{CastError, CoerceError, RecordId, Value};
-use crate::vs::VersionStampError;
+use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
+#[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
 pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
@@ -39,35 +41,9 @@ pub(crate) enum Error {
 	#[error("An error occurred: {0}")]
 	Thrown(String),
 
-	/// There was a problem with the underlying datastore
-	#[error("There was a problem with the underlying datastore: {0}")]
-	Ds(String),
-
-	/// There was a problem with a datastore transaction
-	#[error("There was a problem with a datastore transaction: {0}")]
-	Tx(String),
-
-	/// The transaction was already cancelled or committed
-	#[error("Couldn't update a finished transaction")]
-	TxFinished,
-
-	/// The current transaction was created as read-only
-	#[error("Couldn't write to a read only transaction")]
-	TxReadonly,
-
-	/// The conditional value in the request was not equal
-	#[error("Value being checked was not correct")]
-	TxConditionNotMet,
-
-	/// The key being inserted in the transaction already exists
-	#[error("The key being inserted already exists")]
-	TxKeyAlreadyExists,
-
-	/// There was a transaction error that can be retried
-	#[error(
-		"Failed to commit transaction due to a read or write conflict. This transaction can be retried"
-	)]
-	TxRetryable,
+	/// An error originating from the KVS (Key-Value Store) layer
+	#[error("There was a problem with the key-value store: {0}")]
+	Kvs(#[from] KvsError),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -82,13 +58,13 @@ pub(crate) enum Error {
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a CONTENT clause")]
+	#[error("Cannot use {} in a CONTENT clause", value.to_sql())]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a MERGE clause")]
+	#[error("Cannot use {} in a MERGE clause", value.to_sql())]
 	InvalidMerge {
 		value: Value,
 	},
@@ -96,6 +72,11 @@ pub(crate) enum Error {
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {0}")]
 	InvalidPatch(PatchError),
+
+	#[error("Invalid query: {message}")]
+	Query {
+		message: String,
+	},
 
 	/// Given test operation failed for JSON Patch
 	#[error(
@@ -118,7 +99,7 @@ pub(crate) enum Error {
 	},
 
 	/// The FETCH clause accepts idioms, strings and fields.
-	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	#[error("Found {} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields", value.to_sql())]
 	InvalidFetch {
 		value: Expr,
 	},
@@ -165,16 +146,21 @@ pub(crate) enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
+	},
+
+	#[error(
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
+	)]
+	InvalidAggregationSelector {
+		expr: String,
 	},
 
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
-	#[cfg_attr(not(feature = "http"), expect(dead_code))]
+	#[cfg_attr(not(any(feature = "http", feature = "jwks")), expect(dead_code))]
 	InvalidUrl(String),
 
 	/// The size of the vector is incorrect
@@ -211,8 +197,8 @@ pub(crate) enum Error {
 	InvalidControlFlow,
 
 	/// The query timedout
-	#[error("The query was not executed because it exceeded the timeout")]
-	QueryTimedout,
+	#[error("The query was not executed because it exceeded the timeout: {0}")]
+	QueryTimedout(Duration),
 
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]
@@ -264,6 +250,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The requested function does not exist
+	#[error("The module '{name}' does not exist")]
+	MdNotFound {
+		name: String,
+	},
+
 	/// The requested field does not exist
 	#[error("The field '{name}' does not exist")]
 	FdNotFound {
@@ -303,7 +295,7 @@ pub(crate) enum Error {
 	/// The requested table does not exist
 	#[error("The table '{name}' does not exist")]
 	TbNotFound {
-		name: String,
+		name: TableName,
 	},
 
 	/// The requested api does not exist
@@ -362,8 +354,8 @@ pub(crate) enum Error {
 	RealtimeDisabled,
 
 	/// Reached excessive computation depth due to functions, subqueries, or
-	/// futures
-	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	/// computed values
+	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
 	/// Tried to execute a statement that can't be used here
@@ -478,13 +470,13 @@ pub(crate) enum Error {
 	},
 
 	/// A database entry for the specified record already exists
-	#[error("Database record `{record}` already exists")]
+	#[error("Database record `{record}` already exists", record = record.to_sql())]
 	RecordExists {
 		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`", record = record.to_sql())]
 	IndexExists {
 		record: RecordId,
 		index: String,
@@ -492,7 +484,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "" } else { "not " })]
 	TableCheck {
 		record: String,
 		relation: bool,
@@ -501,7 +493,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}",
+		field = field.to_sql()
 	)]
 	FieldValue {
 		record: String,
@@ -534,7 +527,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly",
+		field = field.to_sql()
 	)]
 	FieldReadonly {
 		record: String,
@@ -542,7 +536,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
-	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	#[error("Found field '{field}', but no such field exists for table '{table}'", field = field.to_sql())]
 	FieldUndefined {
 		table: String,
 		field: Idiom,
@@ -614,7 +608,7 @@ pub(crate) enum Error {
 
 	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request: {0}")]
-	#[cfg_attr(not(feature = "http"), expect(dead_code))]
+	#[cfg_attr(not(any(feature = "http", feature = "jwks")), expect(dead_code))]
 	Http(String),
 
 	/// There was an error processing a value in parallel
@@ -693,9 +687,6 @@ pub(crate) enum Error {
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
-
-	#[error("Versionstamp in key is corrupted: {0}")]
-	CorruptedVersionstampInKey(#[from] VersionStampError),
 
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
@@ -799,6 +790,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The requested module already exists
+	#[error("The module '{name}' already exists")]
+	MdAlreadyExists {
+		name: String,
+	},
+
 	/// The requested index already exists
 	#[error("The index '{name}' already exists")]
 	IxAlreadyExists {
@@ -882,9 +879,11 @@ pub(crate) enum Error {
 		name: String,
 	},
 
-	/// A database index entry for the specified table is already building
-	#[error("Index building has been cancelled")]
-	IndexingBuildingCancelled,
+	/// A the index building has been cancelled
+	#[error("Index building has been cancelled: {reason}")]
+	IndexingBuildingCancelled {
+		reason: String,
+	},
 
 	/// The token has expired
 	#[error("The token has expired")]
@@ -894,7 +893,7 @@ pub(crate) enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
-	/// The supplied type could not be serialiazed into `expr::Value`
+	/// The supplied type could not be serialized into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
@@ -1020,10 +1019,6 @@ pub(crate) enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
-	#[doc(hidden)]
-	#[error("The underlying datastore does not support reversed scans")]
-	UnsupportedReversedScans,
-
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]
 	InvalidStorageVersion,
@@ -1080,9 +1075,14 @@ pub(crate) enum Error {
 	/// The `REFERENCE` keyword can only be used in combination with a type
 	/// referencing a record
 	#[error(
-		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify only a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
+
+	#[error(
+		"Cannot use the `REFERENCE` keyword on nested field `{0}`. Specify a referencing field at the root level instead."
+	)]
+	ReferenceNestedField(String),
 
 	/// Something went wrong while updating references
 	#[error("An error occured while updating references for `{0}`: {1}")]
@@ -1158,6 +1158,7 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
@@ -1222,82 +1223,6 @@ impl From<InvalidHeaderValue> for Error {
 impl From<ToStrError> for Error {
 	fn from(error: ToStrError) -> Self {
 		Error::Unreachable(error.to_string())
-	}
-}
-
-#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
-impl From<surrealkv::Error> for Error {
-	fn from(e: surrealkv::Error) -> Error {
-		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
-			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
-		}
-	}
-}
-
-#[cfg(feature = "kv-rocksdb")]
-impl From<rocksdb::Error> for Error {
-	fn from(e: rocksdb::Error) -> Error {
-		match e.kind() {
-			rocksdb::ErrorKind::Busy => Error::TxRetryable,
-			rocksdb::ErrorKind::TryAgain => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
-		}
-	}
-}
-
-#[cfg(feature = "kv-indxdb")]
-impl From<indxdb::err::Error> for Error {
-	fn from(e: indxdb::err::Error) -> Error {
-		match e {
-			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
-			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
-		}
-	}
-}
-
-#[cfg(feature = "kv-tikv")]
-impl From<tikv::Error> for Error {
-	fn from(e: tikv::Error) -> Error {
-		match e {
-			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable,
-			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => {
-				Error::Tx("Transaction key too large".to_string())
-			}
-			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => {
-				Error::Tx("Transaction too large".to_string())
-			}
-			_ => Error::Tx(e.to_string()),
-		}
-	}
-}
-
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::FdbError> for Error {
-	fn from(e: foundationdb::FdbError) -> Error {
-		if e.is_retryable() {
-			return Error::TxRetryable;
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
-		}
-		Error::Ds(e.to_string())
-	}
-}
-
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::TransactionCommitError> for Error {
-	fn from(e: foundationdb::TransactionCommitError) -> Error {
-		if e.is_retryable() {
-			return Error::TxRetryable;
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
-		}
-		Error::Tx(e.to_string())
 	}
 }
 

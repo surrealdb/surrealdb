@@ -1,5 +1,6 @@
-use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,14 +21,13 @@ impl Default for RemoveIndexStatement {
 	}
 }
 
-impl Display for RemoveIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE INDEX")?;
+impl ToSql for RemoveIndexStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE INDEX");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 	}
 }
 

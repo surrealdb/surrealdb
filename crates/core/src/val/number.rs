@@ -16,6 +16,7 @@
 //!   used by keys (see DecimalLexEncoder docs).
 //! - Stream-friendly: the numeric encoding contains an in-band terminator and appends a 0x00 byte,
 //!   allowing concatenation in composite keys without ambiguity during decoding.
+
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -29,8 +30,8 @@ use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::IndexFormat;
 use crate::err::Error;
@@ -46,8 +47,7 @@ pub(crate) enum NumberKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-#[serde(rename = "$surrealdb::private::Number")]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Number {
 	Int(i64),
@@ -142,15 +142,15 @@ macro_rules! try_into_prim {
 					match value {
 						Number::Int(v) => match v.$to_int() {
 							Some(v) => Ok(v),
-							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
 						Number::Float(v) => match v.$to_int() {
 							Some(v) => Ok(v),
-							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
 						Number::Decimal(ref v) => match v.$to_int() {
 							Some(v) => Ok(v),
-							None => Err(Error::TryFrom(value.to_string(), stringify!($int))),
+							None => Err(Error::TryFrom(value.to_sql(), stringify!($int))),
 						},
 					}
 				}
@@ -171,11 +171,11 @@ impl TryFrom<Number> for Decimal {
 		match value {
 			Number::Int(v) => match Decimal::from_i64(v) {
 				Some(v) => Ok(v),
-				None => Err(Error::TryFrom(value.to_string(), "Decimal")),
+				None => Err(Error::TryFrom(value.to_sql(), "Decimal")),
 			},
 			Number::Float(v) => match Decimal::try_from(v) {
 				Ok(v) => Ok(v),
-				_ => Err(Error::TryFrom(value.to_string(), "Decimal")),
+				_ => Err(Error::TryFrom(value.to_sql(), "Decimal")),
 			},
 			Number::Decimal(x) => Ok(x),
 		}
@@ -183,23 +183,33 @@ impl TryFrom<Number> for Decimal {
 }
 
 impl Display for Number {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
+			Number::Float(v) => Display::fmt(v, f),
+			Number::Decimal(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl ToSql for Number {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Number::Int(v) => v.fmt_sql(f, sql_fmt),
 			Number::Float(v) => {
 				if v.is_infinite() {
 					if v.is_sign_negative() {
-						write!(f, "-Infinity")
+						write_sql!(f, sql_fmt, "-Infinity")
 					} else {
-						write!(f, "Infinity")
+						write_sql!(f, sql_fmt, "Infinity")
 					}
 				} else if v.is_nan() {
-					write!(f, "NaN")
+					write_sql!(f, sql_fmt, "NaN")
 				} else {
-					write!(f, "{v}f")
+					write_sql!(f, sql_fmt, "{v}f")
 				}
 			}
-			Number::Decimal(v) => write!(f, "{v}dec"),
+			Number::Decimal(v) => v.fmt_sql(f, sql_fmt),
 		}
 	}
 }
@@ -771,15 +781,12 @@ impl Ord for Number {
 	}
 }
 
-// Warning: Equal numbers may have different hashes, which violates
-// the invariants of certain collections!
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		match self {
-			Number::Int(v) => v.hash(state),
-			Number::Float(v) => v.to_bits().hash(state),
-			Number::Decimal(v) => v.hash(state),
-		}
+		// Use decimal buffer encoding to ensure numerically-equal values
+		// across variants (Int/Float/Decimal) produce identical hashes.
+		// This maintains the Hash/Eq contract: if a == b, then hash(a) == hash(b).
+		self.as_decimal_buf().hash(state);
 	}
 }
 
@@ -830,7 +837,7 @@ macro_rules! impl_simple_try_op {
 					(v, w) => Number::Decimal(
 						v.to_decimal()
 							.$checked(w.to_decimal())
-							.ok_or_else(|| Error::$trt(v.to_string(), w.to_string()))?,
+							.ok_or_else(|| Error::$trt(v.to_sql(), w.to_sql()))?,
 					),
 				})
 			}

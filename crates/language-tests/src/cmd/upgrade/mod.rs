@@ -193,10 +193,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(feature = "backend-foundation")]
-		UpgradeBackend::Foundation => {}
-		#[cfg(not(feature = "backend-foundation"))]
-		UpgradeBackend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
 	if UpgradeBackend::SurrealKv == config.backend {
@@ -238,7 +234,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.expect("failed to create datastore for running matching expressions");
 
 	let mut session = surrealdb_core::dbs::Session::default();
-	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+	ds.process_use(None, &mut session, Some("match".to_string()), Some("match".to_string()))
 		.await
 		.unwrap();
 
@@ -377,13 +373,13 @@ async fn run_imports(
 				req.insert("method".to_owned(), ProxyValue::from("use"));
 				req.insert("params".to_owned(), ProxyValue::from(params));
 
-			let resp = connection
-				.request(req)
-				.await
-				.context("Failed to set namespace/database on importing database")?;
-			if let Err(e) = resp.result {
-				bail!("Failed to set namespace/database on importing database: {}", e.message())
-			}
+				let resp = connection
+					.request(req)
+					.await
+					.context("Failed to set namespace/database on importing database")?;
+				if let Err(e) = resp.result {
+					bail!("Failed to set namespace/database on importing database: {}", e.message())
+				}
 			}
 
 			let mut credentials = ProxyObject::default();
@@ -394,13 +390,13 @@ async fn run_imports(
 			req.insert("method".to_owned(), ProxyValue::from("signin"));
 			req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
-		let resp = connection
-			.request(req)
-			.await
-			.context("Failed to authenticate on importing database")?;
-		if let Err(e) = resp.result {
-			bail!("Failed to authenticate on importing database: {}", e.message())
-		}
+			let resp = connection
+				.request(req)
+				.await
+				.context("Failed to authenticate on importing database")?;
+			if let Err(e) = resp.result {
+				bail!("Failed to authenticate on importing database: {}", e.message())
+			}
 
 			for import in imports {
 				let Ok(source) = std::str::from_utf8(&set[import.id].source) else {
@@ -465,13 +461,13 @@ async fn run_upgrade_test(
 				req.insert("method".to_owned(), ProxyValue::from("use"));
 				req.insert("params".to_owned(), ProxyValue::from(params));
 
-			let resp = connection
-				.request(req)
-				.await
-				.context("Failed to set namespace/database on upgrading database")?;
-			if let Err(e) = resp.result {
-				bail!("Failed to set namespace/database on upgrading database: {}", e.message())
-			}
+				let resp = connection
+					.request(req)
+					.await
+					.context("Failed to set namespace/database on upgrading database")?;
+				if let Err(e) = resp.result {
+					bail!("Failed to set namespace/database on upgrading database: {}", e.message())
+				}
 			}
 
 			let mut credentials = ProxyObject::default();
@@ -482,13 +478,13 @@ async fn run_upgrade_test(
 			req.insert("method".to_owned(), ProxyValue::from("signin"));
 			req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
-		let resp = connection
-			.request(req)
-			.await
-			.context("Failed to authenticate on upgrading database")?;
-		if let Err(e) = resp.result {
-			bail!("Failed to authenticate on upgrading database: {}", e.message())
-		}
+			let resp = connection
+				.request(req)
+				.await
+				.context("Failed to authenticate on upgrading database")?;
+			if let Err(e) = resp.result {
+				bail!("Failed to authenticate on upgrading database: {}", e.message())
+			}
 
 			let source = &set[task.test].source;
 			let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;

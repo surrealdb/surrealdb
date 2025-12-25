@@ -5,7 +5,7 @@ use js::prelude::{Coerced, Opt};
 use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
@@ -14,12 +14,12 @@ mod classes;
 
 pub(crate) use classes::Query;
 
-use crate::ctx::MutableContext;
+use crate::ctx::Context;
 
 /// A class to carry the data to run subqueries.
 #[derive(js::JsLifetime)]
 pub struct QueryContext<'js> {
-	pub context: &'js Context,
+	pub context: &'js FrozenContext,
 	pub opt: &'js Options,
 	pub doc: Option<&'js CursorDoc>,
 	pub pending: RefCell<Option<Promise<'js>>>,
@@ -76,7 +76,7 @@ pub fn query<'js>(
 				query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
 			};
 
-			let mut context = MutableContext::new(query_ctx.context);
+			let mut context = Context::new(query_ctx.context);
 			if let Some(v) = query.clone().vars {
 				context
 					.attach_variables(v)

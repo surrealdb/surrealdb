@@ -1,6 +1,6 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -9,12 +9,21 @@ pub struct OptionStatement {
 	pub what: bool,
 }
 
-impl fmt::Display for OptionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl OptionStatement {
+	pub(crate) fn import() -> Self {
+		Self {
+			name: "IMPORT".to_string(),
+			what: true,
+		}
+	}
+}
+
+impl ToSql for OptionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if self.what {
-			write!(f, "OPTION {}", EscapeIdent(&self.name))
+			write_sql!(f, fmt, "OPTION {}", EscapeKwFreeIdent(&self.name))
 		} else {
-			write!(f, "OPTION {} = FALSE", EscapeIdent(&self.name))
+			write_sql!(f, fmt, "OPTION {} = FALSE", EscapeKwFreeIdent(&self.name))
 		}
 	}
 }

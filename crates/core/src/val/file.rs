@@ -1,16 +1,11 @@
-use std::fmt;
-
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::File")]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
@@ -38,7 +33,7 @@ impl File {
 		types.is_empty() || types.contains(&self.bucket)
 	}
 
-	pub fn display_inner(&self) -> String {
+	pub(crate) fn display_inner(&self) -> String {
 		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
 	}
 }
@@ -46,8 +41,8 @@ impl File {
 impl From<surrealdb_types::File> for File {
 	fn from(v: surrealdb_types::File) -> Self {
 		Self {
-			bucket: v.bucket().to_string(),
-			key: v.key().to_string(),
+			bucket: v.bucket,
+			key: v.key,
 		}
 	}
 }
@@ -55,12 +50,6 @@ impl From<surrealdb_types::File> for File {
 impl From<File> for surrealdb_types::File {
 	fn from(x: File) -> Self {
 		surrealdb_types::File::new(x.bucket, x.key)
-	}
-}
-
-impl fmt::Display for File {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "f\"{}\"", self.display_inner())
 	}
 }
 
@@ -77,4 +66,10 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+impl ToSql for File {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "f\"{}\"", self.display_inner())
+	}
 }

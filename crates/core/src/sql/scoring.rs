@@ -1,7 +1,7 @@
-use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd)]
@@ -59,14 +59,14 @@ impl Default for Scoring {
 	}
 }
 
-impl fmt::Display for Scoring {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Scoring {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::Bm {
 				k1,
 				b,
-			} => write!(f, "BM25({},{})", k1, b),
-			Self::Vs => f.write_str("VS"),
+			} => write_sql!(f, sql_fmt, "BM25({},{})", k1, b),
+			Self::Vs => write_sql!(f, sql_fmt, "VS"),
 		}
 	}
 }

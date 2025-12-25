@@ -1,26 +1,33 @@
-use std::fmt::{self, Display};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
+mod database;
 mod field;
+mod index;
+mod namespace;
 mod sequence;
+mod system;
 mod table;
 
+pub(crate) use database::AlterDatabaseStatement;
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
+pub(crate) use index::AlterIndexStatement;
+pub(crate) use namespace::AlterNamespaceStatement;
 pub(crate) use sequence::AlterSequenceStatement;
+pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
-
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+/// Helper to express a tri‑state alteration:
+/// - `None`: leave the current value unchanged
+/// - `Set(T)`: set/replace the current value to `T`
+/// - `Drop`: remove/clear the current value
 pub(crate) enum AlterKind<T> {
 	#[default]
 	None,
@@ -79,50 +86,55 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+/// Execution‑time representation of all `ALTER` statements.
+///
+/// Variants map to specific resources and delegate execution to their
+/// corresponding implementations.
 pub(crate) enum AlterStatement {
+	System(AlterSystemStatement),
+	Namespace(AlterNamespaceStatement),
+	Database(AlterDatabaseStatement),
 	Table(AlterTableStatement),
+	Index(AlterIndexStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),
 }
 
 impl AlterStatement {
-	/// Process this type returning a computed simple Value
+	/// Executes this statement, returning a simple value.
+	///
+	/// All `ALTER` statements currently return `Value::None` on success and may
+	/// perform side effects such as storage compaction or metadata updates.
+	#[instrument(level = "trace", name = "AlterStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::System(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Namespace(v) => v.compute(ctx, opt).await,
+			Self::Database(v) => v.compute(ctx, opt).await,
+			Self::Table(v) => v.compute(ctx, opt).await,
+			Self::Index(v) => v.compute(ctx, opt).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(ctx, opt).await,
 		}
 	}
 }
 
-impl VisitExpression for AlterStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let AlterStatement::Field(AlterFieldStatement {
-			name,
-			..
-		}) = self
-		{
-			name.visit(visitor);
-		}
-	}
-}
-
-impl Display for AlterStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for AlterStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
+			Self::System(v) => v.fmt_sql(f, fmt),
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

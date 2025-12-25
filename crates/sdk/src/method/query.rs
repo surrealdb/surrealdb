@@ -10,7 +10,6 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryType;
 use surrealdb_core::rpc::{DbResultError, DbResultStats};
-use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -19,6 +18,7 @@ use crate::err::Error;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, WithStats};
 use crate::notification::Notification;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal, opt};
 
 /// A query future
@@ -53,7 +53,9 @@ impl<T: SurrealValue> IntoVariables for T {
 			Value::Array(arr) => {
 				let mut vars = Variables::new();
 				for v in arr.chunks(2) {
-					let key = v[0].clone().into_string().unwrap();
+					let key = v[0].clone().into_string().map_err(|_| {
+						Error::InvalidParams("Variable key must be a string".to_string())
+					})?;
 					let value = v[1].clone();
 					vars.insert(key, value);
 				}
@@ -102,17 +104,22 @@ where
 			let router = client.inner.router.extract()?;
 
 			let results = router
-				.execute_query(Command::RawQuery {
-					query: Cow::Owned(query.into_owned()),
-					txn,
-					variables: variables?,
-				})
+				.execute_query(
+					client.session_id,
+					Command::Query {
+						query: Cow::Owned(query.into_owned()),
+						txn,
+						variables: variables?,
+					},
+				)
 				.await?;
 
 			let mut indexed_results = IndexedResults::new();
 
 			for (index, result) in results.into_iter().enumerate() {
-				let stats = DbResultStats::default().with_execution_time(result.time);
+				let stats = DbResultStats::default()
+					.with_execution_time(result.time)
+					.with_query_type(result.query_type);
 
 				match result.query_type {
 					QueryType::Other => {
@@ -123,6 +130,7 @@ where
 						let live_stream = crate::method::live::register(
 							router,
 							live_query_id.into(),
+							client.session_id,
 						)
 						.await
 						.map(|rx| {
@@ -158,25 +166,6 @@ impl<'r, C> Query<'r, C>
 where
 	C: Connection,
 {
-	/// Chains a query onto an existing query
-	pub fn query(self, surql: impl Into<Cow<'r, str>>) -> Self {
-		let client = self.client.clone();
-		let query = if self.query.is_empty() {
-			surql.into()
-		} else if self.query.ends_with(';') {
-			Cow::Owned(format!("{} {}", self.query, surql.into()))
-		} else {
-			Cow::Owned(format!("{}; {}", self.query, surql.into()))
-		};
-
-		Query {
-			txn: self.txn,
-			client,
-			query,
-			variables: self.variables,
-		}
-	}
-
 	/// Return query statistics along with its results
 	pub const fn with_stats(self) -> WithStats<Self> {
 		WithStats(self)
@@ -243,8 +232,8 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
-	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
+	pub results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
+	pub live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -301,16 +290,13 @@ impl IndexedResults {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
-	/// let mut response = db
-	///     // Get `john`'s details
-	///     .query("SELECT * FROM user:john")
-	///     // List all users whose first name is John
-	///     .query("SELECT * FROM user WHERE name.first = 'John'")
-	///     // Get John's address
-	///     .query("SELECT address FROM user:john")
-	///     // Get all users' addresses
-	///     .query("SELECT address FROM user")
-	///     .await?;
+	/// // Run multiple queries in a single request
+	/// let mut response = db.query("
+	///     SELECT * FROM user:john;
+	///     SELECT * FROM user WHERE name.first = 'John';
+	///     SELECT address FROM user:john;
+	///     SELECT address FROM user;
+	/// ").await?;
 	///
 	/// // Get the first (and only) user from the first query
 	/// let user: Option<User> = response.take(0)?;
@@ -452,10 +438,10 @@ impl IndexedResults {
 				break;
 			}
 		}
-		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				return Err(error);
-			}
+		if let Some(key) = first_error
+			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
+		{
+			return Err(error);
 		}
 		Ok(self)
 	}
@@ -503,16 +489,13 @@ impl WithStats<IndexedResults> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
-	/// let mut response = db
-	///     // Get `john`'s details
-	///     .query("SELECT * FROM user:john")
-	///     // List all users whose first name is John
-	///     .query("SELECT * FROM user WHERE name.first = 'John'")
-	///     // Get John's address
-	///     .query("SELECT address FROM user:john")
-	///     // Get all users' addresses
-	///     .query("SELECT address FROM user")
-	///     // Return stats along with query results
+	/// // Run multiple queries in a single request with stats
+	/// let mut response = db.query("
+	///     SELECT * FROM user:john;
+	///     SELECT * FROM user WHERE name.first = 'John';
+	///     SELECT address FROM user:john;
+	///     SELECT address FROM user;
+	/// ")
 	///     .with_stats()
 	///     .await?;
 	///
@@ -876,7 +859,7 @@ mod tests {
 		assert_eq!(body, vec![article.body]);
 
 		let mut response = IndexedResults {
-			results: to_map(vec![Ok(value.clone())]),
+			results: to_map(vec![Ok(value)]),
 			..IndexedResults::new()
 		};
 		let vec: Vec<String> = response.take("title").unwrap();

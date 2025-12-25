@@ -1,26 +1,23 @@
-use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
 	TableDefinition, TableType,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -38,32 +35,16 @@ pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
-	pub flex: bool,
 	pub field_kind: Option<Kind>,
+	pub flexible: bool,
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
-}
-
-impl VisitExpression for DefineFieldStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.value.iter().for_each(|expr| expr.visit(visitor));
-		self.assert.iter().for_each(|expr| expr.visit(visitor));
-		self.computed.iter().for_each(|expr| expr.visit(visitor));
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-		self.reference.iter().for_each(|reference| reference.visit(visitor));
-	}
 }
 
 impl Default for DefineFieldStatement {
@@ -72,15 +53,15 @@ impl Default for DefineFieldStatement {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
-			flex: false,
 			field_kind: None,
+			flexible: false,
 			readonly: false,
 			value: None,
 			assert: None,
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -90,7 +71,7 @@ impl DefineFieldStatement {
 	pub(crate) async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::FieldDefinition> {
@@ -102,11 +83,17 @@ impl DefineFieldStatement {
 			}
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
-			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
-			flexible: self.flex,
+			table: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into(),
 			field_kind: self.field_kind.clone(),
+			flexible: self.flexible,
 			readonly: self.readonly,
 			value: self.value.clone(),
 			assert: self.assert.clone(),
@@ -119,16 +106,17 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			reference: self.reference.clone(),
 		})
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineFieldStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -145,7 +133,7 @@ impl DefineFieldStatement {
 		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
-		self.validate_reference_options(ctx)?;
+		self.validate_reference_options(&definition)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
@@ -153,17 +141,23 @@ impl DefineFieldStatement {
 		// Validate id field restrictions
 		self.validate_id_restrictions(&definition)?;
 
+		// Validate FLEXIBLE restrictions
+		self.validate_flexible_restrictions(ctx, ns, db, &definition).await?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
+
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
+
 		// Get the name of the field
 		let fd = self.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &definition.what, &fd).await? {
+		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FdAlreadyExists {
-							name: fd.name.to_string(),
+							name: fd.name.to_sql(),
 						});
 					}
 				}
@@ -173,11 +167,6 @@ impl DefineFieldStatement {
 				}
 			}
 		}
-
-		let tb = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &definition.what, opt.strict).await?
-		};
 
 		// Process the statement
 		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
@@ -209,7 +198,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.what);
+							cache.clear_tb(ns, db, &definition.table);
 						}
 
 						txn.clear_cache();
@@ -239,7 +228,7 @@ impl DefineFieldStatement {
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.what);
+							cache.clear_tb(ns, db, &definition.table);
 						}
 
 						txn.clear_cache();
@@ -256,7 +245,7 @@ impl DefineFieldStatement {
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &definition.what);
+			cache.clear_tb(ns, db, &definition.table);
 		}
 
 		// Clear the cache
@@ -273,7 +262,7 @@ impl DefineFieldStatement {
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &definition.what, None).await.ok();
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await.ok();
 		// Process possible recursive_definitions
 		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
 			let mut name = definition.name.clone();
@@ -296,24 +285,21 @@ impl DefineFieldStatement {
 				// Add a new subtype
 				name.0.push(Part::All);
 				// Get the field name
-				let fd = name.to_string();
+				let fd = name.to_sql();
 				// Set the subtype `DEFINE FIELD` definition
-				let key = crate::key::table::fd::new(ns, db, &definition.what, &fd);
+				let key = crate::key::table::fd::new(ns, db, &definition.table, &fd);
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
 					FieldDefinition {
 						field_kind: Some(cur_kind),
-						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: definition.what.to_string(),
-						flexible: definition.flexible,
+						table: definition.table.clone(),
 						field_kind: Some(cur_kind),
-						reference: definition.reference.clone(),
 						..Default::default()
 					}
 				};
@@ -338,7 +324,7 @@ impl DefineFieldStatement {
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
 		// Find all existing field definitions
-		let fields = txn.all_tb_fields(ns, db, &definition.what, None).await?;
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 		if self.computed.is_some() {
 			// Ensure the field is not the `id` field
 			ensure!(!definition.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
@@ -346,7 +332,7 @@ impl DefineFieldStatement {
 			// Ensure the field is top-level
 			ensure!(
 				definition.name.len() == 1,
-				Error::ComputedNestedField(definition.name.to_string())
+				Error::ComputedNestedField(definition.name.to_sql())
 			);
 
 			// Ensure there are no conflicting clauses
@@ -357,15 +343,14 @@ impl DefineFieldStatement {
 				matches!(self.default, DefineDefault::None),
 				Error::ComputedKeywordConflict("DEFAULT".into())
 			);
-			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
 			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
 
 			// Ensure no nested fields exist
 			for field in fields.iter() {
 				if field.name.starts_with(&definition.name) && field.name != definition.name {
 					bail!(Error::ComputedNestedFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -377,8 +362,8 @@ impl DefineFieldStatement {
 					&& field.name != definition.name
 				{
 					bail!(Error::ComputedParentFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -387,13 +372,17 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
+	pub(crate) fn validate_reference_options(
+		&self,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
+			ensure!(
+				definition.name.len() == 1,
+				Error::ReferenceNestedField(definition.name.to_sql())
+			);
+
 			fn valid(kind: &Kind, outer: bool) -> bool {
 				match kind {
 					Kind::None | Kind::Record(_) => true,
@@ -422,7 +411,7 @@ impl DefineFieldStatement {
 			ensure!(
 				is_record_id,
 				Error::ReferenceTypeConflict(
-					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
 				)
 			);
 		}
@@ -432,26 +421,27 @@ impl DefineFieldStatement {
 
 	pub(crate) async fn disallow_mismatched_types(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ns: NamespaceId,
 		db: DatabaseId,
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
-		let fds = ctx.tx().all_tb_fields(ns, db, &definition.what, None).await?;
+		let fds = ctx.tx().all_tb_fields(ns, db, &definition.table, None).await?;
 
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
-				if definition.name.starts_with(&fd.name) && definition.name != fd.name {
-					if let Some(fd_kind) = &fd.field_kind {
-						let path = definition.name[fd.name.len()..].to_vec();
-						if !fd_kind.allows_nested_kind(&path, self_kind) {
-							bail!(Error::MismatchedFieldTypes {
-								name: definition.name.to_string(),
-								kind: self_kind.to_string(),
-								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_string(),
-							});
-						}
+				if definition.name.starts_with(&fd.name)
+					&& definition.name != fd.name
+					&& let Some(fd_kind) = &fd.field_kind
+				{
+					let path = definition.name[fd.name.len()..].to_vec();
+					if !fd_kind.allows_nested_kind(&path, self_kind) {
+						bail!(Error::MismatchedFieldTypes {
+							name: definition.name.to_sql(),
+							kind: self_kind.to_sql(),
+							existing_name: fd.name.to_sql(),
+							existing_kind: fd_kind.to_sql(),
+						});
 					}
 				}
 			}
@@ -484,64 +474,37 @@ impl DefineFieldStatement {
 			if let Some(ref kind) = self.field_kind {
 				ensure!(
 					RecordIdKeyLit::kind_supported(kind),
-					Error::IdFieldUnsupportedKind(kind.to_string())
+					Error::IdFieldUnsupportedKind(kind.to_sql())
 				);
 			}
 		}
 
 		Ok(())
 	}
-}
 
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+	pub(crate) async fn validate_flexible_restrictions(
+		&self,
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if self.flexible {
+			// Get the table definition
+			let txn = ctx.tx();
+			let Some(tb) = txn.get_tb(ns, db, &definition.table).await? else {
+				bail!(Error::TbNotFound {
+					name: definition.table.clone(),
+				});
+			};
+
+			// FLEXIBLE can only be used in SCHEMAFULL tables
+			ensure!(
+				tb.schemafull,
+				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+			);
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.flex {
-			write!(f, " FLEXIBLE")?
-		}
-		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?
-		}
-		match self.default {
-			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
-		}
-		if self.readonly {
-			write!(f, " READONLY")?
-		}
-		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
-		}
-		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
-		}
-		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
-		}
-		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
-		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
+
 		Ok(())
 	}
 }

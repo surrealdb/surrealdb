@@ -1,28 +1,39 @@
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
-use crate::ctx::Context;
-use crate::dbs::{Operable, Options, Processed, Statement, Workable};
+use crate::catalog::Record;
+use crate::ctx::FrozenContext;
+use crate::dbs::{Operable, Options, Processable, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
-use crate::val::record::Record;
 
 impl Document {
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::process", skip_all)
+	)]
 	pub(crate) async fn process(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
-		pro: Processed,
+		Processable {
+			doc_ctx,
+			record_strategy,
+			generate,
+			rid,
+			val,
+			ir,
+		}: Processable,
 	) -> Result<Value, IgnoreError> {
 		// Check current context
-		if ctx.is_done(true).await? {
+		if ctx.is_done(None).await? {
 			// Don't process the document
 			return Err(IgnoreError::Ignore);
 		}
 		// Setup a new workable
-		let ins = match pro.val {
+		let ins = match val {
 			Operable::Value(v) => (v, Workable::Normal),
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
@@ -31,12 +42,14 @@ impl Document {
 			}
 		};
 		// Setup a new document
-		let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, false, pro.rs);
+		let mut doc =
+			Document::new(doc_ctx, rid, ir, generate, ins.0, ins.1, false, record_strategy);
 		// Process the statement
 		let res = match stm {
 			Statement::Select {
-				..
-			} => doc.select(stk, ctx, opt, stm).await?,
+				stmt,
+				omit,
+			} => doc.select(stk, ctx, opt, stmt, omit).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,
 			Statement::Update(_) => doc.update(stk, ctx, opt, stm).await?,

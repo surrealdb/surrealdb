@@ -1,6 +1,7 @@
 use std::ops::Bound;
 
 use anyhow::{Result, ensure};
+use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -138,7 +139,7 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				search
+				search.to_sql()
 			),
 		})),
 	}
@@ -165,8 +166,8 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -348,8 +349,13 @@ pub mod is {
 	use crate::syn;
 	use crate::val::{Datetime, Value};
 
-	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
+	static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern")
+	});
+	static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
+		Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$")
+			.expect("valid regex pattern")
+	});
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value> {
 		if arg.is_empty() {
@@ -632,6 +638,8 @@ pub mod semver {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::{matches, replace, slice};
 	use crate::fnc::args::{Cast, Optional};
 	use crate::val::Value;
@@ -672,7 +680,7 @@ mod tests {
 				Value::from(expected),
 				"replace({},{},{})",
 				base,
-				pattern,
+				pattern.to_sql(),
 				replacement
 			);
 		}

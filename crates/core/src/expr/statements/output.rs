@@ -1,11 +1,8 @@
-use std::fmt;
-
 use reblessive::tree::Stk;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::fetch::Fetchs;
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
@@ -23,10 +20,11 @@ impl OutputStatement {
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "OutputStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -44,27 +42,5 @@ impl OutputStatement {
 		}
 		//
 		Err(ControlFlow::Return(value))
-	}
-}
-
-impl VisitExpression for OutputStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.visit(visitor);
-		if let Some(fetchs) = &self.fetch {
-			fetchs.visit(visitor);
-		}
-	}
-}
-
-impl fmt::Display for OutputStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN {}", self.what)?;
-		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
-		}
-		Ok(())
 	}
 }

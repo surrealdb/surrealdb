@@ -1,0 +1,68 @@
+name: 'Prepare release variables'
+description: 'Compute release version, name, and metadata'
+
+inputs:
+  nightly-release:
+    description: 'Whether this is a nightly release'
+    required: false
+    default: 'true'
+
+outputs:
+  name:
+    description: 'Release name (e.g., nightly or v2.0.0)'
+    value: ${{ steps.outputs.outputs.name }}
+  version:
+    description: 'Version number from Cargo.toml'
+    value: ${{ steps.outputs.outputs.version }}
+  pre-release:
+    description: 'Whether this is a pre-release'
+    value: ${{ steps.outputs.outputs.pre-release }}
+  release-name:
+    description: 'Release environment name (nightly, alpha, beta, stable)'
+    value: ${{ steps.outputs.outputs.release-name }}
+  build-metadata:
+    description: 'Build metadata for nightly releases'
+    value: ${{ steps.outputs.outputs.build-metadata }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+
+    - name: Set outputs
+      id: outputs
+      shell: bash
+      run: |
+        set -x
+
+        cargo_version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+
+        if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
+          # Nightly release - compute version based on main's version
+          nightly_version=$(./.github/scripts/compute-nightly-version.sh "$cargo_version")
+          echo "version=${nightly_version}" >> $GITHUB_OUTPUT
+
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          rev=$(git rev-parse --short HEAD)
+          build_metadata=${date}.${rev}
+          echo "build-metadata=${build_metadata}" >> $GITHUB_OUTPUT
+          echo "name=nightly" >> $GITHUB_OUTPUT
+          echo "pre-release=true" >> $GITHUB_OUTPUT
+          echo "release-name=nightly" >> $GITHUB_OUTPUT
+        else
+          # Versioned release - use version from Cargo.toml
+          echo "version=${cargo_version}" >> $GITHUB_OUTPUT
+          echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
+          if [[ $cargo_version == *"-"* ]]; then
+            echo "pre-release=true" >> $GITHUB_OUTPUT
+            suffix=$(echo $cargo_version | tr "-" "\n" | sed -n 2p)
+            release_name=$(echo $suffix | tr "." "\n" | sed -n 1p)
+            echo "release-name=${release_name}" >> $GITHUB_OUTPUT
+          else
+            echo "pre-release=false" >> $GITHUB_OUTPUT
+            echo "release-name=stable" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+

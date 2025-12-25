@@ -1,6 +1,6 @@
-use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -9,14 +9,13 @@ pub struct RemoveParamStatement {
 	pub if_exists: bool,
 }
 
-impl Display for RemoveParamStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE PARAM")?;
+impl ToSql for RemoveParamStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "REMOVE PARAM");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write!(f, " ${}", EscapeIdent(&self.name))?;
-		Ok(())
+		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(&self.name));
 	}
 }
 

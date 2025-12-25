@@ -197,14 +197,14 @@ pub(super) async fn config(
 	}
 	// Check if the key operations (if specified) include verification
 	// Source: https://datatracker.ietf.org/doc/html/rfc7517#section-4.3
-	if let Some(ops) = &jwk.common.key_operations {
-		if !ops.contains(&KeyOperations::Verify) {
-			warn!(
-				"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
-				jwk.common.key_operations
-			);
-			bail!(Error::InvalidAuth); // Return opaque error
-		}
+	if let Some(ops) = &jwk.common.key_operations
+		&& !ops.contains(&KeyOperations::Verify)
+	{
+		warn!(
+			"Invalid values for parameter 'key_ops' in JWK object: '{:?}'",
+			jwk.common.key_operations
+		);
+		bail!(Error::InvalidAuth); // Return opaque error
 	}
 
 	// Return verification configuration if a decoding key can be retrieved from the
@@ -308,7 +308,7 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 	#[cfg(not(target_family = "wasm"))]
 	let req = req.header(reqwest::header::USER_AGENT, &*crate::cnf::SURREALDB_USER_AGENT);
 	#[cfg(not(target_family = "wasm"))]
-	let res = req.timeout((*REMOTE_TIMEOUT).to_std().unwrap()).send().await?;
+	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
 	#[cfg(target_family = "wasm")]
 	let res = req.send().await?;
 	if !res.status().is_success() {

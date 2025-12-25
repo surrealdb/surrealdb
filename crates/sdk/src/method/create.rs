@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -10,6 +9,7 @@ use super::{Content, validate_data};
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// A record create future
@@ -62,12 +62,12 @@ macro_rules! into_future {
 				let mut variables = Variables::new();
 				let what = what.for_sql_query(&mut variables)?;
 
-				let cmd = Command::RawQuery {
+				let cmd = Command::Query {
 					txn,
 					query: Cow::Owned(format!("CREATE {what}")),
 					variables,
 				};
-				router.$method(cmd).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};
@@ -101,7 +101,7 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		Content::from_closure(self.client, self.txn, || {
 			let content = data.into_value();
@@ -117,7 +117,7 @@ where
 			let what = what.for_sql_query(&mut variables)?;
 			variables.insert("_content".to_string(), content);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query: Cow::Owned(format!("CREATE {what} CONTENT $_content")),
 				variables,
@@ -133,7 +133,7 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		Content::from_closure(self.client, self.txn, || {
 			let content = data.into_value();
@@ -156,7 +156,7 @@ where
 				}
 			};
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,

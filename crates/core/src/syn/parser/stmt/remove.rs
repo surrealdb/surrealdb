@@ -1,15 +1,17 @@
 use reblessive::Stk;
 
-use crate::sql::Param;
 use crate::sql::statements::remove::{
-	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
+	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveModuleStatement,
+	RemoveSequenceStatement,
 };
 use crate::sql::statements::{
 	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
 	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
 	RemoveStatement, RemoveUserStatement,
 };
-use crate::syn::parser::mac::{expected, unexpected};
+use crate::sql::{ModuleName, Param};
+use crate::syn::error::bail;
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
@@ -80,6 +82,57 @@ impl Parser<'_> {
 				}
 
 				RemoveStatement::Function(RemoveFunctionStatement {
+					name,
+					if_exists,
+				})
+			}
+			t!("MODULE") => {
+				if !self.settings.surrealism_enabled {
+					bail!(
+						"Experimental capability `surrealism` is not enabled",
+						@self.last_span() => "Use of `REMOVE MODULE` is still experimental"
+					)
+				}
+
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
+				let peek = self.peek();
+				let name = match peek.kind {
+					t!("mod") => {
+						self.pop_peek();
+						expected_whitespace!(self, t!("::"));
+						let name = self.parse_ident()?;
+						ModuleName::Module(name)
+					}
+					t!("silo") => {
+						self.pop_peek();
+						expected_whitespace!(self, t!("::"));
+						let organisation = self.parse_ident()?;
+						expected_whitespace!(self, t!("::"));
+						let package = self.parse_ident()?;
+						expected_whitespace!(self, t!("<"));
+						let major = self.parse_version_digits()?;
+						expected_whitespace!(self, t!("."));
+						let minor = self.parse_version_digits()?;
+						expected_whitespace!(self, t!("."));
+						let patch = self.parse_version_digits()?;
+						expected_whitespace!(self, t!(">"));
+						ModuleName::Silo(organisation, package, major, minor, patch)
+					}
+					_ => unexpected!(self, peek, "a module name"),
+				};
+
+				let next = self.peek();
+				if self.eat(t!("(")) {
+					self.expect_closing_delimiter(t!(")"), next.span)?;
+				}
+
+				RemoveStatement::Module(RemoveModuleStatement {
 					name,
 					if_exists,
 				})

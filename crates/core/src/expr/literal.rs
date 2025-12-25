@@ -1,19 +1,16 @@
 use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
 use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResult, RecordIdLit};
-use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid,
-	Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid, Value,
 };
 
 /// A literal value, should be computed to get an actual value.
@@ -42,50 +39,13 @@ pub(crate) enum Literal {
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
+	Set(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Geometry(Geometry),
 	File(File),
-	Closure(Box<Closure>),
-}
-
-impl VisitExpression for Literal {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Literal::None
-			| Literal::Null
-			| Literal::UnboundedRange
-			| Literal::Bool(_)
-			| Literal::Float(_)
-			| Literal::Integer(_)
-			| Literal::Decimal(_)
-			| Literal::String(_)
-			| Literal::Bytes(_)
-			| Literal::Regex(_)
-			| Literal::Duration(_)
-			| Literal::Datetime(_)
-			| Literal::Uuid(_)
-			| Literal::Geometry(_)
-			| Literal::File(_) => {}
-			Literal::RecordId(x) => {
-				x.key.visit(visitor);
-			}
-			Literal::Array(x) => {
-				x.iter().for_each(|x| x.visit(visitor));
-			}
-			Literal::Object(x) => {
-				x.iter().for_each(|x| x.visit(visitor));
-			}
-			Literal::Closure(x) => {
-				x.visit(visitor);
-			}
-		}
-	}
 }
 
 impl Literal {
@@ -108,16 +68,17 @@ impl Literal {
 			| Literal::Geometry(_) => true,
 			Literal::RecordId(record_id_lit) => record_id_lit.is_static(),
 			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
+			Literal::Set(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
-			Literal::Closure(_) => false,
 		}
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "Literal::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -142,6 +103,14 @@ impl Literal {
 				}
 				Value::Array(Array(array))
 			}
+			Literal::Set(exprs) => {
+				let mut set = crate::val::Set::new();
+				for e in exprs.iter() {
+					let v = stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?;
+					set.insert(v);
+				}
+				Value::Set(set)
+			}
 			Literal::Object(items) => {
 				let mut map = BTreeMap::new();
 				for i in items.iter() {
@@ -155,7 +124,6 @@ impl Literal {
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => closure.compute(ctx).await?,
 		};
 		Ok(res)
 	}
@@ -175,13 +143,13 @@ impl PartialEq for Literal {
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
 			(Literal::Array(a), Literal::Array(b)) => a == b,
+			(Literal::Set(a), Literal::Set(b)) => a == b,
 			(Literal::Object(a), Literal::Object(b)) => a == b,
 			(Literal::Duration(a), Literal::Duration(b)) => a == b,
 			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
-			(Literal::Closure(a), Literal::Closure(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -204,84 +172,21 @@ impl Hash for Literal {
 			Literal::Regex(x) => x.hash(state),
 			Literal::RecordId(x) => x.hash(state),
 			Literal::Array(x) => x.hash(state),
+			Literal::Set(x) => x.hash(state),
 			Literal::Object(x) => x.hash(state),
 			Literal::Duration(x) => x.hash(state),
 			Literal::Datetime(x) => x.hash(state),
 			Literal::Uuid(x) => x.hash(state),
 			Literal::Geometry(x) => x.hash(state),
 			Literal::File(x) => x.hash(state),
-			Literal::Closure(x) => x.hash(state),
 		}
 	}
 }
 
-impl fmt::Display for Literal {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match self {
-			Literal::None => write!(f, "NONE"),
-			Literal::Null => write!(f, "NULL"),
-			Literal::UnboundedRange => write!(f, ".."),
-			Literal::Bool(x) => {
-				if *x {
-					write!(f, "true")
-				} else {
-					write!(f, "false")
-				}
-			}
-			Literal::Float(float) => {
-				if float.is_finite() {
-					write!(f, "{float}f")
-				} else {
-					write!(f, "{float}")
-				}
-			}
-			Literal::Integer(x) => write!(f, "{x}"),
-			Literal::Decimal(d) => write!(f, "{d}dec"),
-			Literal::String(strand) => write!(f, "{}", QuoteStr(strand)),
-			Literal::Bytes(bytes) => write!(f, "{bytes}"),
-			Literal::Regex(regex) => write!(f, "{regex}"),
-			Literal::RecordId(record_id_lit) => write!(f, "{record_id_lit}"),
-			Literal::Array(exprs) => {
-				f.write_char('[')?;
-				if !exprs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')
-			}
-			Literal::Object(items) => {
-				if is_pretty() {
-					f.write_char('{')?;
-				} else {
-					f.write_str("{ ")?;
-				}
-				if !items.is_empty() {
-					let indent = pretty_indent();
-					write!(
-						f,
-						"{}",
-						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
-							args,
-							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), entry.value)
-						)),)
-					)?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			}
-			Literal::Duration(duration) => write!(f, "{duration}"),
-			Literal::Datetime(datetime) => write!(f, "{datetime}"),
-			Literal::Uuid(uuid) => write!(f, "{uuid}"),
-			Literal::Geometry(geometry) => write!(f, "{geometry}"),
-			Literal::File(file) => write!(f, "{file}"),
-			Literal::Closure(closure) => write!(f, "{closure}"),
-		}
+impl ToSql for Literal {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let lit: crate::sql::Literal = self.clone().into();
+		lit.fmt_sql(f, fmt);
 	}
 }
 
@@ -291,17 +196,9 @@ pub(crate) struct ObjectEntry {
 	pub value: Expr,
 }
 
-impl VisitExpression for ObjectEntry {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.value.visit(visitor);
-	}
-}
-
-impl fmt::Display for ObjectEntry {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}: {}", EscapeKey(&self.key), self.value)
+impl ToSql for ObjectEntry {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let entry: crate::sql::literal::ObjectEntry = self.clone().into();
+		entry.fmt_sql(f, fmt);
 	}
 }

@@ -32,7 +32,7 @@ async fn define_foreign_table() -> Result<()> {
 		UPSERT person:two SET age = 39, score = 'test';
 		SELECT * FROM person_by_age;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 11);
@@ -146,7 +146,7 @@ async fn define_foreign_table() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert_eq!(tmp, DbResultError::InternalError("Incorrect arguments for aggregate function math::mean() on table 'person_by_age'. This function expects a number but found 'test'".to_string()));
+	assert_eq!(tmp, DbResultError::InternalError("Incorrect arguments for function math::mean(). Argument 1 was the wrong type. Expected `number` but found `'test'`".to_string()));
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -180,7 +180,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 		SELECT * FROM monthly;
 		SELECT * FROM daily;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -267,7 +267,7 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<()> {
 		SELECT agr, day FROM wallet_agr;
 	"
 	);
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 29);

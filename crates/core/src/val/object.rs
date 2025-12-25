@@ -1,35 +1,20 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::literal::ObjectEntry;
-use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::EscapeKey;
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Object")]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
@@ -124,7 +109,7 @@ impl TryInto<HeaderMap> for Object {
 	type Error = Error;
 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
 		let mut headermap = HeaderMap::new();
-		for (k, v) in self.into_iter() {
+		for (k, v) in self {
 			let k: HeaderName = k.parse()?;
 			let v: HeaderValue = v.coerce_to::<String>()?.parse()?;
 			headermap.insert(k, v);
@@ -152,36 +137,6 @@ impl Object {
 			})
 			.collect()
 	}
-
-	pub(crate) fn display<V: Display>(f: &mut Formatter, o: &BTreeMap<String, V>) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		if is_pretty() {
-			f.write_char('{')?;
-		} else {
-			f.write_str("{ ")?;
-		}
-		if !o.is_empty() {
-			let indent = pretty_indent();
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(
-					o.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
-						f,
-						"{}: {}",
-						EscapeKey(k),
-						v
-					))),
-				)
-			)?;
-			drop(indent);
-		}
-		if is_pretty() {
-			f.write_char('}')
-		} else {
-			f.write_str(" }")
-		}
-	}
 }
 
 impl std::ops::Add for Object {
@@ -194,8 +149,41 @@ impl std::ops::Add for Object {
 	}
 }
 
-impl Display for Object {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Object::display(f, &self.0)
+impl ToSql for Object {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		if self.is_empty() {
+			return f.push_str("{  }");
+		}
+
+		if sql_fmt.is_pretty() {
+			f.push('{');
+		} else {
+			f.push_str("{ ");
+		}
+
+		if !self.is_empty() {
+			let inner_fmt = sql_fmt.increment();
+			if sql_fmt.is_pretty() {
+				f.push('\n');
+				inner_fmt.write_indent(f);
+			}
+			for (i, (key, value)) in self.0.iter().enumerate() {
+				if i > 0 {
+					inner_fmt.write_separator(f);
+				}
+				write_sql!(f, sql_fmt, "{}: ", EscapeKey(key));
+				value.fmt_sql(f, inner_fmt);
+			}
+			if sql_fmt.is_pretty() {
+				f.push('\n');
+				sql_fmt.write_indent(f);
+			}
+		}
+
+		if sql_fmt.is_pretty() {
+			f.push('}');
+		} else {
+			f.push_str(" }");
+		}
 	}
 }

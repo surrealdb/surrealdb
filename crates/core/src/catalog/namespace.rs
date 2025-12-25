@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -79,15 +79,19 @@ impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::String(v)))
+				.unwrap_or(Expr::Literal(Literal::None)),
 			..Default::default()
 		}
 	}
 }
 
 impl ToSql for NamespaceDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 

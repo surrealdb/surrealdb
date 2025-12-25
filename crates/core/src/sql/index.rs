@@ -1,7 +1,6 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
 use crate::types::PublicNumber;
@@ -13,8 +12,6 @@ pub(crate) enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// M-Tree index for distance-based metrics
-	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities - single writer
@@ -28,7 +25,6 @@ impl From<Index> for crate::catalog::Index {
 		match v {
 			Index::Idx => Self::Idx,
 			Index::Uniq => Self::Uniq,
-			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
 			Index::Count(c) => Self::Count(c.map(Into::into)),
@@ -41,7 +37,6 @@ impl From<crate::catalog::Index> for Index {
 		match v {
 			crate::catalog::Index::Idx => Self::Idx,
 			crate::catalog::Index::Uniq => Self::Uniq,
-			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
 			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
@@ -72,40 +67,6 @@ impl From<crate::catalog::FullTextParams> for FullTextParams {
 			az: v.analyzer,
 			hl: v.highlight,
 			sc: v.scoring.into(),
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) struct MTreeParams {
-	pub dimension: u16,
-	pub distance: Distance,
-	pub vector_type: VectorType,
-	pub capacity: u16,
-	pub mtree_cache: u32,
-}
-
-impl From<MTreeParams> for crate::catalog::MTreeParams {
-	fn from(v: MTreeParams) -> Self {
-		crate::catalog::MTreeParams {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			capacity: v.capacity,
-			mtree_cache: v.mtree_cache,
-		}
-	}
-}
-
-impl From<crate::catalog::MTreeParams> for MTreeParams {
-	fn from(v: crate::catalog::MTreeParams) -> Self {
-		Self {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			capacity: v.capacity,
-			mtree_cache: v.mtree_cache,
 		}
 	}
 }
@@ -170,17 +131,17 @@ pub(crate) enum Distance {
 	Pearson,
 }
 
-impl Display for Distance {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl ToSql for Distance {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Chebyshev => f.write_str("CHEBYSHEV"),
-			Self::Cosine => f.write_str("COSINE"),
-			Self::Euclidean => f.write_str("EUCLIDEAN"),
-			Self::Hamming => f.write_str("HAMMING"),
-			Self::Jaccard => f.write_str("JACCARD"),
-			Self::Manhattan => f.write_str("MANHATTAN"),
-			Self::Minkowski(order) => write!(f, "MINKOWSKI {}", order),
-			Self::Pearson => f.write_str("PEARSON"),
+			Self::Chebyshev => f.push_str("CHEBYSHEV"),
+			Self::Cosine => f.push_str("COSINE"),
+			Self::Euclidean => f.push_str("EUCLIDEAN"),
+			Self::Hamming => f.push_str("HAMMING"),
+			Self::Jaccard => f.push_str("JACCARD"),
+			Self::Manhattan => f.push_str("MANHATTAN"),
+			Self::Minkowski(order) => write_sql!(f, fmt, "MINKOWSKI {}", order),
+			Self::Pearson => f.push_str("PEARSON"),
 		}
 	}
 }
@@ -218,65 +179,62 @@ impl From<crate::catalog::Distance> for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum VectorType {
-	#[default]
 	F64,
+	#[default]
 	F32,
 	I64,
 	I32,
 	I16,
 }
 
-impl Display for VectorType {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl ToSql for VectorType {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			Self::F64 => f.write_str("F64"),
-			Self::F32 => f.write_str("F32"),
-			Self::I64 => f.write_str("I64"),
-			Self::I32 => f.write_str("I32"),
-			Self::I16 => f.write_str("I16"),
+			Self::F64 => f.push_str("F64"),
+			Self::F32 => f.push_str("F32"),
+			Self::I64 => f.push_str("I64"),
+			Self::I32 => f.push_str("I32"),
+			Self::I16 => f.push_str("I16"),
 		}
 	}
 }
 
-impl Display for Index {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Index {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Idx => Ok(()),
-			Self::Uniq => f.write_str("UNIQUE"),
+			Self::Idx => {}
+			Self::Uniq => f.push_str("UNIQUE"),
 			Self::Count(c) => {
-				f.write_str("COUNT")?;
+				f.push_str("COUNT");
 				if let Some(v) = c {
-					write!(f, " {v}")?
+					write_sql!(f, fmt, " {}", v)
 				}
-				Ok(())
 			}
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
+				write_sql!(f, fmt, "FULLTEXT ANALYZER {} {}", EscapeKwFreeIdent(&p.az), p.sc);
 				if p.hl {
-					f.write_str(" HIGHLIGHTS")?
+					f.push_str(" HIGHLIGHTS")
 				}
-				Ok(())
-			}
-			Self::MTree(p) => {
-				write!(
-					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} MTREE_CACHE {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.mtree_cache
-				)
 			}
 			Self::Hnsw(p) => {
-				write!(
+				write_sql!(
 					f,
+					fmt,
 					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} LM {}",
-					p.dimension, p.distance, p.vector_type, p.ef_construction, p.m, p.m0, p.ml
-				)?;
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.ef_construction,
+					p.m,
+					p.m0,
+					p.ml
+				);
 				if p.extend_candidates {
-					f.write_str(" EXTEND_CANDIDATES")?
+					f.push_str(" EXTEND_CANDIDATES")
 				}
 				if p.keep_pruned_connections {
-					f.write_str(" KEEP_PRUNED_CONNECTIONS")?
+					f.push_str(" KEEP_PRUNED_CONNECTIONS")
 				}
-				Ok(())
 			}
 		}
 	}

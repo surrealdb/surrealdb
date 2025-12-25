@@ -41,7 +41,7 @@ pub(crate) fn headers(context: &mut InvocationContext, (headers,): (Object,)) ->
 	let mut unset: Vec<String> = Vec::new();
 	let mut headermap = HeaderMap::new();
 
-	for (name, value) in headers.into_iter() {
+	for (name, value) in headers {
 		match value {
 			Value::None => {
 				unset.push(name);

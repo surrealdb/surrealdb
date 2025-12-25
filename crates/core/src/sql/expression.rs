@@ -1,6 +1,8 @@
-use std::fmt;
+use std::ops::Bound;
 
-use crate::fmt::{EscapeIdent, Pretty};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::{CoverStmts, EscapeIdent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -13,10 +15,7 @@ use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::types::{
-	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRecordId,
-	PublicUuid, PublicValue,
-};
+use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -52,7 +51,7 @@ pub(crate) enum Expr {
 	Throw(Box<Expr>),
 
 	Return(Box<OutputStatement>),
-	If(Box<IfelseStatement>),
+	IfElse(Box<IfelseStatement>),
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),
 	Update(Box<UpdateStatement>),
@@ -79,9 +78,9 @@ impl Expr {
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.to_string()),
-				x => Idiom::field(x.to_string()),
+				x => Idiom::field(x.to_sql()),
 			},
-			x => Idiom::field(x.to_string()),
+			x => Idiom::field(x.to_sql()),
 		}
 	}
 
@@ -94,9 +93,7 @@ impl Expr {
 			PublicValue::Number(PublicNumber::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			PublicValue::Number(PublicNumber::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
 			PublicValue::String(x) => Expr::Literal(Literal::String(x)),
-			PublicValue::Bytes(x) => {
-				Expr::Literal(Literal::Bytes(PublicBytes::from(x.into_inner())))
-			}
+			PublicValue::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(x)),
 			PublicValue::Table(x) => Expr::Table(x.into_string()),
 			PublicValue::RecordId(PublicRecordId {
@@ -109,6 +106,11 @@ impl Expr {
 			PublicValue::Array(x) => {
 				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
 			}
+			PublicValue::Set(x) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
+			}
 			PublicValue::Object(x) => Expr::Literal(Literal::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
@@ -117,18 +119,11 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			PublicValue::Duration(x) => {
-				Expr::Literal(Literal::Duration(PublicDuration::from(x.inner())))
-			}
-			PublicValue::Datetime(x) => {
-				Expr::Literal(Literal::Datetime(PublicDatetime::from(x.inner())))
-			}
-			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(PublicUuid::from(x.0))),
+			PublicValue::Duration(x) => Expr::Literal(Literal::Duration(x)),
+			PublicValue::Datetime(x) => Expr::Literal(Literal::Datetime(x)),
+			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(x)),
 			PublicValue::Geometry(x) => Expr::Literal(Literal::Geometry(x)),
-			PublicValue::File(x) => Expr::Literal(Literal::File(PublicFile::new(
-				x.bucket().to_string(),
-				x.key().to_string(),
-			))),
+			PublicValue::File(x) => Expr::Literal(Literal::File(PublicFile::new(x.bucket, x.key))),
 			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}
 	}
@@ -136,31 +131,15 @@ impl Expr {
 	// NOTE: Changes to this function also likely require changes to
 	// crate::expr::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
-	fn needs_parentheses(&self) -> bool {
+	pub(crate) fn needs_parentheses(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
+			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
+			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Throw(_)
 			| Expr::Return(_)
-			| Expr::If(_)
+			| Expr::IfElse(_)
 			| Expr::Select(_)
 			| Expr::Create(_)
 			| Expr::Update(_)
@@ -176,6 +155,26 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Postfix {
+				op,
+				..
+			} => matches!(op, PostfixOperator::Range | PostfixOperator::RangeSkip),
+
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
 		}
 	}
 }
@@ -198,21 +197,23 @@ fn convert_public_range_to_literal(range: surrealdb_types::Range) -> Expr {
 	use crate::sql::literal::Literal;
 	use crate::sql::operator::BinaryOperator;
 
+	let range = range.into_inner();
+
 	// Determine the operator first before moving the values
-	let op = match (&range.start, &range.end) {
+	let op = match (&range.0, &range.1) {
 		(std::ops::Bound::Included(_), std::ops::Bound::Included(_)) => {
 			BinaryOperator::RangeInclusive
 		}
 		_ => BinaryOperator::Range,
 	};
 
-	let start_expr = match range.start {
+	let start_expr = match range.0 {
 		std::ops::Bound::Included(v) => Expr::from_public_value(v),
 		std::ops::Bound::Excluded(v) => Expr::from_public_value(v),
 		std::ops::Bound::Unbounded => Expr::Literal(Literal::None),
 	};
 
-	let end_expr = match range.end {
+	let end_expr = match range.1 {
 		std::ops::Bound::Included(v) => Expr::from_public_value(v),
 		std::ops::Bound::Excluded(v) => Expr::from_public_value(v),
 		std::ops::Bound::Unbounded => Expr::Literal(Literal::None),
@@ -243,27 +244,32 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		},
 		surrealdb_types::Value::String(s) => crate::val::Value::String(s),
 		surrealdb_types::Value::Duration(d) => {
-			crate::val::Value::Duration(crate::val::Duration(d.inner()))
+			crate::val::Value::Duration(crate::val::Duration(d.into_inner()))
 		}
 		surrealdb_types::Value::Datetime(dt) => {
-			crate::val::Value::Datetime(crate::val::Datetime(dt.inner()))
+			crate::val::Value::Datetime(crate::val::Datetime(dt.into_inner()))
 		}
-		surrealdb_types::Value::Uuid(u) => crate::val::Value::Uuid(crate::val::Uuid(u.0)),
-		surrealdb_types::Value::Array(a) => crate::val::Value::Array(crate::val::Array(
-			a.inner().clone().into_iter().map(convert_public_value_to_internal).collect(),
+		surrealdb_types::Value::Uuid(u) => {
+			crate::val::Value::Uuid(crate::val::Uuid(u.into_inner()))
+		}
+		surrealdb_types::Value::Array(a) => crate::val::Value::Array(crate::val::Array::from(
+			a.into_iter().map(convert_public_value_to_internal).collect::<Vec<_>>(),
 		)),
-		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object(
-			o.inner()
-				.clone()
-				.into_iter()
+		surrealdb_types::Value::Set(s) => crate::val::Value::Set(crate::val::Set::from(
+			s.into_iter()
+				.map(convert_public_value_to_internal)
+				.collect::<std::collections::BTreeSet<_>>(),
+		)),
+		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object::from(
+			o.into_iter()
 				.map(|(k, v)| (k, convert_public_value_to_internal(v)))
-				.collect(),
+				.collect::<std::collections::BTreeMap<_, _>>(),
 		)),
 		surrealdb_types::Value::Geometry(g) => {
 			crate::val::Value::Geometry(convert_public_geometry_to_internal(g))
 		}
 		surrealdb_types::Value::Bytes(b) => {
-			crate::val::Value::Bytes(crate::val::Bytes(b.inner().clone()))
+			crate::val::Value::Bytes(crate::val::Bytes(b.into_inner()))
 		}
 		surrealdb_types::Value::Table(t) => crate::val::Value::Table(t.into()),
 		surrealdb_types::Value::RecordId(PublicRecordId {
@@ -272,39 +278,29 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		}) => {
 			let key = convert_public_record_id_key_to_internal(key);
 			crate::val::Value::RecordId(crate::val::RecordId {
-				table: table.into_string(),
+				table: table.into(),
 				key,
 			})
 		}
 		surrealdb_types::Value::File(f) => crate::val::Value::File(crate::val::File {
-			bucket: f.bucket().to_string(),
-			key: f.key().to_string(),
+			bucket: f.bucket,
+			key: f.key,
 		}),
-		surrealdb_types::Value::Range(r) => {
-			let start = match r.start {
-				std::ops::Bound::Included(v) => {
-					std::ops::Bound::Included(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Excluded(v) => {
-					std::ops::Bound::Excluded(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			let end = match r.end {
-				std::ops::Bound::Included(v) => {
-					std::ops::Bound::Included(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Excluded(v) => {
-					std::ops::Bound::Excluded(convert_public_value_to_internal(v))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			crate::val::Value::Range(Box::new(crate::val::Range {
-				start,
-				end,
-			}))
+		surrealdb_types::Value::Range(r) => crate::val::Value::Range(Box::new(crate::val::Range {
+			start: match r.start {
+				Bound::Included(v) => Bound::Included(convert_public_value_to_internal(v)),
+				Bound::Excluded(v) => Bound::Excluded(convert_public_value_to_internal(v)),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+			end: match r.end {
+				Bound::Included(v) => Bound::Included(convert_public_value_to_internal(v)),
+				Bound::Excluded(v) => Bound::Excluded(convert_public_value_to_internal(v)),
+				Bound::Unbounded => Bound::Unbounded,
+			},
+		})),
+		surrealdb_types::Value::Regex(r) => {
+			crate::val::Value::Regex(crate::val::Regex(r.into_inner()))
 		}
-		surrealdb_types::Value::Regex(r) => crate::val::Value::Regex(crate::val::Regex(r.0)),
 	}
 }
 
@@ -315,74 +311,82 @@ fn convert_public_record_id_key_to_internal(
 		surrealdb_types::RecordIdKey::Number(n) => crate::val::RecordIdKey::Number(n),
 		surrealdb_types::RecordIdKey::String(s) => crate::val::RecordIdKey::String(s),
 		surrealdb_types::RecordIdKey::Uuid(u) => {
-			crate::val::RecordIdKey::Uuid(crate::val::Uuid(u.0))
+			crate::val::RecordIdKey::Uuid(crate::val::Uuid(u.into_inner()))
 		}
-		surrealdb_types::RecordIdKey::Array(a) => {
-			crate::val::RecordIdKey::Array(crate::val::Array(
-				a.inner().clone().into_iter().map(convert_public_value_to_internal).collect(),
-			))
-		}
+		surrealdb_types::RecordIdKey::Array(a) => crate::val::RecordIdKey::Array(
+			crate::val::Array(a.into_iter().map(convert_public_value_to_internal).collect()),
+		),
 		surrealdb_types::RecordIdKey::Object(o) => {
 			crate::val::RecordIdKey::Object(crate::val::Object(
-				o.inner()
-					.clone()
-					.into_iter()
-					.map(|(k, v)| (k, convert_public_value_to_internal(v)))
-					.collect(),
+				o.into_iter().map(|(k, v)| (k, convert_public_value_to_internal(v))).collect(),
 			))
 		}
 		surrealdb_types::RecordIdKey::Range(r) => {
-			let start = match r.start {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			let end = match r.end {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_public_record_id_key_to_internal(k))
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
 			crate::val::RecordIdKey::Range(Box::new(crate::val::RecordIdKeyRange {
-				start,
-				end,
+				start: match r.start {
+					Bound::Included(k) => {
+						Bound::Included(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Unbounded => Bound::Unbounded,
+				},
+				end: match r.end {
+					Bound::Included(k) => {
+						Bound::Included(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_public_record_id_key_to_internal(k))
+					}
+					Bound::Unbounded => Bound::Unbounded,
+				},
 			}))
 		}
 	}
 }
 
-impl fmt::Display for Expr {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		let mut f = Pretty::from(f);
+impl ToSql for Expr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Expr::Literal(literal) => write!(f, "{literal}"),
-			Expr::Param(param) => write!(f, "{param}"),
-			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write!(f, "{mock}"),
-			Expr::Block(block) => write!(f, "{block}"),
-			Expr::Constant(constant) => write!(f, "{constant}"),
+			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
+			Expr::Param(param) => param.fmt_sql(f, fmt),
+			Expr::Idiom(idiom) => idiom.fmt_sql(f, fmt),
+			Expr::Table(ident) => write_sql!(f, fmt, "{}", EscapeIdent(ident)),
+			Expr::Mock(mock) => mock.fmt_sql(f, fmt),
+			Expr::Block(block) => block.fmt_sql(f, fmt),
+			Expr::Constant(constant) => constant.fmt_sql(f, fmt),
 			Expr::Prefix {
 				op,
 				expr,
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
+				if let Expr::Literal(Literal::Integer(x)) = expr.as_ref()
+					&& x.is_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Decimal(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if let Expr::Literal(Literal::Float(x)) = expr.as_ref()
+					&& x.is_sign_negative()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "{op}({expr})")
+					|| matches!(
+						expr.as_ref(),
+						Expr::Prefix {
+							op: PrefixOperator::Negate,
+							..
+						}
+					) {
+					write_sql!(f, fmt, "{op}({expr})");
 				} else {
-					write!(f, "{op}{expr}")
+					write_sql!(f, fmt, "{op}{expr}");
 				}
 			}
 			Expr::Postfix {
@@ -394,10 +398,11 @@ impl fmt::Display for Expr {
 				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					|| matches!(op, PostfixOperator::Call(_))
 				{
-					write!(f, "({expr}){op}")
+					write_sql!(f, fmt, "({expr}){op}");
 				} else {
-					write!(f, "{expr}{op}")
+					write_sql!(f, fmt, "{expr}{op}");
 				}
 			}
 			Expr::Binary {
@@ -412,11 +417,13 @@ impl fmt::Display for Expr {
 				if left.needs_parentheses()
 					|| left_bp < op_bp
 					|| left_bp == op_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({left})")?;
+						&& matches!(
+							left_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
+					write_sql!(f, fmt, "({left})");
 				} else {
-					write!(f, "{left}")?;
+					write_sql!(f, fmt, "{left}");
 				}
 
 				if matches!(
@@ -426,43 +433,47 @@ impl fmt::Display for Expr {
 						| BinaryOperator::RangeInclusive
 						| BinaryOperator::RangeSkipInclusive
 				) {
-					write!(f, "{op}")?;
+					op.fmt_sql(f, fmt);
 				} else {
-					write!(f, " {op} ")?;
+					f.push(' ');
+					op.fmt_sql(f, fmt);
+					f.push(' ');
 				}
 
 				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({right})")
+						&& matches!(
+							right_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
+					write_sql!(f, fmt, "({right})");
 				} else {
-					write!(f, "{right}")
+					write_sql!(f, fmt, "{right}");
 				}
 			}
-			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
-			Expr::Closure(closure) => write!(f, "{closure}"),
-			Expr::Break => write!(f, "BREAK"),
-			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::If(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
+			Expr::FunctionCall(function_call) => function_call.fmt_sql(f, fmt),
+			Expr::Closure(closure) => closure.fmt_sql(f, fmt),
+			Expr::Break => f.push_str("BREAK"),
+			Expr::Continue => f.push_str("CONTINUE"),
+			Expr::Return(x) => x.fmt_sql(f, fmt),
+			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {}", CoverStmts(expr.as_ref())),
+			Expr::IfElse(s) => s.fmt_sql(f, fmt),
+			Expr::Select(s) => s.fmt_sql(f, fmt),
+			Expr::Create(s) => s.fmt_sql(f, fmt),
+			Expr::Update(s) => s.fmt_sql(f, fmt),
+			Expr::Delete(s) => s.fmt_sql(f, fmt),
+			Expr::Relate(s) => s.fmt_sql(f, fmt),
+			Expr::Insert(s) => s.fmt_sql(f, fmt),
+			Expr::Define(s) => s.fmt_sql(f, fmt),
+			Expr::Remove(s) => s.fmt_sql(f, fmt),
+			Expr::Rebuild(s) => s.fmt_sql(f, fmt),
+			Expr::Upsert(s) => s.fmt_sql(f, fmt),
+			Expr::Alter(s) => s.fmt_sql(f, fmt),
+			Expr::Info(s) => s.fmt_sql(f, fmt),
+			Expr::Foreach(s) => s.fmt_sql(f, fmt),
+			Expr::Let(s) => s.fmt_sql(f, fmt),
+			Expr::Sleep(s) => s.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -473,7 +484,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t),
+			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -507,7 +518,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Continue => crate::expr::Expr::Continue,
 			Expr::Return(e) => crate::expr::Expr::Return(Box::new((*e).into())),
 			Expr::Throw(e) => crate::expr::Expr::Throw(Box::new((*e).into())),
-			Expr::If(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
+			Expr::IfElse(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
 			Expr::Select(s) => crate::expr::Expr::Select(Box::new((*s).into())),
 			Expr::Create(s) => crate::expr::Expr::Create(Box::new((*s).into())),
 			Expr::Update(s) => crate::expr::Expr::Update(Box::new((*s).into())),
@@ -533,7 +544,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t),
+			crate::expr::Expr::Table(t) => Expr::Table(t.into_string()),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),
@@ -567,7 +578,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Continue => Expr::Continue,
 			crate::expr::Expr::Return(e) => Expr::Return(Box::new((*e).into())),
 			crate::expr::Expr::Throw(e) => Expr::Throw(Box::new((*e).into())),
-			crate::expr::Expr::IfElse(s) => Expr::If(Box::new((*s).into())),
+			crate::expr::Expr::IfElse(s) => Expr::IfElse(Box::new((*s).into())),
 			crate::expr::Expr::Select(s) => Expr::Select(Box::new((*s).into())),
 			crate::expr::Expr::Create(s) => Expr::Create(Box::new((*s).into())),
 			crate::expr::Expr::Update(s) => Expr::Update(Box::new((*s).into())),

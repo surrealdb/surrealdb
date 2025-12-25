@@ -31,7 +31,7 @@ impl Tasks {
 	}
 	#[cfg(not(target_family = "wasm"))]
 	pub async fn resolve(self) -> Result<(), Error> {
-		for task in self.0.into_iter() {
+		for task in self.0 {
 			let _ = task.await;
 		}
 		Ok(())
@@ -50,7 +50,7 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task2 = spawn_task_node_membership_check(dbs.clone(), canceller.clone(), opts);
 	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
-	let task5 = spawn_task_index_compaction(dbs.clone(), canceller.clone(), opts);
+	let task5 = spawn_task_index_compaction(dbs, canceller, opts);
 	Tasks(vec![task1, task2, task3, task4, task5])
 }
 
@@ -60,13 +60,13 @@ fn spawn_task_node_membership_refresh(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_refresh_interval;
+	let interval = opts.node_membership_refresh_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Updating node registration information every {delay:?}");
+		trace!("Updating node registration information every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -75,7 +75,7 @@ fn spawn_task_node_membership_refresh(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_update().await {
+					if let Err(e) = dbs.update_node().await {
 						error!("Error updating node registration information: {e}");
 					}
 				}
@@ -91,13 +91,13 @@ fn spawn_task_node_membership_check(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_check_interval;
+	let interval = opts.node_membership_check_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Processing and archiving inactive nodes every {delay:?}");
+		trace!("Processing and archiving inactive nodes every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -106,7 +106,7 @@ fn spawn_task_node_membership_check(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_expire().await {
+					if let Err(e) = dbs.expire_nodes().await {
 						error!("Error processing and archiving inactive nodes: {e}");
 					}
 				}
@@ -122,13 +122,13 @@ fn spawn_task_node_membership_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_cleanup_interval;
+	let interval = opts.node_membership_cleanup_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Processing and cleaning archived nodes every {delay:?}");
+		trace!("Processing and cleaning archived nodes every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -137,7 +137,7 @@ fn spawn_task_node_membership_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_remove().await {
+					if let Err(e) = dbs.remove_nodes().await {
 						error!("Error processing and cleaning archived nodes: {e}");
 					}
 				}
@@ -153,13 +153,13 @@ fn spawn_task_changefeed_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let gc_interval = opts.changefeed_gc_interval;
+	let interval = opts.changefeed_gc_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Running changefeed garbage collection every {gc_interval:?}");
+		trace!("Running changefeed garbage collection every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(gc_interval).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -168,7 +168,7 @@ fn spawn_task_changefeed_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.changefeed_process(&gc_interval).await {
+					if let Err(e) = dbs.changefeed_process(&interval).await {
 						error!("Error running changefeed garbage collection: {e}");
 					}
 				}

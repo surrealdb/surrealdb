@@ -1,14 +1,11 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::UserProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -20,14 +17,6 @@ pub(crate) struct RemoveUserStatement {
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveUserStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
-}
 impl Default for RemoveUserStatement {
 	fn default() -> Self {
 		Self {
@@ -43,7 +32,7 @@ impl RemoveUserStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -135,16 +124,5 @@ impl RemoveUserStatement {
 				Ok(Value::None)
 			}
 		}
-	}
-}
-
-impl Display for RemoveUserStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE USER")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.base)?;
-		Ok(())
 	}
 }

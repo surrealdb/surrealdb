@@ -1,13 +1,14 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::DefineTableStatement;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -44,7 +45,7 @@ pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
 	pub(crate) database_id: DatabaseId,
 	pub(crate) table_id: TableId,
-	pub(crate) name: String,
+	pub(crate) name: TableName,
 	pub(crate) drop: bool,
 	pub(crate) schemafull: bool,
 	pub(crate) view: Option<ViewDefinition>,
@@ -70,7 +71,7 @@ impl TableDefinition {
 		namespace_id: NamespaceId,
 		database_id: DatabaseId,
 		table_id: TableId,
-		name: String,
+		name: TableName,
 	) -> Self {
 		let now = Uuid::now_v7();
 		Self {
@@ -104,7 +105,7 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			name: sql::Expr::Table(self.name.clone().into_string()),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
@@ -113,7 +114,8 @@ impl TableDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}
@@ -121,15 +123,15 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt)
 	}
 }
 
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
+			"name".to_string() => self.name.into_string().into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
 			"kind".to_string() => self.table_type.structure(),
@@ -152,17 +154,17 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			TableType::Any => f.push_str("ANY"),
 			TableType::Normal => f.push_str("NORMAL"),
 			TableType::Relation(rel) => {
 				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					write_sql!(f, " IN {}", kind);
+					write_sql!(f, sql_fmt, " IN {}", kind.to_sql());
 				}
 				if let Some(kind) = &rel.to {
-					write_sql!(f, " OUT {}", kind);
+					write_sql!(f, sql_fmt, " OUT {}", kind.to_sql());
 				}
 				if rel.enforced {
 					f.push_str(" ENFORCED");

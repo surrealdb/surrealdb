@@ -12,10 +12,9 @@ use surrealdb_core::dbs::capabilities::{
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	RecordReferences,
 	GraphQl,
-	BearerAccess,
 	DefineApi,
+	Surrealism,
 }
 
 /// Not public API
@@ -23,10 +22,9 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::RecordReferences => ExperimentalTarget::RecordReferences,
 			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
-			ExperimentalFeature::BearerAccess => ExperimentalTarget::BearerAccess,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}
 }

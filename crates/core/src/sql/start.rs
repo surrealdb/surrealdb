@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::Expr;
 
@@ -6,9 +6,9 @@ use crate::sql::Expr;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Start(pub Expr);
 
-impl fmt::Display for Start {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "START {}", self.0)
+impl ToSql for Start {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "START {}", self.0);
 	}
 }
 

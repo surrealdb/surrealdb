@@ -1,8 +1,8 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
-use crate::sql::Expr;
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,30 +11,31 @@ pub(crate) struct DefineEventStatement {
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE EVENT",)?;
+impl ToSql for DefineEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE EVENT");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(
+		write_sql!(
 			f,
+			fmt,
 			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
-			Fmt::comma_separated(&self.then)
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			CoverStmts(&self.name),
+			CoverStmts(&self.target_table),
+			CoverStmts(&self.when),
+			Fmt::comma_separated(self.then.iter().map(CoverStmts))
+		);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		Ok(())
 	}
 }
 
@@ -46,7 +47,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -60,7 +61,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

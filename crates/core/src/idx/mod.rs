@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -32,34 +31,29 @@ use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
-use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
-use crate::val::RecordIdKey;
+use crate::val::{RecordIdKey, TableName};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[repr(transparent)]
 pub struct IndexKeyBase(Arc<Inner>);
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 struct Inner {
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: String,
+	tb: TableName,
 	ix: IndexId,
 }
 
 impl IndexKeyBase {
-	pub fn new(
-		ns: impl Into<NamespaceId>,
-		db: impl Into<DatabaseId>,
-		tb: &str,
-		ix: impl Into<IndexId>,
-	) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: TableName, ix: IndexId) -> Self {
 		Self(Arc::new(Inner {
-			ns: ns.into(),
-			db: db.into(),
-			tb: tb.to_string(),
-			ix: ix.into(),
+			ns,
+			db,
+			tb,
+			ix,
 		}))
 	}
 
@@ -89,14 +83,6 @@ impl IndexKeyBase {
 
 	fn new_hs_key(&self) -> Hs<'_> {
 		Hs::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_vm_root_key(&self) -> VmRoot<'_> {
-		VmRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_vm_key(&self, node_id: NodeId) -> Vm<'_> {
-		Vm::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
@@ -181,7 +167,7 @@ impl IndexKeyBase {
 		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
-	pub(crate) fn table(&self) -> &str {
+	pub(crate) fn table(&self) -> &TableName {
 		&self.0.tb
 	}
 

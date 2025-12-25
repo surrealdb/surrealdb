@@ -16,10 +16,10 @@ skip-record-id-key = true
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ id: relationship_node_plain:⟨'explicit_id'⟩ }]"
+value = "[{ id: relationship_node_plain:`'explicit_id'` }]"
 
 [[test.results]]
-value = "[{ id: relationship_node_plain:⟨'explicit_id'⟩, predicate: 'p2' }]"
+value = "[{ id: relationship_node_plain:`'explicit_id'`, predicate: 'p2' }]"
 
 [[test.results]]
 value = "[{ count: 1 }, { count: 1 }]"

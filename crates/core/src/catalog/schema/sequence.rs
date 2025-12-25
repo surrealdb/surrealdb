@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
+use crate::types::PublicDuration;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -23,10 +25,14 @@ impl SequenceDefinition {
 	fn to_sql_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			batch: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.batch as i64)),
-			start: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.start)),
-			timeout: self.timeout.map(|t| t.into()),
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			batch: sql::Expr::Literal(sql::Literal::Integer(self.batch as i64)),
+			start: sql::Expr::Literal(sql::Literal::Integer(self.start)),
+			timeout: sql::Expr::Literal(
+				self.timeout
+					.map(|x| sql::Literal::Duration(PublicDuration::from_std(x)))
+					.unwrap_or(sql::Literal::None),
+			),
 		}
 	}
 }
@@ -45,7 +51,7 @@ impl InfoStructure for SequenceDefinition {
 }
 
 impl ToSql for &SequenceDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }

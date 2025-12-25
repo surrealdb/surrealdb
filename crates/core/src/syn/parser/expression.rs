@@ -1,6 +1,7 @@
 //! This module defines the pratt parser for operators.
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use super::enter_query_recursion;
 use super::mac::unexpected;
@@ -135,7 +136,7 @@ impl Parser<'_> {
 			t!("+") | t!("-") => Some(BindingPower::AddSub),
 			t!("*") | t!("×") | t!("/") | t!("÷") | t!("%") => Some(BindingPower::MulDiv),
 			t!("**") => Some(BindingPower::Power),
-			t!("?:") | t!("??") => Some(BindingPower::Nullish),
+			t!("?:") | t!("?") => Some(BindingPower::Nullish),
 			_ => None,
 		}
 	}
@@ -145,8 +146,16 @@ impl Parser<'_> {
 			t!("!") | t!("+") | t!("-") => Some(BindingPower::Prefix),
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
-				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
+				let peek = self.peek_whitespace1();
+				if peek.kind == t!("-") {
+					let recover = self.recent_span();
+					if self.peek2().kind == TokenKind::Digits {
+						self.backup_after(recover);
+						return Some(BindingPower::Prefix);
+					}
+					return None;
+				}
+				if matches!(peek.kind, t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)
@@ -194,12 +203,12 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
 						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
-						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
+						Numeric::Integer(i) => {
+							Expr::Literal(Literal::Integer(i.into_int(self.recent_span())?))
+						}
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Positive,
@@ -232,13 +241,13 @@ impl Parser<'_> {
 					// to backup before the digits token was consumed, clear the digits token from
 					// the token buffer so it isn't popped after parsing the number and then lex the
 					// number.
-					self.lexer.backup_before(p.span);
-					self.token_buffer.clear();
-					self.token_buffer.push(token);
+					self.pop_peek();
 					let expr = match self.next_token_value::<Numeric>()? {
-						Numeric::Float(f) => Expr::Literal(Literal::Float(f)),
-						Numeric::Integer(i) => Expr::Literal(Literal::Integer(i)),
-						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+						Numeric::Float(f) => Expr::Literal(Literal::Float(-f)),
+						Numeric::Integer(i) => {
+							Expr::Literal(Literal::Integer(i.into_neg_int(self.recent_span())?))
+						}
+						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(-d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
 							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
@@ -314,7 +323,14 @@ impl Parser<'_> {
 		} else {
 			NearestNeighbor::KTree(amount)
 		};
-		self.expect_closing_delimiter(t!("|>"), token.span)?;
+		if !self.eat(t!("|")) || !self.eat_whitespace(t!(">")) {
+			bail!("Unexpected token `{}` expected delimiter `|>`",
+				self.peek().kind,
+				@self.recent_span(),
+				@token.span=> "expected this delimiter to close"
+			);
+		}
+
 		Ok(res)
 	}
 
@@ -325,29 +341,25 @@ impl Parser<'_> {
 				| BinaryOperator::NotEqual
 				| BinaryOperator::AllEqual
 				| BinaryOperator::AnyEqual
+				| BinaryOperator::LessThan
+				| BinaryOperator::LessThanEqual
+				| BinaryOperator::MoreThan
+				| BinaryOperator::MoreThanEqual
+				| BinaryOperator::Matches(_)
 				| BinaryOperator::Contain
 				| BinaryOperator::NotContain
-				| BinaryOperator::NotInside
 				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
 				| BinaryOperator::ContainNone
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
 				| BinaryOperator::AllInside
 				| BinaryOperator::AnyInside
 				| BinaryOperator::NoneInside
 				| BinaryOperator::Outside
 				| BinaryOperator::Intersects
-				| BinaryOperator::Inside
 				| BinaryOperator::NearestNeighbor(_)
 		)
-	}
-
-	fn expr_is_relation(expr: &Expr) -> bool {
-		match expr {
-			Expr::Binary {
-				op,
-				..
-			} => Self::operator_is_relation(op),
-			_ => false,
-		}
 	}
 
 	fn expr_is_range(expr: &Expr) -> bool {
@@ -389,7 +401,12 @@ impl Parser<'_> {
 			t!("||") | t!("OR") => BinaryOperator::Or,
 			t!("&&") | t!("AND") => BinaryOperator::And,
 			t!("?:") => BinaryOperator::TenaryCondition,
-			t!("??") => BinaryOperator::NullCoalescing,
+			t!("?") => {
+				if !self.eat_whitespace(t!("?")) {
+					unexpected!(self, token, "`??`")
+				}
+				BinaryOperator::NullCoalescing
+			}
 			t!("==") => BinaryOperator::ExactEqual,
 			t!("!=") => BinaryOperator::NotEqual,
 			t!("*=") => BinaryOperator::AllEqual,
@@ -461,13 +478,12 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),
 		};
-		let before = self.recent_span();
 		let rhs_covered = self.peek().kind == t!("(");
 		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		let is_relation = Self::operator_is_relation(&operator);
-		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
-			let span = before.covers(self.recent_span());
+		if !lhs_prime && is_relation && BindingPower::for_expr(&lhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
@@ -480,19 +496,19 @@ impl Parser<'_> {
 				| BinaryOperator::RangeInclusive
 		);
 		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		if !rhs_covered && is_relation && Self::expr_is_relation(&rhs) {
-			let span = before.covers(self.recent_span());
+		if !rhs_covered && is_relation && BindingPower::for_expr(&rhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
@@ -647,7 +663,7 @@ impl Parser<'_> {
 			}
 
 			// explain that assignment operators can't be used in normal expressions.
-			if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
+			if let t!("+=") | t!("-=") | t!("+?=") = token.kind {
 				unexpected!(self,token,"an operator",
 					=> "assignment operators are only allowed in SET and DUPLICATE KEY UPDATE clauses")
 			}
@@ -683,12 +699,14 @@ impl Parser<'_> {
 			return Ok(());
 		};
 		bail!("Parameter declarations without `let` are deprecated.",
-			@span => "Replace with `let {} = ...` to keep the previous behavior.", p)
+			@span => "Replace with `let {} = ...` to keep the previous behavior.", p.to_sql())
 	}
 }
 
 #[cfg(test)]
 mod test {
+	use surrealdb_types::ToSql;
+
 	use crate::sql::{BinaryOperator, Expr, Kind, Literal, PrefixOperator};
 	use crate::syn;
 
@@ -696,7 +714,7 @@ mod test {
 	fn cast_int() {
 		let sql = "<int>1.2345";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("<int> 1.2345f", format!("{}", out));
+		assert_eq!("<int> 1.2345f", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Prefix {
@@ -710,7 +728,7 @@ mod test {
 	fn cast_string() {
 		let sql = "<string>1.2345";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("<string> 1.2345f", format!("{}", out));
+		assert_eq!("<string> 1.2345f", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Prefix {
@@ -724,77 +742,77 @@ mod test {
 	fn expression_statement() {
 		let sql = "true AND false";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("true AND false", format!("{}", out));
+		assert_eq!("true AND false", out.to_sql());
 	}
 
 	#[test]
 	fn expression_left_opened() {
 		let sql = "3 * 3 * 3 = 27";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 27", out.to_sql());
 	}
 
 	#[test]
 	fn expression_left_closed() {
 		let sql = "(3 * 3 * 3) = 27";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 27", out.to_sql());
 	}
 
 	#[test]
 	fn expression_right_opened() {
 		let sql = "27 = 3 * 3 * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("27 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_right_closed() {
 		let sql = "27 = (3 * 3 * 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("27 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_both_opened() {
 		let sql = "3 * 3 * 3 = 3 * 3 * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_both_closed() {
 		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_closed_required() {
 		let sql = "(3 + 3) * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("(3 + 3) * 3", format!("{}", out));
+		assert_eq!("(3 + 3) * 3", out.to_sql());
 	}
 
 	#[test]
 	fn range_closed_required() {
 		let sql = "(1..2)..3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("(1..2)..3", format!("{}", out));
+		assert_eq!("(1..2)..3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_unary() {
 		let sql = "-a";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!(sql, out.to_sql());
 	}
 
 	#[test]
 	fn expression_with_unary() {
 		let sql = "-(5) + 5";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("-5 + 5", format!("{}", out));
+		assert_eq!("-5 + 5", out.to_sql());
 	}
 
 	#[test]
@@ -810,7 +828,7 @@ mod test {
 				right: Box::new(one.clone()),
 			}),
 			op: BinaryOperator::Subtract,
-			right: Box::new(one.clone()),
+			right: Box::new(one),
 		};
 		assert_eq!(expected, out);
 	}

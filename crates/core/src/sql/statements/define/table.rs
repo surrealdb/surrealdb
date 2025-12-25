@@ -1,7 +1,7 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::CoverStmts;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
@@ -16,7 +16,7 @@ pub(crate) struct DefineTableStatement {
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub table_type: TableType,
 }
 
@@ -31,80 +31,75 @@ impl Default for DefineTableStatement {
 			view: None,
 			permissions: Permissions::none(),
 			changefeed: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
 		}
 	}
 }
 
-impl Display for DefineTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE")?;
+impl ToSql for DefineTableStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		f.push_str("DEFINE TABLE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		f.push_str(" TYPE");
 		match &self.table_type {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
+			TableType::Normal => f.push_str(" NORMAL"),
 			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
+				f.push_str(" RELATION");
 				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN ",)?;
+					f.push_str(" IN ");
 					for (idx, k) in kind.iter().enumerate() {
 						if idx != 0 {
-							write!(f, " | ")?;
+							f.push_str(" | ");
 						}
-						write!(f, "{}", k)?;
+						write_sql!(f, sql_fmt, "{}", k);
 					}
 				}
-
 				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT ",)?;
+					f.push_str(" OUT ");
 					for (idx, k) in kind.iter().enumerate() {
 						if idx != 0 {
-							write!(f, " | ")?;
+							f.push_str(" | ");
 						}
-						write!(f, "{}", k)?;
+						write_sql!(f, sql_fmt, "{}", k);
 					}
 				}
 				if rel.enforced {
-					write!(f, " ENFORCED")?;
+					f.push_str(" ENFORCED");
 				}
 			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
+			TableType::Any => f.push_str(" ANY"),
 		}
 		if self.drop {
-			f.write_str(" DROP")?;
+			f.push_str(" DROP");
 		}
-		f.write_str(if self.full {
+		f.push_str(if self.full {
 			" SCHEMAFULL"
 		} else {
 			" SCHEMALESS"
-		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
+		});
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		if let Some(ref v) = self.view {
-			write!(f, " {v}")?
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
+			write_sql!(f, sql_fmt, " {}", v);
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = sql_fmt.increment();
+			inner_fmt.write_indent(f);
 		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "{}", self.permissions)?;
-		Ok(())
+			f.push(' ');
+		}
+		write_sql!(f, sql_fmt, "{}", self.permissions);
 	}
 }
 
@@ -119,7 +114,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			table_type: v.table_type.into(),
 		}
 	}
@@ -137,7 +132,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			table_type: v.table_type.into(),
 		}
 	}

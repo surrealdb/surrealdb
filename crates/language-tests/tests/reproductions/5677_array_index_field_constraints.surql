@@ -25,7 +25,7 @@ match = "$error = /Found 99999999999999999999dec for field `some_data\\[1\\]`, w
 error = true
 
 [[test.results]]
-match = "$error = /Couldn't coerce value for field `some_data` of `device:.*`: Expected `array<number,2>` but found an collection of length `0`/"
+match = "$error = /Couldn't coerce value for field `some_data` of `device:.*`: Expected `array<number,2>` but found a collection of length `0`/"
 error = true
 */
 

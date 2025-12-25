@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};

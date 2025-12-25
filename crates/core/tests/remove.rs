@@ -20,7 +20,7 @@ async fn remove_statement_table() -> Result<()> {
 		REMOVE TABLE test;
 		INFO FOR DB;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -41,6 +41,7 @@ async fn remove_statement_table() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: {},
 			sequences: {},
 			tables: {},
@@ -61,7 +62,7 @@ async fn remove_statement_namespace() -> Result<()> {
 			DEFINE NAMESPACE test;
 			REMOVE NAMESPACE test;
 		";
-		let dbs = new_ds().await?;
+		let dbs = new_ds("x", "x").await?;
 		let ses = Session::owner();
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -82,7 +83,7 @@ async fn remove_statement_namespace() -> Result<()> {
 			DEFINE NAMESPACE test;
 			REMOVE NAMESPACE test;
 		";
-		let dbs = new_ds().await?;
+		let dbs = new_ds("x", "x").await?;
 		// No namespace is selected
 		let ses = Session::owner().with_ns("test");
 		let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -109,7 +110,7 @@ async fn remove_statement_database() -> Result<()> {
 			DEFINE DATABASE test;
 			REMOVE DATABASE test;
 		";
-		let dbs = new_ds().await?;
+		let dbs = new_ds("x", "x").await?;
 		let ses = Session::owner().with_ns("test");
 		let res = &mut dbs.execute(sql, &ses, None).await?;
 		assert_eq!(res.len(), 3);
@@ -130,7 +131,7 @@ async fn remove_statement_database() -> Result<()> {
 			DEFINE DATABASE test;
 			REMOVE DATABASE test;
 		";
-		let dbs = new_ds().await?;
+		let dbs = new_ds("other", "other").await?;
 		// No database is selected
 		let ses = Session::owner().with_ns("test").with_db("test");
 		let res = &mut dbs.execute(sql, &ses, None).await?;
@@ -155,7 +156,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 		REMOVE ANALYZER english;
 		INFO FOR DB;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -176,6 +177,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: {},
 			sequences: {},
 			tables: {},
@@ -200,7 +202,7 @@ async fn remove_statement_index() -> Result<()> {
 		REMOVE INDEX ft_title ON book;
 		INFO FOR TABLE book;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -230,13 +232,13 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE TABLE IF EXISTS foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE TABLE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -250,13 +252,13 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE ANALYZER IF EXISTS foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ANALYZER IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -270,13 +272,13 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE DATABASE IF EXISTS foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE DATABASE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -290,13 +292,13 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE EVENT IF EXISTS foo ON bar;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE EVENT IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -310,13 +312,13 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE FIELD IF EXISTS foo ON bar;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FIELD IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -330,13 +332,13 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE FUNCTION IF EXISTS fn::foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FUNCTION IF EXISTS fn::foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -350,13 +352,13 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE INDEX IF EXISTS foo ON bar;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE INDEX IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -370,13 +372,13 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE NAMESPACE IF EXISTS foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE NAMESPACE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -390,13 +392,13 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE PARAM IF EXISTS $foo;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE PARAM IF EXISTS $foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -410,13 +412,13 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE ACCESS IF EXISTS foo ON DB;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ACCESS IF EXISTS foo ON DB;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -430,13 +432,13 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 		USE NS test DB test;
 		REMOVE USER IF EXISTS foo ON ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE USER IF EXISTS foo ON ROOT;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -468,8 +470,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -600,8 +602,8 @@ async fn permissions_checks_remove_function() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -641,8 +643,8 @@ async fn permissions_checks_remove_analyzer() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -682,8 +684,8 @@ async fn permissions_checks_remove_root_access() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#.to_string();
+	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -853,8 +855,8 @@ async fn permissions_checks_remove_db_access() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -894,8 +896,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
+	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -1071,8 +1073,8 @@ async fn permissions_checks_remove_db_user() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1112,8 +1114,8 @@ async fn permissions_checks_remove_param() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { param: \"DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL\" }, sequences: {  }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1153,8 +1155,8 @@ async fn permissions_checks_remove_table() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1196,7 +1198,7 @@ async fn permissions_checks_remove_event() {
 	// succeeded and when it failed
 	let check_success =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
-	let check_error = "{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
+	let check_error = "{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level

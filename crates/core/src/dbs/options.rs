@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
+use crate::cnf::dynamic::DynamicConfiguration;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
@@ -18,13 +19,13 @@ use crate::types::PublicNotification;
 ///
 /// An Options contains specific information for how
 /// to process each particular statement, including the record
-/// version to retrieve, whether futures should be processed, and
+/// version to retrieve, whether computed values should be processed, and
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
 pub struct Options {
 	/// The current Node ID of the datastore instance
-	id: Option<Uuid>,
+	id: Uuid,
 	/// The currently selected Namespace
 	pub(crate) ns: Option<Arc<str>>,
 	/// The currently selected Database
@@ -41,14 +42,14 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
-	/// Should we error if tables don't exist?
-	pub(crate) strict: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
 	/// Optional message broker for live notifications
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
+	/// Configuration parameters that can be dynamically changed
+	dynamic_configuration: DynamicConfiguration,
 }
 
 #[derive(Clone, Debug)]
@@ -71,33 +72,24 @@ pub trait MessageBroker: Send + Sync + Debug {
 	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-impl Default for Options {
-	fn default() -> Self {
-		Options::new()
-	}
-}
-
 impl Options {
-	/// Create a new Options object
-	pub fn new() -> Options {
-		Options {
-			id: None,
+	pub(crate) fn new(id: Uuid, dynamic_configuration: DynamicConfiguration) -> Self {
+		Self {
+			id,
 			ns: None,
 			db: None,
 			dive: *MAX_COMPUTATION_DEPTH,
 			live: false,
 			perms: true,
 			force: Force::None,
-			strict: false,
 			import: false,
 			auth_enabled: true,
 			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			dynamic_configuration,
 		}
 	}
-
-	// --------------------------------------------------
 
 	/// Specify which Namespace should be used for
 	/// code which uses this `Options` object.
@@ -116,13 +108,6 @@ impl Options {
 	/// Set the maximum depth a computation can reach.
 	pub fn with_max_computation_depth(mut self, depth: u32) -> Self {
 		self.dive = depth;
-		self
-	}
-
-	/// Set the Node ID for subsequent code which uses
-	/// this `Options`, with support for chaining.
-	pub fn with_id(mut self, id: Uuid) -> Self {
-		self.id = Some(id);
 		self
 	}
 
@@ -167,12 +152,6 @@ impl Options {
 		self
 	}
 
-	/// Sepecify if we should error when a table does not exist
-	pub fn with_strict(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
 	/// Specify if we are currently importing data
 	pub fn with_import(mut self, import: bool) -> Self {
 		self.set_import(import);
@@ -207,6 +186,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			perms: self.perms,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -219,6 +199,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			perms,
 			..*self
 		}
@@ -232,19 +213,7 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_strict(&self, strict: bool) -> Self {
-		Self {
-			broker: self.broker.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			strict,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -258,6 +227,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			import,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -270,6 +240,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			broker: Some(sender),
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		}
 	}
@@ -284,7 +255,7 @@ impl Options {
 		}
 	}
 
-	/// Create a new Options object for a function/subquery/future/etc.
+	/// Create a new Options object for a function/subquery/computed/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
@@ -299,6 +270,7 @@ impl Options {
 			db: self.db.clone(),
 			force: self.force.clone(),
 			dive: self.dive - cost as u32,
+			dynamic_configuration: self.dynamic_configuration.clone(),
 			..*self
 		})
 	}
@@ -306,11 +278,9 @@ impl Options {
 	// --------------------------------------------------
 
 	/// Get current Node ID
-	#[inline(always)]
-	pub fn id(&self) -> Result<Uuid> {
+	#[inline]
+	pub fn id(&self) -> Uuid {
 		self.id
-			.ok_or_else(|| Error::unreachable("No Node ID is specified"))
-			.map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS
@@ -437,6 +407,14 @@ impl Options {
 			}
 		}
 	}
+
+	/// Returns the handle to runtime‑adjustable configuration toggles.
+	///
+	/// Currently this includes the global query timeout, which can be modified
+	/// via `ALTER SYSTEM QUERY_TIMEOUT ...`.
+	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
+		&self.dynamic_configuration
+	}
 }
 
 #[cfg(test)]
@@ -449,7 +427,8 @@ mod tests {
 	fn is_allowed() {
 		// With auth disabled
 		{
-			let opts = Options::default().with_auth_enabled(false);
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+				.with_auth_enabled(false);
 
 			// When no NS is provided and it targets the NS base, it should return an error
 			opts.is_allowed(Action::View, ResourceKind::Any, &Base::Ns).unwrap_err();
@@ -468,8 +447,7 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)
 				.unwrap();
 			// When a DB resource is targeted and NS and DB was provided, it succeeds
-			opts.clone()
-				.with_ns(Some("ns".into()))
+			opts.with_ns(Some("ns".into()))
 				.with_db(Some("db".into()))
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();
@@ -477,7 +455,7 @@ mod tests {
 
 		// With auth enabled
 		{
-			let opts = Options::default()
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
 				.with_auth_enabled(true)
 				.with_auth(Auth::for_root(Role::Owner).into());
 
@@ -498,8 +476,7 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Ns)
 				.unwrap();
 			// When a DB resource is targeted and NS and DB was provided, it succeeds
-			opts.clone()
-				.with_ns(Some("ns".into()))
+			opts.with_ns(Some("ns".into()))
 				.with_db(Some("db".into()))
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();

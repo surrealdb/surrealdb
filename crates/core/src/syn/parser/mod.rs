@@ -87,6 +87,8 @@ mod token;
 mod token_buffer;
 mod value;
 
+#[cfg(feature = "arbitrary")]
+pub(crate) use builtin::PATHS;
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
 use super::error::{RenderedError, syntax_error};
@@ -145,14 +147,12 @@ pub struct ParserSettings {
 	/// itself. Examples are subquery and blocks like block statements and if
 	/// statements and such.
 	pub query_recursion_limit: usize,
-	/// Whether record references are enabled.
-	pub references_enabled: bool,
-	/// Whether bearer access is enabled
-	pub bearer_access_enabled: bool,
-	/// Whether bearer access is enabled
+	/// Whether define api is enabled
 	pub define_api_enabled: bool,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
+	/// Whether the surrealism feature is enabled
+	pub surrealism_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -162,10 +162,9 @@ impl Default for ParserSettings {
 			flexible_record_id: true,
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
-			references_enabled: false,
-			bearer_access_enabled: false,
 			define_api_enabled: false,
 			files_enabled: false,
+			surrealism_enabled: false,
 		}
 	}
 }
@@ -173,10 +172,9 @@ impl Default for ParserSettings {
 impl ParserSettings {
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
-			references_enabled: enabled,
-			bearer_access_enabled: enabled,
 			define_api_enabled: enabled,
 			files_enabled: enabled,
+			surrealism_enabled: enabled,
 			..Self::default()
 		}
 	}
@@ -256,7 +254,7 @@ impl<'a> Parser<'a> {
 	///
 	/// Should only be called after peeking a value.
 	pub fn pop_peek(&mut self) -> Token {
-		let res = self.token_buffer.pop().unwrap();
+		let res = self.token_buffer.pop().expect("token buffer is non-empty");
 		self.last_span = res.span;
 		res
 	}
@@ -313,7 +311,7 @@ impl<'a> Parser<'a> {
 			};
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek1(&mut self) -> Token {
@@ -331,7 +329,7 @@ impl<'a> Parser<'a> {
 			let r = self.lexer.next_token();
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek_whitespace1(&mut self) -> Token {
@@ -435,6 +433,43 @@ impl<'a> Parser<'a> {
 	pub(crate) async fn parse_expr(&mut self, stk: &mut Stk) -> ParseResult<sql::Expr> {
 		self.parse_expr_start(stk).await
 	}
+
+	/// Speculativily parse a branch.
+	///
+	/// If the callback returns `Ok(Some(_))` then the lexer state advances like it would normally.
+	/// However if any other value is returned from the callback the lexer is rolled back to before
+	/// the function was called.
+	///
+	/// This function can be used for cases where the right branch cannot be determined from the
+	/// n'th next token.
+	///
+	/// # Usage
+	/// This function is very powerfull but also has the drawbacks.
+	/// - First it enables ambigous grammar, when implementing new syntax using this function please
+	///   first see if it is possible to implement the feature using the peek functions an otherwise
+	///   maybe consider redesigning the syntax so it is `LL(n)`.
+	///
+	/// - Second because it doesn't provide feedback on what exactly happened it can result in
+	///   errors being unpredictable
+	///
+	/// - Third, any parsing using speculating and then recovering is doing extra work it ideally
+	///   didn't have to do.
+	///
+	/// Please limit the use of this function to small branches that can't recurse.
+	pub(crate) async fn speculate<T, F>(&mut self, stk: &mut Stk, cb: F) -> ParseResult<Option<T>>
+	where
+		F: AsyncFnOnce(&mut Stk, &mut Parser) -> ParseResult<Option<T>>,
+	{
+		let backup = self.last_span();
+		match cb(stk, self).await {
+			Ok(Some(x)) => Ok(Some(x)),
+			Ok(None) => {
+				self.backup_after(backup);
+				Ok(None)
+			}
+			Err(e) => Err(e),
+		}
+	}
 }
 
 /// A struct which can parse queries statements by statement
@@ -465,8 +500,12 @@ impl StatementStream {
 		// The parser should have ensured that bytes is a valid utf-8 string.
 		// TODO: Maybe change this to unsafe cast once we have more convidence in the
 		// parsers correctness.
-		let (line_num, remaining) =
-			std::str::from_utf8(bytes).unwrap().lines().enumerate().last().unwrap_or((0, ""));
+		let (line_num, remaining) = std::str::from_utf8(bytes)
+			.expect("parser validated utf8")
+			.lines()
+			.enumerate()
+			.last()
+			.unwrap_or((0, ""));
 
 		self.line_offset += line_num;
 		if line_num > 0 {

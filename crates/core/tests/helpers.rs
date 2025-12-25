@@ -16,8 +16,13 @@ use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::{Number, ToSql, Value};
 
-pub async fn new_ds() -> Result<Datastore> {
-	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
+pub async fn new_ds(ns: &str, db: &str) -> Result<Datastore> {
+	let ds =
+		Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications();
+	let sess = Session::owner().with_ns(ns);
+	ds.execute(&format!("DEFINE NS `{ns}`"), &Session::owner(), None).await?;
+	ds.execute(&format!("DEFINE DB `{db}`"), &sess, None).await?;
+	Ok(ds)
 }
 
 #[allow(dead_code)]
@@ -39,22 +44,18 @@ pub async fn iam_run_case(
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
 
-	if use_ns {
-		if let Some(ns) = &sess.ns {
-			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
-		}
+	if use_ns && let Some(ns) = &sess.ns {
+		ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
 	}
-	if use_db {
-		if let Some(db) = &sess.db {
-			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
-		}
+	if use_db && let Some(db) = &sess.db {
+		ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
 	}
 
 	// Prepare statement
 	{
 		if !prepare.is_empty() {
 			let resp = ds.execute(prepare, &owner_sess, None).await.unwrap();
-			for r in resp.into_iter() {
+			for r in resp {
 				let tmp = r.output();
 				ensure!(tmp.is_ok(), "Prepare statement failed: {}", tmp.unwrap_err());
 			}
@@ -156,7 +157,12 @@ pub async fn iam_check_cases_impl(
 
 		// Auth enabled
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(true);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(true);
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -174,7 +180,12 @@ pub async fn iam_check_cases_impl(
 
 		// Auth disabled
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(false);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(false);
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -194,7 +205,7 @@ pub async fn iam_check_cases_impl(
 	// Anonymous user
 	let ns = "NS";
 	let db = "DB";
-	for auth_enabled in [true, false].into_iter() {
+	for auth_enabled in [true, false] {
 		{
 			println!(
 				"* Testing '{test}' for 'Anonymous' on '({ns}, {db})' with {auth_enabled}",
@@ -204,7 +215,12 @@ pub async fn iam_check_cases_impl(
 					"auth disabled"
 				}
 			);
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = Datastore::new("memory")
+				.await
+				.unwrap()
+				.with_capabilities(Capabilities::all())
+				.with_notifications()
+				.with_auth_enabled(auth_enabled);
 			let expected_result = if auth_enabled {
 				expected_anonymous_failure_result
 			} else {
@@ -322,7 +338,7 @@ impl Test {
 	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self> {
-		Self::new_ds(new_ds().await?, sql).await
+		Self::new_ds(new_ds("test", "test").await?, sql).await
 	}
 
 	/// Simulates restarting the Datastore
@@ -440,7 +456,7 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|e| panic!("INVALID VALUE {e}\n\n{info}:\n{val}")),
 			info,
 		)
 	}

@@ -1,8 +1,7 @@
-use std::fmt;
-
 use anyhow::Result;
+use tokio::time::timeout;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Base;
@@ -16,36 +15,37 @@ pub(crate) struct SleepStatement {
 
 impl SleepStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "SleepStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
-		// Calculate the sleep duration
-		let dur = match (ctx.timeout(), self.duration.0) {
-			(Some(t), d) if t < d => t,
-			(_, d) => d,
-		};
-		// Sleep for the specified time
-		#[cfg(target_family = "wasm")]
-		wasmtimer::tokio::sleep(dur).await;
-		#[cfg(not(target_family = "wasm"))]
-		tokio::time::sleep(dur).await;
+		// Is there a timeout?
+		if let Some(t) = ctx.timeout() {
+			println!("{t:?} - {:?}", self.duration.0);
+			timeout(t, self.sleep()).await?;
+		} else {
+			self.sleep().await;
+		}
 		// Ok all good
 		Ok(Value::None)
 	}
-}
 
-impl fmt::Display for SleepStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SLEEP {}", self.duration)
+	// Sleep for the specified time
+	async fn sleep(&self) {
+		#[cfg(target_family = "wasm")]
+		wasmtimer::tokio::sleep(self.duration.0).await;
+		#[cfg(not(target_family = "wasm"))]
+		tokio::time::sleep(self.duration.0).await;
 	}
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use std::time::{self, SystemTime};
 

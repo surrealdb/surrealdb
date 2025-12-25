@@ -1,9 +1,9 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::{Data, Expr, Output, Timeout};
+use crate::fmt::CoverStmts;
+use crate::sql::{Data, Expr, Literal, Output};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
@@ -11,41 +11,40 @@ pub struct InsertStatement {
 	pub ignore: bool,
 	pub update: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
-	pub version: Option<Expr>,
+	pub version: Expr,
 }
 
-impl fmt::Display for InsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("INSERT")?;
+impl ToSql for InsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("INSERT");
 		if self.relation {
-			f.write_str(" RELATION")?
+			f.push_str(" RELATION");
 		}
 		if self.ignore {
-			f.write_str(" IGNORE")?
+			f.push_str(" IGNORE");
 		}
-		if let Some(into) = &self.into {
-			write!(f, " INTO {}", into)?;
+		if let Some(ref v) = self.into {
+			write_sql!(f, fmt, " INTO {}", CoverStmts(v));
 		}
-		write!(f, " {}", self.data)?;
+		write_sql!(f, fmt, " {}", self.data);
 		if let Some(ref v) = self.update {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
-		Ok(())
 	}
 }
 
@@ -57,10 +56,10 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			ignore: v.ignore,
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(From::from),
+			version: v.version.into(),
 		}
 	}
 }
@@ -73,10 +72,10 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			ignore: v.ignore,
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
-			version: v.version.map(From::from),
+			version: v.version.into(),
 		}
 	}
 }

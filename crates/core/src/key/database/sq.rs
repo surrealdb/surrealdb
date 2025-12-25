@@ -63,12 +63,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-            let val = Sq::new(
-            NamespaceId(1),
-            DatabaseId(2),
-            "test",
-        );
+		let val = Sq::new(NamespaceId(1), DatabaseId(2), "test");
 		let enc = Sq::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sqtest\0");
 	}

@@ -1,6 +1,7 @@
 use md5::Digest;
 use revision::revisioned;
 use sha2::Sha256;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::kvs::impl_kv_value_revisioned;
@@ -17,8 +18,8 @@ impl Subject {
 	// Returns the main identifier of a subject as a string.
 	pub fn id(&self) -> String {
 		match self {
-			Subject::Record(id) => id.to_string(),
-			Subject::User(name) => name.clone(),
+			Subject::Record(id) => id.to_sql(),
+			Subject::User(n) => n.clone(),
 		}
 	}
 }

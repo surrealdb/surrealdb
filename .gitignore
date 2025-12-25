@@ -59,4 +59,8 @@ lcov.info
 surreal
 history.txt
 /doc/tla/states/
+/profiling/traces/
+
+crates/surrealism/test/demo.surli
+crates/surrealism/test/surrealism
 

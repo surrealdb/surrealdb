@@ -2,8 +2,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
-use crate::ctx::{Context, MutableContext};
+use crate::catalog::RecordType;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
@@ -11,7 +13,6 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt, Idiom};
-use crate::val::record::RecordType;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -53,7 +54,7 @@ impl Document {
 			ensure!(
 				!id.key.is_range(),
 				Error::IdInvalid {
-					value: id.to_string(),
+					value: id.to_sql(),
 				}
 			);
 			// Set the document id
@@ -79,7 +80,7 @@ impl Document {
 	/// fields are reset back to the original state.
 	pub(super) async fn default_record_data(
 		&mut self,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -104,7 +105,7 @@ impl Document {
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
 					bail!(Error::InOverride {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			}
@@ -121,7 +122,7 @@ impl Document {
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
 					bail!(Error::OutOverride {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			}
@@ -169,7 +170,7 @@ impl Document {
 	pub(super) async fn process_record_data(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -216,77 +217,77 @@ impl Document {
 	pub(super) async fn compute_input_data(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Option<&ComputedData>> {
-		if self.input_data.is_none() {
-			if let Some(data) = stm.data() {
-				let doc = match self.reduced(stk, ctx, opt, Current).await? {
-					true => &self.current_reduced,
-					false => &self.current,
-				};
+		if self.input_data.is_none()
+			&& let Some(data) = stm.data()
+		{
+			let doc = match self.reduced(stk, ctx, opt, Current).await? {
+				true => &self.current_reduced,
+				false => &self.current,
+			};
 
-				self.input_data = Some(match data {
-					Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
-						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
-						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
-						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::ContentExpression(data) => ComputedData::Content(Arc::new(
-						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
-					x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
-						let assignments = {
-							let ctx = if matches!(x, Data::UpdateExpression(_)) {
-								// Duplicate context
-								let mut ctx = MutableContext::new(ctx);
-								// Add insertable value
-								if let Workable::Insert(value) = &self.extras {
-									ctx.add_value("input", value.clone());
-								}
-								if let Workable::Relate(_, _, Some(value)) = &self.extras {
-									ctx.add_value("input", value.clone());
-								}
-								// Freeze the context
-								ctx.freeze()
-							} else {
-								ctx.clone()
-							};
-
-							let mut assignments = Vec::with_capacity(data.len());
-							for x in data.iter() {
-								assignments.push(ComputedAssignment {
-									place: x.place.clone(),
-									operator: x.operator.clone(),
-									value: x
-										.value
-										.compute(stk, &ctx, opt, Some(doc))
-										.await
-										.catch_return()?,
-								});
+			self.input_data = Some(match data {
+				Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
+					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+				)),
+				Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
+					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+				)),
+				Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
+					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+				)),
+				Data::ContentExpression(data) => ComputedData::Content(Arc::new(
+					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+				)),
+				Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
+				x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
+					let assignments = {
+						let ctx = if matches!(x, Data::UpdateExpression(_)) {
+							// Duplicate context
+							let mut ctx = Context::new(ctx);
+							// Add insertable value
+							if let Workable::Insert(value) = &self.extras {
+								ctx.add_value("input", value.clone());
 							}
-
-							assignments
-						};
-
-						let mut input = if self.reduced(stk, ctx, opt, Current).await? {
-							self.initial_reduced.doc.as_ref().clone()
+							if let Workable::Relate(_, _, Some(value)) = &self.extras {
+								ctx.add_value("input", value.clone());
+							}
+							// Freeze the context
+							ctx.freeze()
 						} else {
-							self.initial.doc.as_ref().clone()
+							ctx.clone()
 						};
-						apply_assignments(stk, ctx, opt, &mut input, assignments.clone()).await?;
 
-						ComputedData::Set(assignments, Arc::new(input))
-					}
-					x => bail!("Unexpected data clause type: {x:?}"),
-				});
-			}
+						let mut assignments = Vec::with_capacity(data.len());
+						for x in data.iter() {
+							assignments.push(ComputedAssignment {
+								place: x.place.clone(),
+								operator: x.operator.clone(),
+								value: x
+									.value
+									.compute(stk, &ctx, opt, Some(doc))
+									.await
+									.catch_return()?,
+							});
+						}
+
+						assignments
+					};
+
+					let mut input = if self.reduced(stk, ctx, opt, Current).await? {
+						self.initial_reduced.doc.as_ref().clone()
+					} else {
+						self.initial.doc.as_ref().clone()
+					};
+					apply_assignments(stk, ctx, opt, &mut input, assignments.clone()).await?;
+
+					ComputedData::Set(assignments, Arc::new(input))
+				}
+				x => bail!("Unexpected data clause type: {x:?}"),
+			});
 		}
 
 		Ok(self.input_data.as_ref())
@@ -295,7 +296,7 @@ impl Document {
 	pub(super) async fn compute_input_value(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Option<Arc<Value>>> {
@@ -354,12 +355,12 @@ pub(super) struct ComputedAssignment {
 
 async fn apply_assignments(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: &mut Value,
 	assignments: Vec<ComputedAssignment>,
 ) -> Result<()> {
-	for x in assignments.into_iter() {
+	for x in assignments {
 		match &x.operator {
 			AssignOperator::Assign => match x.value {
 				Value::None => doc.del(stk, ctx, opt, &x.place).await?,

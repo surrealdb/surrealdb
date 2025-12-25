@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -7,20 +5,18 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
 use crate::catalog::{self, UserDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Expr, Idiom, Literal};
-use crate::fmt::{Fmt, QuoteStr};
+use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
@@ -33,17 +29,7 @@ pub(crate) struct DefineUserStatement {
 	pub code: String,
 	pub roles: Vec<String>,
 	pub duration: UserDuration,
-	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineUserStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
+	pub comment: Expr,
 }
 
 impl Default for DefineUserStatement {
@@ -56,7 +42,7 @@ impl Default for DefineUserStatement {
 			code: String::new(),
 			roles: vec![],
 			duration: UserDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -69,7 +55,7 @@ impl DefineUserStatement {
 			name: Expr::Idiom(Idiom::field(user)),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
@@ -78,25 +64,44 @@ impl DefineUserStatement {
 				.collect::<String>(),
 			roles: vec![role],
 			duration: UserDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 
 	pub(crate) async fn to_definition(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::UserDefinition> {
+		let token_duration = stk
+			.run(|stk| self.duration.token.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+		let session_duration = stk
+			.run(|stk| self.duration.session.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(UserDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?,
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.clone(),
-			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
-			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			token_duration,
+			session_duration,
+			comment,
 			base: self.base.into(),
 		})
 	}
@@ -112,20 +117,27 @@ impl DefineUserStatement {
 			duration: UserDuration {
 				token: def
 					.token_duration
-					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 				session: def
 					.session_duration
-					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 			},
-			comment: def.comment.as_ref().map(|x| Expr::Idiom(Idiom::field(x.clone()))),
+			comment: def
+				.comment
+				.as_ref()
+				.map(|x| Expr::Idiom(Idiom::field(x.clone())))
+				.unwrap_or(Expr::Literal(Literal::None)),
 		}
 	}
 
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineUserStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -144,7 +156,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserRootAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 								});
 							}
 						}
@@ -169,7 +181,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserNsAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 									ns: opt.ns()?.into(),
 								});
 							}
@@ -181,7 +193,7 @@ impl DefineUserStatement {
 
 				let ns = {
 					let ns = opt.ns()?;
-					txn.get_or_add_ns(ns, opt.strict).await?
+					txn.get_or_add_ns(Some(ctx), ns).await?
 				};
 
 				// Process the statement
@@ -201,7 +213,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserDbAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
 								});
@@ -214,7 +226,7 @@ impl DefineUserStatement {
 
 				let db = {
 					let (ns, db) = opt.ns_db()?;
-					txn.get_or_add_db(ns, db, opt.strict).await?
+					txn.get_or_add_db(Some(ctx), ns, db).await?
 				};
 
 				// Process the statement
@@ -228,53 +240,9 @@ impl DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
-			self.base,
-			QuoteStr(&self.hash),
-			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<_>>()
-			),
-		)?;
-		// Always print relevant durations so defaults can be changed in the future
-		// If default values were not printed, exports would not be forward compatible
-		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.duration.token {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

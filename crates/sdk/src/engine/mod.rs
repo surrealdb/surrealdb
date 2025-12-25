@@ -3,7 +3,6 @@
 pub mod any;
 #[cfg(any(
 	feature = "kv-mem",
-	feature = "kv-fdb",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
 	feature = "kv-indxdb",
@@ -23,6 +22,7 @@ use futures::Stream;
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Interval;
+use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
@@ -45,5 +45,23 @@ impl Stream for IntervalStream {
 
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Instant>> {
 		self.inner.poll_tick(cx).map(Some)
+	}
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+enum SessionError {
+	NotFound(Uuid),
+	Remote(String),
+}
+
+impl From<SessionError> for crate::Error {
+	fn from(error: SessionError) -> Self {
+		match error {
+			SessionError::NotFound(id) => {
+				crate::Error::InternalError(format!("Session not found: {id}"))
+			}
+			SessionError::Remote(error) => crate::Error::InternalError(error),
+		}
 	}
 }

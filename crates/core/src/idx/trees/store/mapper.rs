@@ -31,10 +31,10 @@ impl Mappers {
 	pub(crate) async fn check(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
 		if let Some(filters) = &az.filters {
 			for f in filters {
-				if let Filter::Mapper(path) = f {
-					if !self.0.contains_key(path) {
-						self.insert(path).await?;
-					}
+				if let Filter::Mapper(path) = f
+					&& !self.0.contains_key(path)
+				{
+					self.insert(path).await?;
 				}
 			}
 		}
@@ -64,7 +64,7 @@ impl Mappers {
 
 	pub(crate) fn cleanup(&self, azs: &[catalog::AnalyzerDefinition]) {
 		// Collect every existing mapper
-		let mut keys: HashSet<String> = self.0.iter().map(|e| e.key().to_string()).collect();
+		let mut keys: HashSet<String> = self.0.iter().map(|e| e.key().clone()).collect();
 		// Remove keys that still exist in the definitions
 		for az in azs {
 			if let Some(filters) = &az.filters {

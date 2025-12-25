@@ -1,43 +1,46 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
-use crate::sql::{Expr, Index};
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Expr, Index, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
 	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub concurrently: bool,
 }
 
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX")?;
+impl ToSql for DefineIndexStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE INDEX");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write_sql!(
+				f,
+				sql_fmt,
+				" FIELDS {}",
+				Fmt::comma_separated(self.cols.iter().map(CoverStmts))
+			);
 		}
 		if Index::Idx != self.index {
-			write!(f, " {}", self.index)?;
+			write_sql!(f, sql_fmt, " {}", self.index);
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
+			write_sql!(f, sql_fmt, " CONCURRENTLY");
 		}
-		Ok(())
 	}
 }
 
@@ -49,7 +52,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			concurrently: v.concurrently,
 		}
 	}
@@ -63,7 +66,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			concurrently: v.concurrently,
 		}
 	}

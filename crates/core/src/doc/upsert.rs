@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
@@ -13,7 +13,7 @@ impl Document {
 	pub(super) async fn upsert(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
@@ -26,7 +26,7 @@ impl Document {
 			return self.upsert_update(stk, ctx, opt, stm).await;
 		}
 
-		ctx.tx().lock().await.new_save_point();
+		ctx.tx().new_save_point().await?;
 
 		// First try to create the value and if that is not possible due to an existing
 		// value fall back to update instead.
@@ -66,25 +66,25 @@ impl Document {
 					}
 				}
 				Err(e) => {
-					ctx.tx().lock().await.rollback_to_save_point().await?;
+					ctx.tx().rollback_to_save_point().await?;
 					return Err(IgnoreError::Error(e));
 				}
 			},
 			Err(IgnoreError::Ignore) => {
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().release_last_save_point().await?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
-				ctx.tx().lock().await.release_last_save_point()?;
+				ctx.tx().release_last_save_point().await?;
 				return Ok(x);
 			}
 		};
 
 		// Create failed so now fall back to running an update.
 
-		ctx.tx().lock().await.rollback_to_save_point().await?;
+		ctx.tx().rollback_to_save_point().await?;
 
-		if ctx.is_done(true).await? {
+		if ctx.is_done(None).await? {
 			return Err(IgnoreError::Ignore);
 		}
 
@@ -105,38 +105,38 @@ impl Document {
 	async fn upsert_create(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		self.check_permissions_quick(stk, ctx, opt, stm).await?;
+		self.check_permissions_quick(opt, stm).await?;
 		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.generate_record_id()?;
-		self.check_table_type(ctx, opt, stm).await?;
+		self.check_table_type(stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
 		self.process_changefeeds(ctx, opt, stm).await?;
-		self.pluck(stk, ctx, opt, stm).await
+		self.pluck_generic(stk, ctx, opt, stm).await
 	}
 	/// Attempt to run an UPSERT statement to
 	/// update a record which already exists
 	async fn upsert_update(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		self.check_permissions_quick(stk, ctx, opt, stm).await?;
-		self.check_table_type(ctx, opt, stm).await?;
+		self.check_permissions_quick(opt, stm).await?;
+		self.check_table_type(stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.check_where_condition(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
@@ -146,11 +146,11 @@ impl Document {
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
 		self.process_changefeeds(ctx, opt, stm).await?;
-		self.pluck(stk, ctx, opt, stm).await
+		self.pluck_generic(stk, ctx, opt, stm).await
 	}
 }

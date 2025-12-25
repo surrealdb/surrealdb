@@ -21,11 +21,11 @@ mod variables;
 pub mod capabilities;
 pub mod node;
 
-pub(crate) use variables::Variables;
+pub(crate) use variables::{ParameterCapturePass, Variables};
 
 pub use self::capabilities::Capabilities;
 pub(crate) use self::executor::Executor;
-pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processed, Workable};
+pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable, Workable};
 pub(crate) use self::options::{Force, MessageBroker, Options};
 pub use self::response::{QueryResult, QueryResultBuilder, QueryType, Status};
 pub use self::session::Session;

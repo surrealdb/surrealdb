@@ -57,6 +57,27 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 		subset
 	};
 
+	// Filter tests based on backend specification in their environment configuration.
+	// Tests are included if:
+	// - They have no env config (run on all backends)
+	// - They have an empty backend list (run on all backends)
+	// - Their backend list contains the current backend
+	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
+		subset.filter_map(|_, test| {
+			if let Some(env) = &test.config.env {
+				if !env.backend.is_empty() {
+					env.backend.contains(&backend.to_string())
+				} else {
+					true
+				}
+			} else {
+				true
+			}
+		})
+	} else {
+		subset
+	};
+
 	if matches.get_flag("no-results") {
 		subset.filter_map(|_, set| {
 			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
@@ -87,10 +108,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
 		Backend::TikV => bail!("TiKV backend feature is not enabled"),
-		#[cfg(feature = "backend-foundation")]
-		Backend::Foundation => {}
-		#[cfg(not(feature = "backend-foundation"))]
-		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
 	let subset = filter_testset_from_arguments(testset, matches);
@@ -281,7 +298,7 @@ pub async fn grade_task(
 		.expect("failed to create datastore for running matching expressions");
 
 	let mut session = surrealdb_core::dbs::Session::default();
-	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+	ds.process_use(None, &mut session, Some("match".to_string()), Some("match".to_string()))
 		.await
 		.unwrap();
 
@@ -299,21 +316,18 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let config = &context.testset[context.id].config;
 	let capabilities = core_capabilities_from_test_config(config);
 
-	let timeout_duration = config
+	let context_timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
-
-	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
+		.map(|x| x.context_timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
+		.unwrap_or(Duration::from_secs(3));
 
 	let res = context
 		.ds
 		.with(
 			move |ds| {
 				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(timeout_duration))
-					.with_strict_mode(strict)
+					.with_query_timeout(Some(context_timeout_duration))
 			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
@@ -322,7 +336,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let res = match res {
 		Ok(x) => x?,
 		Err(PermitError::Other(e)) => return Err(e),
-		Err(PermitError::Panic(e)) => TestTaskResult::Paniced(e),
+		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
 	};
 
 	context.result.send((context.id, res)).await.expect("result channel quit early");
@@ -356,7 +370,7 @@ async fn run_test_with_dbs(
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
-	dbs.process_use(&mut import_session, session.ns.clone(), session.db.clone()).await?;
+	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
@@ -401,16 +415,13 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		references_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::RecordReferences),
-		bearer_access_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::BearerAccess),
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+		surrealism_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	};
 

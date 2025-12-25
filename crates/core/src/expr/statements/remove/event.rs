@@ -1,19 +1,18 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveEventStatement {
@@ -22,15 +21,6 @@ pub(crate) struct RemoveEventStatement {
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveEventStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.table_name.visit(visitor);
-	}
-}
 impl Default for RemoveEventStatement {
 	fn default() -> Self {
 		Self {
@@ -46,7 +36,7 @@ impl RemoveEventStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -55,7 +45,9 @@ impl RemoveEventStatement {
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		// Compute the table name
-		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?;
+		let table_name = TableName::new(
+			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?,
+		);
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "event name").await?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -106,13 +98,9 @@ impl RemoveEventStatement {
 	}
 }
 
-impl Display for RemoveEventStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE EVENT")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
-		Ok(())
+impl ToSql for RemoveEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::remove::RemoveEventStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

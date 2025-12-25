@@ -1,5 +1,6 @@
 use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
@@ -11,8 +12,7 @@ use ndarray_stats::DeviationExt;
 use num_traits::Zero;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use storekey::{BorrowDecode, Encode};
+use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::catalog::{Distance, VectorType};
 use crate::err::Error;
@@ -20,8 +20,6 @@ use crate::fnc::util::math::ToFloat;
 use crate::kvs::KVValue;
 use crate::val::{Number, Value};
 
-/// In the context of a Symmetric MTree index, the term object refers to a
-/// vector, representing the indexed item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Vector {
 	F64(Array1<f64>),
@@ -32,7 +30,7 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, BorrowDecode)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SerializedVector {
 	F64(Vec<f64>),
 	F32(Vec<f32>),
@@ -43,7 +41,7 @@ pub enum SerializedVector {
 
 impl KVValue for SerializedVector {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
@@ -52,6 +50,32 @@ impl KVValue for SerializedVector {
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
+
+impl<F> Encode<F> for SerializedVector {
+	#[inline]
+	fn encode<W: Write>(&self, w: &mut Writer<W>) -> std::result::Result<(), EncodeError> {
+		// Capacity hint: payload bytes + small overhead for revision header/length.
+		let cap = match self {
+			SerializedVector::F64(v) => v.len() * 8 + 16,
+			SerializedVector::F32(v) => v.len() * 4 + 16,
+			SerializedVector::I64(v) => v.len() * 8 + 16,
+			SerializedVector::I32(v) => v.len() * 4 + 16,
+			SerializedVector::I16(v) => v.len() * 2 + 16,
+		};
+		let mut buf = Vec::with_capacity(cap);
+		SerializeRevisioned::serialize_revisioned(self, &mut buf).map_err(EncodeError::custom)?;
+		w.write_slice(&buf)?;
+		Ok(())
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
+	fn borrow_decode(r: &mut BorrowReader<'de>) -> std::result::Result<Self, DecodeError> {
+		let slice = r.read_cow()?;
+		DeserializeRevisioned::deserialize_revisioned(&mut slice.as_ref())
+			.map_err(DecodeError::custom)
 	}
 }
 
@@ -290,8 +314,8 @@ impl Vector {
 	where
 		T: ToFloat + Clone + FromPrimitive + Add<Output = T> + Div<Output = T> + Zero,
 	{
-		let mean_x = x.mean().unwrap().to_float();
-		let mean_y = y.mean().unwrap().to_float();
+		let mean_x = x.mean().expect("mean should be computable").to_float();
+		let mean_y = y.mean().expect("mean should be computable").to_float();
 
 		let mut sum_xy = 0.0;
 		let mut sum_x2 = 0.0;
@@ -324,6 +348,18 @@ impl Vector {
 			(Self::I16(a), Self::I16(b)) => Self::pearson(a, b),
 			_ => f64::NAN,
 		}
+	}
+
+	fn mem_size(&self) -> usize {
+		let s = match self {
+			Self::F64(arr) => arr.len() * std::mem::size_of::<f64>(),
+			Self::F32(arr) => arr.len() * std::mem::size_of::<f32>(),
+			Self::I64(arr) => arr.len() * std::mem::size_of::<i64>(),
+			Self::I32(arr) => arr.len() * std::mem::size_of::<i32>(),
+			Self::I16(arr) => arr.len() * std::mem::size_of::<i16>(),
+		};
+		// Array1 overhead (approximately 24 bytes for ndarray metadata)
+		s + 24
 	}
 }
 
@@ -365,25 +401,10 @@ impl PartialEq for SharedVector {
 }
 impl Eq for SharedVector {}
 
-impl Serialize for SharedVector {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		// We only serialize the vector part, not the u64
-		let ser: SerializedVector = self.0.as_ref().into();
-		ser.serialize(serializer)
-	}
-}
-
-impl<'de> Deserialize<'de> for SharedVector {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		// We deserialize into a vector and construct the struct
-		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
-		Ok(v.into())
+impl SharedVector {
+	pub(super) fn mem_size(&self) -> usize {
+		// SharedVector stack size + Vector heap size + Arc heap overhead
+		std::mem::size_of::<Self>() + self.0.mem_size() + 16
 	}
 }
 

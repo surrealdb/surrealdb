@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeSet;
 use std::hint::black_box;
 
@@ -13,7 +15,7 @@ fn array_complement(first: Array, other: Array) -> Array {
 	for i in other.iter() {
 		set.insert(i);
 	}
-	for v in first.into_iter() {
+	for v in first {
 		if !set.contains(&v) {
 			out.push(v)
 		}

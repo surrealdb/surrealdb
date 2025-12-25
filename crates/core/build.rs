@@ -5,7 +5,6 @@ fn main() {
 	}
 	if cfg!(any(
 		feature = "kv-mem",
-		feature = "kv-fdb",
 		feature = "kv-tikv",
 		feature = "kv-rocksdb",
 		feature = "kv-surrealkv",

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
@@ -75,6 +75,7 @@ pub struct DatabaseDefinition {
 	pub(crate) name: String,
 	pub(crate) comment: Option<String>,
 	pub(crate) changefeed: Option<ChangeFeed>,
+	pub(crate) strict: bool,
 }
 impl_kv_value_revisioned!(DatabaseDefinition);
 
@@ -82,7 +83,11 @@ impl DatabaseDefinition {
 	fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
 			name: Expr::Idiom(Idiom::field(self.name.clone())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::String(v)))
+				.unwrap_or(Expr::Literal(Literal::None)),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}
@@ -90,8 +95,8 @@ impl DatabaseDefinition {
 }
 
 impl ToSql for DatabaseDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 

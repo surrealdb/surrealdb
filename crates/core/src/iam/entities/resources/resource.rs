@@ -2,6 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::Level;
+use crate::catalog::base::Base;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -16,6 +17,7 @@ pub enum ResourceKind {
 	Document,
 	Option,
 	Function,
+	Module,
 	Analyzer,
 	Parameter,
 	Model,
@@ -41,6 +43,17 @@ pub enum ResourceKind {
 pub enum ConfigKind {
 	GraphQL,
 	Api,
+	Default,
+}
+
+impl ConfigKind {
+	pub fn base(&self) -> Base {
+		match self {
+			ConfigKind::Default => Base::Root,
+			ConfigKind::GraphQL => Base::Db,
+			ConfigKind::Api => Base::Db,
+		}
+	}
 }
 
 impl std::fmt::Display for ResourceKind {
@@ -54,6 +67,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Document => write!(f, "Document"),
 			ResourceKind::Option => write!(f, "Option"),
 			ResourceKind::Function => write!(f, "Function"),
+			ResourceKind::Module => write!(f, "Module"),
 			ResourceKind::Api => write!(f, "Api"),
 			ResourceKind::Analyzer => write!(f, "Analyzer"),
 			ResourceKind::Parameter => write!(f, "Parameter"),
@@ -75,6 +89,7 @@ impl std::fmt::Display for ConfigKind {
 		match self {
 			ConfigKind::GraphQL => write!(f, "GraphQL"),
 			ConfigKind::Api => write!(f, "API"),
+			ConfigKind::Default => write!(f, "Default"),
 		}
 	}
 }

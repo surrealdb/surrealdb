@@ -1,18 +1,14 @@
-use std::fmt::{self, Display, Write};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::catalog::{ParamDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, FlowResultExt as _};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -21,25 +17,17 @@ pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
-}
-
-impl VisitExpression for DefineParamStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl DefineParamStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineParamStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -58,7 +46,7 @@ impl DefineParamStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::PaAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.clone(),
 						});
 					}
 				}
@@ -69,9 +57,14 @@ impl DefineParamStatement {
 
 		let db = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 		// Process the statement
 		txn.put_db_param(
 			db.namespace_id,
@@ -79,7 +72,7 @@ impl DefineParamStatement {
 			&ParamDefinition {
 				value,
 				name: self.name.clone(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				comment,
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -88,28 +81,5 @@ impl DefineParamStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineParamStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE PARAM")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }

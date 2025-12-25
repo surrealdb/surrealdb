@@ -1,8 +1,8 @@
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
-use std::fmt;
 
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
@@ -14,7 +14,7 @@ use surrealml::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 use crate::catalog::Permission;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -36,9 +36,10 @@ pub(crate) struct Model {
 	pub version: String,
 }
 
-impl fmt::Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>", self.name, self.version)
+impl ToSql for Model {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let stmt: crate::sql::model::Model = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -47,7 +48,7 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		mut args: Vec<Value>,
@@ -107,7 +108,7 @@ impl Model {
 		}
 
 		// Take the first and only specified argument
-		let argument = args.pop().unwrap();
+		let argument = args.pop().expect("single argument validated above");
 		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
@@ -126,17 +127,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -158,17 +159,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -192,17 +193,17 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message))
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -219,7 +220,7 @@ impl Model {
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		_ctx: &Context,
+		_ctx: &FrozenContext,
 		_opt: &Options,
 		_doc: Option<&CursorDoc>,
 		_args: Vec<Value>,

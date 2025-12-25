@@ -3,9 +3,10 @@ use std::ops::Deref;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -37,7 +38,7 @@ impl Value {
 	pub(crate) async fn get(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		path: &[Part],
@@ -46,9 +47,14 @@ impl Value {
 		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
 		}
-		match path.first() {
+
+		let Some(first) = path.first() else {
+			return Ok(self.clone());
+		};
+
+		match first {
 			// The knowledge of the current value is not relevant to Part::Recurse
-			Some(Part::Recurse(recurse, inner_path, instruction)) => {
+			Part::Recurse(recurse, inner_path, instruction) => {
 				// Find the path to recurse and what path to process after the recursion is
 				// finished
 				let (path, after) = match inner_path {
@@ -115,10 +121,10 @@ impl Value {
 			// ensure we can process them efficiently. When encountering a
 			// recursion part, it will find the repeat recurse part and handle
 			// it. If we find one in any unsupported scenario, we throw an error.
-			Some(Part::RepeatRecurse) => {
+			Part::RepeatRecurse => {
 				Err(ControlFlow::Err(anyhow::Error::new(Error::UnsupportedRepeatRecurse)))
 			}
-			Some(Part::Doc) => {
+			Part::Doc => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
 					Some(doc) => match &doc.rid {
@@ -131,7 +137,7 @@ impl Value {
 				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			// Get the current value at the path
-			Some(p) => match self {
+			p => match self {
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
@@ -195,7 +201,7 @@ impl Value {
 						.await
 						.catch_return()?
 					{
-						Value::Number(n) => match v.get(&n.to_string()) {
+						Value::Number(n) => match v.get(&n.to_sql()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => {
 								stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next()))
@@ -206,7 +212,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						Value::RecordId(t) => match v.get(&t.to_string()) {
+						Value::RecordId(t) => match v.get(&t.to_sql()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -534,8 +540,6 @@ impl Value {
 					}
 				}
 			},
-			// No more parts so get the value
-			None => Ok(self.clone()),
 		}
 	}
 }
@@ -622,7 +626,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(RecordId {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKey::String("tobie".to_owned())
 			})
 		);
@@ -648,7 +652,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(RecordId {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKey::String("jaime".to_owned())
 			})
 		);

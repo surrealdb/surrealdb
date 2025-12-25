@@ -1,15 +1,13 @@
-use std::fmt;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -19,7 +17,7 @@ impl Start {
 	pub(crate) async fn process(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<u32> {
@@ -44,17 +42,9 @@ impl Start {
 	}
 }
 
-impl VisitExpression for Start {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.visit(visitor);
-	}
-}
-
-impl fmt::Display for Start {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "START {}", self.0)
+impl ToSql for Start {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_start: crate::sql::Start = self.clone().into();
+		sql_start.fmt_sql(f, fmt);
 	}
 }

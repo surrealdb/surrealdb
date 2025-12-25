@@ -1,10 +1,11 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str;
 
+use surrealdb_types::{SqlFormat, ToSql};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Script(pub String);
+pub struct Script(#[cfg_attr(feature = "arbitrary", arbitrary(default))] pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {
@@ -25,9 +26,9 @@ impl Deref for Script {
 	}
 }
 
-impl Display for Script {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl ToSql for Script {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt)
 	}
 }
 

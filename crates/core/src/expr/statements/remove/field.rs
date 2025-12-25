@@ -1,19 +1,17 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveFieldStatement {
@@ -22,15 +20,6 @@ pub(crate) struct RemoveFieldStatement {
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveFieldStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.table_name.visit(visitor);
-	}
-}
 impl Default for RemoveFieldStatement {
 	fn default() -> Self {
 		Self {
@@ -46,14 +35,16 @@ impl RemoveFieldStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Compute the table name
-		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?;
+		let table_name = TableName::new(
+			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?,
+		);
 		// Compute the name
 		let name = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		// Get the NS and DB
@@ -83,7 +74,7 @@ impl RemoveFieldStatement {
 		// Refresh the table cache for fields
 		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
 			return Err(Error::TbNotFound {
-				name: self.table_name.to_string(),
+				name: table_name,
 			}
 			.into());
 		};
@@ -105,16 +96,5 @@ impl RemoveFieldStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveFieldStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE FIELD")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.table_name)?;
-		Ok(())
 	}
 }

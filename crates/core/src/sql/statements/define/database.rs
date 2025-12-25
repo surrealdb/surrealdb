@@ -1,6 +1,7 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Literal};
 
@@ -10,7 +11,8 @@ pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
-	pub comment: Option<Expr>,
+	pub strict: bool,
+	pub comment: Expr,
 	pub changefeed: Option<ChangeFeed>,
 }
 
@@ -20,28 +22,31 @@ impl Default for DefineDatabaseStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::None),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			changefeed: None,
+			strict: false,
 		}
 	}
 }
 
-impl Display for DefineDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE")?;
+impl ToSql for DefineDatabaseStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE DATABASE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", self.name)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?;
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		if self.strict {
+			f.push_str(" STRICT");
+		}
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
+			write_sql!(f, sql_fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 
@@ -51,8 +56,9 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			changefeed: v.changefeed.map(Into::into),
+			strict: v.strict,
 		}
 	}
 }
@@ -64,7 +70,8 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			strict: v.strict,
+			comment: v.comment.into(),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}

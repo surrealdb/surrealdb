@@ -1,7 +1,8 @@
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
@@ -18,7 +19,7 @@ impl Value {
 	pub(crate) async fn del(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		path: &[Part],
 	) -> Result<()> {
@@ -56,10 +57,10 @@ impl Value {
 						match stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()? {
 							Value::Number(n) => match path.len() {
 								1 => {
-									v.remove(&n.to_string());
+									v.remove(&n.to_sql());
 									Ok(())
 								}
-								_ => match v.get_mut(&n.to_string()) {
+								_ => match v.get_mut(&n.to_sql()) {
 									Some(v) if !v.is_nullish() => {
 										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 									}
@@ -80,10 +81,10 @@ impl Value {
 							},
 							Value::RecordId(t) => match path.len() {
 								1 => {
-									v.remove(&t.to_string());
+									v.remove(&t.to_sql());
 									Ok(())
 								}
-								_ => match v.get_mut(&t.to_string()) {
+								_ => match v.get_mut(&t.to_sql()) {
 									Some(v) if !v.is_nullish() => {
 										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 									}

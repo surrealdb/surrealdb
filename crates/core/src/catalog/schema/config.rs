@@ -1,19 +1,19 @@
-use std::fmt::{self, Display, Write};
-
 use anyhow::Result;
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::{Fmt, Pretty, pretty_indent};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 /// The config struct as it is stored on disk.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConfigDefinition {
+	Default(DefaultConfig),
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigDefinition),
 }
@@ -23,35 +23,39 @@ impl ConfigDefinition {
 	/// Get the name of the config.
 	pub fn name(&self) -> String {
 		match self {
+			ConfigDefinition::Default(_) => ConfigKind::Default.to_string(),
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
 			ConfigDefinition::Api(_) => ConfigKind::Api.to_string(),
 		}
 	}
 
 	/// Convert the config definition into a graphql config.
-	///
-	/// TODO: This is used in the commented out graphql code.
 	#[allow(unused)]
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			ConfigDefinition::GraphQL(g) => Ok(g),
-			c => fail!("found {c} when a graphql config was expected"),
+			c => fail!("found {} when a graphql config was expected", c.to_sql()),
 		}
 	}
 
 	pub fn try_as_api(&self) -> Result<&ApiConfigDefinition> {
 		match self {
 			ConfigDefinition::Api(a) => Ok(a),
-			c => fail!("found {c} when a api config was expected"),
+			c => fail!("found {} when a api config was expected", c.to_sql()),
 		}
 	}
 }
 
-impl Display for ConfigDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for ConfigDefinition {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
-			ConfigDefinition::GraphQL(v) => Display::fmt(v, f),
-			ConfigDefinition::Api(v) => Display::fmt(v, f),
+			ConfigDefinition::Default(v) => v.fmt_sql(f, fmt),
+			ConfigDefinition::GraphQL(v) => {
+				let sql_config: crate::sql::statements::define::config::GraphQLConfig =
+					v.clone().into();
+				sql_config.fmt_sql(f, fmt)
+			}
+			ConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -59,6 +63,9 @@ impl Display for ConfigDefinition {
 impl InfoStructure for ConfigDefinition {
 	fn structure(self) -> Value {
 		match self {
+			ConfigDefinition::Default(v) => Value::from(map!(
+				"defaults" => v.structure()
+			)),
 			ConfigDefinition::GraphQL(v) => Value::from(map!(
 				"graphql" => v.structure()
 			)),
@@ -72,18 +79,8 @@ impl InfoStructure for ConfigDefinition {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct GraphQLConfig {
-	pub tables: TablesConfig,
-	pub functions: FunctionsConfig,
-}
-
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "GRAPHQL")?;
-
-		write!(f, " TABLES {}", self.tables)?;
-		write!(f, " FUNCTIONS {}", self.functions)?;
-		Ok(())
-	}
+	pub tables: GraphQLTablesConfig,
+	pub functions: GraphQLFunctionsConfig,
 }
 
 impl InfoStructure for GraphQLConfig {
@@ -97,90 +94,32 @@ impl InfoStructure for GraphQLConfig {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum TablesConfig {
+pub enum GraphQLTablesConfig {
 	#[default]
 	None,
 	Auto,
-	Include(Vec<TableConfig>),
-	Exclude(Vec<TableConfig>),
+	Include(Vec<TableName>),
+	Exclude(Vec<TableName>),
 }
 
-impl Display for TablesConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			TablesConfig::Auto => write!(f, "AUTO")?,
-			TablesConfig::None => write!(f, "NONE")?,
-			TablesConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE ")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-			}
-			TablesConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-			}
-		}
-
-		Ok(())
-	}
-}
-
-impl InfoStructure for TablesConfig {
+impl InfoStructure for GraphQLTablesConfig {
 	fn structure(self) -> Value {
 		match self {
-			TablesConfig::None => Value::None,
-			TablesConfig::Auto => Value::String("AUTO".into()),
-			TablesConfig::Include(ts) => Value::from(map!(
-				"include" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
+			GraphQLTablesConfig::None => Value::None,
+			GraphQLTablesConfig::Auto => Value::String("AUTO".into()),
+			GraphQLTablesConfig::Include(ts) => Value::from(map!(
+				"include" => Value::Array(ts.into_iter().map(Value::Table).collect()),
 			)),
-			TablesConfig::Exclude(ts) => Value::from(map!(
-				"exclude" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
+			GraphQLTablesConfig::Exclude(ts) => Value::from(map!(
+				"exclude" => Value::Array(ts.into_iter().map(Value::Table).collect()),
 			)),
 		}
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableConfig {
-	pub name: String,
-}
-
-impl From<String> for TableConfig {
-	fn from(value: String) -> Self {
-		Self {
-			name: value,
-		}
-	}
-}
-
-impl Display for TableConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.name)?;
-		Ok(())
-	}
-}
-
-impl InfoStructure for TableConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"name" => Value::from(self.name),
-		))
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum FunctionsConfig {
+pub enum GraphQLFunctionsConfig {
 	#[default]
 	None,
 	Auto,
@@ -188,48 +127,45 @@ pub enum FunctionsConfig {
 	Exclude(Vec<String>),
 }
 
-impl Display for FunctionsConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			FunctionsConfig::Auto => write!(f, "AUTO")?,
-			FunctionsConfig::None => write!(f, "NONE")?,
-			FunctionsConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')?;
-			}
-			FunctionsConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')?;
-			}
-		}
-
-		Ok(())
-	}
-}
-
-impl InfoStructure for FunctionsConfig {
+impl InfoStructure for GraphQLFunctionsConfig {
 	fn structure(self) -> Value {
 		match self {
-			FunctionsConfig::None => Value::None,
-			FunctionsConfig::Auto => Value::String("AUTO".into()),
-			FunctionsConfig::Include(fs) => Value::from(map!(
+			GraphQLFunctionsConfig::None => Value::None,
+			GraphQLFunctionsConfig::Auto => Value::String("AUTO".into()),
+			GraphQLFunctionsConfig::Include(fs) => Value::from(map!(
 				"include" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),
-			FunctionsConfig::Exclude(fs) => Value::from(map!(
+			GraphQLFunctionsConfig::Exclude(fs) => Value::from(map!(
 				"exclude" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),
 		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct DefaultConfig {
+	pub namespace: Option<String>,
+	pub database: Option<String>,
+}
+
+impl ToSql for DefaultConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFAULT");
+		if let Some(namespace) = &self.namespace {
+			write_sql!(f, fmt, " NAMESPACE {}", EscapeKwFreeIdent(namespace));
+		}
+		if let Some(database) = &self.database {
+			write_sql!(f, fmt, " DATABASE {}", EscapeKwFreeIdent(database));
+		}
+	}
+}
+
+impl InfoStructure for DefaultConfig {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"namespace", if let Some(x) = self.namespace => Value::String(x),
+			"database", if let Some(x) = self.database => Value::String(x),
+		))
 	}
 }

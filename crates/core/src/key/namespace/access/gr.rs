@@ -68,12 +68,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		#[rustfmt::skip]
-		let val = Gr::new(
-			NamespaceId(1),
-			"testac",
-			"testgr",
-		);
+		let val = Gr::new(NamespaceId(1), "testac", "testgr");
 		let enc = Gr::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01&testac\0!grtestgr\0");
 	}

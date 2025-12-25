@@ -80,24 +80,30 @@ pub fn format((val, format): (Datetime, String)) -> Result<Value> {
 
 pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 	match group.as_str() {
-		"year" => Ok(Utc.with_ymd_and_hms(val.year(), 1, 1, 0, 0, 0).earliest().unwrap().into()),
-		"month" => {
-			Ok(Utc.with_ymd_and_hms(val.year(), val.month(), 1, 0, 0, 0).earliest().unwrap().into())
-		}
+		"year" => Ok(Utc
+			.with_ymd_and_hms(val.year(), 1, 1, 0, 0, 0)
+			.earliest()
+			.expect("valid datetime")
+			.into()),
+		"month" => Ok(Utc
+			.with_ymd_and_hms(val.year(), val.month(), 1, 0, 0, 0)
+			.earliest()
+			.expect("valid datetime")
+			.into()),
 		"day" => Ok(Utc
 			.with_ymd_and_hms(val.year(), val.month(), val.day(), 0, 0, 0)
 			.earliest()
-			.unwrap()
+			.expect("valid datetime")
 			.into()),
 		"hour" => Ok(Utc
 			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), 0, 0)
 			.earliest()
-			.unwrap()
+			.expect("valid datetime")
 			.into()),
 		"minute" => Ok(Utc
 			.with_ymd_and_hms(val.year(), val.month(), val.day(), val.hour(), val.minute(), 0)
 			.earliest()
-			.unwrap()
+			.expect("valid datetime")
 			.into()),
 		"second" => Ok(Utc
 			.with_ymd_and_hms(
@@ -109,7 +115,7 @@ pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 				val.second(),
 			)
 			.earliest()
-			.unwrap()
+			.expect("valid datetime")
 			.into()),
 		_ => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: String::from("time::group"),

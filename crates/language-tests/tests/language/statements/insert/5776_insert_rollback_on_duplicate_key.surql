@@ -8,20 +8,18 @@ issue = 5776
 run = true
 
 [[test.results]]
-# Statement 1: DEFINE INDEX;
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
-error = "Database index `item_name_idx` already contains 'ItemA', with record `item:⟨item:1⟩`"
-
-
+error = "Database index `item_name_idx` already contains 'ItemA', with record `item:`item:1``"
 
 [[test.results]]
-# Statement 6: SELECT * FROM item;
 value = "[]"
 */
 

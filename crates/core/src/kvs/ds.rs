@@ -6,44 +6,46 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Poll, ready};
 use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
+use surrealdb_types::SurrealValue;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::{instrument, trace};
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::api::Transactable;
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use super::{api, export};
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
 use crate::api::response::{ApiResponse, ResponseInstruction};
-use crate::buc::BucketConnections;
+use crate::buc::BucketStoreProvider;
+use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
-	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
+	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
+	UserProvider,
 };
-use crate::catalog::{ApiDefinition, ApiMethod, Index};
-use crate::ctx::MutableContext;
+use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::cnf::dynamic::DynamicConfiguration;
+use crate::ctx::Context;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
-use crate::dbs::node::Timestamp;
+use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
 use crate::expr::model::get_model_path;
@@ -70,13 +72,15 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::{KVValue, LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::{Value, convert_value_to_public_value};
-use crate::{CommunityComposer, cf, syn};
+use crate::val::convert_value_to_public_value;
+use crate::{CommunityComposer, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
@@ -93,12 +97,10 @@ pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
-	/// Whether this datastore runs in strict mode by default.
-	strict: bool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
-	query_timeout: Option<Duration>,
+	dynamic_configuration: DynamicConfiguration,
 	/// The slow log configuration determining when a query should be logged
 	slow_log: Option<SlowLog>,
 	/// The maximum duration timeout for running multiple statements in a
@@ -121,9 +123,12 @@ pub struct Datastore {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
-	buckets: Arc<BucketConnections>,
+	buckets: BucketsManager,
 	// The sequences
 	sequences: Sequences,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Arc<SurrealismCache>,
 }
 
 #[derive(Clone)]
@@ -148,7 +153,12 @@ impl TransactionFactory {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+		sequences: Sequences,
+	) -> Result<Transaction> {
 		// Specify if the transaction is writeable
 		let write = match write {
 			Read => false,
@@ -163,10 +173,9 @@ impl TransactionFactory {
 		let (inner, local) = self.builder.new_transaction(write, lock).await?;
 		Ok(Transaction::new(
 			local,
+			sequences,
 			Transactor {
 				inner,
-				stash: super::stash::Stash::default(),
-				cf: cf::Writer::new(),
 			},
 		))
 	}
@@ -177,7 +186,7 @@ impl TransactionFactory {
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
 /// generic transaction parameters into a backend-specific transaction and
 /// report whether the transaction is considered "local" (used internally to
 /// enable some optimizations).
@@ -198,7 +207,7 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn api::Transaction>, bool)>;
+	) -> Result<(Box<dyn Transactable>, bool)>;
 
 	/// Perform any backend-specific shutdown/cleanup.
 	async fn shutdown(&self) -> Result<()>;
@@ -216,10 +225,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// Create a new transaction builder and the clock to use throughout the datastore.
+	///
+	/// # Parameters
+	/// - `path`: Database connection path string
+	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
 
 	/// Validate a datastore path string.
@@ -251,8 +266,6 @@ pub enum DatastoreFlavor {
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-fdb")]
-	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
 }
@@ -267,6 +280,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		_canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
 		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
 			None if path == "memory" => ("memory", ""),
@@ -288,19 +302,21 @@ impl TransactionBuilderFactory for CommunityComposer {
 			path.to_string()
 		};
 		// Initiate the desired datastore
-		let (datastore_flavour, clock) = match (flavour, path) {
+		match (flavour, path) {
 			// Initiate an in-memory datastore
 			(flavour @ "memory", _) => {
 				#[cfg(feature = "kv-mem")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
-				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a File (RocksDB) datastore
 			(flavour @ "file", path) => {
@@ -308,7 +324,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-
 					// Initialise the storage engine
 					warn!(
 						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
@@ -319,10 +334,10 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
@@ -331,16 +346,15 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-
 					let v = super::rocksdb::Datastore::new(&path)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a SurrealKV versioned database
 			(flavour @ "surrealkv+versioned", path) => {
@@ -354,10 +368,10 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a SurrealKV non-versioned database
 			(flavour @ "surrealkv", path) => {
@@ -366,16 +380,15 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-
 					let v = super::surrealkv::Datastore::new(&path, false)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate an IndxDB database
 			(flavour @ "indxdb", path) => {
@@ -385,10 +398,10 @@ impl TransactionBuilderFactory for CommunityComposer {
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
-				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a TiKV datastore
 			(flavour @ "tikv", path) => {
@@ -397,32 +410,19 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
-				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a FoundationDB datastore
-			(flavour @ "fdb", path) => {
-				#[cfg(feature = "kv-fdb")]
-				{
-					let v = super::fdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::FoundationDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
-				}
-				#[cfg(not(feature = "kv-fdb"))]
-				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// The datastore path is not valid
 			(flavour, path) => {
-				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
-				bail!(Error::Ds("Unable to load the specified datastore".into()))
+				info!(target: TARGET, "Unable to load the specified datastore {flavour}{path}");
+				bail!(Error::Kvs(crate::kvs::Error::Datastore(
+					"Unable to load the specified datastore".into()
+				)))
 			}
-		};
-		Ok((Box::<DatastoreFlavor>::new(datastore_flavour), clock))
+		}
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
@@ -433,7 +433,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
 			v if v.starts_with("tikv:") => Ok(v.to_string()),
-			v if v.starts_with("fdb:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -454,7 +453,7 @@ impl TransactionBuilder for DatastoreFlavor {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn api::Transaction>, bool)> {
+	) -> Result<(Box<dyn Transactable>, bool)> {
 		//-> Pin<Box<dyn Future<Output = Result<(Box<dyn api::Transaction>, bool)>> + Send + 'a>> {
 		//Box::pin(async move {
 		Ok(match self {
@@ -478,11 +477,6 @@ impl TransactionBuilder for DatastoreFlavor {
 				let tx = v.transaction(write, lock).await?;
 				(tx, false)
 			}
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -493,20 +487,17 @@ impl TransactionBuilder for DatastoreFlavor {
 	}
 
 	async fn shutdown(&self) -> Result<()> {
-		//Box::pin(async move {
 		match self {
 			#[cfg(feature = "kv-mem")]
-			Self::Mem(v) => v.shutdown().await,
+			Self::Mem(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(v) => v.shutdown().await,
+			Self::RocksDB(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(v) => v.shutdown().await,
+			Self::IndxDB(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => v.shutdown().await,
+			Self::TiKV(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(v) => v.shutdown().await,
+			Self::SurrealKV(v) => Ok(v.shutdown().await?),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -525,8 +516,6 @@ impl Display for DatastoreFlavor {
 			Self::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
@@ -580,7 +569,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(&CommunityComposer(), path).await
+		Self::new_with_factory(CommunityComposer(), path, CancellationToken::new()).await
 	}
 
 	/// Creates a new datastore instance with a custom transaction builder factory.
@@ -591,14 +580,16 @@ impl Datastore {
 	/// # Parameters
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_factory<F: TransactionBuilderFactory>(
-		factory: &F,
+	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
+		composer: F,
 		path: &str,
+		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(factory, path, None).await
+		Self::new_with_clock::<F>(composer, path, None, canceller).await
 	}
 
 	/// Creates a new datastore instance with a custom factory and clock.
@@ -610,31 +601,38 @@ impl Datastore {
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
 	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_clock<F: TransactionBuilderFactory>(
-		factory: &F,
+	pub(crate) async fn new_with_clock<
+		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
+	>(
+		composer: C,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = factory.new_transaction_builder(path, clock).await?;
+		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
+		//
+		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, clock)
+		Self::new_with_builder(builder, buckets, clock)
 	}
 
-	pub fn new_with_builder(
+	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
+		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
+		let id = Uuid::new_v4();
 		Ok(Self {
-			id: Uuid::new_v4(),
+			id,
 			transaction_factory: tf.clone(),
-			strict: false,
 			auth_enabled: false,
-			query_timeout: None,
+			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
@@ -646,20 +644,22 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: None,
 			cache: Arc::new(DatastoreCache::new()),
-			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(tf),
+			buckets,
+			sequences: Sequences::new(tf, id),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
+		self.buckets.clear();
 		Self {
 			id: self.id,
-			strict: self.strict,
 			auth_enabled: self.auth_enabled,
-			query_timeout: self.query_timeout,
-			slow_log: self.slow_log.clone(),
+			dynamic_configuration: DynamicConfiguration::default(),
+			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -670,26 +670,18 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
-			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(self.transaction_factory.clone()),
+			buckets: self.buckets,
+			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
 	}
 
-	/// Specify whether this Datastore should run in strict mode
+	/// Set the node id for this datastore.
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
 		self
-	}
-
-	/// Specify whether this Datastore should run in strict mode
-	pub fn with_strict_mode(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
-	pub fn is_strict_mode(&self) -> bool {
-		self.strict
 	}
 
 	/// Specify whether this datastore should enable live query notifications
@@ -699,8 +691,8 @@ impl Datastore {
 	}
 
 	/// Set a global query timeout for this Datastore
-	pub fn with_query_timeout(mut self, duration: Option<Duration>) -> Self {
-		self.query_timeout = duration;
+	pub fn with_query_timeout(self, duration: Option<Duration>) -> Self {
+		self.dynamic_configuration.set_query_timeout(duration);
 		self
 	}
 
@@ -798,25 +790,28 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+	#[cfg(test)]
+	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
 
 	// Initialise the cluster and run bootstrap utilities
+	// Returns the current version and a flag indicating if this is a new datastore
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn check_version(&self) -> Result<MajorVersion> {
-		let version = self.get_version().await?;
+	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
+		let (version, is_new) = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion);
 		}
 		// Everything ok
-		Ok(version)
+		Ok((version, is_new))
 	}
 
 	// Initialise the cluster and run bootstrap utilities
+	// Returns the current version and a flag indicating if this is a new datastore
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn get_version(&self) -> Result<MajorVersion> {
+	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Create the key where the version is stored
@@ -828,7 +823,7 @@ impl Datastore {
 				// We didn't write anything, so just rollback
 				catch!(txn, txn.cancel().await);
 				// Return the current version
-				val
+				(val, false)
 			}
 			// There is no version set in the storage
 			None => {
@@ -848,12 +843,16 @@ impl Datastore {
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
-				version
+				(version, true)
 			}
 		};
 		// Everything ok
 		Ok(val)
 	}
+
+	// --------------------------------------------------
+	// Initialisation functions
+	// --------------------------------------------------
 
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -873,11 +872,12 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new().with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let mut ctx = MutableContext::default();
+			let opt = Options::new(self.id, self.dynamic_configuration.clone())
+				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
+			let mut ctx = Context::default();
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
-			let mut stack = reblessive::TreeStack::new();
+			let mut stack = TreeStack::new();
 			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
 			catch!(txn, res);
 			// We added a user, so commit the transaction
@@ -891,235 +891,29 @@ impl Datastore {
 		}
 	}
 
-	/// Initialise the cluster and run bootstrap utilities
+	/// Setup the default namespace and database
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn bootstrap(&self) -> Result<()> {
-		// Insert this node in the cluster
-		self.insert_node(self.id).await?;
-		// Mark inactive nodes as archived
-		self.expire_nodes().await?;
-		// Remove archived nodes
-		self.remove_nodes().await?;
+	pub async fn initialise_defaults(&self, namespace: &str, database: &str) -> Result<()> {
+		info!(target: TARGET, "This is a new SurrealDB instance. Initialising default namespace '{namespace}' and database '{database}'");
+		// Create the SQL statement
+		let sql = r"
+			DEFINE NAMESPACE $namespace COMMENT 'Default namespace generated by SurrealDB'; 
+			USE NS $namespace;
+			DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB'; 
+			DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
+		"
+		.to_string();
+
+		// Create the variables
+		let vars = map! {
+			"namespace".to_string() => namespace.to_string().into_value(),
+			"database".to_string() => database.to_string().into_value(),
+		};
+
+		// Execute the SQL statement
+		self.execute(&sql, &Session::owner(), Some(vars.into())).await?;
 		// Everything ok
 		Ok(())
-	}
-
-	/// Run the background task to update node registration information
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_update(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Updating node registration information");
-		// Update this node in the cluster
-		self.update_node(self.id).await?;
-		// Everything ok
-		Ok(())
-	}
-
-	/// Run the background task to process and archive inactive nodes
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_expire(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Processing and archiving inactive nodes");
-		// Mark expired nodes as archived
-		self.expire_nodes().await?;
-		// Everything ok
-		Ok(())
-	}
-
-	/// Run the background task to process and cleanup archived nodes
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_remove(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Processing and cleaning archived nodes");
-		// Cleanup expired nodes data
-		self.remove_nodes().await?;
-		// Everything ok
-		Ok(())
-	}
-
-	/// Performs changefeed garbage collection as a background task.
-	///
-	/// This method is responsible for cleaning up old changefeed data across
-	/// all databases. It uses a distributed task lease mechanism to ensure
-	/// that only one node in a cluster performs this maintenance operation at
-	/// a time, preventing duplicate work and potential conflicts.
-	///
-	/// The process involves:
-	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Calculating the current system time
-	/// 3. Saving timestamps for current versionstamps
-	/// 4. Cleaning up old changefeed data from all databases
-	///
-	/// # Parameters
-	/// * `delay` - Duration specifying how long the lease should be valid
-	///
-	/// # Returns
-	/// * `Ok(())` - If the operation completes successfully or if this node doesn't have the lease
-	/// * `Err` - If any step in the process fails
-	///
-	/// # Errors
-	/// * Returns an error if the system clock appears to have gone backwards
-	/// * Propagates any errors from the underlying database operations
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self, gc_interval: &Duration) -> Result<()> {
-		let lh = LeaseHandler::new(
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::ChangeFeedCleanup,
-			*gc_interval * 2,
-		)?;
-		// Attempt to acquire a lease for the ChangeFeedCleanup task
-		// If we don't get the lease, another node is handling this task
-		if !lh.has_lease().await? {
-			return Ok(());
-		}
-		let lh = Some(lh);
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Calculate the current system time in seconds since UNIX epoch
-		// This will be used as a reference point for cleanup operations
-		let ts = SystemTime::now()
-			.duration_since(UNIX_EPOCH)
-			.map_err(|e| {
-				Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
-			})?
-			.as_secs();
-		// Save timestamps for current versionstamps to track cleanup progress
-		self.changefeed_versionstamp(lh.as_ref(), ts).await?;
-		// Remove old changefeed data from all databases based on retention policies
-		self.changefeed_cleanup(lh.as_ref(), ts).await?;
-		// Everything completed successfully
-		Ok(())
-	}
-
-	/// Performs changefeed garbage collection using a specified timestamp.
-	///
-	/// This method is similar to `changefeed_process` but accepts an explicit
-	/// timestamp instead of calculating the current time. This allows for more
-	/// controlled testing and specific cleanup operations at predetermined
-	/// points in time.
-	///
-	/// Unlike `changefeed_process`, this method does not use the task lease
-	/// mechanism, making it suitable for direct invocation in controlled
-	/// environments or testing scenarios where lease coordination is not
-	/// required.
-	///
-	/// The process involves:
-	/// 1. Saving timestamps for current versionstamps using the provided timestamp
-	/// 2. Cleaning up old changefeed data from all databases
-	///
-	/// # Parameters
-	/// * `ts` - Explicit timestamp (in seconds since UNIX epoch) to use for cleanup operations
-	///
-	/// # Returns
-	/// * `Ok(())` - If the operation completes successfully
-	/// * `Err` - If any step in the process fails
-	///
-	/// # Errors
-	/// * Propagates any errors from the underlying database operations
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, lh))]
-	pub async fn changefeed_process_at(&self, lh: Option<&LeaseHandler>, ts: u64) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Save timestamps for current versionstamps using the provided timestamp
-		self.changefeed_versionstamp(lh, ts).await?;
-		// Remove old changefeed data from all databases based on retention policies
-		// using the provided timestamp as the reference point
-		self.changefeed_cleanup(lh, ts).await?;
-		// Everything completed successfully
-		Ok(())
-	}
-
-	/// Processes the index compaction queue
-	///
-	/// This method is called periodically by the index compaction thread to
-	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to ensure only one node in a cluster performs the
-	/// compaction at a time.
-	///
-	/// The method scans the index compaction queue (stored as `Ic` keys) and
-	/// processes each index that needs compaction. Currently, only full-text
-	/// indexes support compaction, which helps optimize their performance by
-	/// consolidating changes and removing unnecessary data.
-	///
-	/// After processing an index, it is removed from the compaction queue.
-	///
-	/// # Arguments
-	///
-	/// * `interval` - The time interval between compaction runs, used to calculate the lease
-	///   duration
-	///
-	/// # Returns
-	///
-	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
-	///   compaction, Error otherwise
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
-		let lh = LeaseHandler::new(
-			self.id,
-			self.transaction_factory.clone(),
-			TaskLeaseType::IndexCompaction,
-			interval * 2,
-		)?;
-		// We continue without interruptions while there are keys and the lease
-		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
-			// If we don't get the lease, another node is handling this task
-			if !lh.has_lease().await? {
-				return Ok(());
-			}
-			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
-			// Collect every item in the queue
-			let (beg, end) = IndexCompactionKey::range();
-			let range = beg..end;
-			let mut previous: Option<IndexCompactionKey<'static>> = None;
-			let mut count = 0;
-			// Returns an ordered list of indexes that require compaction
-			for (k, _) in txn.getr(range.clone(), None).await? {
-				count += 1;
-				lh.try_maintain_lease().await?;
-				let ic = IndexCompactionKey::decode_key(&k)?;
-				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous {
-					if p.index_matches(&ic) {
-						continue;
-					}
-				}
-				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
-						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								self.id(),
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
-						}
-						Index::Count(_) => {
-							IndexOperation::index_count_compaction(&ic, &txn).await?;
-						}
-						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
-						}
-					},
-					None => {
-						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
-					}
-				}
-				previous = Some(ic.into_owned());
-			}
-			if count > 0 {
-				txn.delr(range).await?;
-				txn.commit().await?;
-			} else {
-				txn.cancel().await?;
-				return Ok(());
-			}
-		}
 	}
 
 	/// Performs a database import from SQL
@@ -1139,10 +933,494 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
 		// Delete this datastore from the cluster
-		self.delete_node(self.id).await?;
+		self.delete_node().await?;
 		// Run any storag engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
 	}
+
+	// --------------------------------------------------
+	// Node functions
+	// --------------------------------------------------
+
+	/// Initialise the cluster and run bootstrap utilities
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn bootstrap(&self) -> Result<()> {
+		// Insert this node in the cluster
+		self.insert_node().await?;
+		// Mark inactive nodes as archived
+		self.expire_nodes().await?;
+		// Remove archived nodes
+		self.remove_nodes().await?;
+		// Everything ok
+		Ok(())
+	}
+
+	/// Inserts a node for the first time into the cluster.
+	///
+	/// This function should be run at server or database startup.
+	///
+	/// This function ensures that this node is entered into the clister
+	/// membership entries. This function must be run at server or database
+	/// startup, in order to write the initial entry and timestamp to storage.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn insert_node(&self) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %self.id,"Inserting node in the cluster");
+		// Refresh system usage metrics
+		crate::sys::refresh().await;
+		// Open transaction and set node data
+		let txn = self.transaction(Write, Optimistic).await?;
+		let key = crate::key::root::nd::Nd::new(self.id);
+		let now = self.clock_now().await;
+		let node = Node::new(self.id, now, false);
+		let res = run!(txn, txn.put(&key, &node, None).await);
+		match res {
+			Err(e) => {
+				if matches!(
+					e.downcast_ref(),
+					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+				) {
+					Err(anyhow::Error::new(Error::ClAlreadyExists {
+						id: self.id.to_string(),
+					}))
+				} else {
+					Err(e)
+				}
+			}
+			x => x,
+		}
+	}
+
+	/// Updates an already existing node in the cluster.
+	///
+	/// This function should be run periodically at a regular interval.
+	///
+	/// This function updates the entry for this node with an up-to-date
+	/// timestamp. This ensures that the node is not marked as expired by any
+	/// garbage collection tasks, preventing any data cleanup for this node.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn update_node(&self) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
+		// Refresh system usage metrics
+		crate::sys::refresh().await;
+		// Open transaction and set node data
+		let txn = self.transaction(Write, Optimistic).await?;
+		let key = crate::key::root::nd::new(self.id);
+		let now = self.clock_now().await;
+		let node = Node::new(self.id, now, false);
+		run!(txn, txn.replace(&key, &node).await)
+	}
+
+	/// Deletes a node from the cluster.
+	///
+	/// This function should be run when a node is shutting down.
+	///
+	/// This function marks the node as archived, ready for garbage collection.
+	/// Later on when garbage collection is running the live queries assigned
+	/// to this node will be removed, along with the node itself.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn delete_node(&self) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
+		// Open transaction and set node data
+		let txn = self.transaction(Write, Optimistic).await?;
+		let key = crate::key::root::nd::new(self.id);
+		let val = catch!(txn, txn.get_node(self.id).await);
+		let node = val.as_ref().archive();
+		run!(txn, txn.replace(&key, &node).await)
+	}
+
+	/// Expires nodes which have timedout from the cluster.
+	///
+	/// This function should be run periodically at an interval.
+	///
+	/// This function marks the node as archived, ready for garbage collection.
+	/// Later on when garbage collection is running the live queries assigned
+	/// to this node will be removed, along with the node itself.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn expire_nodes(&self) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, "Archiving expired nodes in the cluster");
+		// Fetch all of the inactive nodes
+		let inactive = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			let nds = catch!(txn, txn.all_nodes().await);
+			let now = self.clock_now().await;
+			catch!(txn, txn.cancel().await);
+			// Filter the inactive nodes
+			nds.iter()
+				.filter_map(|n| {
+					// Check that the node is active and has expired
+					match n.is_active() && n.heartbeat < now - Duration::from_secs(30) {
+						true => Some(n.to_owned()),
+						false => None,
+					}
+				})
+				.collect::<Vec<_>>()
+		};
+		// Check if there are inactive nodes
+		if !inactive.is_empty() {
+			// Open a writeable transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Archive the inactive nodes
+			for nd in inactive.iter() {
+				// Log the live query scanning
+				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+				// Mark the node as archived
+				let node = nd.archive();
+				// Get the key for the node entry
+				let key = crate::key::root::nd::new(nd.id);
+				// Update the node entry
+				catch!(txn, txn.replace(&key, &node).await);
+			}
+			// Commit the changes
+			catch!(txn, txn.commit().await);
+		}
+		// Everything was successful
+		Ok(())
+	}
+
+	/// Removes and cleans up nodes which are no longer in this cluster.
+	///
+	/// This function should be run periodically at an interval.
+	///
+	/// This function clears up all nodes which have been marked as archived.
+	/// When a matching node is found, all node queries, and table queries are
+	/// garbage collected, before the node itself is completely deleted.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn remove_nodes(&self) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
+		// Fetch all of the archived nodes
+		let archived = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			let nds = catch!(txn, txn.all_nodes().await);
+			catch!(txn, txn.cancel().await);
+			// Filter the archived nodes
+			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
+		};
+		// Loop over the archived nodes
+		for id in archived.iter() {
+			// Open a writeable transaction
+			let beg = crate::key::node::lq::prefix(*id)?;
+			let end = crate::key::node::lq::suffix(*id)?;
+			let mut next = Some(beg..end);
+			let txn = self.transaction(Write, Optimistic).await?;
+			{
+				// Log the live query scanning
+				trace!(target: TARGET, id = %id, "Deleting live queries for node");
+				// Scan the live queries for this node
+				while let Some(rng) = next {
+					// Fetch the next batch of keys and values
+					let res = catch!(txn, txn.batch_keys_vals(rng, *NORMAL_FETCH_SIZE, None).await);
+					next = res.next;
+					for (k, v) in res.result.iter() {
+						// Decode the data for this live query
+						let val: NodeLiveQuery = KVValue::kv_decode_value(v.clone())?;
+						// Get the key for this node live query
+						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
+						// Check that the node for this query is archived
+						if archived.contains(&nlq.nd) {
+							// Get the key for this table live query
+							let tlq = crate::key::table::lq::new(val.ns, val.db, &val.tb, nlq.lq);
+							// Delete the table live query
+							catch!(txn, txn.clr(&tlq).await);
+							// Delete the node live query
+							catch!(txn, txn.clr(&nlq).await);
+						}
+					}
+					// Pause and yield execution
+					yield_now!();
+				}
+			}
+			{
+				// Log the node deletion
+				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
+				// Get the key for the node entry
+				let key = crate::key::root::nd::new(*id);
+				// Delete the cluster node entry
+				catch!(txn, txn.clr(&key).await);
+			}
+			// Commit the changes
+			catch!(txn, txn.commit().await);
+		}
+		// Everything was successful
+		Ok(())
+	}
+
+	/// Clean up all other miscellaneous data.
+	///
+	/// This function should be run periodically at an interval.
+	///
+	/// This function clears up all data which might have been missed from
+	/// previous cleanup runs, or when previous runs failed. This function
+	/// currently deletes all live queries, for nodes which no longer exist
+	/// in the cluster, from all namespaces, databases, and tables. It uses
+	/// a number of transactions in order to prevent failure of large or
+	/// long-running transactions on distributed storage engines.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn garbage_collect(&self) -> Result<()> {
+		// Log the node deletion
+		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
+		// Fetch archived nodes
+		let archived = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			let nds = catch!(txn, txn.all_nodes().await);
+			// Filter the archived nodes
+			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
+		};
+		// Fetch all namespaces
+		let nss = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			catch!(txn, txn.all_ns().await)
+		};
+		// Loop over all namespaces
+		for ns in nss.iter() {
+			// Log the namespace
+			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
+			// Fetch all databases
+			let dbs = {
+				let txn = self.transaction(Read, Optimistic).await?;
+				catch!(txn, txn.all_db(ns.namespace_id).await)
+			};
+			// Loop over all databases
+			for db in dbs.iter() {
+				// Log the namespace
+				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
+				// Fetch all tables
+				let tbs = {
+					let txn = self.transaction(Read, Optimistic).await?;
+					catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await)
+				};
+				// Loop over all tables
+				for tb in tbs.iter() {
+					// Log the namespace
+					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
+					// Iterate over the table live queries
+					let beg =
+						crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
+					let end =
+						crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
+					let mut next = Some(beg..end);
+					let txn = self.transaction(Write, Optimistic).await?;
+					while let Some(rng) = next {
+						// Fetch the next batch of keys and values
+						let max = *NORMAL_FETCH_SIZE;
+						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
+						next = res.next;
+						for (k, v) in res.result.iter() {
+							// Decode the LIVE query statement
+							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v.clone())?;
+							// Get the node id and the live query id
+							let (nid, lid) = (stm.node, stm.id);
+							// Check that the node for this query is archived
+							if archived.contains(&stm.node) {
+								// Get the key for this node live query
+								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
+								// Get the key for this table live query
+								let nlq = crate::key::node::lq::new(nid, lid);
+								// Delete the node live query
+								catch!(txn, txn.clr(&nlq).await);
+								// Delete the table live query
+								catch!(txn, txn.clr(&tlq).await);
+							}
+						}
+						// Pause and yield execution
+						yield_now!();
+					}
+					// Commit the changes
+					txn.commit().await?;
+				}
+			}
+		}
+		// All ok
+		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Live query functions
+	// --------------------------------------------------
+
+	/// Clean up the live queries for a disconnected connection.
+	///
+	/// This function should be run when a WebSocket disconnects.
+	///
+	/// This function clears up the live queries on the current node, which
+	/// are specified by uique live query UUIDs. This is necessary when a
+	/// WebSocket disconnects, and any associated live queries need to be
+	/// cleaned up and removed.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<()> {
+		// Log the node deletion
+		trace!(target: TARGET, "Deleting live queries for a connection");
+		// Fetch expired nodes
+		let txn = self.transaction(Write, Optimistic).await?;
+		// Loop over the live query unique ids
+		for id in ids {
+			// Get the key for this node live query
+			let nlq = crate::key::node::lq::new(self.id(), id);
+			// Fetch the LIVE meta data node entry
+			if let Some(lq) = catch!(txn, txn.get(&nlq, None).await) {
+				// Get the key for this node live query
+				let nlq = crate::key::node::lq::new(self.id(), id);
+				// Get the key for this table live query
+				let tlq = crate::key::table::lq::new(lq.ns, lq.db, &lq.tb, id);
+				// Delete the table live query
+				catch!(txn, txn.clr(&tlq).await);
+				// Delete the node live query
+				catch!(txn, txn.clr(&nlq).await);
+			}
+		}
+		// Commit the changes
+		txn.commit().await?;
+		// All ok
+		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Changefeed functions
+	// --------------------------------------------------
+
+	/// Performs changefeed garbage collection as a background task.
+	///
+	/// This method is responsible for cleaning up old changefeed data across
+	/// all databases. It uses a distributed task lease mechanism to ensure
+	/// that only one node in a cluster performs this maintenance operation at
+	/// a time, preventing duplicate work and potential conflicts.
+	///
+	/// The process involves:
+	/// 1. Acquiring a lease for the ChangeFeedCleanup task
+	/// 2. Calculating the current system time
+	/// 4. Cleaning up old changefeed data from all databases
+	///
+	/// # Arguments
+	/// * `interval` - The interval between compaction runs, to calculate the lease duration
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn changefeed_process(&self, interval: &Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting changefeed garbage collection");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::ChangeFeedCleanup,
+			*interval * 2,
+		)?;
+		// If we don't get the lease, another node is handling this task
+		if !lh.has_lease().await? {
+			return Ok(());
+		}
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Running changefeed garbage collection");
+		// Create a new transaction
+		let txn = self.transaction(Write, Optimistic).await?;
+		// Perform the garbage collection
+		catch!(txn, crate::cf::gc_all_at(&lh, &txn).await);
+		// Commit the changes
+		catch!(txn, txn.commit().await);
+		// Everything ok
+		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Indexing functions
+	// --------------------------------------------------
+
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	/// * `interval` - The interval between compaction runs, to calculate the lease duration
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting index compaction process");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Output function invocation details to logs
+			trace!(target: TARGET, "Running index compaction process");
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = IndexCompactionKey::range();
+			let range = beg..end;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				lh.try_maintain_lease().await?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous
+					&& p.index_matches(&ic)
+				{
+					continue;
+				}
+				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+					Some(ix) if !ix.prepare_remove => match &ix.index {
+						Index::FullText(p) => {
+							let ft = FullTextIndex::new(
+								&self.index_stores,
+								&txn,
+								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
+								p,
+							)
+							.await?;
+							ft.compaction(&txn).await?;
+						}
+						Index::Count(_) => {
+							IndexOperation::index_count_compaction(&ic, &txn).await?;
+						}
+						_ => {
+							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
+						}
+					},
+					_ => {
+						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
+					}
+				}
+				previous = Some(ic.into_owned());
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
+	}
+
+	// --------------------------------------------------
+	// Other functions
+	// --------------------------------------------------
 
 	/// Create a new transaction on this datastore
 	///
@@ -1159,7 +1437,7 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
-		self.transaction_factory.transaction(write, lock).await
+		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -1214,6 +1492,76 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
+	/// Execute a query with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_with_transaction(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+		// Process the AST with the transaction
+		self.process_with_transaction(ast, sess, vars, tx).await
+	}
+
+	/// Process an AST with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn process_with_transaction(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		if let Err(e) = self.check_anon(sess) {
+			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
+			Some(Error::ExpiredSession) => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(|e| match e {
+				Error::InvalidParam {
+					..
+				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
+				_ => DbResultError::InternalError(e.to_string()),
+			})?;
+		}
+
+		// Set the transaction in the context
+		ctx.set_transaction(tx);
+
+		// Process all statements with the transaction
+		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
+			match e.downcast_ref::<Error>() {
+				Some(Error::ExpiredSession) => {
+					DbResultError::InvalidAuth("The session has expired".to_string())
+				}
+				_ => DbResultError::InternalError(e.to_string()),
+			}
+		})
+	}
+
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute_import<S>(
 		&self,
@@ -1251,16 +1599,13 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			references_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+			surrealism_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::Surrealism),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
@@ -1381,11 +1726,8 @@ impl Datastore {
 			Some(Error::IamError(iam_err)) => {
 				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
 			}
-			Some(Error::Ds(msg)) => {
-				DbResultError::InternalError(format!("Datastore error: {}", msg))
-			}
-			Some(Error::Tx(msg)) => {
-				DbResultError::InternalError(format!("Transaction error: {}", msg))
+			Some(Error::Kvs(kvs_err)) => {
+				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
 			}
 			Some(Error::InvalidQuery(_)) => {
 				DbResultError::ParseError("Invalid query syntax".to_string())
@@ -1399,11 +1741,11 @@ impl Datastore {
 			Some(Error::Channel(msg)) => {
 				DbResultError::InternalError(format!("Channel error: {}", msg))
 			}
-			Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
-			}) => DbResultError::QueryNotExecuted(message.clone()),
+			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
 			Some(Error::ScriptingNotAllowed) => {
 				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
 			}
@@ -1471,26 +1813,8 @@ impl Datastore {
 				Some(Error::IamError(iam_err)) => {
 					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
 				}
-				Some(Error::Ds(msg)) => {
-					DbResultError::InternalError(format!("Datastore error: {}", msg))
-				}
-				Some(Error::Tx(msg)) => {
-					DbResultError::InternalError(format!("Transaction error: {}", msg))
-				}
-				Some(Error::TxFinished) => {
-					DbResultError::InternalError("Transaction already finished".to_string())
-				}
-				Some(Error::TxReadonly) => DbResultError::InternalError(
-					"Cannot write to read-only transaction".to_string(),
-				),
-				Some(Error::TxConditionNotMet) => {
-					DbResultError::InternalError("Transaction condition not met".to_string())
-				}
-				Some(Error::TxKeyAlreadyExists) => {
-					DbResultError::InternalError("Key already exists in transaction".to_string())
-				}
-				Some(Error::TxRetryable) => {
-					DbResultError::InternalError("Transaction conflict, retry required".to_string())
+				Some(Error::Kvs(kvs_err)) => {
+					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
 				}
 				Some(Error::NsEmpty) => {
 					DbResultError::InvalidParams("No namespace specified".to_string())
@@ -1521,7 +1845,9 @@ impl Datastore {
 				Some(Error::Channel(msg)) => {
 					DbResultError::InternalError(format!("Channel error: {}", msg))
 				}
-				Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+				Some(Error::QueryTimedout(timeout)) => {
+					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
+				}
 				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 				Some(Error::QueryNotExecuted {
 					message,
@@ -1591,9 +1917,6 @@ impl Datastore {
 				Some(Error::TimestampOverflow(msg)) => {
 					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
 				}
-				Some(Error::CorruptedVersionstampInKey(_)) => {
-					DbResultError::InternalError("Corrupted versionstamp in key".to_string())
-				}
 				Some(Error::NoRecordFound) => {
 					DbResultError::InternalError("No record found".to_string())
 				}
@@ -1620,81 +1943,13 @@ impl Datastore {
 		})
 	}
 
-	/// Ensure a SQL [`Value`] is fully computed
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(
-		&self,
-		val: Expr,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> Result<Value> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can compute values when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "compute".to_string(),
-				resource: "value".to_string(),
-			})
-		})?;
-
-		// Create a new memory stack
-		let mut stack = TreeStack::new();
-		// Create a new query options
-		let opt = self.setup_options(sess);
-		// Create a default context
-		let mut ctx = MutableContext::default();
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout)?;
-		}
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into())?;
-		}
-		let txn_type = if val.read_only() {
-			TransactionType::Read
-		} else {
-			TransactionType::Write
-		};
-		// Start a new transaction
-		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
-		// Store the transaction
-		ctx.set_transaction(txn.clone());
-		// Freeze the context
-		let ctx = ctx.freeze();
-		// Compute the value
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
-		// Store any data
-		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
-			// If the compute was successful, then commit if writeable
-			txn.commit().await?
-		} else {
-			// Cancel if the compute was an error, or if readonly
-			txn.cancel().await?
-		};
-		// Return result
-		res
-	}
-
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(
+	pub(crate) async fn evaluate(
 		&self,
 		val: &Expr,
 		sess: &Session,
@@ -1707,11 +1962,11 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
+		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
@@ -1848,19 +2103,17 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::default()
-			.with_id(self.id)
+		Options::new(self.id, self.dynamic_configuration.clone())
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
 
-	pub fn setup_ctx(&self) -> Result<MutableContext> {
-		let mut ctx = MutableContext::from_ds(
-			self.query_timeout,
+	pub fn setup_ctx(&self) -> Result<Context> {
+		let mut ctx = Context::from_ds(
+			self.dynamic_configuration.get_query_timeout(),
 			self.slow_log.clone(),
 			self.capabilities.clone(),
 			self.index_stores.clone(),
@@ -1870,6 +2123,8 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {
@@ -1893,33 +2148,37 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
+		ctx: Option<&Context>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
 	) -> std::result::Result<QueryResult, DbResultError> {
+		let new_tx = || async {
+			self.transaction(Write, Optimistic)
+				.await
+				.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+		let commit_tx = |txn: Transaction| async move {
+			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+
 		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.ns = Some(ns);
 				session.db = Some(db);
 			}
 			(Some(ns), None) => {
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.get_or_add_ns(ctx, &ns)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.get_or_add_ns(&ns, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
@@ -1928,14 +2187,11 @@ impl Datastore {
 						"Cannot use database without namespace".to_string(),
 					));
 				};
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.db = Some(db);
 			}
 			(None, None) => {
@@ -1965,18 +2221,6 @@ impl Datastore {
 		Ok(model)
 	}
 
-	/// Get a table by name.
-	///
-	/// TODO: This should not be public, but it is used in `src/net/key.rs`.
-	pub async fn ensure_tb_exists(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
-		let tx = self.transaction(TransactionType::Read, LockType::Optimistic).await?;
-
-		tx.expect_tb_by_name(ns, db, tb).await?;
-		tx.cancel().await?;
-
-		Ok(())
-	}
-
 	/// Invoke an API handler.
 	///
 	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
@@ -2000,7 +2244,7 @@ impl Datastore {
 	{
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
-		let db = tx.ensure_ns_db(ns, db, false).await?;
+		let db = tx.ensure_ns_db(None, ns, db).await?;
 
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
@@ -2063,9 +2307,10 @@ impl Datastore {
 		let model = DefineModelStatement {
 			name: name.to_string(),
 			version: version.to_string(),
-			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			comment: Expr::Literal(Literal::String(description.to_string())),
 			hash,
-			..Default::default()
+			kind: Default::default(),
+			permissions: Default::default(),
 		};
 
 		let q = LogicalPlan {
@@ -2085,6 +2330,7 @@ mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
 	use crate::types::{PublicValue, PublicVariables};
+	use crate::val::TableName;
 
 	#[tokio::test]
 	async fn test_setup_superuser() {
@@ -2163,17 +2409,15 @@ mod test {
 
 		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
 
-		let opt = Options::default()
-			.with_id(dbs.id)
+		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)
-			.with_strict(false)
 			.with_auth_enabled(false)
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
@@ -2203,81 +2447,101 @@ mod test {
 		let cache = ds.get_cache();
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
-		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-		let db = txn.ensure_ns_db("test", "test", false).await?;
-		drop(txn);
+		let db = {
+			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+			let db = txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+			db
+		};
 
 		// Define the table, set the initial uuids
-		let sql = r"DEFINE TABLE test;".to_owned();
-		let res = &mut ds.execute(&sql, &ses, None).await?;
-		assert_eq!(res.len(), 1);
-		res.remove(0).result.unwrap();
-		// Obtain the initial uuids
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let initial_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		txn.cancel().await?;
+		let (initial, initial_live_query_version) = {
+			let sql = r"DEFINE TABLE test;".to_owned();
+			let res = &mut ds.execute(&sql, &ses, None).await?;
+			assert_eq!(res.len(), 1);
+			res.remove(0).result.unwrap();
+			// Obtain the initial uuids
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let tb = TableName::from("test");
+			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let initial_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
+			txn.cancel().await?;
+			(initial, initial_live_query_version)
+		};
 
 		// Define some resources to refresh the UUIDs
-		let sql = r"
+		let lqid = {
+			let sql = r"
 		DEFINE FIELD test ON test;
 		DEFINE EVENT test ON test WHEN {} THEN {};
 		DEFINE TABLE view AS SELECT * FROM test;
 		DEFINE INDEX test ON test FIELDS test;
 		LIVE SELECT * FROM test;
 	"
-		.to_owned();
-		let res = &mut ds.execute(&sql, &ses, None).await?;
-		assert_eq!(res.len(), 5);
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		let lqid = res.remove(0).result?;
-		assert!(matches!(lqid, PublicValue::Uuid(_)));
+			.to_owned();
+			let res = &mut ds.execute(&sql, &ses, None).await?;
+			assert_eq!(res.len(), 5);
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			let lqid = res.remove(0).result?;
+			assert!(matches!(lqid, PublicValue::Uuid(_)));
+			lqid
+		};
+
 		// Obtain the uuids after definitions
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let after_define_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		txn.cancel().await?;
-		// Compare uuids after definitions
-		assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-		assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
-		assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
-		assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
-		assert_ne!(initial_live_query_version, after_define_live_query_version);
+		let (after_define, after_define_live_query_version) = {
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let tb = TableName::from("test");
+			let after_define = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_define_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
+			txn.cancel().await?;
+			// Compare uuids after definitions
+			assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+			assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+			assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+			assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
+			assert_ne!(initial_live_query_version, after_define_live_query_version);
+			(after_define, after_define_live_query_version)
+		};
 
 		// Remove the defined resources to refresh the UUIDs
-		let sql = r"
+		{
+			let sql = r"
 		REMOVE FIELD test ON test;
 		REMOVE EVENT test ON test;
 		REMOVE TABLE view;
 		REMOVE INDEX test ON test;
 		KILL $lqid;
 	"
-		.to_owned();
-		let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
-		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
-		assert_eq!(res.len(), 5);
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
+			.to_owned();
+			let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
+			let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+			assert_eq!(res.len(), 5);
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+		}
 		// Obtain the uuids after definitions
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let after_remove_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		drop(txn);
-		// Compare uuids after definitions
-		assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
-		assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
-		assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
-		assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-		assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		{
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let tb = TableName::from("test");
+			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_remove_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
+			drop(txn);
+			// Compare uuids after definitions
+			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
+			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
+			assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
+			assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
+			assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		}
 		//
 		Ok(())
 	}

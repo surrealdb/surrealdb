@@ -1,6 +1,8 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::EscapeKwFreeIdent;
 use crate::types::PublicDatetime;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -38,28 +40,27 @@ pub struct ShowStatement {
 	pub limit: Option<u32>,
 }
 
-impl fmt::Display for ShowStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SHOW CHANGES FOR")?;
+impl ToSql for ShowStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "SHOW CHANGES FOR");
 		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", v)?,
-			None => write!(f, " DATABASE")?,
+			Some(ref v) => write_sql!(f, fmt, " TABLE {}", EscapeKwFreeIdent(v)),
+			None => write_sql!(f, fmt, " DATABASE"),
 		}
 		match self.since {
-			ShowSince::Timestamp(ref v) => write!(f, " SINCE {}", v)?,
-			ShowSince::Versionstamp(ref v) => write!(f, " SINCE {}", v)?,
+			ShowSince::Timestamp(ref v) => write_sql!(f, fmt, " SINCE {}", v),
+			ShowSince::Versionstamp(ref v) => write_sql!(f, fmt, " SINCE {}", v),
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " LIMIT {}", v)?
+			write_sql!(f, fmt, " LIMIT {}", v)
 		}
-		Ok(())
 	}
 }
 
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table,
+			table: v.table.map(TableName::new),
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -69,7 +70,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table,
+			table: v.table.map(TableName::into_string),
 			since: v.since.into(),
 			limit: v.limit,
 		}

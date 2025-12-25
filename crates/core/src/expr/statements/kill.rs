@@ -1,9 +1,8 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -20,10 +19,11 @@ pub(crate) struct KillStatement {
 
 impl KillStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "KillStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -40,13 +40,13 @@ impl KillStatement {
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				})
 			}
 			Ok(id) => id,
 		};
 		// Get the Node ID
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the LIVE ID
 		let lid = lid.0;
 		// Get the transaction
@@ -71,7 +71,7 @@ impl KillStatement {
 			}
 			None => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				});
 			}
 		}
@@ -79,6 +79,7 @@ impl KillStatement {
 			sender
 				.send(PublicNotification::new(
 					lid.into(),
+					None,
 					PublicAction::Killed,
 					PublicValue::None,
 					PublicValue::None,
@@ -87,11 +88,5 @@ impl KillStatement {
 		}
 		// Return the query id
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", self.id)
 	}
 }

@@ -46,9 +46,6 @@ value = "[]"
 [[test.results]]
 value = "NONE"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 DEFINE FIELD connected_to ON utility TYPE option<array<record<house>>> REFERENCE ON DELETE REJECT;
 DEFINE FIELD using ON house COMPUTED <~utility;

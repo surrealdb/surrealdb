@@ -22,7 +22,7 @@ use crate::catalog::{FullTextParams, Scoring};
 /// - Efficient term frequency tracking
 /// - Document length normalization
 /// - Compaction of index data
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
@@ -146,7 +146,6 @@ impl FullTextIndex {
 	/// This method retrieves the analyzer from the database and then calls
 	/// `with_analyzer`
 	pub(crate) async fn new(
-		nid: Uuid,
 		ixs: &IndexStores,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
@@ -154,7 +153,7 @@ impl FullTextIndex {
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer).await?;
 		ixs.mappers().check(&az).await?;
-		Self::with_analyzer(nid, ixs, az, ikb, p)
+		Self::with_analyzer(ixs, az, ikb, p)
 	}
 
 	/// Creates a new full-text index with the specified analyzer
@@ -162,7 +161,6 @@ impl FullTextIndex {
 	/// This method initializes the index with the provided analyzer and
 	/// parameters
 	fn with_analyzer(
-		nid: Uuid,
 		ixs: &IndexStores,
 		az: Arc<catalog::AnalyzerDefinition>,
 		ikb: IndexKeyBase,
@@ -183,7 +181,7 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.highlight,
-			doc_ids: SeqDocIds::new(nid, ikb.clone()),
+			doc_ids: SeqDocIds::new(ikb.clone()),
 			ikb,
 			bm25,
 		})
@@ -196,7 +194,7 @@ impl FullTextIndex {
 	pub(crate) async fn remove_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		content: Vec<Value>,
@@ -207,7 +205,7 @@ impl FullTextIndex {
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
@@ -236,7 +234,7 @@ impl FullTextIndex {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
-					let key = self.ikb.new_dc_with_id(doc_id, opt.id()?, Uuid::now_v7());
+					let key = self.ikb.new_dc_with_id(doc_id, opt.id(), Uuid::now_v7());
 					tx.put(&key, &dcl, None).await?;
 					*require_compaction = true;
 				}
@@ -250,7 +248,7 @@ impl FullTextIndex {
 	/// This method assumes that remove_content has been called previously,
 	/// as it does not remove the content (terms) but only removes the doc_id
 	/// reference.
-	pub(crate) async fn remove_doc(&self, ctx: &Context, doc_id: DocId) -> Result<()> {
+	pub(crate) async fn remove_doc(&self, ctx: &FrozenContext, doc_id: DocId) -> Result<()> {
 		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
 	}
 
@@ -262,14 +260,14 @@ impl FullTextIndex {
 	pub(crate) async fn index_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		content: Vec<Value>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		let nid = opt.id()?;
+		let nid = opt.id();
 		// Get the doc id (if it exists)
 		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
 		// Collect the tokens.
@@ -287,7 +285,7 @@ impl FullTextIndex {
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id()?, Uuid::now_v7());
+			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id(), Uuid::now_v7());
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
@@ -361,7 +359,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		query_string: String,
 	) -> Result<QueryTerms> {
@@ -397,7 +395,7 @@ impl FullTextIndex {
 	pub(in crate::idx) async fn matches_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		qt: &QueryTerms,
 		bo: BooleanOperator,
@@ -557,10 +555,10 @@ impl FullTextIndex {
 		};
 
 		// Create and return an iterator if we have matching documents
-		if let Some(hits) = hits {
-			if !hits.is_empty() {
-				return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
-			}
+		if let Some(hits) = hits
+			&& !hits.is_empty()
+		{
+			return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
 		}
 
 		// No documents match the terms
@@ -630,12 +628,12 @@ impl FullTextIndex {
 		tx: &Transaction,
 		rid: &RecordId,
 	) -> Result<Option<DocId>> {
-		if rid.table != self.ikb.table() {
+		if rid.table != *self.ikb.table() {
 			return Ok(None);
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
-	pub(in crate::idx) async fn new_scorer(&self, ctx: &Context) -> Result<Option<Scorer>> {
+	pub(in crate::idx) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
@@ -668,11 +666,11 @@ impl FullTextIndex {
 			dlc.total_docs_length += st.total_docs_length;
 			has_log = true;
 		}
-		if let Some(compact_log) = compact_log {
-			if has_log {
-				tx.delr(range).await?;
-				*compact_log = true;
-			}
+		if let Some(compact_log) = compact_log
+			&& has_log
+		{
+			tx.delr(range).await?;
+			*compact_log = true;
 		}
 		Ok(dlc)
 	}
@@ -822,7 +820,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 		for doc_id in self.iter.by_ref() {
 			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
 				let rid = RecordId {
-					table: self.ikb.table().to_string(),
+					table: self.ikb.table().clone(),
 					key,
 				};
 				return Ok(Some((rid, doc_id)));
@@ -878,16 +876,14 @@ impl Scorer {
 		let tl = qt.tokens.list();
 		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0) as f64;
 		for (i, d) in qt.docs.iter().enumerate() {
-			if let Some(docs) = d {
-				if docs.contains(doc_id) {
-					if let Some(token) = tl.get(i) {
-						let term = qt.tokens.get_token_string(token)?;
-						let td = fti.get_term_document(tx, doc_id, term).await?;
-						if let Some(td) = td {
-							sc +=
-								self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
-						}
-					}
+			if let Some(docs) = d
+				&& docs.contains(doc_id)
+				&& let Some(token) = tl.get(i)
+			{
+				let term = qt.tokens.get_token_string(token)?;
+				let td = fti.get_term_document(tx, doc_id, term).await?;
+				if let Some(td) = td {
+					sc += self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
 				}
 			}
 		}
@@ -951,7 +947,8 @@ mod tests {
 
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
-	use crate::ctx::{Context, MutableContext};
+	use crate::cnf::dynamic::DynamicConfiguration;
+	use crate::ctx::{Context, FrozenContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
@@ -965,7 +962,7 @@ mod tests {
 
 	#[derive(Clone)]
 	struct TestContext {
-		ctx: Context,
+		ctx: FrozenContext,
 		opt: Options,
 		nid: Uuid,
 		start: Arc<Instant>,
@@ -988,7 +985,7 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::default();
+			let opts = Options::new(ds.id(), DynamicConfiguration::default());
 			let stk_ctx = ctx.clone();
 			let az = stack
 				.enter(|stk| async move {
@@ -1033,21 +1030,14 @@ mod tests {
 				scoring: Default::default(),
 				highlight: true,
 			});
-			let nid = Uuid::from_u128(1);
-			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
-			let opt = Options::default()
-				.with_id(nid)
+			let nid = Uuid::new_v4();
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
+			let opt = Options::new(nid, DynamicConfiguration::default())
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
-				FullTextIndex::with_analyzer(
-					nid,
-					ctx.get_index_stores(),
-					az.clone(),
-					ikb.clone(),
-					&ft_params,
-				)
-				.unwrap(),
+				FullTextIndex::with_analyzer(ctx.get_index_stores(), az, ikb.clone(), &ft_params)
+					.unwrap(),
 			);
 			let start = Arc::new(Instant::now());
 			Self {
@@ -1067,7 +1057,7 @@ mod tests {
 		}
 
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
-			let mut ctx = MutableContext::new(&self.ctx);
+			let mut ctx = Context::new(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
 			let ctx = ctx.freeze();
@@ -1177,8 +1167,8 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc1".to_owned()));
-		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc2".to_owned()));
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

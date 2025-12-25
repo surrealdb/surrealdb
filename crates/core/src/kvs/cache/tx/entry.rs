@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::catalog;
+use crate::catalog::{self, Record};
 use crate::dbs::node::Node;
-use crate::val::record::Record;
 
 #[derive(Clone)]
 pub(crate) enum Entry {
@@ -45,6 +44,8 @@ pub(crate) enum Entry {
 	Dus(Arc<[catalog::UserDefinition]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[catalog::FunctionDefinition]>),
+	/// A slice of DefineModuleStatement specified on a database.
+	Mds(Arc<[catalog::ModuleDefinition]>),
 	/// A slice of TableDefinition specified on a database.
 	Tbs(Arc<[catalog::TableDefinition]>),
 	/// A slice of DefineModelStatement specified on a database.
@@ -216,6 +217,15 @@ impl Entry {
 		match self {
 			Entry::Fcs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Fcs"),
+		}
+	}
+
+	/// Converts this cache entry into a slice of [`catalog::ModuleDefinition`].
+	/// This panics if called on a cache entry that is not an [`Entry::Mds`].
+	pub(crate) fn try_into_mds(self) -> Result<Arc<[catalog::ModuleDefinition]>> {
+		match self {
+			Entry::Mds(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Mds"),
 		}
 	}
 	/// Converts this cache entry into a slice of [`DefineParamStatement`].

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 
 use std::collections::BTreeSet;
@@ -27,16 +29,13 @@ async fn concurrent_task_asc(ds: Arc<Datastore>, seq: &str, count: usize) -> Has
 
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_sequence_next_val() -> Result<()> {
-	let ds = Arc::new(new_ds().await?);
+	let ds = Arc::new(new_ds("test", "test").await?);
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Create the sequence
 	let res = &mut ds
-		.execute(
-			"DEFINE SEQUENCE sq1 START -250; DEFINE SEQUENCE sq2 BATCH 50; DEFINE SEQUENCE sq3 BATCH 10 START 1000;",
-			&ses,
-			None,
-		)
+		.execute("DEFINE SEQUENCE sq1 START -250; DEFINE SEQUENCE sq2 BATCH 50; DEFINE SEQUENCE sq3 BATCH 10 START 1000;",
+			&ses, None)
 		.await?;
 	skip_ok(res, 3)?;
 
@@ -83,7 +82,7 @@ async fn concurrent_sequence_next_val() -> Result<()> {
 
 #[tokio::test]
 async fn sequence_next_val_after_restart() -> Result<()> {
-	let ds = new_ds().await?;
+	let ds = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Create the sequence

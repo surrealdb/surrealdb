@@ -31,7 +31,9 @@ impl Parser<'_> {
 				let v = self.next_token_value()?;
 				match v {
 					NumberToken::Float(f) => Ok(Expr::Literal(Literal::Float(f))),
-					NumberToken::Integer(i) => Ok(Expr::Literal(Literal::Integer(i))),
+					NumberToken::Integer(i) => {
+						Ok(Expr::Literal(Literal::Integer(i.into_int(token.span)?)))
+					}
 					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
 				}
 			}
@@ -39,9 +41,12 @@ impl Parser<'_> {
 			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
+				self.last_span = value.span;
 				let v = match value.value {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
-					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
+					compound::Numeric::Integer(x) => {
+						Expr::Literal(Literal::Integer(x.into_int(value.span)?))
+					}
 					compound::Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
 					compound::Numeric::Duration(x) => {
 						Expr::Literal(Literal::Duration(PublicDuration::from(x)))
@@ -87,13 +92,6 @@ impl Parser<'_> {
 				let peek = self.peek_whitespace();
 				if peek.kind == t!("~") {
 					self.pop_peek();
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `<~` reference lookup is still experimental"
-						)
-					}
-
 					let lookup =
 						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
@@ -108,7 +106,7 @@ impl Parser<'_> {
 						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 				} else {
-					unexpected!(self, token, "expected either a `<-` or a future")
+					unexpected!(self, token, "`<-`, `<->` or `<~`")
 				}
 			}
 			t!("r\"") | t!("r'") => {
@@ -204,6 +202,14 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_custom_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
+			t!("mod") => {
+				self.pop_peek();
+				self.parse_module_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+			}
+			t!("silo") => {
+				self.pop_peek();
+				self.parse_silo_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+			}
 			t!("ml") => {
 				self.pop_peek();
 				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
@@ -211,7 +217,7 @@ impl Parser<'_> {
 			t!("IF") => {
 				self.pop_peek();
 				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Expr::If(Box::new(stmt))
+				Expr::IfElse(Box::new(stmt))
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -365,6 +371,7 @@ impl Parser<'_> {
 				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
 				exprs.push(value);
 
+
 				if !this.eat(t!(",")) {
 					this.expect_closing_delimiter(t!("]"), start)?;
 					break;
@@ -506,7 +513,12 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		let peek = self.peek();
 		let res = match peek.kind {
-			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
+			TokenKind::NaN
+			| TokenKind::Infinity
+			| TokenKind::Digits
+			| TokenKind::Glued(Glued::Number)
+			| t!("+")
+			| t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
 					let number_span = self.peek().span;
 					let number = self.next_token_value::<Numeric>()?;
@@ -518,12 +530,8 @@ impl Parser<'_> {
 							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
 								@number_span => "Coordinate numbers can't be NaN or a decimal");
 						}
-						Numeric::Float(x) if x.is_nan() => {
-							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
-								@number_span => "Coordinate numbers can't be NaN or a decimal");
-						}
 						Numeric::Float(x) => x,
-						Numeric::Integer(x) => x as f64,
+						Numeric::Integer(x) => x.into_int(number_span)? as f64,
 					};
 
 					let y = self.next_token_value::<f64>()?;
@@ -538,14 +546,14 @@ impl Parser<'_> {
 			_ => stk.run(|ctx| self.parse_expr_inherit(ctx)).await?,
 		};
 		let token = self.peek();
-		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-			if let Expr::Idiom(Idiom(ref idiom)) = res {
-				if idiom.len() == 1 {
-					bail!("Unexpected token `{}` expected `)`",peek.kind,
-					@token.span,
-					@peek.span => "This is a reserved keyword here and can't be an identifier");
-				}
-			}
+		if token.kind != t!(")")
+			&& Self::starts_disallowed_subquery_statement(peek.kind)
+			&& let Expr::Idiom(Idiom(ref idiom)) = res
+			&& idiom.len() == 1
+		{
+			bail!("Unexpected token `{}` expected `)`",peek.kind,
+			@token.span,
+			@peek.span => "This is a reserved keyword here and can't be an identifier");
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
 		Ok(res)
@@ -607,6 +615,8 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::*;
 	use crate::syn;
 
@@ -614,21 +624,21 @@ mod tests {
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("1 + 2 + 3", format!("{}", out))
+		assert_eq!("1 + 2 + 3", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("IF true THEN false END", format!("{}", out))
+		assert_eq!("IF true THEN false END", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_select_statement() {
 		let sql = "(SELECT * FROM test)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("SELECT * FROM test", format!("{}", out))
+		assert_eq!("SELECT * FROM test", out.to_sql())
 	}
 
 	#[test]
@@ -636,8 +646,8 @@ mod tests {
 		let sql = "(DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1))";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
-			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN CREATE x SET y = 1",
-			format!("{}", out)
+			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN (CREATE x SET y = 1)",
+			out.to_sql()
 		)
 	}
 
@@ -645,21 +655,21 @@ mod tests {
 	fn subquery_remove_statement() {
 		let sql = "(REMOVE EVENT foo_event ON foo)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("REMOVE EVENT foo_event ON foo", format!("{}", out))
+		assert_eq!("REMOVE EVENT foo_event ON foo", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_insert_statment() {
 		let sql = "(INSERT INTO test [])";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("INSERT INTO test []", format!("{}", out))
+		assert_eq!("INSERT INTO test []", out.to_sql())
 	}
 
 	#[test]
 	fn mock_count() {
 		let sql = "|test:1000|";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("|test:1000|", format!("{}", out));
+		assert_eq!("|test:1000|", out.to_sql());
 		assert_eq!(out, Expr::Mock(Mock::Count(String::from("test"), 1000)));
 	}
 
@@ -667,7 +677,7 @@ mod tests {
 	fn mock_range() {
 		let sql = "|test:1..1000|";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("|test:1..1000|", format!("{}", out));
+		assert_eq!("|test:1..1000|", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Mock(Mock::Range(String::from("test"), TypedRange::from_range(1..1000)))
@@ -678,7 +688,7 @@ mod tests {
 	fn regex_simple() {
 		let sql = "/test/";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("/test/", format!("{}", out));
+		assert_eq!("/test/", out.to_sql());
 		let Expr::Literal(Literal::Regex(regex)) = out else {
 			panic!()
 		};
@@ -689,7 +699,7 @@ mod tests {
 	fn regex_complex() {
 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
+		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", out.to_sql());
 		let Expr::Literal(Literal::Regex(regex)) = out else {
 			panic!()
 		};
@@ -700,25 +710,25 @@ mod tests {
 	fn plain_string() {
 		let sql = r#""hello""#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 
 		let sql = r#"s"hello""#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 
 		let sql = r#"s'hello'"#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 	}
 
 	#[test]
 	fn params() {
 		let sql = "$hello";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("$hello", format!("{}", out));
+		assert_eq!("$hello", out.to_sql());
 
 		let sql = "$__hello";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("$__hello", format!("{}", out));
+		assert_eq!("$__hello", out.to_sql());
 	}
 }

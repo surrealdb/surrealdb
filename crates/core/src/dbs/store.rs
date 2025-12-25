@@ -16,7 +16,7 @@ use crate::err::Error;
 use crate::expr::order::OrderList;
 use crate::val::Value;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
 impl MemoryCollector {
@@ -165,7 +165,17 @@ impl MemoryRandom {
 	}
 
 	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
-		self.result.take().unwrap_or_default()
+		// Return the finalized result if available.
+		if let Some(result) = self.result.take() {
+			return result;
+		}
+		// Otherwise, return the raw values.
+		// This path is reached when no explicit sort() was called (e.g., ORDER BY rand()),
+		// or when the collector was used without finalization. In that case, we assemble
+		// the current values and any pending batch into a single vector.
+		let mut vec = mem::take(&mut self.values);
+		vec.append(&mut mem::take(&mut self.batch));
+		vec
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -269,7 +279,16 @@ impl MemoryOrdered {
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
-		self.result.take().unwrap_or_default()
+		// Return the finalized result if available
+		if let Some(result) = self.result.take() {
+			return result;
+		}
+		// Otherwise, return the raw values.
+		// This path is used when sorting hasn’t been finalized yet; we then assemble
+		// any collected values along with the pending batch into a single vector.
+		let mut vec = mem::take(&mut self.values);
+		vec.append(&mut mem::take(&mut self.batch));
+		vec
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {

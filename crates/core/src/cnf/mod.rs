@@ -1,3 +1,5 @@
+pub(crate) mod dynamic;
+
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
@@ -62,6 +64,11 @@ pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
 
+/// Specifies the number of surrealism modules which can be cached across transactions
+/// (default: 100)
+pub static SURREALISM_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SURREALISM_CACHE_SIZE", usize, 100);
+
 /// The maximum number of keys that should be scanned at once in general queries
 /// (default: 500)
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
@@ -81,6 +88,9 @@ pub static COUNT_BATCH_SIZE: LazyLock<u32> =
 /// (default: 250)
 pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
+
+/// The maximum batch size for Scanner adaptive fetching (default: 10,000)
+pub static MAX_BATCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", u32, 5_000);
 
 /// The maximum size of the priority queue triggering usage of the priority
 /// queue for the result collector.
@@ -162,11 +172,10 @@ pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
 
-/// Whether to output in a form readable for devices like screen and braille
-/// readers For example, by showing ⟨ and ⟩ as `
-pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
-
 /// Specify the USER-AGENT string used by HTTP requests
 pub static SURREALDB_USER_AGENT: LazyLock<String> =
 	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
+
+/// The maximum size of the HNSW vector cache (default: 256 MiB)
+pub static HNSW_CACHE_SIZE: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HNSW_CACHE_SIZE", u64, 256 * 1024 * 1024);

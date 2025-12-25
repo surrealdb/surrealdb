@@ -1,5 +1,8 @@
+#![allow(clippy::unwrap_used)]
+
 use std::future::Future;
 
+use surrealdb::opt::Config;
 use surrealdb::types::{RecordId, SurrealValue};
 use surrealdb::{Connection, Surreal};
 use tokio::sync::SemaphorePermit;
@@ -43,6 +46,7 @@ mod backup_version;
 mod basic;
 mod live;
 mod serialisation;
+mod session_isolation;
 mod version;
 
 const ROOT_USER: &str = "root";
@@ -87,19 +91,19 @@ struct AuthParams {
 trait CreateDb {
 	type Con: Connection;
 
-	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal<Self::Con>);
+	async fn create_db(&self, config: Config) -> (SemaphorePermit<'static>, Surreal<Self::Con>);
 }
 
 impl<F, Fut, C> CreateDb for F
 where
-	F: Fn() -> Fut,
+	F: Fn(Config) -> Fut,
 	Fut: Future<Output = (SemaphorePermit<'static>, Surreal<C>)>,
 	C: Connection,
 {
 	type Con = C;
 
-	async fn create_db(&self) -> (SemaphorePermit<'static>, Surreal<Self::Con>) {
-		(self)().await
+	async fn create_db(&self, config: Config) -> (SemaphorePermit<'static>, Surreal<Self::Con>) {
+		(self)(config).await
 	}
 }
 
@@ -111,6 +115,7 @@ mod ws {
 	use futures::poll;
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::ws::{Client, Ws};
+	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use surrealdb_types::SurrealValue;
 	use tokio::sync::{Semaphore, SemaphorePermit};
@@ -120,9 +125,9 @@ mod ws {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -198,13 +203,21 @@ mod ws {
 	/// and tests various message sizes including edge cases.
 	#[test_log::test(tokio::test)]
 	async fn check_max_size() {
+		use std::fmt;
+
 		use surrealdb::opt::{Config, WebsocketConfig};
 		use ulid::Ulid;
 
 		/// Test content structure for validating large message handling
-		#[derive(Debug, Clone, SurrealValue, PartialEq)]
+		#[derive(Clone, SurrealValue, PartialEq)]
 		struct Content {
 			content: String,
+		}
+
+		impl fmt::Debug for Content {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				write!(f, "Content {{ content: \"...\" }}")
+			}
 		}
 
 		impl Content {
@@ -217,7 +230,7 @@ mod ws {
 		}
 
 		// Set a 256 MiB limit for testing large message handling
-		let max_size = 256 << 20;
+		let max_size = 128 << 20;
 
 		let permit = PERMITS.acquire().await.unwrap();
 		// Configure WebSocket with custom size limits for testing
@@ -263,7 +276,7 @@ mod ws {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live);
+	include_tests!(new_db => basic, serialisation, live, session_isolation);
 }
 
 #[cfg(feature = "protocol-http")]
@@ -271,6 +284,7 @@ mod http {
 
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::http::{Client, Http};
+	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
@@ -278,9 +292,9 @@ mod http {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Client>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
+		let db = Surreal::new::<Http>(("127.0.0.1:8000", config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -297,7 +311,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-mem")]
@@ -316,13 +330,13 @@ mod mem {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
+		let config = config.user(root.clone());
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -403,20 +417,20 @@ mod mem {
 	async fn experimental_features() {
 		let surql = "
 		    USE NAMESPACE namespace DATABASE database;
-			DEFINE FIELD using ON house TYPE record<utility> REFERENCE ON DELETE CASCADE;
+			DEFINE API \"/\" FOR any THEN {};
 		";
 		// Experimental features are rejected by default
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
 		// Experimental features can be allowed
-		let capabilities = Capabilities::new()
-			.with_experimental_feature_allowed(ExperimentalFeature::RecordReferences);
+		let capabilities =
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::DefineApi);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -425,7 +439,6 @@ mod rocksdb {
 	use surrealdb::engine::local::{Db, RocksDb};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
 
@@ -433,14 +446,14 @@ mod rocksdb {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
+		let config = config.user(root.clone());
 		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -463,7 +476,7 @@ mod rocksdb {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -472,20 +485,19 @@ mod tikv {
 	use surrealdb::engine::local::{Db, TiKv};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
+		let config = config.user(root.clone());
 		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -498,37 +510,7 @@ mod tikv {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
-}
-
-#[cfg(feature = "kv-fdb")]
-mod fdb {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, FDb};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
-		let path = "/etc/foundationdb/fdb.cluster";
-		surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone())).await.unwrap();
-		let db = Surreal::new::<FDb>((path, config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -537,7 +519,6 @@ mod surrealkv {
 	use surrealdb::engine::local::{Db, SurrealKv};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
 
@@ -545,14 +526,14 @@ mod surrealkv {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
+		let config = config.user(root.clone());
 		let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -577,7 +558,7 @@ mod surrealkv {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -586,7 +567,6 @@ mod surrealkv_versioned {
 	use surrealdb::engine::local::{Db, SurrealKv};
 	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::Capabilities;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 	use ulid::Ulid;
 
@@ -594,14 +574,14 @@ mod surrealkv_versioned {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
+		let config = config.user(root.clone());
 		let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -626,13 +606,14 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version);
+	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version, session_isolation);
 }
 
 #[cfg(feature = "protocol-http")]
 mod any {
 	use surrealdb::Surreal;
 	use surrealdb::engine::any::Any;
+	use surrealdb::opt::Config;
 	use surrealdb::opt::auth::Root;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
@@ -640,9 +621,9 @@ mod any {
 
 	static PERMITS: Semaphore = Semaphore::const_new(1);
 
-	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Any>) {
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Any>) {
 		let permit = PERMITS.acquire().await.unwrap();
-		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		let db = surrealdb::engine::any::connect(("http://127.0.0.1:8000", config)).await.unwrap();
 		db.signin(Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
@@ -652,5 +633,5 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
 }

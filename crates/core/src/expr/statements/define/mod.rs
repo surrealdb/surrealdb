@@ -9,13 +9,12 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
 mod table;
 mod user;
-
-use std::fmt::{self, Display};
 
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
@@ -30,6 +29,7 @@ pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(in crate::expr::statements) use index::run_indexing;
 pub(crate) use model::DefineModelStatement;
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 use reblessive::tree::Stk;
@@ -37,11 +37,9 @@ pub(crate) use sequence::DefineSequenceStatement;
 pub(crate) use table::DefineTableStatement;
 pub(crate) use user::DefineUserStatement;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -70,14 +68,16 @@ pub(crate) enum DefineStatement {
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	Module(DefineModuleStatement),
 }
 
 impl DefineStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -98,55 +98,7 @@ impl DefineStatement {
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl VisitExpression for DefineStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			DefineStatement::Namespace(namespace) => namespace.visit(visitor),
-			DefineStatement::Database(database) => database.visit(visitor),
-			DefineStatement::Function(function) => function.visit(visitor),
-			DefineStatement::Analyzer(analyzer) => analyzer.visit(visitor),
-			DefineStatement::Param(param) => param.visit(visitor),
-			DefineStatement::Table(table) => table.visit(visitor),
-			DefineStatement::Event(event) => event.visit(visitor),
-			DefineStatement::Field(field) => field.visit(visitor),
-			DefineStatement::Index(index) => index.visit(visitor),
-			DefineStatement::User(user) => user.visit(visitor),
-			DefineStatement::Model(model) => model.visit(visitor),
-			DefineStatement::Access(access) => access.visit(visitor),
-			DefineStatement::Config(_) => {}
-			DefineStatement::Api(api) => api.visit(visitor),
-			DefineStatement::Bucket(bucket) => bucket.visit(visitor),
-			DefineStatement::Sequence(sequence) => sequence.visit(visitor),
-		}
-	}
-}
-
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Config(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }

@@ -18,7 +18,7 @@ async fn statement_timeouts() -> Result<()> {
 		SELECT * FROM person TIMEOUT 0s;
 		DELETE person:test TIMEOUT 0s;
 	";
-	let error = "The query was not executed because it exceeded the timeout";
+	let error = "The query was not executed because it exceeded the timeout: 0ns";
 	Test::new(sql)
 		.await?
 		.expect_val("{ id: person:ok, test: true }")?
@@ -44,7 +44,7 @@ async fn query_timeout() -> Result<()> {
 			}
 		}
 	";
-	let ds = new_ds().await?.with_query_timeout(Some(Duration::from_millis(500)));
+	let ds = new_ds("test", "test").await?.with_query_timeout(Some(Duration::from_millis(500)));
 	let session = Session::owner();
 	let before = Instant::now();
 	let mut res = ds.execute(sql, &session, None).await.unwrap();

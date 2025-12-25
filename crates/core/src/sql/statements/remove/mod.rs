@@ -1,4 +1,5 @@
 mod access;
+use surrealdb_types::{SqlFormat, ToSql};
 mod analyzer;
 mod api;
 mod bucket;
@@ -8,13 +9,12 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
 mod table;
 mod user;
-
-use std::fmt::{self, Display, Formatter};
 
 pub(crate) use access::RemoveAccessStatement;
 pub(crate) use analyzer::RemoveAnalyzerStatement;
@@ -26,6 +26,7 @@ pub(crate) use field::RemoveFieldStatement;
 pub(crate) use function::RemoveFunctionStatement;
 pub(crate) use index::RemoveIndexStatement;
 pub(crate) use model::RemoveModelStatement;
+pub(crate) use module::RemoveModuleStatement;
 pub(crate) use namespace::RemoveNamespaceStatement;
 pub(crate) use param::RemoveParamStatement;
 pub(crate) use sequence::RemoveSequenceStatement;
@@ -46,30 +47,33 @@ pub(crate) enum RemoveStatement {
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(RemoveModelStatement),
 	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
+	Module(RemoveModuleStatement),
 }
 
-impl Display for RemoveStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for RemoveStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Model(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -92,6 +96,7 @@ impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 			RemoveStatement::Api(v) => Self::Api(v.into()),
 			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+			RemoveStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }
@@ -114,6 +119,7 @@ impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
 			crate::expr::statements::RemoveStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::RemoveStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }

@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -12,6 +11,7 @@ use crate::conn::Command;
 use crate::err::Error;
 use crate::method::{BoxFuture, Content, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// An insert future
@@ -77,11 +77,14 @@ macro_rules! into_future {
 				};
 
 				router
-					.$method(Command::RawQuery {
-						txn,
-						query,
-						variables,
-					})
+					.$method(
+						client.session_id,
+						Command::Query {
+							txn,
+							query,
+							variables,
+						},
+					)
 					.await
 			})
 		}
@@ -171,7 +174,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,
@@ -188,7 +191,7 @@ where
 	/// Specifies the data to insert into the table
 	pub fn relation<D>(self, data: D) -> InsertRelation<'r, C, R>
 	where
-		D: SurrealValue + 'static,
+		D: SurrealValue,
 	{
 		InsertRelation::from_closure(self.client, || {
 			let mut data = data.into_value();
@@ -224,7 +227,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,

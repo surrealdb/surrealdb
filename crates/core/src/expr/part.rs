@@ -1,21 +1,18 @@
-use std::fmt;
-use std::fmt::Write;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -136,85 +133,20 @@ impl Part {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::Start(v) => v.to_raw_string(),
-			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v)),
-			_ => self.to_string(),
+			Part::Field(v) => {
+				let mut s = ".".to_string();
+				EscapeKwFreeIdent(v).fmt_sql(&mut s, SqlFormat::SingleLine);
+				s
+			}
+			_ => self.to_sql(),
 		}
 	}
 }
 
-impl VisitExpression for Part {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Part::Lookup(lookup) => {
-				lookup.visit(visitor);
-			}
-			Part::Value(expr) | Part::Start(expr) | Part::Where(expr) => {
-				expr.visit(visitor);
-			}
-			Part::Method(_, x) => {
-				x.iter().for_each(|expr| expr.visit(visitor));
-			}
-			Part::Destructure(x) => {
-				x.iter().for_each(|part| part.visit(visitor));
-			}
-			Part::Recurse(_, idiom, instruction) => {
-				idiom.iter().for_each(|idiom| idiom.visit(visitor));
-				instruction.iter().for_each(|instruction| instruction.visit(visitor));
-			}
-			_ => {}
-		}
-	}
-}
-
-impl fmt::Display for Part {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Part::All => f.write_str(".*"),
-			Part::Last => f.write_str("[$]"),
-			Part::First => f.write_str("[0]"),
-			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
-			Part::Flatten => f.write_str("…"),
-			Part::Where(v) => write!(f, "[WHERE {v}]"),
-			Part::Lookup(v) => write!(f, "{v}"),
-			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
-			Part::Destructure(v) => {
-				f.write_str(".{")?;
-				if !is_pretty() {
-					f.write_char(' ')?;
-				}
-				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(v))?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			}
-			Part::Optional => write!(f, "?"),
-			Part::Recurse(v, nest, instruction) => {
-				write!(f, ".{{{v}")?;
-				if let Some(instruction) = instruction {
-					write!(f, "+{instruction}")?;
-				}
-				write!(f, "}}")?;
-
-				if let Some(nest) = nest {
-					write!(f, "({nest})")?;
-				}
-
-				Ok(())
-			}
-			Part::Doc => write!(f, "@"),
-			Part::RepeatRecurse => write!(f, ".@"),
-		}
+impl ToSql for Part {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let part: crate::sql::part::Part = self.clone().into();
+		part.fmt_sql(f, fmt);
 	}
 }
 
@@ -238,10 +170,11 @@ pub enum RecursionPlan {
 }
 
 impl<'a> RecursionPlan {
+	#[instrument(level = "trace", name = "RecursionPlan::compute", skip_all)]
 	pub async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
@@ -266,7 +199,7 @@ impl<'a> RecursionPlan {
 	pub async fn compute_inner(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'a>,
@@ -448,28 +381,10 @@ impl DestructurePart {
 	}
 }
 
-impl VisitExpression for DestructurePart {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Self::Aliased(_, idiom) => idiom.visit(visitor),
-			Self::Destructure(_, parts) => parts.iter().for_each(|part| part.visit(visitor)),
-			_ => {}
-		}
-	}
-}
-impl fmt::Display for DestructurePart {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
-			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
-			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", EscapeIdent(fd), Part::Destructure(d.clone()))
-			}
-		}
+impl ToSql for DestructurePart {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::part::DestructurePart = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -509,17 +424,10 @@ impl TryInto<(u32, Option<u32>)> for Recurse {
 	}
 }
 
-impl fmt::Display for Recurse {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Recurse::Fixed(v) => write!(f, "{v}"),
-			Recurse::Range(beg, end) => match (beg, end) {
-				(None, None) => write!(f, ".."),
-				(Some(beg), None) => write!(f, "{beg}.."),
-				(None, Some(end)) => write!(f, "..{end}"),
-				(Some(beg), Some(end)) => write!(f, "{beg}..{end}"),
-			},
-		}
+impl ToSql for Recurse {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let recurse: crate::sql::part::Recurse = self.clone().into();
+		recurse.fmt_sql(f, fmt);
 	}
 }
 
@@ -543,25 +451,10 @@ pub(crate) enum RecurseInstruction {
 	},
 }
 
-impl VisitExpression for RecurseInstruction {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let RecurseInstruction::Shortest {
-			expects,
-			..
-		} = self
-		{
-			expects.visit(visitor);
-		}
-	}
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn walk_paths(
 	stk: &mut Stk,
-	ctx: &Context,
+	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	recursion: Recursion<'_>,
@@ -610,17 +503,17 @@ async fn walk_paths(
 				path.push(step.to_owned());
 				Value::from(path)
 			};
-			if let Some(expects) = expects {
-				if step == expects {
-					let steps = match val {
-						Value::Array(v) => v.0,
-						v => vec![v],
-					};
-					for step in steps {
-						finished.push(step);
-					}
-					return Ok(Value::None);
+			if let Some(expects) = expects
+				&& step == expects
+			{
+				let steps = match val {
+					Value::Array(v) => v.0,
+					v => vec![v],
+				};
+				for step in steps {
+					finished.push(step);
 				}
+				return Ok(Value::None);
 			}
 			if reached_max {
 				if (Option::<&Value>::None).is_none() {
@@ -639,7 +532,7 @@ impl RecurseInstruction {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		rec: Recursion<'_>,
@@ -713,43 +606,9 @@ impl RecurseInstruction {
 	}
 }
 
-impl fmt::Display for RecurseInstruction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Path {
-				inclusive,
-			} => {
-				write!(f, "path")?;
-
-				if *inclusive {
-					write!(f, "+inclusive")?;
-				}
-
-				Ok(())
-			}
-			Self::Collect {
-				inclusive,
-			} => {
-				write!(f, "collect")?;
-
-				if *inclusive {
-					write!(f, "+inclusive")?;
-				}
-
-				Ok(())
-			}
-			Self::Shortest {
-				expects,
-				inclusive,
-			} => {
-				write!(f, "shortest={expects}")?;
-
-				if *inclusive {
-					write!(f, "+inclusive")?;
-				}
-
-				Ok(())
-			}
-		}
+impl ToSql for RecurseInstruction {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::part::RecurseInstruction = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
 use super::args::Optional;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -12,11 +12,20 @@ use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Table, Uuid, Value,
+	RecordIdKeyRange, Set, TableName, Uuid, Value,
 };
+
+/// Returns the type of the value as a string.
+pub fn type_of((val,): (Value,)) -> Result<Value> {
+	Ok(Value::String(val.kind_of().to_string()))
+}
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
+}
+
+pub fn set((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Set>()?.into())
 }
 
 pub fn bool((val,): (Value,)) -> Result<Value> {
@@ -44,7 +53,7 @@ pub fn duration((val,): (Value,)) -> Result<Value> {
 }
 
 pub async fn field(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (String,),
 ) -> Result<Value> {
 	match opt {
@@ -59,7 +68,7 @@ pub async fn field(
 }
 
 pub async fn fields(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(val,): (Vec<String>,),
 ) -> Result<Value> {
 	match opt {
@@ -116,11 +125,15 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 }
 
 pub fn table((val,): (Value,)) -> Result<Value> {
-	let strand = match val {
+	let table_name = match val {
+		Value::Table(t) => t,
 		Value::RecordId(t) => t.table,
-		v => v.into_raw_string(),
+		Value::String(t) => TableName::new(t),
+		v => bail!(Error::TbInvalid {
+			value: v.into_raw_string(),
+		}),
 	};
-	Ok(Value::Table(Table::new(strand)))
+	Ok(Value::Table(table_name))
 }
 
 pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
@@ -164,7 +177,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.into_raw_string(),
+			table: TableName::new(arg1.into_raw_string()),
 		})),
 
 		(arg1, None) => arg1
@@ -183,10 +196,14 @@ pub mod is {
 	use anyhow::Result;
 
 	use crate::fnc::args::Optional;
-	use crate::val::{Geometry, Value};
+	use crate::val::{Geometry, TableName, Value};
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
+	}
+
+	pub fn set((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_set().into())
 	}
 
 	pub fn bool((arg,): (Value,)) -> Result<Value> {
@@ -271,7 +288,10 @@ pub mod is {
 
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[tb]).into(),
+			Some(tb) => {
+				let tb = TableName::new(tb);
+				arg.is_record_type(&[tb]).into()
+			}
 			None => arg.is_record().into(),
 		};
 		Ok(res)

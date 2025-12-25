@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupSubject;
@@ -80,7 +81,7 @@ impl Parser<'_> {
 					if token.kind == t!("$param") {
 						let param = self.next_token_value::<Param>()?;
 						bail!("Unexpected token `$param` expected a record-id key",
-							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident,param);
+							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident, param.to_sql());
 					}
 
 					// we haven't matched anything so far so we still want any type of id.
@@ -138,22 +139,36 @@ impl Parser<'_> {
 	pub(crate) async fn parse_lookup_subject(
 		&mut self,
 		stk: &mut Stk,
+		supports_referencing_field: bool,
 	) -> ParseResult<LookupSubject> {
-		let tb = self.parse_ident()?;
+		let table = self.parse_ident()?;
 		if self.eat_whitespace(t!(":")) {
-			let rng = self.parse_id_range(stk).await?;
-			Ok(LookupSubject::Range(tb, rng))
+			let range = self.parse_id_range(stk).await?;
+			let referencing_field =
+				self.parse_referencing_field(supports_referencing_field).await?;
+
+			Ok(LookupSubject::Range {
+				table,
+				range,
+				referencing_field,
+			})
 		} else {
-			Ok(LookupSubject::Table(tb))
+			Ok(LookupSubject::Table {
+				table,
+				referencing_field: self.parse_referencing_field(supports_referencing_field).await?,
+			})
 		}
 	}
 
-	pub(crate) async fn parse_record_id_with_range(
+	pub(crate) async fn parse_referencing_field(
 		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<RecordIdLit> {
-		let ident = self.parse_ident()?;
-		self.parse_record_id_or_range(stk, ident).await
+		supports_referencing_field: bool,
+	) -> ParseResult<Option<String>> {
+		if supports_referencing_field && self.eat(t!("FIELD")) {
+			Ok(Some(self.parse_ident()?))
+		} else {
+			Ok(None)
+		}
 	}
 
 	pub(crate) async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
@@ -272,7 +287,7 @@ impl Parser<'_> {
 					unexpected!(self, token, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).unwrap();
+				let text = String::from_utf8(slice.to_vec()).expect("parser validated utf8");
 				// Safety: Parser guarentees no null bytes present in string.
 				Ok(RecordIdKeyLit::String(text))
 			}
@@ -347,11 +362,11 @@ mod tests {
 		let sql = "test:id";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -362,11 +377,11 @@ mod tests {
 		let sql = "test:001";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -380,7 +395,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(i64::MIN),
 			}
 		);
@@ -394,7 +409,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(i64::MAX),
 			}
 		);
@@ -409,7 +424,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String(max_str),
 			}
 		);
@@ -424,7 +439,7 @@ mod tests {
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String(min_str),
 			}
 		);
@@ -437,11 +452,11 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -451,11 +466,11 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Number(1),
 			}
 		);
@@ -466,11 +481,11 @@ mod tests {
 		let sql = "`test`:`id`";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -481,11 +496,11 @@ mod tests {
 		let sql = "⟨test⟩:⟨id⟩";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::String("id".to_owned()),
 			}
 		);
@@ -496,11 +511,11 @@ mod tests {
 		let sql = "test:{ location: 'GBR', year: 2022 }";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Object(vec![
 					sql::literal::ObjectEntry {
 						key: "location".to_string(),
@@ -520,11 +535,11 @@ mod tests {
 		let sql = "test:['GBR', 2022]";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
-				table: String::from("test"),
+				table: "test".into(),
 				key: RecordIdKeyLit::Array(vec![
 					sql::Expr::Literal(sql::Literal::String("GBR".to_owned())),
 					sql::Expr::Literal(sql::Literal::Integer(2022)),

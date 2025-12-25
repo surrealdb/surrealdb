@@ -1,17 +1,16 @@
-use std::fmt;
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{RecordId, ToSql, write_sql};
+use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::operator::BindingPower;
+use crate::expr::closure::ClosureExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -23,10 +22,9 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
 use crate::types::PublicValue;
-use crate::val::{Array, Closure, Range, Table, Value};
+use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
@@ -34,7 +32,7 @@ pub(crate) enum Expr {
 	Param(Param),
 	Idiom(Idiom),
 	// Maybe move into Literal?
-	Table(String),
+	Table(TableName),
 	// This type can probably be removed in favour of range expressions.
 	Mock(Mock),
 	Block(Box<Block>),
@@ -55,7 +53,7 @@ pub(crate) enum Expr {
 	// TODO: Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
 
-	Closure(Box<Closure>),
+	Closure(Box<ClosureExpr>),
 
 	Break,
 	Continue,
@@ -142,28 +140,32 @@ impl Expr {
 			},
 			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s)),
 			surrealdb_types::Value::Bytes(b) => {
-				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.inner().clone())))
+				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.into_inner())))
 			}
 			surrealdb_types::Value::Duration(d) => {
-				Expr::Literal(Literal::Duration(crate::val::Duration(d.inner())))
+				Expr::Literal(Literal::Duration(crate::val::Duration(d.into_inner())))
 			}
-			surrealdb_types::Value::Datetime(dt) => {
-				Expr::Literal(Literal::Datetime(crate::val::Datetime(dt.inner())))
+			surrealdb_types::Value::Datetime(d) => {
+				Expr::Literal(Literal::Datetime(crate::val::Datetime(d.into_inner())))
 			}
-			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
-			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
-				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-			)),
+			surrealdb_types::Value::Uuid(u) => {
+				Expr::Literal(Literal::Uuid(crate::val::Uuid(u.into_inner())))
+			}
+			surrealdb_types::Value::Array(a) => {
+				Expr::Literal(Literal::Array(a.into_iter().map(Expr::from_public_value).collect()))
+			}
+			surrealdb_types::Value::Set(s) => {
+				Expr::Literal(Literal::Array(s.into_iter().map(Expr::from_public_value).collect()))
+			}
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
-				o.inner()
-					.iter()
+				o.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k.clone(),
-						value: Expr::from_public_value(v.clone()),
+						key: k,
+						value: Expr::from_public_value(v),
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::Table(t) => Expr::Table(t.into_string()),
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into()),
 			surrealdb_types::Value::RecordId(RecordId {
 				table,
 				key,
@@ -172,35 +174,33 @@ impl Expr {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
-						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
+						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
 					}
-					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-						a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-					),
+					surrealdb_types::RecordIdKey::Array(a) => {
+						RecordIdKeyLit::Array(a.into_iter().map(Expr::from_public_value).collect())
+					}
 					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
-						o.inner()
-							.iter()
+						o.into_iter()
 							.map(|(k, v)| ObjectEntry {
-								key: k.clone(),
-								value: Expr::from_public_value(v.clone()),
+								key: k,
+								value: Expr::from_public_value(v),
 							})
 							.collect(),
 					),
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: table.into_string(),
+					table: table.into(),
 					key: key_lit,
 				}))
 			}
 			surrealdb_types::Value::Geometry(g) => Expr::Literal(Literal::Geometry(g.into())),
-			surrealdb_types::Value::File(f) => Expr::Literal(Literal::File(crate::val::File::new(
-				f.bucket().to_string(),
-				f.key().to_string(),
-			))),
+			surrealdb_types::Value::File(f) => {
+				Expr::Literal(Literal::File(crate::val::File::new(f.bucket, f.key)))
+			}
 			surrealdb_types::Value::Range(r) => Expr::from(*r),
 			surrealdb_types::Value::Regex(r) => {
-				Expr::Literal(Literal::Regex(crate::val::Regex(r.0)))
+				Expr::Literal(Literal::Regex(crate::val::Regex(r.into_inner())))
 			}
 		}
 	}
@@ -209,7 +209,7 @@ impl Expr {
 impl From<surrealdb_types::Range> for Expr {
 	fn from(r: surrealdb_types::Range) -> Self {
 		use std::ops::Bound;
-		match (r.start, r.end) {
+		match r.into_inner() {
 			// Unbounded range: ..
 			(Bound::Unbounded, Bound::Unbounded) => Expr::Literal(Literal::UnboundedRange),
 			// Prefix ranges: ..end or ..=end
@@ -314,36 +314,22 @@ impl Expr {
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
-				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
-				x => Idiom::field(x.to_string()),
+				Literal::Datetime(d) => Idiom::field(d.to_string()),
+				x => Idiom::field(x.to_sql()),
 			},
-			x => Idiom::field(x.to_string()),
+			x => Idiom::field(x.to_sql()),
 		}
 	}
 
-	/// Updates the `"parent"` doc field for statements with a meaning full
-	/// document.
-	async fn update_parent_doc<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
-	where
-		F: AsyncFnOnce(&Context, Option<&CursorDoc>) -> R,
-	{
-		let mut ctx_store = None;
-		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = MutableContext::new(ctx);
-			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
-			ctx_store.insert(new_ctx.freeze())
-		} else {
-			ctx
-		};
-
-		f(ctx, doc).await
-	}
-
 	/// Process this type returning a computed simple Value
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Expr::compute", skip_all)
+	)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
@@ -355,7 +341,7 @@ impl Expr {
 				param.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Idiom(idiom) => idiom.compute(stk, ctx, &opt, doc).await,
-			Expr::Table(ident) => Ok(Value::Table(Table::new(ident.clone()))),
+			Expr::Table(ident) => Ok(Value::Table(ident.clone())),
 			Expr::Mock(mock) => {
 				// NOTE(value pr): This is a breaking change but makes the most sense without
 				// having mock be part of the Value type.
@@ -406,76 +392,40 @@ impl Expr {
 			}
 			Expr::IfElse(ifelse_statement) => ifelse_statement.compute(stk, ctx, &opt, doc).await,
 			Expr::Select(select_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Create(create_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Update(update_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Delete(delete_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Relate(relate_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Insert(insert_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Define(define_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Remove(remove_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					remove_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				remove_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Rebuild(rebuild_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Upsert(upsert_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Alter(alter_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Info(info_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Foreach(foreach_statement) => {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
@@ -495,7 +445,7 @@ impl Expr {
 
 	async fn compute_prefix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		op: &PrefixOperator,
@@ -525,7 +475,7 @@ impl Expr {
 
 	async fn compute_postfix(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
@@ -548,10 +498,10 @@ impl Expr {
 					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 
-				if let Value::Object(ref x) = res {
-					if let Some(Value::Closure(x)) = x.get(name.as_str()) {
-						return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
-					}
+				if let Value::Object(ref x) = res
+					&& let Some(Value::Closure(x)) = x.get(name.as_str())
+				{
+					return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
 				};
 				fnc::idiom(stk, ctx, opt, doc, res, name, args).await.map_err(ControlFlow::Err)
 			}
@@ -576,7 +526,7 @@ impl Expr {
 
 	async fn compute_binary(
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
@@ -761,34 +711,19 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.clone(),
-			_ => self.to_string(),
+			Expr::Table(ident) => ident.clone().into_string(),
+			_ => self.to_sql(),
 		}
 	}
 
 	// NOTE: Changes to this function also likely require changes to
 	// crate::sql::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
+	#[allow(dead_code)]
 	fn needs_parentheses(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
+			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
+			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Throw(_)
@@ -809,244 +744,38 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
-		}
-	}
-}
 
-/// A lightweight visitor for traversing an expression tree.
-///
-/// Implementors call the provided `visitor` function on `self` and any nested
-/// expressions. The traversal order is pre-order: the current node is visited
-/// before its children. This is intentionally minimal to keep traversal cheap.
-///
-/// This trait enables features that need to inspect a statement without
-/// executing it, such as slow-query logging, which walks the AST to find
-/// `$param` usages.
-pub(crate) trait VisitExpression {
-	/// Visit this expression and its nested expressions, invoking `visitor`
-	/// for each encountered node.
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr);
-}
-
-impl VisitExpression for Expr {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		visitor(self);
-		match self {
-			Expr::Literal(x) => {
-				x.visit(visitor);
-			}
-			Expr::Param(_) => {}
-			Expr::Idiom(x) => {
-				x.visit(visitor);
-			}
-			Expr::Table(_) => {}
-			Expr::Mock(_) => {}
-			Expr::Block(block) => {
-				block.visit(visitor);
-			}
-			Expr::Constant(_) => {}
-			Expr::Prefix {
-				expr,
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
 				..
-			} => {
-				expr.visit(visitor);
 			}
-			Expr::Postfix {
-				expr,
+			| Expr::Postfix {
 				..
-			} => expr.visit(visitor),
-			Expr::Binary {
-				left,
-				right,
+			}
+			| Expr::Binary {
 				..
-			} => {
-				left.visit(visitor);
-				right.visit(visitor);
 			}
-			Expr::FunctionCall(function) => function.visit(visitor),
-			Expr::Closure(closure) => {
-				closure.visit(visitor);
-			}
-			Expr::Break => {}
-			Expr::Continue => {}
-			Expr::Return(output) => {
-				output.visit(visitor);
-			}
-			Expr::Throw(expr) => expr.visit(visitor),
-			Expr::IfElse(x) => {
-				x.exprs.iter().for_each(|(a, b)| {
-					a.visit(visitor);
-					b.visit(visitor);
-				});
-
-				if let Some(x) = &x.close {
-					x.visit(visitor);
-				}
-			}
-			Expr::Select(select) => {
-				select.visit(visitor);
-			}
-			Expr::Create(create) => {
-				create.visit(visitor);
-			}
-			Expr::Update(update) => {
-				update.visit(visitor);
-			}
-			Expr::Upsert(upsert) => {
-				upsert.visit(visitor);
-			}
-			Expr::Delete(delete) => {
-				delete.visit(visitor);
-			}
-			Expr::Relate(relate) => relate.visit(visitor),
-			Expr::Insert(insert) => {
-				insert.visit(visitor);
-			}
-			Expr::Define(define) => {
-				define.visit(visitor);
-			}
-			Expr::Remove(remove) => {
-				remove.visit(visitor);
-			}
-			Expr::Rebuild(_) => {}
-			Expr::Alter(alter) => {
-				alter.visit(visitor);
-			}
-			Expr::Info(info) => {
-				info.visit(visitor);
-			}
-			Expr::Foreach(foreach) => foreach.visit(visitor),
-			Expr::Let(set) => {
-				set.visit(visitor);
-			}
-			Expr::Sleep(_) => {}
-		}
-	}
-}
-
-impl fmt::Display for Expr {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		let mut f = Pretty::from(f);
-		match self {
-			Expr::Literal(literal) => write!(f, "{literal}"),
-			Expr::Param(param) => write!(f, "{param}"),
-			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write!(f, "{mock}"),
-			Expr::Block(block) => write!(f, "{block}"),
-			Expr::Constant(constant) => write!(f, "{constant}"),
-			Expr::Prefix {
-				op,
-				expr,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "{op}({expr})")
-				} else {
-					write!(f, "{op}{expr}")
-				}
-			}
-			Expr::Postfix {
-				expr,
-				op,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "({expr}){op}")
-				} else {
-					write!(f, "{expr}{op}")
-				}
-			}
-			Expr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				let op_bp = BindingPower::for_binary_operator(op);
-				let left_bp = BindingPower::for_expr(left);
-				let right_bp = BindingPower::for_expr(right);
-
-				if left.needs_parentheses()
-					|| left_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({left})")?;
-				} else {
-					write!(f, "{left}")?;
-				}
-
-				if matches!(
-					op,
-					BinaryOperator::Range
-						| BinaryOperator::RangeSkip
-						| BinaryOperator::RangeInclusive
-						| BinaryOperator::RangeSkipInclusive
-				) {
-					write!(f, "{op}")?;
-				} else {
-					write!(f, " {op} ")?;
-				}
-
-				if right.needs_parentheses()
-					|| right_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({right})")
-				} else {
-					write!(f, "{right}")
-				}
-			}
-			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
-			Expr::Closure(closure) => write!(f, "{closure}"),
-			Expr::Break => write!(f, "BREAK"),
-			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::IfElse(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
+			| Expr::FunctionCall(_) => false,
 		}
 	}
 }
 
 impl ToSql for Expr {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_expr: crate::sql::Expr = self.clone().into();
+		sql_expr.fmt_sql(f, fmt);
 	}
 }
 
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -1061,7 +790,7 @@ impl SerializeRevisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
+		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }
 
@@ -1072,10 +801,9 @@ impl DeserializeRevisioned for Expr {
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
-				references_enabled: true,
-				bearer_access_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
+				surrealism_enabled: true,
 				..Default::default()
 			},
 			async |p, stk| p.parse_expr(stk).await,

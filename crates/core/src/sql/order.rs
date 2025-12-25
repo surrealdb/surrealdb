@@ -1,5 +1,6 @@
-use std::fmt;
 use std::ops::Deref;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::Idiom;
@@ -11,11 +12,13 @@ pub enum Ordering {
 	Order(OrderList),
 }
 
-impl fmt::Display for Ordering {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Ordering {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		match self {
-			Ordering::Random => write!(f, "ORDER BY RAND()"),
-			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
+			Ordering::Random => f.push_str("ORDER BY RAND()"),
+			Ordering::Order(list) => {
+				write_sql!(f, fmt, "ORDER BY {}", list);
+			}
 		}
 	}
 }
@@ -40,7 +43,10 @@ impl From<crate::expr::order::Ordering> for Ordering {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct OrderList(pub Vec<Order>);
+pub struct OrderList(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Order>,
+);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
@@ -49,9 +55,9 @@ impl Deref for OrderList {
 	}
 }
 
-impl fmt::Display for OrderList {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", Fmt::comma_separated(&self.0))
+impl ToSql for OrderList {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -71,6 +77,7 @@ impl From<crate::expr::order::OrderList> for OrderList {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Order {
 	/// The value to order by
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::basic_idiom))]
 	pub value: Idiom,
 	pub collate: bool,
 	pub numeric: bool,
@@ -78,19 +85,18 @@ pub struct Order {
 	pub direction: bool,
 }
 
-impl fmt::Display for Order {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.value)?;
+impl ToSql for Order {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.value.fmt_sql(f, fmt);
 		if self.collate {
-			write!(f, " COLLATE")?;
+			f.push_str(" COLLATE");
 		}
 		if self.numeric {
-			write!(f, " NUMERIC")?;
+			f.push_str(" NUMERIC");
 		}
 		if !self.direction {
-			write!(f, " DESC")?;
+			f.push_str(" DESC");
 		}
-		Ok(())
 	}
 }
 

@@ -4,8 +4,8 @@ use std::str;
 use std::str::FromStr;
 
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Datetime;
 use crate::fmt::QuoteStr;
@@ -13,21 +13,8 @@ use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone,
-	Copy,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Encode,
-	BorrowDecode,
+	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode,
 )]
-#[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
@@ -69,11 +56,6 @@ impl Uuid {
 		Self(uuid::Uuid::max())
 	}
 
-	/// Convert the Uuid to a raw String
-	pub fn to_raw(self) -> String {
-		self.0.to_string()
-	}
-
 	/// Generate a new UUID from a slice
 	pub fn from_slice(slice: &[u8]) -> Result<Self, uuid::Error> {
 		Ok(Self(uuid::Uuid::from_slice(slice)?))
@@ -94,7 +76,7 @@ impl From<Uuid> for uuid::Uuid {
 
 impl From<surrealdb_types::Uuid> for Uuid {
 	fn from(v: surrealdb_types::Uuid) -> Self {
-		Uuid(v.0)
+		Uuid(v.into_inner())
 	}
 }
 
@@ -120,6 +102,12 @@ impl Deref for Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "u{}", QuoteStr(&self.0.to_string()))
+		self.0.fmt(f)
+	}
+}
+
+impl ToSql for Uuid {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}", &QuoteStr(&self.0.to_string()))
 	}
 }

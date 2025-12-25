@@ -1,8 +1,8 @@
-use std::fmt;
-
 use clap::builder::{EnumValueParser, PossibleValue};
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use semver::Version;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
@@ -37,12 +37,11 @@ pub enum Backend {
 	RocksDb,
 	SurrealKv,
 	TikV,
-	Foundation,
 }
 
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV, Backend::Foundation]
+		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
@@ -51,7 +50,17 @@ impl ValueEnum for Backend {
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
-			Backend::Foundation => Some(PossibleValue::new("foundation")),
+		}
+	}
+}
+
+impl Display for Backend {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Memory => f.write_str("mem"),
+			Self::RocksDb => f.write_str("rocksdb"),
+			Self::SurrealKv => f.write_str("surrealkv"),
+			Self::TikV => f.write_str("tikv"),
 		}
 	}
 }
@@ -60,19 +69,17 @@ impl ValueEnum for Backend {
 pub enum UpgradeBackend {
 	RocksDb,
 	SurrealKv,
-	Foundation,
 }
 
 impl ValueEnum for UpgradeBackend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv, UpgradeBackend::Foundation]
+		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
 			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
-			UpgradeBackend::Foundation => Some(PossibleValue::new("foundationdb")),
 		}
 	}
 }

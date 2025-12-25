@@ -1,12 +1,15 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
-use crate::sql::{Expr, Part};
+use crate::sql::Part;
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[allow(dead_code)]
 pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -24,25 +27,24 @@ impl IntoIterator for Idioms {
 	}
 }
 
-impl Display for Idioms {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&Fmt::comma_separated(&self.0), f)
+impl ToSql for Idioms {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
 	}
 }
 
-impl From<Idioms> for crate::expr::Idioms {
+impl From<Idioms> for ExprIdioms {
 	fn from(v: Idioms) -> Self {
-		crate::expr::Idioms(v.0.into_iter().map(Into::into).collect())
+		ExprIdioms(v.0.into_iter().map(Into::into).collect())
 	}
 }
-impl From<crate::expr::Idioms> for Idioms {
-	fn from(v: crate::expr::Idioms) -> Self {
+impl From<ExprIdioms> for Idioms {
+	fn from(v: ExprIdioms) -> Self {
 		Idioms(v.0.into_iter().map(Into::into).collect())
 	}
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
@@ -74,28 +76,23 @@ impl From<crate::expr::Idiom> for Idiom {
 	}
 }
 
-impl Display for Idiom {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Idiom {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
-			Some(Part::Start(x)) => match x {
-				Expr::Block(_)
-				| Expr::Literal(_)
-				| Expr::Table(_)
-				| Expr::Mock(_)
-				| Expr::Constant(_)
-				| Expr::Param(_) => x.fmt(f)?,
-				_ => {
-					write!(f, "({x})")?;
+			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
+			Some(Part::Start(x)) => {
+				if x.needs_parentheses() {
+					write_sql!(f, fmt, "({x})");
+				} else {
+					write_sql!(f, fmt, "{x}");
 				}
-			},
-			Some(x) => x.fmt(f)?,
+			}
+			Some(x) => x.fmt_sql(f, fmt),
 			None => {}
 		};
 		for p in iter {
-			p.fmt(f)?;
+			p.fmt_sql(f, fmt);
 		}
-		Ok(())
 	}
 }

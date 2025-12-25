@@ -1,9 +1,10 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
@@ -24,21 +25,24 @@ impl ParamDefinition {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
 			value: {
-				let public_val: crate::types::PublicValue = self.value.clone().try_into().unwrap();
-				crate::sql::Expr::from_public_value(public_val)
+				let public_val: crate::types::PublicValue =
+					self.value.clone().try_into().expect("value conversion should succeed");
+				sql::Expr::from_public_value(public_val)
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+
 			permissions: self.permissions.clone().into(),
 		}
 	}
 }
 
 impl ToSql for &ParamDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 

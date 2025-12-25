@@ -1,18 +1,15 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::NamespaceDefinition;
 use crate::catalog::providers::NamespaceProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr, Literal};
+use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -21,17 +18,7 @@ pub(crate) struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
-	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineNamespaceStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor))
-	}
+	pub comment: Expr,
 }
 
 impl Default for DefineNamespaceStatement {
@@ -40,17 +27,18 @@ impl Default for DefineNamespaceStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::String(String::new())),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
 
 impl DefineNamespaceStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineNamespaceStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -76,35 +64,24 @@ impl DefineNamespaceStatement {
 			}
 			ns.namespace_id
 		} else {
-			txn.lock().await.get_next_ns_id().await?
+			ctx.try_get_sequences()?.next_namespace_id(Some(ctx)).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 		// Process the statement
 		let ns_def = NamespaceDefinition {
 			namespace_id,
 			name,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.put_ns(ns_def).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE NAMESPACE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", &self.name)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		Ok(())
 	}
 }

@@ -5,15 +5,16 @@ use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-	AccessStatementShow, Subject,
+	AccessStatementShow, PurgeKind, Subject,
 };
+use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Expr, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -102,7 +103,7 @@ impl Parser<'_> {
 			}
 			t!("USE") => {
 				self.pop_peek();
-				self.parse_use_stmt().map(TopLevelExpr::Use)
+				self.parse_use_stmt(stk).await.map(TopLevelExpr::Use)
 			}
 			t!("ACCESS") => {
 				self.pop_peek();
@@ -220,27 +221,36 @@ impl Parser<'_> {
 			}
 			t!("PURGE") => {
 				self.pop_peek();
-				let mut expired = false;
-				let mut revoked = false;
-				loop {
+				let mut kind = None;
+				let kind = loop {
 					match self.peek_kind() {
 						t!("EXPIRED") => {
 							self.pop_peek();
-							expired = true;
+							match kind {
+								None => kind = Some(PurgeKind::Expired),
+								Some(PurgeKind::Revoked) => kind = Some(PurgeKind::Both),
+								_ => unexpected!(self, peek, "ACCESS PURGE statement to end"),
+							}
 						}
 						t!("REVOKED") => {
 							self.pop_peek();
-							revoked = true;
+							match kind {
+								None => kind = Some(PurgeKind::Revoked),
+								Some(PurgeKind::Expired) => kind = Some(PurgeKind::Both),
+								_ => unexpected!(self, peek, "ACCESS PURGE statement to end"),
+							}
 						}
 						_ => {
-							if !expired && !revoked {
-								unexpected!(self, peek, "EXPIRED, REVOKED or both");
-							}
-							break;
+							let Some(kind) = kind else {
+								unexpected!(self, peek, "EXPIRED, or REVOKED")
+							};
+							break kind;
 						}
 					}
+					//TODO: This is kind of bad syntax, we should either choose to have a `,`
+					//between keywords or not, not allow both and just ignore it.
 					self.eat(t!(","));
-				}
+				};
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
 				} else {
@@ -249,8 +259,7 @@ impl Parser<'_> {
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
-					expired,
-					revoked,
+					kind,
 					grace,
 				}))
 			}
@@ -289,27 +298,32 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
-	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
+	async fn parse_use_stmt(&mut self, stk: &mut Stk) -> ParseResult<UseStatement> {
 		let peek = self.peek();
-		let (ns, db) = match peek.kind {
+		let stmt = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
-				let ns = self.parse_ident()?;
-				let db = self.eat(t!("DATABASE")).then(|| self.parse_ident()).transpose()?;
-				(Some(ns), db)
+				let ns = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				if self.eat(t!("DATABASE")) {
+					let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
+					UseStatement::NsDb(ns, db)
+				} else {
+					UseStatement::Ns(ns)
+				}
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
-				let db = self.parse_ident()?;
-				(None, Some(db))
+				let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				UseStatement::Db(db)
+			}
+			t!("DEFAULT") => {
+				self.pop_peek();
+				UseStatement::Default
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
 		};
 
-		Ok(UseStatement {
-			ns,
-			db,
-		})
+		Ok(stmt)
 	}
 
 	/// Parsers a FOR statement.
@@ -410,23 +424,20 @@ impl Parser<'_> {
 	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
-		let expr = match self.peek_kind() {
+		let fields = match self.peek_kind() {
 			t!("DIFF") => {
 				self.pop_peek();
-				Fields::all()
+				LiveFields::Diff
 			}
-			_ => self.parse_fields(stk).await?,
+			_ => LiveFields::Select(self.parse_fields(stk).await?),
 		};
 		expected!(self, t!("FROM"));
-		let what = match self.peek().kind {
-			t!("$param") => Expr::Param(self.next_token_value()?),
-			_ => self.parse_expr_table(stk).await?,
-		};
+		let what = self.parse_expr_table(stk).await?;
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
 
 		Ok(LiveStatement {
-			fields: expr,
+			fields,
 			what,
 			cond,
 			fetch,

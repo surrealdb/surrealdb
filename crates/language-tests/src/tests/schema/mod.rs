@@ -13,7 +13,7 @@ use surrealdb_core::dbs::capabilities::{
 };
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_types::{Object, RecordId, Value, ToSql};
+use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -83,9 +83,6 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub clean: bool,
 
-	#[serde(default)]
-	pub strict: bool,
-
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
 
@@ -96,7 +93,15 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub imports: Vec<String>,
 	pub timeout: Option<BoolOr<u64>>,
+	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
+
+	/// Specifies which backends this test should run on.
+	/// If empty, the test runs on all backends.
+	/// If specified, the test only runs when the selected backend is in this list.
+	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
+	#[serde(default)]
+	pub backend: Vec<String>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -104,7 +109,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
-	/// Returns the namespace if the environement specifies one, none otherwise
+	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn namespace(&self) -> Option<&str> {
@@ -115,7 +120,7 @@ impl TestEnv {
 		}
 	}
 
-	/// Returns the namespace if the environement specifies one, none otherwise
+	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn database(&self) -> Option<&str> {
@@ -128,6 +133,10 @@ impl TestEnv {
 
 	pub fn timeout(&self) -> Option<u64> {
 		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+	}
+
+	pub fn context_timeout(&self) -> Option<u64> {
+		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
@@ -179,7 +188,7 @@ impl<'de> Deserialize<'de> for TestExpectation {
 				ErrorTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Error)
 			} else {
 				Err(to_deser_error(
-					"Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field",
+					"Table does not match any the options, expected table to contain at least one `match`, `value` or `error` field",
 				))
 			}
 		} else {
@@ -228,7 +237,7 @@ pub struct MatchTestResult {
 /// [env]
 /// timeout = true
 ///
-/// # Set the timeout as enabeled with the value of 1000ms
+/// # Set the timeout as enabled with the value of 1000ms
 /// [env]
 /// timeout = 1000
 /// ```
@@ -432,10 +441,9 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
-			bearer_access_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -496,10 +504,9 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
-			bearer_access_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -540,10 +547,9 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
-			bearer_access_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {

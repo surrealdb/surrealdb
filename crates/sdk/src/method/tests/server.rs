@@ -2,7 +2,7 @@ use async_channel::Receiver;
 use surrealdb_core::dbs::QueryResultBuilder;
 
 use crate::conn::{Command, Route};
-use crate::types::Value;
+use crate::types::{SurrealValue, Value};
 
 pub(super) fn mock(route_rx: Receiver<Route>) {
 	tokio::spawn(async move {
@@ -17,10 +17,25 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let query_result = match cmd {
 				Command::Invalidate | Command::Health => query_result,
-				Command::Authenticate {
+				Command::Begin => {
+					query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into())))
+				}
+				Command::Commit {
 					..
 				}
-				| Command::Kill {
+				| Command::Rollback {
+					..
+				}
+				| Command::Revoke {
+					..
+				} => query_result,
+				Command::Authenticate {
+					token,
+				}
+				| Command::Refresh {
+					token,
+				} => query_result.with_result(Ok(token.into_value())),
+				Command::Kill {
 					..
 				}
 				| Command::Unset {
@@ -46,7 +61,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Set {
 					..
 				} => query_result,
-				Command::RawQuery {
+				Command::Query {
 					..
 				} => query_result,
 				Command::Run {
@@ -68,6 +83,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 					..
 				}
 				| Command::ImportFile {
+					..
+				}
+				| Command::Attach {
+					..
+				}
+				| Command::Detach {
 					..
 				} => query_result,
 			};

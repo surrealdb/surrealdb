@@ -33,7 +33,6 @@ Other supported backends include:
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
 - `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
-- `foundation`: FoundationDB storage engine (requires `backend-foundation` feature)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
 ```bash
@@ -187,28 +186,50 @@ Defaults to `"*"`
 #### `[test.results]`
 
 The test results table specifies the expected out of the test. The command line
-tool will warn about every test that does not includes a this table in its
+tool will warn about every test that does not include this table in its
 configuration. This table can either be a straight table or an array of tables.
 
 Examples:
 
 ```toml
 [test.results]
-parse-error = "foo"
+parsing-error = "foo"
 ```
 
 This tests if the test returns a parsing error with the text `foo`. A test is
 parsed once and can only return a single parsing error. So when testing for a
 parsing error only a single result is allowed to be specified.
 
+```surql
+/**
+[test]
+
+[test.results]
+parsing-error = """
+Invalid function/constant path, did you maybe mean `type::record`
+  --> [16:1]
+   |
+16 | type::thing("person", "one");
+   | ^^^^^^^^^^^
+"""
+
+*/
+
+type::thing("person", "one");
+
+// Can't add this extra assertion inside the same file
+// Must be a separate file with its own [test.results]
+// string::slayce();
+```
+
 Note that the following are also allowed:
 
 ```toml
 [test.results]
-parse-error = true
+parsing-error = true
 
 [test.results]
-parse-error = false
+parsing-error = false
 ```
 
 Specifying a boolean will check for the presence or absence of a parsing error
@@ -352,12 +373,75 @@ utility functions.
 
 Defaults to `[]`
 
+#### `[env.backend]`
+
+Specifies which backends (storage engines) the test should run on. This is useful 
+when a test is specific to certain backend implementations or when testing 
+backend-specific features like compaction.
+
+The value should be an array of strings with valid backend identifiers:
+- `"mem"`: In-memory storage engine
+- `"rocksdb"`: RocksDB embedded storage engine
+- `"surrealkv"`: SurrealKV file-based storage engine
+- `"tikv"`: TiKV distributed storage engine
+
+**Behavior:**
+- If the array is **empty** (default): The test runs on all backends
+- If the array is **specified**: The test only runs when the selected backend (via `--backend` CLI flag) is in the list
+- If no `[env]` section exists: The test runs on all backends
+
+**Examples:**
+
+```toml
+# Test that only runs on RocksDB
+[env]
+backend = ["rocksdb"]
+```
+
+```toml
+# Test that runs on both memory and RocksDB backends
+[env]
+backend = ["mem", "rocksdb"]
+```
+
+```toml
+# Test that runs on all backends (empty array)
+[env]
+backend = []
+```
+
+```toml
+# Test that runs on all backends (no backend field specified)
+[env]
+namespace = "test"
+# No backend field means run on all backends
+```
+
+This feature is particularly useful for testing backend-specific operations. For 
+example, the `ALTER TABLE COMPACT` statement behaves differently on different 
+backends: it succeeds on RocksDB but returns an error on the memory backend.
+
+Defaults to `[]` (runs on all backends)
+
 #### `[env.timeout]`
 
-Specifies a duration in milliseconds within which the test should finish. If the
-test takes longer than the given duration it will be considered an error and it
-will cause a test run to fail. This key can also be set to `false` to disable
-the timeout altogether or `true` to default to 2 seconds. Defaults to `2000`.
+Specifies a duration in milliseconds within which the entire test should finish. 
+This controls the overall test execution time from start to finish. If the test 
+takes longer than the given duration it will be considered an error and it will 
+cause a test run to fail. This key can also be set to `false` to disable the 
+timeout altogether or `true` to default to 1 second. Defaults to `2000` (2 seconds).
+
+#### `[env.context_timeout]`
+
+Specifies a duration in milliseconds for individual query execution within the 
+datastore context. This controls how long each query is allowed to run. If a 
+query takes longer than the given duration, it will be terminated. This key can 
+also be set to `false` to disable the context timeout altogether or `true` to 
+default to 1 second. Defaults to `3000` (3 seconds).
+
+Note: `[env.timeout]` and `[env.context_timeout]` serve different purposes:
+- `timeout`: Controls the entire test execution time (end-to-end)
+- `context_timeout`: Controls individual query execution time within the test
 
 
 #### `[env.signin]` `[env.signup]`

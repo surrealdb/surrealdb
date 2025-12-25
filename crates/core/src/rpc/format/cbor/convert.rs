@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
 use std::ops::Bound;
 
@@ -12,7 +12,7 @@ use crate::syn;
 use crate::types::{
 	PublicArray, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicNumber,
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
-	PublicUuid, PublicValue,
+	PublicSet, PublicTable, PublicUuid, PublicValue,
 };
 use crate::val::DecimalExt;
 
@@ -41,6 +41,7 @@ const TAG_BOUND_EXCLUDED: u64 = 51;
 
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
+const TAG_SET: u64 = 56;
 
 // Custom Geometries (88->95 is unassigned)
 const TAG_GEOMETRY_POINT: u64 = 88;
@@ -185,7 +186,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					CborValue::Text(v) => Ok(PublicValue::String(v)),
+					CborValue::Text(v) => Ok(PublicValue::Table(PublicTable::new(v))),
 					_ => Err(anyhow!("Expected a CBOR text data type")),
 				},
 				// A range
@@ -349,6 +350,12 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						Err(anyhow!("Expected a CBOR array with two String bucket and key values"))
 					}
 				},
+				TAG_SET => match *v {
+					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(
+						v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?,
+					))),
+					_ => Err(anyhow!("Expected a CBOR array with Set values")),
+				},
 				// An unknown tag
 				_ => Err(anyhow!("Encountered an unknown CBOR tag")),
 			}
@@ -402,7 +409,10 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		}
 		PublicValue::Array(v) => from_array(v),
 		PublicValue::Object(v) => from_object(v),
-		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into())),
+		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into_inner().to_vec())),
+		PublicValue::Table(v) => {
+			Ok(CborValue::Tag(TAG_TABLE, Box::new(CborValue::Text(v.into_string()))))
+		}
 		PublicValue::RecordId(PublicRecordId {
 			table,
 			key,
@@ -427,12 +437,20 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::File(file) => Ok(CborValue::Tag(
 			TAG_FILE,
 			Box::new(CborValue::Array(vec![
-				CborValue::Text(file.bucket().to_string()),
-				CborValue::Text(file.key().to_string()),
+				CborValue::Text(file.bucket),
+				CborValue::Text(file.key),
 			])),
 		)),
-		// We shouldn't reach here
-		_ => Err(anyhow!("Found unsupported SurrealQL value being encoded into a CBOR value")),
+		PublicValue::Set(v) => Ok(CborValue::Tag(
+			TAG_SET,
+			Box::new(CborValue::Array(
+				v.into_iter().map(from_value).collect::<Result<Vec<CborValue>>>()?,
+			)),
+		)),
+		PublicValue::Regex(_) => {
+			// Uncborrable value type
+			Err(anyhow!("Unsupported value type: Regex"))
+		}
 	}
 }
 
@@ -503,8 +521,8 @@ fn to_range(val: CborValue) -> Result<PublicRange> {
 	match val {
 		CborValue::Array(v) if v.len() == 2 => {
 			let mut v = v;
-			let beg = decode_bound(v.remove(0).clone())?;
-			let end = decode_bound(v.remove(0).clone())?;
+			let beg = decode_bound(v.remove(0))?;
+			let end = decode_bound(v.remove(0))?;
 			Ok(PublicRange::new(beg, end))
 		}
 		_ => Err(anyhow!("Expected a CBOR array with 2 bounds")),
@@ -519,8 +537,8 @@ fn from_range(r: PublicRange) -> Result<CborValue> {
 			Bound::Unbounded => Ok(CborValue::Null),
 		}
 	}
-
-	Ok(CborValue::Array(vec![encode(r.start)?, encode(r.end)?]))
+	let (start, end) = r.into_inner();
+	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
 }
 
 fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
@@ -536,7 +554,8 @@ fn from_record_id_key_range(r: PublicRecordIdKeyRange) -> Result<CborValue> {
 		}
 	}
 
-	Ok(CborValue::Array(vec![encode(r.start)?, encode(r.end)?]))
+	let (start, end) = r.into_inner();
+	Ok(CborValue::Array(vec![encode(start)?, encode(end)?]))
 }
 
 fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
@@ -552,8 +571,8 @@ fn to_record_id_key_range(val: CborValue) -> Result<PublicRecordIdKeyRange> {
 	match val {
 		CborValue::Array(v) if v.len() == 2 => {
 			let mut v = v;
-			let start = decode_bound(v.remove(0).clone())?;
-			let end = decode_bound(v.remove(0).clone())?;
+			let start = decode_bound(v.remove(0))?;
+			let end = decode_bound(v.remove(0))?;
 
 			Ok(PublicRecordIdKeyRange {
 				start,

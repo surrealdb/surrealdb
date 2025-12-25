@@ -320,3 +320,13 @@ Join the growing [SurrealDB Community](https://surrealdb.com/community) around t
 - Get involved on [Reddit](http://reddit.com/r/surrealdb/)
 - Read our blog posts on [Medium](https://medium.com/surrealdb)
 - Questions tagged #surrealdb on [Stack Overflow](https://stackoverflow.com/questions/tagged/surrealdb)
+
+## For Maintainers: Releasing
+
+If you are a maintainer responsible for performing releases, please refer to the comprehensive [release process documentation](doc/RELEASING.md). This guide covers:
+
+- How to perform nightly, pre-release, stable, and patch releases
+- The branching strategy and version management
+- Step-by-step instructions with examples
+- Troubleshooting common issues
+- The workflow architecture and idempotency guarantees

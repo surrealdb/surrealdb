@@ -33,7 +33,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -88,7 +88,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{ foo { id, val } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -216,7 +216,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -268,7 +268,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			let expected =
 				json!({"data":{"foo":[{"id":"foo:1","val":42},{"id":"foo:2","val":43}]}});
-			assert_eq!(expected, body);
+			assert_eq!(body, expected);
 		}
 
 		// check partial access
@@ -318,7 +318,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 
@@ -326,7 +326,7 @@ mod graphql_integration {
 			let res = client.post(gql_url).body("").send().await?;
 			assert_eq!(res.status(), 400);
 			let body = res.text().await?;
-			assert!(body.contains("NotConfigured"));
+			assert!(body.contains("NotConfigured"), "{body}");
 		}
 
 		// add schema and data
@@ -433,7 +433,7 @@ mod graphql_integration {
 		headers.insert("surreal-db", db.parse()?);
 		headers.insert(header::ACCEPT, "application/json".parse()?);
 		let client = reqwest::Client::builder()
-			.connect_timeout(Duration::from_millis(10))
+			.connect_timeout(Duration::from_secs(10))
 			.default_headers(headers)
 			.build()?;
 

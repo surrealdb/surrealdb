@@ -1,16 +1,13 @@
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+use surrealdb_types::{SqlFormat, ToSql};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Base {
+	#[default]
 	Root,
 	Ns,
 	Db,
-}
-
-impl Default for Base {
-	fn default() -> Self {
-		Self::Root
-	}
 }
 
 impl fmt::Display for Base {
@@ -20,5 +17,12 @@ impl fmt::Display for Base {
 			Self::Db => f.write_str("DATABASE"),
 			Self::Root => f.write_str("ROOT"),
 		}
+	}
+}
+
+impl ToSql for Base {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_base: crate::sql::Base = (*self).into();
+		sql_base.fmt_sql(f, sql_fmt);
 	}
 }

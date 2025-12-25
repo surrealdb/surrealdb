@@ -1,15 +1,13 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
-use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
+use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, RecordId, Value};
-use crate::vs::VersionStamp;
+use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -35,20 +33,64 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.clone()));
+		h.insert("name", Value::String(v.name.into_string()));
 		Value::Object(Object::from(h))
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableMutations(pub String, pub Vec<TableMutation>);
+pub struct TableMutations(pub TableName, pub Vec<TableMutation>);
 
 impl_kv_value_revisioned!(TableMutations);
 
 impl TableMutations {
-	pub fn new(tb: String) -> Self {
+	/// Create a new table mutations
+	pub fn new(tb: TableName) -> Self {
 		Self(tb, Vec::new())
+	}
+	/// Push a table change to the table mutations
+	pub fn push_table_change(&mut self, dt: TableDefinition) {
+		// Push the table change to the entry
+		self.1.push(TableMutation::Def(dt));
+	}
+
+	/// Push a mutation to the table mutations (record change)
+	pub fn push_record_change(
+		&mut self,
+		id: RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
+		store_difference: bool,
+	) {
+		// Check if this is a delete operation
+		if current.as_ref().is_nullish() {
+			// Push the delete mutation to the entry
+			self.1.push(match store_difference {
+				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+				false => TableMutation::Del(id),
+			});
+		} else {
+			// Push the set mutation to the entry
+			self.1.push(match store_difference {
+				true => {
+					if previous.as_ref().is_none() {
+						TableMutation::Set(id, current.into_owned())
+					} else {
+						// We intentionally record the patches in reverse (current -> previous)
+						// because we cannot otherwise resolve operations such as "replace" and
+						// "remove".
+						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
+						TableMutation::SetWithDiff(
+							id,
+							current.into_owned(),
+							patches_to_create_previous,
+						)
+					}
+				}
+				false => TableMutation::Set(id, current.into_owned()),
+			});
+		}
 	}
 }
 
@@ -68,10 +110,11 @@ impl Default for DatabaseMutation {
 	}
 }
 
-// Change is a set of mutations made to a table at the specific timestamp.
+// ChangeSet is a set of mutations made to a database at a specific timestamp.
+// The u128 timestamp represents the version number when these changes occurred.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
+pub struct ChangeSet(pub u128, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
@@ -89,11 +132,7 @@ impl TableMutation {
 				h.insert(
 					"update".to_string(),
 					Value::Array(Array(
-						operations
-							.clone()
-							.into_iter()
-							.map(|x| Value::Object(x.into_object()))
-							.collect(),
+						operations.into_iter().map(|x| Value::Object(x.into_object())).collect(),
 					)),
 				);
 				h
@@ -141,49 +180,10 @@ impl DatabaseMutation {
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
 		let mut m = BTreeMap::<String, Value>::new();
-		m.insert("versionstamp".to_string(), Value::from(self.0.into_u128()));
+		m.insert("versionstamp".to_string(), Value::from(self.0));
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
 		Value::Object(so)
-	}
-}
-
-impl Display for TableMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
-			TableMutation::Del(id) => write!(f, "DEL {}", id),
-			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => {
-				write!(f, "{}", t.to_sql())
-			}
-		}
-	}
-}
-
-impl Display for TableMutations {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let tb = &self.0;
-		let muts = &self.1;
-		write!(f, "{}", tb)?;
-		muts.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
-
-impl Display for DatabaseMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.0;
-
-		x.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
-
-impl Display for ChangeSet {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.1;
-
-		write!(f, "{}", x)
 	}
 }
 
@@ -204,26 +204,23 @@ mod tests {
 	#[test]
 	fn serialization() {
 		let cs = ChangeSet(
-			VersionStamp::from_u64(1),
+			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				"mytb".into(),
 				vec![
 					TableMutation::Set(
-						RecordId::new("mytb".to_string(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 					),
-					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
+					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
 					TableMutation::Def(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
-						"mytb".to_string(),
+						"mytb".into(),
 					)),
 				],
 			)]),
@@ -239,17 +236,14 @@ mod tests {
 	#[test]
 	fn serialization_rev2() {
 		let cs = ChangeSet(
-			VersionStamp::from_u64(1),
+			65536u128,
 			DatabaseMutation(vec![TableMutations(
-				"mytb".to_string(),
+				"mytb".into(),
 				vec![
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Add {
@@ -258,23 +252,20 @@ mod tests {
 						}],
 					),
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
-							(
-								"id",
-								Value::from(RecordId::new("mytb".to_owned(), "tobie2".to_owned())),
-							),
+							("id", Value::from(RecordId::new("mytb".into(), "tobie2".to_owned()))),
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Remove {
 							path: vec!["temp".to_owned()],
 						}],
 					),
-					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
+					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
 					TableMutation::DelWithOriginal(
-						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
+						RecordId::new("mytb".into(), "tobie".to_owned()),
 						Value::Object(Object::from(map! {
-								"id" => Value::from(RecordId::new("mytb".to_owned(),"tobie".to_owned())),
+								"id" => Value::from(RecordId::new("mytb".into(),"tobie".to_owned())),
 								"note" => Value::from("surreal"),
 						})),
 					),
@@ -282,7 +273,7 @@ mod tests {
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
-						"mytb".to_string(),
+						"mytb".into(),
 					)),
 				],
 			)]),

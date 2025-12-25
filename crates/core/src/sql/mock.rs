@@ -1,7 +1,8 @@
-use std::fmt;
 use std::ops::Bound;
 
-use crate::fmt::EscapeIdent;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::range::TypedRange;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -12,23 +13,23 @@ pub enum Mock {
 	// Add new variants here
 }
 
-impl fmt::Display for Mock {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Mock {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Mock::Count(tb, c) => {
-				write!(f, "|{}:{}|", EscapeIdent(tb), c)
+				write_sql!(f, fmt, "|{}:{}|", EscapeKwFreeIdent(tb), c);
 			}
 			Mock::Range(tb, r) => {
-				write!(f, "|{}:", EscapeIdent(tb))?;
+				write_sql!(f, fmt, "|{}:", EscapeKwFreeIdent(tb));
 				match r.start {
-					Bound::Included(x) => write!(f, "{x}..")?,
-					Bound::Excluded(x) => write!(f, "{x}>..")?,
-					Bound::Unbounded => write!(f, "..")?,
+					Bound::Included(x) => write_sql!(f, fmt, "{x}.."),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}>.."),
+					Bound::Unbounded => f.push_str(".."),
 				}
 				match r.end {
-					Bound::Included(x) => write!(f, "={x}|"),
-					Bound::Excluded(x) => write!(f, "{x}|"),
-					Bound::Unbounded => write!(f, "|"),
+					Bound::Included(x) => write_sql!(f, fmt, "={x}|"),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}|"),
+					Bound::Unbounded => f.push('|'),
 				}
 			}
 		}
@@ -38,8 +39,8 @@ impl fmt::Display for Mock {
 impl From<Mock> for crate::expr::Mock {
 	fn from(v: Mock) -> Self {
 		match v {
-			Mock::Count(tb, c) => crate::expr::Mock::Count(tb, c),
-			Mock::Range(tb, r) => crate::expr::Mock::Range(tb, r),
+			Mock::Count(tb, c) => crate::expr::Mock::Count(tb.into(), c),
+			Mock::Range(tb, r) => crate::expr::Mock::Range(tb.into(), r),
 		}
 	}
 }
@@ -47,8 +48,8 @@ impl From<Mock> for crate::expr::Mock {
 impl From<crate::expr::Mock> for Mock {
 	fn from(v: crate::expr::Mock) -> Self {
 		match v {
-			crate::expr::Mock::Count(tb, c) => Mock::Count(tb, c),
-			crate::expr::Mock::Range(tb, r) => Mock::Range(tb, r),
+			crate::expr::Mock::Count(tb, c) => Mock::Count(tb.into_string(), c),
+			crate::expr::Mock::Range(tb, r) => Mock::Range(tb.into_string(), r),
 		}
 	}
 }

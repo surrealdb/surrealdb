@@ -3,7 +3,7 @@ use reblessive::Stk;
 use super::parts::MissingKind;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
-use crate::sql::{Fields, Limit, Order, Split, Splits, Start};
+use crate::sql::{Expr, Fields, Limit, Literal, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};
@@ -43,9 +43,9 @@ impl Parser<'_> {
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
-		let split = self.try_parse_split(stk, &expr, fields_span).await?;
-		let group = self.try_parse_group(stk, &expr, fields_span).await?;
-		let order = self.try_parse_orders(stk, &expr, fields_span).await?;
+		let split = self.try_parse_split(&expr, fields_span)?;
+		let group = self.try_parse_group(&expr, fields_span)?;
+		let order = self.try_parse_orders(&expr, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;
 			let limit = self.try_parse_limit(stk).await?;
@@ -57,9 +57,9 @@ impl Parser<'_> {
 		};
 		let fetch = self.try_parse_fetch(stk).await?;
 		let version = if self.eat(t!("VERSION")) {
-			Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
+			stk.run(|stk| self.parse_expr_field(stk)).await?
 		} else {
-			None
+			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));
@@ -87,9 +87,8 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn try_parse_split(
+	pub(crate) fn try_parse_split(
 		&mut self,
-		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Splits>> {
@@ -102,7 +101,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
-		let split = self.parse_basic_idiom(stk).await?;
+		let split = self.parse_basic_idiom()?;
 		let split_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -111,7 +110,7 @@ impl Parser<'_> {
 		let mut res = vec![Split(split)];
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let split = self.parse_basic_idiom(stk).await?;
+			let split = self.parse_basic_idiom()?;
 			let split_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Split, fields, fields_span, &split, split_span)?;
@@ -121,9 +120,8 @@ impl Parser<'_> {
 		Ok(Some(Splits(res)))
 	}
 
-	pub(crate) async fn try_parse_orders(
+	pub(crate) fn try_parse_orders(
 		&mut self,
-		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Ordering>> {
@@ -143,7 +141,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.recent_span();
-		let order = self.parse_order(stk).await?;
+		let order = self.parse_order()?;
 		let order_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
@@ -152,7 +150,7 @@ impl Parser<'_> {
 		let mut orders = vec![order];
 		while self.eat(t!(",")) {
 			let before = self.recent_span();
-			let order = self.parse_order(stk).await?;
+			let order = self.parse_order()?;
 			let order_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(
@@ -169,8 +167,8 @@ impl Parser<'_> {
 		Ok(Some(Ordering::Order(OrderList(orders))))
 	}
 
-	async fn parse_order(&mut self, stk: &mut Stk) -> ParseResult<Order> {
-		let start = self.parse_basic_idiom(stk).await?;
+	fn parse_order(&mut self) -> ParseResult<Order> {
+		let start = self.parse_basic_idiom()?;
 		let collate = self.eat(t!("COLLATE"));
 		let numeric = self.eat(t!("NUMERIC"));
 		let direction = match self.peek_kind() {

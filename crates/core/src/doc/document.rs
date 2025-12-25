@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -7,23 +8,27 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
-use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
-use crate::ctx::{Context, MutableContext};
+use crate::catalog::{
+	self, Data, DatabaseDefinition, FieldDefinition, NamespaceDefinition, Permission, Record,
+	TableDefinition,
+};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Workable};
 use crate::doc::alter::ComputedData;
-use crate::expr::{Base, FlowResultExt as _};
-use crate::iam::{Action, ResourceKind};
+use crate::expr::FlowResultExt as _;
+use crate::iam::Action;
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use crate::val::record::{Data, Record};
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, TableName, Value};
 
 pub(crate) struct Document {
+	/// The document context for this document
+	pub(crate) doc_ctx: DocumentContext,
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<String>,
+	pub(super) r#gen: Option<TableName>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -36,11 +41,84 @@ pub(crate) struct Document {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct NsDbCtx {
+	pub(crate) ns: Arc<NamespaceDefinition>,
+	pub(crate) db: Arc<DatabaseDefinition>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NsDbTbCtx {
+	pub(crate) ns: Arc<NamespaceDefinition>,
+	pub(crate) db: Arc<DatabaseDefinition>,
+	pub(crate) tb: Arc<TableDefinition>,
+	pub(crate) fields: Arc<[FieldDefinition]>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum DocumentContext {
+	NsDbCtx(NsDbCtx),
+	NsDbTbCtx(NsDbTbCtx),
+}
+
+impl DocumentContext {
+	pub(crate) fn ns(&self) -> &Arc<NamespaceDefinition> {
+		match self {
+			DocumentContext::NsDbCtx(ctx) => &ctx.ns,
+			DocumentContext::NsDbTbCtx(ctx) => &ctx.ns,
+		}
+	}
+
+	pub(crate) fn db(&self) -> &Arc<DatabaseDefinition> {
+		match self {
+			DocumentContext::NsDbCtx(ctx) => &ctx.db,
+			DocumentContext::NsDbTbCtx(ctx) => &ctx.db,
+		}
+	}
+
+	pub(crate) fn tb(&self) -> Result<&Arc<TableDefinition>> {
+		match self {
+			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
+				"Table not defined in DocumentContext, this is certainly a bug and should be reported."
+			)),
+			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.tb),
+		}
+	}
+
+	pub(crate) fn fd(&self) -> Result<&Arc<[FieldDefinition]>> {
+		match self {
+			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
+				"Fields not defined in DocumentContext, this is certainly a bug and should be reported."
+			)),
+			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.fields),
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorRecord,
 	pub(crate) fields_computed: bool,
+}
+
+impl CursorDoc {
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
+	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
+	{
+		let ctx = if let Some(doc) = doc {
+			let mut new_ctx = Context::new(ctx);
+			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
+			Cow::Owned(new_ctx.freeze())
+		} else {
+			Cow::Borrowed(ctx)
+		};
+
+		f(ctx).await
+	}
 }
 
 /// Wrapper around a Record for cursor operations
@@ -190,16 +268,19 @@ pub(crate) enum Permitted {
 
 impl Document {
 	/// Initialise a new document
+	#[allow(clippy::too_many_arguments)]
 	pub fn new(
+		doc_ctx: DocumentContext,
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<String>,
+		r#gen: Option<TableName>,
 		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
 		rs: RecordStrategy,
 	) -> Self {
 		Document {
+			doc_ctx,
 			id: id.clone(),
 			r#gen,
 			retry,
@@ -207,7 +288,7 @@ impl Document {
 			current: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
-			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
+			initial_reduced: CursorDoc::new(id, ir, val),
 			record_strategy: rs,
 			input_data: None,
 		}
@@ -271,7 +352,7 @@ impl Document {
 		}
 	}
 
-	/// Retur true if the document has been extracted by an iterator that already matcheed the
+	/// Return true if the document has been extracted by an iterator that already matched the
 	/// condition.
 	pub(crate) fn is_condition_checked(&self) -> bool {
 		matches!(self.record_strategy, RecordStrategy::Count | RecordStrategy::KeysOnly)
@@ -316,10 +397,14 @@ impl Document {
 	/// based on the permissions, then this function will
 	/// not have any performance impact by cloning the
 	/// full and reduced documents.
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::reduced", skip_all)
+	)]
 	pub(crate) async fn reduced(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		permitted: Permitted,
 	) -> Result<bool> {
@@ -363,19 +448,24 @@ impl Document {
 		Ok(true)
 	}
 
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::compute_reduced_target", skip_all)
+	)]
 	pub(crate) async fn compute_reduced_target(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		full: &CursorDoc,
 	) -> Result<CursorDoc> {
-		// Fetch the fields for the table
-		let fds = self.fd(ctx, opt).await?;
 		// The document to be reduced
 		let mut reduced = full.doc.clone();
+
+		let table_fields = self.fd(ctx, opt).await?;
+
 		// Loop over each field in document
-		for fd in fds.iter() {
+		for fd in table_fields.iter() {
 			// Loop over each field in document
 			for k in reduced.as_ref().each(&fd.name).iter() {
 				// Process the field permissions
@@ -388,7 +478,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = MutableContext::new(ctx);
+						let mut ctx = Context::new(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
@@ -425,7 +515,15 @@ impl Document {
 	}
 
 	/// Get the database for this document
-	pub async fn db(&self, ctx: &Context, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::db", skip_all)
+	)]
+	pub(super) async fn db(
+		&self,
+		ctx: &FrozenContext,
+		opt: &Options,
+	) -> Result<Arc<DatabaseDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = opt.ns_db()?;
 		// Get transaction
@@ -433,83 +531,47 @@ impl Document {
 		// Get the table definition
 		match ctx.get_cache() {
 			// A cache is present on the context
-			Some(cache) if txn.local() => {
+			Some(cache) if txn.is_local() => {
 				// Get the cache entry key
 				let key = cache::ds::Lookup::Db(ns, db);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_type(),
 					None => {
-						let val = txn.get_or_add_db(ns, db, opt.strict).await?;
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val
+						let val = txn.get_or_add_db(Some(ctx), ns, db).await?;
+						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_type()
 			}
 			// No cache is present on the context
-			_ => txn.get_or_add_db(ns, db, opt.strict).await,
+			_ => txn.get_or_add_db(Some(ctx), ns, db).await,
 		}
 	}
 
 	/// Get the table for this document
-	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
-		// Get the NS + DB
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		// Get the record id
-		let id = self.id()?;
-		// Get transaction
-		let txn = ctx.tx();
-		// Get the table definition
-		match ctx.get_cache() {
-			// A cache is present on the context
-			Some(cache) if txn.local() => {
-				// Get the cache entry key
-				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
-				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_type(),
-					None => {
-						let val = match txn.get_tb(ns, db, &id.table).await? {
-							Some(tb) => tb,
-							None => {
-								// Allowed to run?
-								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-								// We can create the table automatically
-								let (ns, db) = opt.ns_db()?;
-								txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await?
-							}
-						};
-						let val = cache::ds::Entry::Any(val.clone());
-						cache.insert(key, val.clone());
-						val.try_into_type()
-					}
-				}
-			}
-			// No cache is present on the context
-			_ => {
-				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.table).await? {
-					Some(tb) => Ok(tb),
-					None => {
-						// Allowed to run?
-						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
-						// We can create the table automatically
-						let (ns, db) = opt.ns_db()?;
-						txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
-					}
-				}
-			}
-		}
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::tb", skip_all)
+	)]
+	pub(super) async fn tb(&self) -> Result<&Arc<TableDefinition>> {
+		self.doc_ctx.tb()
 	}
 
 	/// Get the foreign tables for this document
-	pub async fn ft(&self, ctx: &Context, opt: &Options) -> Result<Arc<[TableDefinition]>> {
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ft", skip_all)
+	)]
+	pub(super) async fn ft(
+		&self,
+		ctx: &FrozenContext,
+		opt: &Options,
+	) -> Result<Arc<[TableDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -518,31 +580,33 @@ impl Document {
 				let key = cache::ds::Lookup::Fts(ns, db, &tb.name, tb.cache_tables_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_fts(),
 					None => {
 						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Fts(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_fts(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
 		}
 	}
 
 	/// Get the events for this document
-	pub async fn ev(
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ev", skip_all)
+	)]
+	pub(super) async fn ev(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -551,62 +615,47 @@ impl Document {
 				let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_evs(),
 					None => {
 						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Evs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_evs(),
+
 			// No cache is present on the context
 			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
 		}
 	}
 
 	/// Get the fields for this document
-	pub async fn fd(
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::fd", skip_all)
+	)]
+	pub(super) async fn fd(
 		&self,
-		ctx: &Context,
-		opt: &Options,
+		_ctx: &FrozenContext,
+		_opt: &Options,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
-		// Get the NS + DB
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
-		// Get the cache from the context
-		match ctx.get_cache() {
-			// A cache is present on the context
-			Some(cache) => {
-				// Get the cache entry key
-				let key = cache::ds::Lookup::Fds(ns, db, &tb.name, tb.cache_fields_ts);
-				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_fds(),
-					None => {
-						let val = ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await?;
-						cache.insert(key, cache::ds::Entry::Fds(val.clone()));
-						Ok(val)
-					}
-				}
-			}
-			// No cache is present on the context
-			None => ctx.tx().all_tb_fields(ns, db, &tb.name, opt.version).await,
-		}
+		self.doc_ctx.fd().cloned()
 	}
 
 	/// Get the indexes for this document
-	pub async fn ix(
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::ix", skip_all)
+	)]
+	pub(super) async fn ix(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -615,31 +664,33 @@ impl Document {
 				let key = cache::ds::Lookup::Ixs(ns, db, &tb.name, tb.cache_indexes_ts);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_ixs(),
 					None => {
 						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Ixs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
+						Ok(val)
 					}
 				}
 			}
-			.try_into_ixs(),
 			// No cache is present on the context
 			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
 		}
 	}
 
 	// Get the lives for this document
-	pub async fn lv(
+	#[cfg_attr(
+		feature = "trace-doc-ops",
+		instrument(level = "trace", name = "Document::lv", skip_all)
+	)]
+	pub(super) async fn lv(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
-		let tb = self.tb(ctx, opt).await?;
+		let tb = self.tb().await?;
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -650,15 +701,13 @@ impl Document {
 				let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, version);
 				// Get or update the cache entry
 				match cache.get(&key) {
-					Some(val) => val,
+					Some(val) => val.try_into_lvs(),
 					None => {
 						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
-						let val = cache::ds::Entry::Lvs(val.clone());
-						cache.insert(key, val.clone());
-						val
+						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
+						Ok(val)
 					}
 				}
-				.try_into_lvs()
 			}
 			// No cache is present on the context
 			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,

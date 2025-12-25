@@ -5,12 +5,12 @@ use super::CursorDoc;
 use super::args::Optional;
 use crate::buc::BucketController;
 use crate::buc::store::ObjectKey;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::val::{File, Object, Value};
 
 pub async fn put(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, value): (File, Value),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -20,7 +20,7 @@ pub async fn put(
 }
 
 pub async fn put_if_not_exists(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, value): (File, Value),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -30,7 +30,7 @@ pub async fn put_if_not_exists(
 }
 
 pub async fn get(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -39,7 +39,7 @@ pub async fn get(
 }
 
 pub async fn head(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -48,7 +48,7 @@ pub async fn head(
 }
 
 pub async fn delete(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -58,7 +58,7 @@ pub async fn delete(
 }
 
 pub async fn copy(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -69,7 +69,7 @@ pub async fn copy(
 }
 
 pub async fn copy_if_not_exists(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -80,7 +80,7 @@ pub async fn copy_if_not_exists(
 }
 
 pub async fn rename(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -91,7 +91,7 @@ pub async fn rename(
 }
 
 pub async fn rename_if_not_exists(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file, target): (File, String),
 ) -> Result<Value> {
 	let target = ObjectKey::new(target);
@@ -102,7 +102,7 @@ pub async fn rename_if_not_exists(
 }
 
 pub async fn exists(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(file,): (File,),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
@@ -112,7 +112,7 @@ pub async fn exists(
 }
 
 pub async fn list(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, &Options, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(bucket, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value> {
 	let mut controller = BucketController::new(stk, ctx, opt, doc, &bucket).await?;

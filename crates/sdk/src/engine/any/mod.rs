@@ -2,14 +2,14 @@
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For
 //! storing data we support a number of key value stores. These are SurrealKV,
-//! RocksDB, TiKV, FoundationDB and an in-memory store. We call these
-//! local engines. SurrealKV and RocksDB are file-based, single node key value
-//! stores. TiKV and FoundationDB are are distributed stores that can scale
-//! horizontally across multiple nodes. The in-memory store does not persist
-//! your data, it only stores it in memory. All these can be embedded in your
-//! application, so you don't need to spin up a SurrealDB server first in order
-//! to use them. We also support spinning up a server externally and then access
-//! your database via WebSockets or HTTP. We call these remote engines.
+//! RocksDB, TiKV and an in-memory store. We call these local engines. SurrealKV
+//! and RocksDB are file-based, single node key value stores. TiKV is a
+//! distributed store that can scale horizontally across multiple nodes. The
+//! in-memory store does not persist your data, it only stores it in memory. All
+//! these can be embedded in your application, so you don't need to spin up a
+//! SurrealDB server first in order to use them. We also support spinning up a
+//! server externally and then access your database via WebSockets or HTTP. We
+//! call these remote engines.
 //!
 //! The Rust SDK abstracts away the implementation details of the engines to
 //! make them work in a unified way. All these engines, whether they are local
@@ -195,7 +195,9 @@ impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
-			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
+			"memory" | "mem://" => {
+				(Url::parse("mem://").expect("valid memory url"), "memory".to_owned())
+			}
 			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
 				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
 			}
@@ -313,9 +315,6 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a TiKV-backed instance
 /// let db = connect("tikv://localhost:2379").await?;
-///
-/// // Instantiate a FoundationDB-backed instance
-/// let db = connect("fdb://path/to/fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -329,14 +328,13 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 }
 
 #[cfg(all(test, feature = "kv-mem"))]
+#[allow(clippy::unwrap_used)]
 mod tests {
-
-	use surrealdb_types::{self, Object};
 
 	use super::*;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
-	use crate::types::Value;
+	use crate::types::{Object, Value};
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {
@@ -384,34 +382,28 @@ mod tests {
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything
-		assert!(
-			db.query("INFO FOR ROOT").await.unwrap().check().is_err(),
-			"client should not have access to KV"
-		);
-		assert!(
-			db.query("INFO FOR NS").await.unwrap().check().is_err(),
-			"client should not have access to NS"
-		);
-		assert!(
-			db.query("INFO FOR DB").await.unwrap().check().is_err(),
-			"client should not have access to DB"
-		);
+		db.query("INFO FOR ROOT")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to KV");
+		db.query("INFO FOR NS")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to NS");
+		db.query("INFO FOR DB")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to DB");
 
 		// It can sign in
-		assert!(db.signin(creds).await.is_ok(), "client should be able to sign in");
+		db.signin(creds).await.expect("client should be able to sign in");
 
 		// After the sign in, the client has access to everything
-		assert!(
-			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
-			"client should have access to KV"
-		);
-		assert!(
-			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
-			"client should have access to NS"
-		);
-		assert!(
-			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
-			"client should have access to DB"
-		);
+		db.query("INFO FOR ROOT").await.unwrap().check().expect("client should have access to KV");
+		db.query("INFO FOR NS").await.unwrap().check().expect("client should have access to NS");
+		db.query("INFO FOR DB").await.unwrap().check().expect("client should have access to DB");
 	}
 }

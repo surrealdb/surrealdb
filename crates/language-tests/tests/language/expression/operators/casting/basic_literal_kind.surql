@@ -5,19 +5,19 @@
 value = "'a'"
 
 [[test.results]]
-error = "Expected `'b'` but found a `'a'`"
+error = "Could not cast into `'b'` using input `'a'`"
 
 [[test.results]]
-error = "Expected `'b'` but found a `123`"
-
-[[test.results]]
-value = "123"
+error = "Could not cast into `'b'` using input `123`"
 
 [[test.results]]
 value = "123"
 
 [[test.results]]
-error = "Expected `123` but found a `'a'`"
+value = "123"
+
+[[test.results]]
+error = "Could not cast into `123` using input `'a'`"
 
 [[test.results]]
 value = "[123, 'abc']"
@@ -26,19 +26,19 @@ value = "[123, 'abc']"
 value = "[123, 'abc']"
 
 [[test.results]]
-error = "Expected `[123, 'abd']` but found a `[123, 'abc']`"
+error = "Could not cast into `[123, 'abd']` using input `[123, 'abc']`"
 
 [[test.results]]
 value = "{ a: 1d }"
 
 [[test.results]]
-error = "Expected `{ a: 2d }` but found a `{ a: 1d }`"
+error = "Could not cast into `{ a: 2d }` using input `{ a: 1d }`"
 
 [[test.results]]
 value = "true"
 
 [[test.results]]
-error = "Expected `true` but found a `false`"
+error = "Could not cast into `true` using input `false`"
 
 */
 <"a" | "b"> "a";

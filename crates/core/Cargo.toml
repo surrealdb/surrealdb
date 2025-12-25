@@ -5,7 +5,6 @@ readme = "README.md"
 documentation = "https://docs.rs/surrealdb-core/"
 edition.workspace = true
 version.workspace = true
-rust-version.workspace = true
 authors.workspace = true
 description.workspace = true
 repository.workspace = true
@@ -16,9 +15,9 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["kv-mem"]
+default = ["kv-mem", "graphql"]
 kv-mem = [
-    "dep:surrealkv",
+    "dep:surrealmx",
     "tokio/time",
     "dep:tempfile",
     "dep:ext-sort",
@@ -33,7 +32,6 @@ kv-rocksdb = [
     "dep:affinitypool",
 ]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
@@ -45,7 +43,8 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
-allocator = ["dep:jemallocator"]
+surrealism = ["dep:surrealism-runtime"]
+allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -53,22 +52,27 @@ arbitrary = [
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
     "uuid/arbitrary",
+    "surrealdb-types/arbitrary",
 ]
 allocation-tracking = []
-enterprise = ["dep:rust-s3"]
+trace-doc-ops = []
+
+# GraphQL support
+graphql = ["dep:async-graphql"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
-features = ["kv-mem", "kv-rocksdb", "http", "scripting"]
+features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql"]
 targets = []
 
 [dependencies]
 
 # External surreal crates
+surrealmx = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
 surrealml = { workspace = true, optional = true }
+
 affinitypool = { workspace = true, optional = true }
-#derive.workspace = true
 dmp.workspace = true
 indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
@@ -86,10 +90,10 @@ lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision.workspace = true
 storekey.workspace = true
+surrealdb-types = { workspace = true }
 vart.workspace = true
 
 # External KV stores
-foundationdb = { workspace = true, optional = true }
 rocksdb = { workspace = true, optional = true }
 tikv = { workspace = true, optional = true }
 
@@ -100,10 +104,9 @@ ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
-async-executor.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
-] }
+], optional = true }
 async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
@@ -153,7 +156,6 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-snap.workspace = true
 strsim.workspace = true
 subtle.workspace = true
 sysinfo.workspace = true
@@ -182,21 +184,22 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
-surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
+tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 # NON-WASM DEPENDENCY CONFIGURATION
+# Note: surrealism-runtime is only available on non-WASM targets
+# The surrealism feature will be enabled by default for non-WASM in the parent workspace
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
-surrealdb-types = { workspace = true, features = ["js"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -207,11 +210,16 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
+tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+surrealism-runtime = { workspace = true, optional = true }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))'.dependencies]
 jemallocator = { workspace = true, optional = true }
+
+[target.'cfg(all(any(unix, windows), not(all(any(target_arch = "x86_64", target_arch = "x86"), any(target_os = "linux", target_os = "macos"), not(target_env = "msvc")))))'.dependencies]
+mimalloc = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
@@ -226,11 +234,20 @@ temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
+
+[package.metadata.cargo-machete]
+# md-5 crate is imported as md5::, regex-syntax is optional (tied to arbitrary feature)
+ignored = ["md-5", "regex-syntax"]
 
 [lints]
 workspace = true
 
 [lib]
 name = "surrealdb_core"
+
+[[bench]]
+name = "allocation_tracking"
+harness = false

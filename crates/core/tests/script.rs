@@ -22,7 +22,7 @@ async fn script_function_error() -> Result<()> {
 			throw new Error('error');
 		};
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -51,7 +51,7 @@ async fn script_function_simple() -> Result<()> {
 			return "Line 1\nLine 2";
 		};
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -85,7 +85,7 @@ async fn script_function_context() -> Result<()> {
 				{ rating: 8.7 },
 			];
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -122,7 +122,7 @@ async fn script_function_arguments() -> Result<()> {
 			return `${arguments[0]} is ${arguments[1].join(', ')}`;
 		};
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -172,7 +172,7 @@ async fn script_function_types() -> Result<()> {
 			}
 		;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -204,7 +204,7 @@ async fn script_function_module_os() -> Result<()> {
 			return platform();
 		};
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -222,7 +222,7 @@ async fn script_query_from_script_select() -> Result<()> {
 		CREATE test SET name = "b", number = 1;
 		CREATE test SET name = "c", number = 2;
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// direct query
@@ -278,7 +278,7 @@ async fn script_query_from_script() -> Result<()> {
 			return await surrealdb.query(`CREATE ONLY article:test SET name = "The daily news", issue_number = 3`)
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -319,7 +319,7 @@ async fn script_value_function_params() -> Result<()> {
 			return await surrealdb.value(`$test.name`)
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -344,7 +344,7 @@ async fn script_value_function_inline_values() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -379,7 +379,7 @@ async fn script_function_number_conversion_test() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -405,7 +405,7 @@ async fn script_bytes() -> Result<()> {
 			return new Uint8Array([0,1,2,3,4,5,6,7])
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -431,7 +431,7 @@ async fn script_geometry_point() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -459,7 +459,7 @@ async fn script_geometry_line() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -495,7 +495,7 @@ async fn script_geometry_polygon() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -530,7 +530,7 @@ async fn script_geometry_multi_point() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -566,7 +566,7 @@ async fn script_geometry_multi_line() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -609,7 +609,7 @@ async fn script_geometry_multi_polygon() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -651,7 +651,7 @@ async fn script_geometry_collection() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -695,7 +695,7 @@ async fn script_bytes_into() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())
@@ -725,7 +725,7 @@ async fn script_geometry_into() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())
@@ -741,7 +741,7 @@ async fn script_parallel_query() -> Result<()> {
 			])
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())
@@ -762,7 +762,7 @@ async fn script_run_too_long() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
 	timeout += timeout / 2;
@@ -793,7 +793,7 @@ async fn script_limit_massive_parallel() -> Result<()> {
 		};
 		return fn::crashcat();
 	"#;
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())

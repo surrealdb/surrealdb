@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-use uuid::Uuid;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
 
 pub type DocId = u64;
@@ -46,25 +42,18 @@ impl Resolved {
 /// - Allocates IDs in batches for better performance
 pub(crate) struct SeqDocIds {
 	ikb: IndexKeyBase,
-	nid: Uuid,
-	domain: Arc<SequenceDomain>,
 	batch: u32,
 }
 
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and
-	/// index key base. Sets up the sequence domain for generating unique
-	/// document IDs.
+	/// Initializes a new document ID manager for the specified index.
 	///
 	/// # Arguments
-	/// * `nid` - The node ID used for distributed sequence generation
 	/// * `ikb` - The index key base containing namespace, database, table, and index information
-	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
+	pub(in crate::idx) fn new(ikb: IndexKeyBase) -> Self {
 		Self {
-			nid,
-			domain: Arc::new(SequenceDomain::new_ft_doc_ids(ikb.clone())),
 			batch: 1000, // TODO ekeller: Make that configurable?
 			ikb,
 		}
@@ -105,7 +94,7 @@ impl SeqDocIds {
 	/// * `Ok(Resolved::New(DocId))` - If a new document ID was created
 	pub(in crate::idx) async fn resolve_doc_id(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		id: RecordIdKey,
 	) -> Result<Resolved> {
 		let id_key = self.ikb.new_id_key(id.clone());
@@ -117,7 +106,7 @@ impl SeqDocIds {
 		// If not, let's get one from the sequence
 		let new_doc_id = ctx
 			.try_get_sequences()?
-			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
+			.next_fts_doc_id(Some(ctx), self.ikb.clone(), self.batch)
 			.await? as DocId;
 		{
 			tx.set(&id_key, &new_doc_id, None).await?;
@@ -174,36 +163,34 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
-	use uuid::Uuid;
-
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-	use crate::ctx::Context;
+	use crate::ctx::FrozenContext;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::seqdocids::{DocId, Resolved, SeqDocIds};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::RecordIdKey;
+	use crate::val::{RecordIdKey, TableName};
 
 	const TEST_NS_ID: NamespaceId = NamespaceId(1);
 	const TEST_DB_ID: DatabaseId = DatabaseId(1);
 	const TEST_TB: &str = "test_tb";
 	const TEST_IX_ID: IndexId = IndexId(1);
 
-	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (Context, SeqDocIds) {
+	async fn new_operation(ds: &Datastore, tt: TransactionType) -> (FrozenContext, SeqDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
-		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
+		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB.into(), TEST_IX_ID);
 		ctx.set_transaction(tx.into());
-		let d = SeqDocIds::new(Uuid::nil(), ikb);
+		let d = SeqDocIds::new(ikb);
 		(ctx.freeze(), d)
 	}
 
-	async fn finish(ctx: Context) {
+	async fn finish(ctx: FrozenContext) {
 		ctx.tx().commit().await.unwrap();
 	}
 
-	async fn check_get_doc_key_id(ctx: &Context, d: &SeqDocIds, doc_id: DocId, key: &str) {
+	async fn check_get_doc_key_id(ctx: &FrozenContext, d: &SeqDocIds, doc_id: DocId, key: &str) {
 		let tx = ctx.tx();
 		let id = RecordIdKey::String(key.into());
 		assert_eq!(SeqDocIds::get_id(&d.ikb, &tx, doc_id).await.unwrap(), Some(id.clone()));
@@ -398,17 +385,18 @@ mod tests {
 		{
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
+			let tb = TableName::from(TEST_TB);
 			for id in ["Foo", "Bar", "Hello", "World"] {
 				let id = crate::key::index::id::Id::new(
 					TEST_NS_ID,
 					TEST_DB_ID,
-					TEST_TB,
+					&tb,
 					TEST_IX_ID,
 					RecordIdKey::String(id.into()),
 				);
 				assert!(!tx.exists(&id, None).await.unwrap());
 			}
-			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
+			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB.into(), TEST_IX_ID);
 			for doc_id in 0..=3 {
 				assert_eq!(SeqDocIds::get_id(&ikb, &tx, doc_id).await.unwrap(), None);
 			}

@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use helpers::*;
 use regex::Regex;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::ToSql;
 
@@ -24,7 +23,7 @@ async fn info_for_root() {
 	)
 	.unwrap();
 	t.expect_regex(
-		r"\{ accesses: \[\{.*\}\], namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
+		r"\{ accesses: \[\{.*\}\], config: \{ .* \}, defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
 	)
 	.unwrap();
 }
@@ -89,7 +88,7 @@ async fn info_for_user() {
         DEFINE USER user ON NS PASSWORD 'pass';
         DEFINE USER user ON DB PASSWORD 'pass';
     "#;
-	let dbs = new_ds().await.unwrap();
+	let dbs = new_ds("ns", "db").await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -176,7 +175,7 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -286,7 +285,7 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }";
+	let check = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }";
 
 	let test_cases = [
 		// Root level
@@ -542,9 +541,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -567,9 +564,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -592,9 +587,7 @@ async fn access_info_redacted() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -604,7 +597,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
@@ -618,9 +611,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -630,7 +621,7 @@ WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
@@ -647,9 +638,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -673,9 +662,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("x", "x").await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -698,9 +685,7 @@ async fn access_info_redacted_structure() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("ns", "db").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -710,7 +695,7 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], modules: [], params: [], sequences: [], tables: [], users: [] }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
@@ -724,9 +709,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds("ns", "db").await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -736,7 +719,7 @@ DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: [{ duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
+			r#"{ accesses: [{ duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], modules: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
@@ -751,7 +734,7 @@ async fn function_info_structure() {
         DEFINE FUNCTION fn::example($name: string) -> string { RETURN "Hello, " + $name + "!" };
         INFO FOR DB STRUCTURE;
     "#;
-	let dbs = new_ds().await.unwrap();
+	let dbs = new_ds("ns", "db").await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -761,7 +744,7 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-		r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!' }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#
+		r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!' }", name: 'example', permissions: true, returns: 'string' }], models: [], modules: [], params: [], sequences: [], tables: [], users: [] }"#
 		.to_string();
 	let out_str = out.unwrap().to_sql();
 	assert_eq!(

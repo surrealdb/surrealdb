@@ -14,7 +14,7 @@ value = "NONE"
 value = "{ events: { }, fields: { id_copied: 'DEFINE FIELD id_copied ON product TYPE record DEFAULT id PERMISSIONS FULL' }, indexes: { }, lives: { }, tables: { } }"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ { default: 'id', default_always: false, flex: false, kind: 'record', name: 'id_copied', permissions: { create: true, select: true, update: true }, readonly: false, what: 'product' } ], indexes: [ ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ { default: 'id', default_always: false, kind: 'record', name: 'id_copied', permissions: { create: true, select: true, update: true }, readonly: false, table: 'product' } ], indexes: [ ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 value = "[{ id: product:a, id_copied: product:a }]"

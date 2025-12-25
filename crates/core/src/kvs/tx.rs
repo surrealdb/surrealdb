@@ -1,65 +1,73 @@
 use std::any::Any;
 use std::fmt::Debug;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::lock::{Mutex, MutexGuard};
+use chrono::{DateTime, Utc};
+use futures::TryStreamExt;
+use futures::future::try_join_all;
 use futures::stream::Stream;
 use uuid::Uuid;
 
 use super::batch::Batch;
-use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider,
-	NamespaceProvider, NodeProvider, TableProvider, UserProvider,
+	NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
-	NamespaceDefinition, NamespaceId, TableDefinition,
+	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultConfig, IndexId,
+	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
-use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::ctx::Context;
 use crate::dbs::node::Node;
+use crate::doc::CursorRecord;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
-use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::key::KVKey;
-use crate::kvs::scanner::Scanner;
-use crate::kvs::{Transactor, cache};
-use crate::val::record::Record;
-use crate::val::{RecordId, RecordIdKey};
+use crate::kvs::scanner::Direction;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::{KVKey, KVValue, Transactor, cache};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
 	local: bool,
 	/// The underlying transactor
-	tx: Mutex<Transactor>,
+	tr: Transactor,
 	/// The query cache for this store
 	cache: TransactionCache,
-	/// Cache the index updates
-	index_caches: IndexTreeCaches,
-	/// Does this support reverse scan?
-	has_reverse_scan: bool,
+	/// The sequences for this store
+	sequences: Sequences,
+	// The changefeed buffer
+	cf: crate::cf::Writer,
+}
+
+impl Deref for Transaction {
+	type Target = Transactor;
+
+	fn deref(&self) -> &Self::Target {
+		&self.tr
+	}
 }
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, sequences: Sequences, tr: Transactor) -> Transaction {
 		Transaction {
 			local,
-			has_reverse_scan: tx.inner.supports_reverse_scan(),
-			tx: Mutex::new(tx),
+			tr,
 			cache: TransactionCache::new(),
-			index_caches: IndexTreeCaches::default(),
+			sequences,
+			cf: crate::cf::Writer::new(),
 		}
 	}
 
-	/// Retrieve the underlying transaction
-	pub fn inner(self) -> Transactor {
-		self.tx.into_inner()
+	/// Check if the transaction is local or remote
+	pub fn is_local(&self) -> bool {
+		self.local
 	}
 
 	/// Enclose this transaction in an [`Arc`]
@@ -67,29 +75,14 @@ impl Transaction {
 		Arc::new(self)
 	}
 
-	/// Retrieve the underlying transaction
-	pub async fn lock(&self) -> MutexGuard<'_, Transactor> {
-		self.tx.lock().await
-	}
-
-	/// Check if the transaction is local or remote
-	pub fn local(&self) -> bool {
-		self.local
-	}
-
-	/// Check if the transaction supports reverse scan
-	pub fn has_reverse_scan(&self) -> bool {
-		self.has_reverse_scan
-	}
-
 	/// Check if the transaction is finished.
 	///
-	/// If the transaction has been canceled or committed,
+	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`Error::TxFinished`] error.
-	pub async fn closed(&self) -> bool {
-		self.lock().await.closed()
+	/// in a [`kvs::Error::TransactionFinished`] error.
+	pub fn closed(&self) -> bool {
+		self.tr.closed()
 	}
 
 	/// Cancel a transaction.
@@ -97,7 +90,10 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<()> {
-		self.lock().await.cancel().await
+		// Clear any buffered changefeed entries
+		self.cf.clear();
+		// Cancel the transaction
+		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
 
 	/// Commit a transaction.
@@ -105,7 +101,15 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
-		self.lock().await.commit().await
+		// Store any buffered changefeed entries
+		if let Err(e) = self.store_changes().await {
+			// Cancel the transaction if failure
+			let _ = self.cancel().await;
+			// Return the error
+			return Err(e);
+		}
+		// Commit the transaction
+		Ok(self.tr.commit().await.map_err(Error::from)?)
 	}
 
 	/// Check if a key exists in the datastore.
@@ -114,7 +118,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.exists(key, version).await
+		let key = key.encode_key()?;
+		Ok(self.tr.exists(key, version).await.map_err(Error::from)?)
 	}
 
 	/// Fetch a key from the datastore.
@@ -123,16 +128,32 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.get(key, version).await
+		let key = key.encode_key()?;
+		let val = self.tr.get(key, version).await.map_err(Error::from)?;
+		val.map(K::ValueType::kv_decode_value).transpose()
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<K::ValueType>>>
+	pub async fn getm<K>(
+		&self,
+		keys: Vec<K>,
+		version: Option<u64>,
+	) -> Result<Vec<Option<K::ValueType>>>
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getm(keys).await
+		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
+		self.tr
+			.getm(keys, version)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|v| match v {
+				Some(v) => K::ValueType::kv_decode_value(v).map(Some),
+				None => Ok(None),
+			})
+			.collect()
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
@@ -140,11 +161,18 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in
 	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, K::ValueType)>>
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getp(key).await
+		let key = key.encode_key()?;
+		self.tr
+			.getp(key)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(v)?)))
+			.collect()
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -152,11 +180,23 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in
 	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
+	pub async fn getr<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, K::ValueType)>>
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getr(rng, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		self.tr
+			.getr(beg..end, version)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(v)?)))
+			.collect()
 	}
 
 	/// Delete a key from the datastore.
@@ -165,7 +205,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.del(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.del(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete a key from the datastore if the current value matches a
@@ -175,7 +216,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delc(key, chk).await
+		let key = key.encode_key()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.delc(key, chk).await.map_err(Error::from)?)
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -187,7 +230,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delr(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.delr(beg..end).await.map_err(Error::from)?)
 	}
 
 	/// Delete a prefix of keys from the datastore.
@@ -199,7 +244,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delp(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.delp(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -208,7 +254,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clr(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.clr(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -218,7 +265,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrc(key, chk).await
+		let key = key.encode_key()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.clrc(key, chk).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -230,7 +279,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrr(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.clrr(beg..end).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a prefix of keys from the datastore.
@@ -242,7 +293,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrp(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.clrp(key).await.map_err(Error::from)?)
 	}
 
 	/// Insert or update a key in the datastore.
@@ -251,16 +303,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.set(key, val, version).await
-	}
-
-	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
-	where
-		K: KVKey + Debug,
-	{
-		self.lock().await.replace(key, val).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.set(key, val, version).await.map_err(Error::from)?)
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -269,7 +314,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.put(key, val, version).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.put(key, val, version).await.map_err(Error::from)?)
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -283,7 +330,21 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.putc(key, val, chk).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.putc(key, val, chk).await.map_err(Error::from)?)
+	}
+
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.replace(key, val).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -295,8 +356,14 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.keys(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.keys(beg..end, limit, version).await.map_err(Error::from)?)
 	}
+
+	// --------------------------------------------------
+	// Range functions
+	// --------------------------------------------------
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
@@ -312,7 +379,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.keysr(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.keysr(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -329,7 +398,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.scan(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.scan(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -342,7 +413,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.scanr(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.scanr(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -354,8 +427,14 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.count(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.count(beg..end).await.map_err(Error::from)?)
 	}
+
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
@@ -371,7 +450,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys(rng, batch, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -388,7 +469,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys_vals(rng, batch, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys_vals(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -404,58 +487,248 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys_vals_versions(rng, batch).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys_vals_versions(beg..end, batch).await.map_err(Error::from)?)
 	}
+
+	// --------------------------------------------------
+	// Stream functions
+	// --------------------------------------------------
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream(
-		&self,
-		rng: Range<Vec<u8>>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		sc: ScanDirection,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit, sc)
-	}
-
+	/// This function fetches keys in batches, with multiple requests to the
+	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
+	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
+	/// by default for optimal read throughput.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys(
 		&self,
-		rng: Range<Vec<u8>>,
+		rng: Range<Key>,
+		version: Option<u64>,
 		limit: Option<usize>,
-		sc: ScanDirection,
+		dir: ScanDirection,
 	) -> impl Stream<Item = Result<Key>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, sc)
+		self.tr
+			.stream_keys(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
+	}
+
+	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	///
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore. The Scanner uses adaptive batch
+	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
+	/// Prefetching is enabled by default for optimal read throughput.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys_vals(
+		&self,
+		rng: Range<Key>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: ScanDirection,
+	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
+		self.tr
+			.stream_keys_vals(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
+	}
+
+	/// Retrieve a stream over a specific range of keys in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys_no_prefetch(
+		&self,
+		rng: Range<Key>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: ScanDirection,
+	) -> impl Stream<Item = Result<Key>> + '_ {
+		self.tr
+			.stream_keys_no_prefetch(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
+	}
+
+	/// Retrieve a stream over a specific range of key-value pairs in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys_vals_no_prefetch(
+		&self,
+		rng: Range<Key>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: ScanDirection,
+	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
+		self.tr
+			.stream_keys_vals_no_prefetch(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
 	}
 
 	// --------------------------------------------------
-	// Rollback methods
+	// Savepoint functions
 	// --------------------------------------------------
 
-	/// Warn if this transaction is dropped without proper handling.
-	pub async fn rollback_with_warning(self) -> Self {
-		self.tx.lock().await.check_level(Check::Warn);
-		self
+	/// Set a new save point on the transaction.
+	pub async fn new_save_point(&self) -> Result<()> {
+		Ok(self.inner.new_save_point().await.map_err(Error::from)?)
 	}
 
-	/// Error if this transaction is dropped without proper handling.
-	pub async fn rollback_with_error(self) -> Self {
-		self.tx.lock().await.check_level(Check::Error);
-		self
+	/// Release the last save point.
+	pub async fn release_last_save_point(&self) -> Result<()> {
+		Ok(self.inner.release_last_save_point().await.map_err(Error::from)?)
 	}
 
-	/// Do nothing if this transaction is dropped without proper handling.
-	pub async fn rollback_and_ignore(self) -> Self {
-		self.tx.lock().await.check_level(Check::None);
-		self
+	/// Rollback to the last save point.
+	pub async fn rollback_to_save_point(&self) -> Result<()> {
+		Ok(self.inner.rollback_to_save_point().await.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------
-	// Cache methods
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
+		Ok(self.tr.timestamp().await.map_err(Error::from)?)
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		Ok(self.tr.timestamp_bytes_from_versionstamp(version).await.map_err(Error::from)?)
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		Ok(self.tr.timestamp_bytes_from_datetime(datetime).await.map_err(Error::from)?)
+	}
+
+	// --------------------------------------------------
+	// Changefeed functions
+	// --------------------------------------------------
+
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn changefeed_buffer_table_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		dt: &TableDefinition,
+	) {
+		self.cf.changefeed_buffer_table_change(ns, db, tb, dt)
+	}
+
+	// change will record the change in the changefeed if enabled.
+	// To actually persist the record changes into the underlying kvs,
+	// you must call the `complete_changes` function and then commit the
+	// transaction.
+	#[expect(clippy::too_many_arguments)]
+	pub(crate) fn changefeed_buffer_record_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
+		store_difference: bool,
+	) {
+		self.cf.changefeed_buffer_record_change(
+			ns,
+			db,
+			tb,
+			id.clone(),
+			previous,
+			current,
+			store_difference,
+		)
+	}
+
+	// complete_changes will complete the changefeed recording for the given
+	// namespace and database.
+	//
+	// This function writes all buffered changefeed entries to the datastore
+	// with the current transaction timestamp. Every change must be recorded by
+	// calling this struct's `changefeed_buffer_record_change` function beforehand.
+	// If there were no preceding calls for this transaction, this function
+	// will do nothing.
+	//
+	// This function should be called only after all the changes have been made to
+	// the transaction. Otherwise, changes are missed in the change feed.
+	//
+	// This function should be called immediately before calling the commit function
+	// to ensure the timestamp reflects the actual commit time.
+	pub(crate) async fn store_changes(&self) -> Result<()> {
+		// Get the changes from the changefeed
+		let changes = self.cf.changes()?;
+		// For zero-length changes, return early
+		if changes.is_empty() {
+			return Ok(());
+		}
+		// Get the current transaction timestamp
+		let ts = self.timestamp().await?.to_ts_bytes();
+		// Convert the timestamp bytes to a slice
+		let ts = ts.as_slice();
+		// Collect all changefeed write operations as futures
+		let futures = changes.into_iter().map(|(ns, db, tb, value)| async move {
+			// Create the changefeed key with the current timestamp
+			let key = crate::key::change::new(ns, db, ts, &tb).encode_key()?;
+			// Write the changefeed entry using the raw transactor API
+			self.tr.set(key, value, None).await.map_err(Error::from)?;
+			// Everything succeeded
+			Ok::<(), anyhow::Error>(())
+		});
+		// Execute all write operations concurrently
+		try_join_all(futures).await?;
+		// All good
+		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Cache functions
 	// --------------------------------------------------
 
 	#[inline]
@@ -463,7 +736,7 @@ impl Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 	) {
@@ -478,8 +751,16 @@ impl Transaction {
 		self.cache.clear()
 	}
 
-	pub(crate) fn index_caches(&self) -> &IndexTreeCaches {
-		&self.index_caches
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn compact<K>(&self, prefix_key: Option<K>) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let rng = match prefix_key {
+			Some(prefix_key) => Some(util::to_prefix_range(prefix_key)?),
+			None => None,
+		};
+		self.tr.inner.compact(rng).await
 	}
 }
 
@@ -521,6 +802,51 @@ impl NodeProvider for Transaction {
 			}
 		}
 		.try_into_type()
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl RootProvider for Transaction {
+	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>> {
+		let qey = cache::tx::Lookup::Rcg("default");
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::root_config::new("default");
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+				let ConfigDefinition::Default(val) = val else {
+					fail!("Expected a default config but found {val:?} instead");
+				};
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
+		.map(Option::Some)
+	}
+
+	/// Retrieve a specific config definition from the root.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<ConfigDefinition>>> {
+		let qey = cache::tx::Lookup::Rcg(cg);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Option::Some),
+			None => {
+				let key = crate::key::root::root_config::new(cg);
+				if let Some(val) = self.get(&key, None).await? {
+					let val = Arc::new(val);
+					let entr = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entr);
+					Ok(Some(val))
+				} else {
+					Ok(None)
+				}
+			}
+		}
 	}
 }
 
@@ -572,10 +898,6 @@ impl NamespaceProvider for Transaction {
 		}
 	}
 
-	async fn get_next_ns_id(&self) -> Result<NamespaceId> {
-		self.lock().await.get_next_ns_id().await
-	}
-
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
 		let key = crate::key::root::ns::new(&ns.name);
 		self.set(&key, &ns, None).await?;
@@ -588,6 +910,10 @@ impl NamespaceProvider for Transaction {
 		self.cache.insert(qey, entry);
 
 		Ok(cached_ns)
+	}
+
+	async fn get_next_ns_id(&self, ctx: Option<&Context>) -> Result<NamespaceId> {
+		self.sequences.next_namespace_id(ctx).await
 	}
 }
 
@@ -629,8 +955,8 @@ impl DatabaseProvider for Transaction {
 				};
 
 				let val = Arc::new(db_def);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -638,12 +964,12 @@ impl DatabaseProvider for Transaction {
 
 	/// Get or add a database with a default configuration, only if we are in
 	/// dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_db_upwards(
 		&self,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
-		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
 		let qey = cache::tx::Lookup::DbByName(ns, db);
@@ -660,47 +986,36 @@ impl DatabaseProvider for Transaction {
 					return Ok(db_def);
 				}
 
-				// Database does not exist
-				if !strict {
-					let ns_def = if upwards {
-						self.get_or_add_ns(ns, strict).await?
-					} else {
-						match self.get_ns_by_name(ns).await? {
-							Some(ns_def) => ns_def,
-							None => {
-								return Err(Error::NsNotFound {
-									name: ns.to_owned(),
-								}
-								.into());
+				let ns_def = if upwards {
+					self.get_or_add_ns(ctx, ns).await?
+				} else {
+					match self.get_ns_by_name(ns).await? {
+						Some(ns_def) => ns_def,
+						None => {
+							return Err(Error::NsNotFound {
+								name: ns.to_owned(),
 							}
+							.into());
 						}
-					};
-
-					let db_def = DatabaseDefinition {
-						namespace_id: ns_def.namespace_id,
-						database_id: self.lock().await.get_next_db_id(ns_def.namespace_id).await?,
-						name: db.to_string(),
-						comment: None,
-						changefeed: None,
-					};
-
-					return self.put_db(&ns_def.name, db_def).await;
-				}
-
-				// Ensure the namespace exists
-				if self.get_ns_by_name(ns).await?.is_none() {
-					return Err(Error::NsNotFound {
-						name: ns.to_owned(),
 					}
-					.into());
-				}
+				};
 
-				return Err(Error::DbNotFound {
-					name: db.to_owned(),
-				}
-				.into());
+				let db_def = DatabaseDefinition {
+					namespace_id: ns_def.namespace_id,
+					database_id: self.get_next_db_id(ctx, ns_def.namespace_id).await?,
+					name: db.to_string(),
+					comment: None,
+					changefeed: None,
+					strict: false,
+				};
+
+				return self.put_db(&ns_def.name, db_def).await;
 			}
 		}
+	}
+
+	async fn get_next_db_id(&self, ctx: Option<&Context>, ns: NamespaceId) -> Result<DatabaseId> {
+		self.sequences.next_database_id(ctx, ns).await
 	}
 
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>> {
@@ -800,6 +1115,28 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
+	/// Retrieve all module definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn all_db_modules(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::ModuleDefinition]>> {
+		let qey = cache::tx::Lookup::Mds(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_mds(),
+			None => {
+				let beg = crate::key::database::md::prefix(ns, db)?;
+				let end = crate::key::database::md::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let entry = cache::tx::Entry::Mds(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_params(
@@ -844,7 +1181,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	/// Retrieve all model definitions for a specific database.
+	/// Retrieve all config definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_configs(
 		&self,
@@ -883,16 +1220,15 @@ impl DatabaseProvider for Transaction {
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
-
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
 	}
 
-	/// Retrieve a specific analyzer definition.
+	/// Retrieve a specific analyzer definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_analyzer(
 		&self,
@@ -909,13 +1245,14 @@ impl DatabaseProvider for Transaction {
 					name: az.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
 	}
 
+	/// Retrieve a specific sequence definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_sequence(
 		&self,
@@ -932,8 +1269,8 @@ impl DatabaseProvider for Transaction {
 					name: sq.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
@@ -956,22 +1293,35 @@ impl DatabaseProvider for Transaction {
 					name: fc.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
 	}
 
-	async fn put_db_function(
+	/// Retrieve a specific module definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn get_db_module(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		fc: &catalog::FunctionDefinition,
-	) -> Result<()> {
-		let key = crate::key::database::fc::new(ns, db, &fc.name);
-		self.set(&key, fc, None).await?;
-		Ok(())
+		md: &str,
+	) -> Result<Arc<catalog::ModuleDefinition>> {
+		let qey = cache::tx::Lookup::Md(ns, db, md);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type(),
+			None => {
+				let key = crate::key::database::md::new(ns, db, md);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::MdNotFound {
+					name: md.to_owned(),
+				})?;
+				let val = Arc::new(val);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
 	}
 
 	/// Retrieve a specific function definition from a database.
@@ -991,22 +1341,11 @@ impl DatabaseProvider for Transaction {
 					name: pa.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
-	}
-
-	async fn put_db_param(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		pa: &catalog::ParamDefinition,
-	) -> Result<()> {
-		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		self.set(&key, pa, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific config definition from a database.
@@ -1032,6 +1371,40 @@ impl DatabaseProvider for Transaction {
 				}
 			}
 		}
+	}
+
+	async fn put_db_function(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		fc: &catalog::FunctionDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::fc::new(ns, db, &fc.name);
+		self.set(&key, fc, None).await?;
+		Ok(())
+	}
+
+	async fn put_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &catalog::ModuleDefinition,
+	) -> Result<()> {
+		let name = md.get_storage_name()?;
+		let key = crate::key::database::md::new(ns, db, &name);
+		self.set(&key, md, None).await?;
+		Ok(())
+	}
+
+	async fn put_db_param(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		pa: &catalog::ParamDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::pa::new(ns, db, &pa.name);
+		self.set(&key, pa, None).await?;
+		Ok(())
 	}
 }
 
@@ -1067,7 +1440,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::TableDefinition]>> {
 		let qey = cache::tx::Lookup::Fts(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1086,14 +1459,13 @@ impl TableProvider for Transaction {
 
 	/// Get or add a table with a default configuration, only if we are in
 	/// dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn get_or_add_tb_upwards(
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
+	async fn get_or_add_tb(
 		&self,
+		ctx: Option<&Context>,
 		ns: &str,
 		db: &str,
-		tb: &str,
-		strict: bool,
-		upwards: bool,
+		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
 		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1101,24 +1473,10 @@ impl TableProvider for Transaction {
 			Some(val) => val.try_into_type(),
 			// The entry is not in the cache
 			None => {
-				let db_def = if upwards {
-					self.get_or_add_db_upwards(ns, db, strict, upwards).await?
-				} else {
-					if self.get_ns_by_name(ns).await?.is_none() {
-						return Err(Error::NsNotFound {
-							name: ns.to_owned(),
-						}
-						.into());
-					}
-					match self.get_db_by_name(ns, db).await? {
-						Some(db_def) => db_def,
-						None => {
-							return Err(Error::DbNotFound {
-								name: db.to_owned(),
-							}
-							.into());
-						}
-					}
+				let Some(db_def) = self.get_db_by_name(ns, db).await? else {
+					return Err(anyhow::anyhow!(Error::DbNotFound {
+						name: db.to_owned(),
+					}));
 				};
 
 				let table_key =
@@ -1131,7 +1489,7 @@ impl TableProvider for Transaction {
 					return Ok(cached_tb);
 				}
 
-				if strict {
+				if db_def.strict {
 					return Err(Error::TbNotFound {
 						name: tb.to_owned(),
 					}
@@ -1141,11 +1499,8 @@ impl TableProvider for Transaction {
 				let tb_def = TableDefinition::new(
 					db_def.namespace_id,
 					db_def.database_id,
-					self.lock()
-						.await
-						.get_next_tb_id(db_def.namespace_id, db_def.database_id)
-						.await?,
-					tb.to_owned(),
+					self.get_next_tb_id(ctx, db_def.namespace_id, db_def.database_id).await?,
+					tb.clone(),
 				);
 				self.put_tb(ns, db, &tb_def).await
 			}
@@ -1156,7 +1511,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: &str,
 		db: &str,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
 		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1186,7 +1541,21 @@ impl TableProvider for Transaction {
 		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.set(&key, tb, None).await?;
+		match self.set(&key, tb, None).await {
+			Ok(_) => {}
+			Err(e) => {
+				if matches!(
+					e.downcast_ref(),
+					Some(Error::Kvs(crate::kvs::Error::TransactionReadonly))
+				) {
+					return Err(Error::TbNotFound {
+						name: tb.name.clone(),
+					}
+					.into());
+				}
+				return Err(e);
+			}
+		}
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
@@ -1197,15 +1566,15 @@ impl TableProvider for Transaction {
 		self.cache.insert(qey, cached_entry.clone());
 
 		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.insert(qey, cached_entry.clone());
+		self.cache.insert(qey, cached_entry);
 
 		Ok(cached_tb)
 	}
 
-	async fn del_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	async fn del_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()> {
 		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
 			return Err(Error::TbNotFound {
-				name: tb.to_string(),
+				name: tb.clone(),
 			}
 			.into());
 		};
@@ -1222,10 +1591,10 @@ impl TableProvider for Transaction {
 		Ok(())
 	}
 
-	async fn clr_tb(&self, ns: &str, db: &str, tb: &str) -> Result<()> {
+	async fn clr_tb(&self, ns: &str, db: &str, tb: &TableName) -> Result<()> {
 		let Some(tb) = self.get_tb_by_name(ns, db, tb).await? else {
 			return Err(Error::TbNotFound {
-				name: tb.to_string(),
+				name: tb.clone(),
 			}
 			.into());
 		};
@@ -1248,7 +1617,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		let qey = cache::tx::Lookup::Evs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1271,7 +1640,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
 		let qey = cache::tx::Lookup::Fds(ns, db, tb);
@@ -1295,7 +1664,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
 		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1318,7 +1687,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
 		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1341,7 +1710,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
 		let qey = cache::tx::Lookup::Tb(ns, db, tb);
 		match self.cache.get(&qey) {
@@ -1352,8 +1721,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1365,7 +1734,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ev: &str,
 	) -> Result<Arc<catalog::EventDefinition>> {
 		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
@@ -1377,8 +1746,8 @@ impl TableProvider for Transaction {
 					name: ev.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(val)
 			}
 		}
@@ -1390,7 +1759,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>> {
 		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
@@ -1402,8 +1771,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1413,7 +1782,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		fd: &catalog::FieldDefinition,
 	) -> Result<()> {
 		let name = fd.name.to_raw_string();
@@ -1428,7 +1797,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
@@ -1440,8 +1809,8 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1451,7 +1820,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: IndexId,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
 		let key = crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix);
@@ -1466,7 +1835,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &catalog::IndexDefinition,
 	) -> Result<()> {
 		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
@@ -1487,7 +1856,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		ix: &str,
 	) -> Result<()> {
 		// Get the index definition
@@ -1507,12 +1876,14 @@ impl TableProvider for Transaction {
 	}
 
 	/// Fetch a specific record value.
+	///
+	/// This function will return a new default initialized record if non exists.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_record(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Record>> {
@@ -1571,7 +1942,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<bool> {
 		let key = crate::key::record::new(ns, db, tb, id);
@@ -1583,7 +1954,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -1599,7 +1970,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
 		version: Option<u64>,
@@ -1618,7 +1989,7 @@ impl TableProvider for Transaction {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<()> {
 		// Delete the value in the datastore
@@ -1629,6 +2000,15 @@ impl TableProvider for Transaction {
 		self.cache.remove(qey);
 		// Return nothing
 		Ok(())
+	}
+
+	async fn get_next_tb_id(
+		&self,
+		ctx: Option<&Context>,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId> {
+		self.sequences.next_table_id(ctx, ns, db).await
 	}
 }
 
@@ -1705,17 +2085,11 @@ impl UserProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
-	}
-
-	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
-		let key = crate::key::root::us::new(&us.name);
-		self.set(&key, us, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific namespace user definition.
@@ -1735,17 +2109,11 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
-	}
-
-	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
-		let key = crate::key::namespace::us::new(ns, &us.name);
-		self.set(&key, us, None).await?;
-		Ok(())
 	}
 
 	/// Retrieve a specific user definition from a database.
@@ -1766,11 +2134,23 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
+	}
+
+	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
+		let key = crate::key::root::us::new(&us.name);
+		self.set(&key, us, None).await?;
+		Ok(())
+	}
+
+	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
+		let key = crate::key::namespace::us::new(ns, &us.name);
+		self.set(&key, us, None).await?;
+		Ok(())
 	}
 
 	async fn put_db_user(
@@ -1921,8 +2301,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1944,8 +2324,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1967,8 +2347,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -1991,8 +2371,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2015,8 +2395,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2040,8 +2420,8 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entr = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entr);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
 				Ok(Some(val))
 			}
 		}
@@ -2054,7 +2434,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::root::access::all::new(ra);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2066,7 +2445,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::namespace::access::all::new(ns, na);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2078,7 +2456,6 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::database::access::all::new(ns, db, da);
 		self.delp(&key).await?;
-
 		// Return result
 		Ok(())
 	}
@@ -2122,10 +2499,10 @@ impl ApiProvider for Transaction {
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
-				let api_def = Arc::new(val);
-				let val = cache::tx::Entry::Any(api_def.clone());
-				self.cache.insert(qey, val.clone());
-				Ok(Some(api_def))
+				let val = Arc::new(val);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(Some(val))
 			}
 		}
 	}
@@ -2134,7 +2511,6 @@ impl ApiProvider for Transaction {
 		let name = ap.path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		self.set(&key, ap, None).await?;
-
 		// Return result
 		Ok(())
 	}

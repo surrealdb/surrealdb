@@ -2,22 +2,97 @@ use reblessive::Stk;
 
 use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
-use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
+use crate::sql::statements::alter::{
+	AlterDatabaseStatement, AlterFieldStatement, AlterIndexStatement, AlterKind,
+	AlterNamespaceStatement, AlterSequenceStatement, AlterSystemStatement,
+};
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
-use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::t;
+use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_alter_stmt(&mut self, stk: &mut Stk) -> ParseResult<AlterStatement> {
 		let next = self.next();
 		match next.kind {
+			t!("SYSTEM") => self.parse_alter_system(stk).await.map(AlterStatement::System),
+			t!("NAMESPACE") => self.parse_alter_namespace().await.map(AlterStatement::Namespace),
+			t!("DATABASE") => self.parse_alter_database().await.map(AlterStatement::Database),
 			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
+			t!("INDEX") => self.parse_alter_index().await.map(AlterStatement::Index),
 			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
 			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
+	}
+
+	pub(crate) async fn parse_alter_system(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterSystemStatement> {
+		let mut res = AlterSystemStatement::default();
+
+		loop {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						TokenKind::Identifier => {
+							let name = self.parse_ident()?;
+							match name.as_str() {
+								"QUERY_TIMEOUT" => {
+									res.query_timeout = AlterKind::Drop;
+								}
+								_ => unexpected!(self, peek, "`QUERY_TIMEOUT`"),
+							}
+						}
+						_ => {
+							unexpected!(self, peek, "`QUERY_TIMEOUT`")
+						}
+					}
+				}
+				t!("COMPACT") => {
+					self.pop_peek();
+					res.compact = true;
+				}
+				TokenKind::Identifier => {
+					let peek = self.peek();
+					let name = self.parse_ident()?;
+					match name.as_str() {
+						"QUERY_TIMEOUT" => {
+							let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+							res.query_timeout = AlterKind::Set(duration);
+						}
+						_ => unexpected!(self, peek, "`QUERY_TIMEOUT`"),
+					}
+				}
+				_ => break,
+			}
+		}
+
+		if !res.compact && matches!(res.query_timeout, AlterKind::None) {
+			unexpected!(self, self.peek(), "`COMPACT`, `DROP` or `QUERY_TIMEOUT`")
+		}
+		Ok(res)
+	}
+
+	pub(crate) async fn parse_alter_namespace(&mut self) -> ParseResult<AlterNamespaceStatement> {
+		if !self.eat(t!("COMPACT")) {
+			unexpected!(self, self.peek(), "`COMPACT`")
+		}
+		Ok(AlterNamespaceStatement {
+			compact: true,
+		})
+	}
+
+	pub(crate) async fn parse_alter_database(&mut self) -> ParseResult<AlterDatabaseStatement> {
+		if !self.eat(t!("COMPACT")) {
+			unexpected!(self, self.peek(), "`COMPACT`")
+		}
+		Ok(AlterDatabaseStatement {
+			compact: true,
+		})
 	}
 
 	pub(crate) async fn parse_alter_table(
@@ -59,6 +134,10 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				t!("COMPACT") => {
+					self.pop_peek();
+					res.compact = true;
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -102,6 +181,59 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	pub(crate) async fn parse_alter_index(&mut self) -> ParseResult<AlterIndexStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.parse_ident()?;
+		expected!(self, t!("ON"));
+		self.eat(t!("TABLE"));
+		let table = self.parse_ident()?;
+
+		let mut res = AlterIndexStatement {
+			name,
+			table,
+			if_exists,
+			..Default::default()
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = AlterKind::Drop;
+						}
+						_ => {
+							unexpected!(self, peek, "`COMMENT`")
+						}
+					}
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				t!("PREPARE") => {
+					self.pop_peek();
+					self.eat(t!("REMOVE"));
+					res.prepare_remove = true;
+				}
+				_ => break,
+			}
+		}
+
+		if !res.prepare_remove && matches!(res.comment, AlterKind::None) {
+			unexpected!(self, self.peek(), "`PREPARE`, `DROP` or `COMMENT`")
+		}
+		Ok(res)
+	}
+
 	pub(crate) async fn parse_alter_field(
 		&mut self,
 		stk: &mut Stk,
@@ -112,7 +244,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.parse_local_idiom(stk).await?;
+		let name = self.parse_local_idiom()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.parse_ident()?;
@@ -129,13 +261,13 @@ impl Parser<'_> {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
-						t!("FLEXIBLE") => {
-							self.pop_peek();
-							res.flex = AlterKind::Drop;
-						}
 						t!("TYPE") => {
 							self.pop_peek();
 							res.kind = AlterKind::Drop;
+						}
+						t!("FLEXIBLE") => {
+							self.pop_peek();
+							res.flexible = AlterKind::Drop;
 						}
 						t!("READONLY") => {
 							self.pop_peek();
@@ -158,13 +290,6 @@ impl Parser<'_> {
 							res.comment = AlterKind::Drop;
 						}
 						t!("REFERENCE") => {
-							if !self.settings.references_enabled {
-								bail!(
-									"Experimental capability `record_references` is not enabled",
-									@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-								)
-							}
-
 							self.pop_peek();
 							res.reference = AlterKind::Drop;
 						}
@@ -177,17 +302,17 @@ impl Parser<'_> {
 						}
 					}
 				}
-				t!("FLEXIBLE") => {
-					self.pop_peek();
-					res.flex = AlterKind::Set(());
-				}
 				t!("TYPE") => {
 					self.pop_peek();
 					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
 				}
+				t!("FLEXIBLE") => {
+					self.pop_peek();
+					res.flexible = AlterKind::Set(());
+				}
 				t!("READONLY") => {
 					self.pop_peek();
-					res.flex = AlterKind::Set(());
+					res.readonly = AlterKind::Set(());
 				}
 				t!("VALUE") => {
 					self.pop_peek();
@@ -216,13 +341,6 @@ impl Parser<'_> {
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = AlterKind::Set(self.parse_reference(stk).await?);
 				}
@@ -250,8 +368,8 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		if let Some(to) = self.try_parse_timeout(stk).await? {
-			res.timeout = Some(to);
+		if self.eat(t!("TIMEOUT")) {
+			res.timeout = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 		}
 
 		Ok(res)

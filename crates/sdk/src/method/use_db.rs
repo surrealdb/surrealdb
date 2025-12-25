@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
+use surrealdb_types::Value;
+
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::WaitFor;
@@ -32,20 +34,31 @@ impl<'r, Client> IntoFuture for UseDb<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<()>;
+	type Output = Result<(Option<String>, Option<String>)>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			router
-				.execute_unit(Command::Use {
-					namespace: self.ns,
-					database: Some(self.db),
-				})
+			let result = router
+				.execute_value(
+					self.client.session_id,
+					Command::Use {
+						namespace: self.ns,
+						database: Some(self.db),
+					},
+				)
 				.await?;
 			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();
-			Ok(())
+
+			let Value::Object(obj) = result else {
+				return Ok((None, None));
+			};
+
+			let namespace = obj.get("namespace").and_then(|v| v.as_string()).map(String::from);
+			let database = obj.get("database").and_then(|v| v.as_string()).map(String::from);
+
+			Ok((namespace, database))
 		})
 	}
 }

@@ -1,43 +1,13 @@
 use std::time::Duration;
 
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
+use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::base::Base;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::val::{Array, Value};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[repr(transparent)]
-pub struct UserId(pub u64);
-
-impl_kv_value_revisioned!(UserId);
-
-impl Revisioned for UserId {
-	fn revision() -> u16 {
-		1
-	}
-}
-
-impl SerializeRevisioned for UserId {
-	#[inline]
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.0, writer)
-	}
-}
-
-impl DeserializeRevisioned for UserId {
-	#[inline]
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		DeserializeRevisioned::deserialize_revisioned(reader).map(UserId)
-	}
-}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -55,34 +25,41 @@ pub struct UserDefinition {
 }
 
 impl UserDefinition {
-	fn to_sql_definition(&self) -> crate::sql::statements::define::DefineUserStatement {
-		crate::sql::statements::define::DefineUserStatement {
-			kind: crate::sql::statements::define::DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			base: crate::sql::Base::from(crate::expr::Base::from(self.base.clone())),
-			pass_type: crate::sql::statements::define::user::PassType::Hash(self.hash.clone()),
+	fn to_sql_definition(&self) -> sql::statements::define::DefineUserStatement {
+		sql::statements::define::DefineUserStatement {
+			kind: sql::statements::define::DefineKind::Default,
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			base: sql::Base::from(crate::expr::Base::from(self.base.clone())),
+			pass_type: sql::statements::define::user::PassType::Hash(self.hash.clone()),
 			roles: self.roles.clone(),
-			token_duration: self.token_duration.map(|d| {
-				crate::sql::Expr::Literal(crate::sql::Literal::Duration(
-					crate::types::PublicDuration::from(d),
-				))
-			}),
-			session_duration: self.session_duration.map(|d| {
-				crate::sql::Expr::Literal(crate::sql::Literal::Duration(
-					crate::types::PublicDuration::from(d),
-				))
-			}),
+			token_duration: self
+				.token_duration
+				.map(|d| {
+					sql::Expr::Literal(sql::Literal::Duration(crate::types::PublicDuration::from(
+						d,
+					)))
+				})
+				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
+			session_duration: self
+				.session_duration
+				.map(|d| {
+					sql::Expr::Literal(sql::Literal::Duration(crate::types::PublicDuration::from(
+						d,
+					)))
+				})
+				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
 			comment: self
 				.comment
 				.clone()
-				.map(|c| crate::sql::Expr::Literal(crate::sql::Literal::String(c))),
+				.map(|c| sql::Expr::Literal(sql::Literal::String(c)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }
 
 impl ToSql for &UserDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 

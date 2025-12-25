@@ -1,19 +1,16 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
-use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RebuildStatement {
@@ -22,10 +19,11 @@ pub(crate) enum RebuildStatement {
 
 impl RebuildStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "RebuildStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -35,30 +33,29 @@ impl RebuildStatement {
 	}
 }
 
-impl Display for RebuildStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Index(v) => Display::fmt(v, f),
-		}
+impl ToSql for RebuildStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct RebuildIndexStatement {
 	pub name: String,
-	pub what: String,
+	pub table: TableName,
 	pub if_exists: bool,
 	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.table, &self.name).await?;
 		let ix = match res {
 			Some(x) => x,
 			None => {
@@ -66,31 +63,24 @@ impl RebuildIndexStatement {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::IxNotFound {
-						name: self.name.to_string(),
+						name: self.name.clone(),
 					}
 					.into());
 				}
 			}
 		};
-		let ix = ix.as_ref().clone();
+		let tb = ctx.tx().expect_tb(ns, db, &self.table).await?;
 
 		// Rebuild the index
-		run_indexing(ctx, opt, &ix, !self.concurrently).await?;
+		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
 }
 
-impl Display for RebuildIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REBUILD INDEX")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
+impl ToSql for RebuildIndexStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildIndexStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

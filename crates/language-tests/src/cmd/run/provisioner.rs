@@ -88,15 +88,6 @@ impl CreateInfo {
 				tx.commit().await?;
 				ds
 			}
-			Backend::Foundation => {
-				let p = self.produce_path();
-				let ds = Datastore::new(&format!("fdb://{p}")).await?;
-				let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.delr(vec![0u8]..vec![0xffu8]).await?;
-				tx.commit().await?;
-				path = Some(p);
-				ds
-			}
 		};
 
 		let ds =
@@ -187,11 +178,15 @@ impl Permit {
 
 		if let Some(sender) = sender {
 			if res.is_err() {
+				// Shutdown the panicking datastore to release resources
+				if let Err(e) = store.shutdown().await {
+					println!("Failed to shutdown panicking datastore: {e}");
+				}
 				let new_ds = match create_base_datastore().await {
 					Ok(x) => x,
 					Err(e) => {
 						println!(
-							"Failed to create a new datastore to replaced panicking datastore: {e}"
+							"Failed to create a new datastore to replace panicking datastore: {e}"
 						);
 						return res;
 					}
@@ -202,10 +197,20 @@ impl Permit {
 			} else {
 				sender.try_send(store).expect("Too many datastores entered into datastore channel");
 			}
+		} else if remove_path.is_some() {
+			// Shutdown the datastore before removing its directory to ensure all file descriptors are closed
+			// This is critical for RocksDB which can have many open file handles
+			if let Err(e) = store.shutdown().await {
+				println!("Failed to shutdown datastore before cleanup: {e}");
+			}
 		}
 
 		if let Some(remove_path) = remove_path {
-			tokio::spawn(tokio::fs::remove_dir_all(remove_path));
+			// Remove the directory synchronously to ensure cleanup completes before next test
+			// This prevents file descriptor exhaustion on backends like RocksDB
+			if let Err(e) = tokio::fs::remove_dir_all(&remove_path).await {
+				println!("Failed to remove temporary directory {remove_path}: {e}");
+			}
 		}
 		res
 	}

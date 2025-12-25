@@ -9,7 +9,7 @@ use super::modules::surrealdb::query::QueryContext;
 use super::modules::{loader, resolver};
 use super::{classes, fetch, globals, modules};
 use crate::cnf::{SCRIPTING_MAX_MEMORY_LIMIT, SCRIPTING_MAX_STACK_SIZE};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -21,7 +21,7 @@ use crate::val::Value;
 /// Caller must ensure that the runtime from which `Ctx` originates cannot
 /// outlife 'a.
 pub unsafe fn create_query_data<'a>(
-	context: &'a Context,
+	context: &'a FrozenContext,
 	opt: &'a Options,
 	doc: Option<&'a CursorDoc>,
 	ctx: &Ctx<'_>,
@@ -43,14 +43,14 @@ pub unsafe fn create_query_data<'a>(
 }
 
 pub async fn run(
-	context: &Context,
+	context: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
 	src: &str,
 	arg: Vec<Value>,
 ) -> Result<Value> {
 	// Check the context
-	if context.is_done(true).await? {
+	if context.is_done(None).await? {
 		return Ok(Value::None);
 	}
 
@@ -63,7 +63,8 @@ pub async fn run(
 	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
 
 	// Create a JavaScript context
-	let run = js::AsyncRuntime::new().unwrap();
+	let run = js::AsyncRuntime::new()
+		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript runtime: {}", e))?;
 	// Explicitly set max stack size to 256 KiB
 	run.set_max_stack_size(*SCRIPTING_MAX_STACK_SIZE).await;
 	// Explicitly set max memory size to 2 MB
@@ -73,7 +74,9 @@ pub async fn run(
 	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);
 	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
-	let ctx = js::AsyncContext::full(&run).await.unwrap();
+	let ctx = js::AsyncContext::full(&run)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript context: {}", e))?;
 	// Set the module resolver and loader
 	run.set_loader(resolver(), loader()).await;
 	// Create the main function structure

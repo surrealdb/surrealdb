@@ -90,7 +90,7 @@ impl Lexer<'_> {
 					.fix()
 					.from_local_datetime(&date_time)
 					.earliest()
-					.unwrap()
+					.expect("valid datetime")
 					.with_timezone(&Utc);
 
 				return Ok(PublicDatetime::from(datetime));
@@ -167,9 +167,11 @@ impl Lexer<'_> {
 				// The range checks on the digits ensure that the offset can't exceed 23:59 so
 				// below unwraps won't panic.
 				if x == b'-' {
-					FixedOffset::west_opt((hour * 3600 + minutes * 60) as i32).unwrap()
+					FixedOffset::west_opt((hour * 3600 + minutes * 60) as i32)
+						.expect("valid timezone offset")
 				} else {
-					FixedOffset::east_opt((hour * 3600 + minutes * 60) as i32).unwrap()
+					FixedOffset::east_opt((hour * 3600 + minutes * 60) as i32)
+						.expect("valid timezone offset")
 				}
 			}
 			Some(b'Z' | b'z') => Utc.fix(),
@@ -186,12 +188,10 @@ impl Lexer<'_> {
 
 		let date_time = NaiveDateTime::new(date, time);
 
-		let datetime = timezone
-			.from_local_datetime(&date_time)
-			.earliest()
-			// this should never panic with a fixed offset.
-			.unwrap()
-			.with_timezone(&Utc);
+		let Some(datetime) = timezone.from_local_datetime(&date_time).earliest() else {
+			bail!("Invalid Datetime, timezone was outside of the range of valid datetimes", @reader.span_since(timezone_start))
+		};
+		let datetime = datetime.with_timezone(&Utc);
 
 		Ok(PublicDatetime::from(datetime))
 	}

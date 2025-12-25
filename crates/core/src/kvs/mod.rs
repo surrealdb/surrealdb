@@ -7,8 +7,6 @@
 //! - put
 //!
 //! These operations can be processed by the following storage engines:
-//! - `fdb`: [FoundationDB](https://github.com/apple/foundationdb/) a distributed database designed
-//!   to handle large volumes of structured data across clusters of commodity servers
 //! - `indxdb`: WASM based database to store data in the browser
 //! - `rocksdb`: [RocksDB](https://github.com/facebook/rocksdb) an embeddable persistent key-value
 //!   store for fast storage
@@ -18,43 +16,46 @@
 
 pub mod export;
 
-pub mod api;
+mod api;
 mod batch;
-mod cf;
 mod clock;
 mod ds;
+mod err;
+mod into;
 mod key;
-mod node;
 mod scanner;
-mod stash;
 mod threadpool;
+mod timestamp;
 mod tr;
 mod tx;
-pub(crate) mod version;
+mod util;
 
-mod fdb;
 mod indxdb;
 mod mem;
 mod rocksdb;
 mod surrealkv;
 mod tikv;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) mod cache;
 pub(crate) mod index;
-pub mod savepoint;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;
-#[cfg(test)]
-mod tests;
-mod util;
+pub(crate) mod version;
 
-pub use api::Transaction as KVTransaction;
+pub use api::Transactable;
 pub use clock::SizedClock;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
+pub use err::{Error, Result};
+pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
-pub use tr::{Check, LockType, TransactionType, Transactor};
+pub use scanner::{Direction, Scanner};
+pub use timestamp::{HlcTimestamp, IncTimestamp, Timestamp};
+pub use tr::{LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

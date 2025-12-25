@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::catalog::providers::TableProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
@@ -9,7 +9,7 @@ use crate::err::Error;
 impl Document {
 	pub(super) async fn store_record_data(
 		&mut self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
@@ -18,7 +18,7 @@ impl Document {
 			return Ok(());
 		}
 		// Check if the table is a view
-		if self.tb(ctx, opt).await?.drop {
+		if self.tb().await?.drop {
 			return Ok(());
 		}
 		// Get the record id
@@ -62,7 +62,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
@@ -95,7 +98,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
@@ -128,7 +134,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))

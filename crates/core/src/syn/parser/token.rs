@@ -95,11 +95,13 @@ impl Parser<'_> {
 				| t!("-") | t!("u'")
 				| t!("u\"") | t!("d'")
 				| t!("d\"") | t!("r'")
-				| t!("r\"") | t!("'")
-				| t!("\"") | TokenKind::Digits
+				| t!("b\"") | t!("r\"")
+				| t!("'") | t!("\"")
+				| TokenKind::Digits
 				| TokenKind::NaN
 				| t!("true") | t!("false")
 				| t!("fn") | t!("ml")
+				| t!("mod") | t!("silo")
 				| t!("(") | t!("{")
 				| t!("[") | t!("/")
 				| t!("|") | t!("||")

@@ -76,9 +76,9 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	Ok((dec, val))
 }
 
-static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
+pub(crate) static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
 
-static DUD: LazyLock<Validation> = LazyLock::new(|| {
+pub(crate) static DUD: LazyLock<Validation> = LazyLock::new(|| {
 	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 	validation.insecure_disable_signature_validation();
 	validation.validate_nbf = false;
@@ -160,18 +160,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
-	if let Some(nbf) = token_data.claims.nbf {
-		if nbf > Utc::now().timestamp() {
-			debug!("Token verification failed due to the 'nbf' claim containing a future time");
-			bail!(Error::InvalidAuth);
-		}
+	if let Some(nbf) = token_data.claims.nbf
+		&& nbf > Utc::now().timestamp()
+	{
+		debug!("Token verification failed due to the 'nbf' claim containing a future time");
+		bail!(Error::InvalidAuth);
 	}
 	// Check if the auth token has expired
-	if let Some(exp) = token_data.claims.exp {
-		if exp < Utc::now().timestamp() {
-			debug!("Token verification failed due to the 'exp' claim containing a past time");
-			bail!(Error::ExpiredToken);
-		}
+	if let Some(exp) = token_data.claims.exp
+		&& exp < Utc::now().timestamp()
+	{
+		debug!("Token verification failed due to the 'exp' claim containing a past time");
+		bail!(Error::ExpiredToken);
 	}
 	// Check the token authentication claims
 	match &token_data.claims {
@@ -191,7 +191,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -202,9 +202,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
 			else {
 				return Err(Error::AccessDbNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
+					db: db.clone(),
 				}
 				.into());
 			};
@@ -242,13 +242,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
 						rid.clone().into(),
 					))
-					.unwrap(),
+					.expect("record id conversion should succeed"),
 				);
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
-					.unwrap(),
+					.expect("claims conversion should succeed"),
 				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -257,7 +257,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
@@ -265,13 +268,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
 					rid.clone().into(),
 				))
-				.unwrap(),
+				.expect("record id conversion should succeed"),
 			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
+				Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 			)));
 			Ok(())
 		}
@@ -291,7 +294,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -304,9 +307,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessDbNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
+					db: db.clone(),
 				}
 				.into());
 			};
@@ -347,7 +350,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
-							.unwrap(),
+							.expect("claims conversion should succeed"),
 						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
@@ -370,15 +373,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// Log the success
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 					// Set the session
-					session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+					session.tk = Some(
+						crate::val::convert_value_to_public_value(value)
+							.expect("value conversion should succeed"),
+					);
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(de.session_duration)?;
 					session.au = Arc::new(Auth::new(Actor::new(
-						de.name.to_string(),
+						de.name.clone(),
 						roles,
-						Level::Database(ns.to_string(), db.to_string()),
+						Level::Database(ns.clone(), db.clone()),
 					)));
 				}
 				// If the access type is Record, this is record access
@@ -416,7 +422,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
-							.unwrap(),
+							.expect("claims conversion should succeed"),
 						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
@@ -424,8 +430,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
-						session.tk =
-							Some(crate::val::convert_value_to_public_value(value).unwrap());
+						session.tk = Some(
+							crate::val::convert_value_to_public_value(value)
+								.expect("value conversion should succeed"),
+						);
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
@@ -433,13 +441,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
 								rid.clone().into(),
 							))
-							.unwrap(),
+							.expect("record id conversion should succeed"),
 						);
 						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_sql(),
 							Default::default(),
-							Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
+							Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 						)));
 					}
 					_ => bail!(Error::AccessMethodMismatch),
@@ -462,7 +470,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -488,17 +496,20 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))
 					.collect::<Result<_, _>>()?,
-				Level::Database(ns.to_string(), db.to_string()),
+				Level::Database(ns.clone(), db.clone()),
 			)));
 			Ok(())
 		}
@@ -516,7 +527,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
-						name: ns.to_string(),
+						name: ns.clone(),
 					}
 					.into());
 				}
@@ -529,8 +540,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessNsNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
 				}
 				.into());
 			};
@@ -569,7 +580,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
-					.unwrap(),
+					.expect("claims conversion should succeed"),
 				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -592,14 +603,17 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
+				de.name.clone(),
 				roles,
-				Level::Namespace(ns.to_string()),
+				Level::Namespace(ns.clone()),
 			)));
 			Ok(())
 		}
@@ -617,7 +631,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
-						name: ns.to_string(),
+						name: ns.clone(),
 					}
 					.into());
 				}
@@ -640,16 +654,19 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))
 					.collect::<Result<_, _>>()?,
-				Level::Namespace(ns.to_string()),
+				Level::Namespace(ns.clone()),
 			)));
 			Ok(())
 		}
@@ -670,7 +687,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessRootNotFound {
-					ac: ac.to_string(),
+					ac: ac.clone(),
 				}
 				.into());
 			};
@@ -709,7 +726,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
-					.unwrap(),
+					.expect("claims conversion should succeed"),
 				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -732,10 +749,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root with access method `{}`", ac);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
+			session.au = Arc::new(Auth::new(Actor::new(de.name.clone(), roles, Level::Root)));
 			Ok(())
 		}
 		// Check if this is root authentication with user credentials
@@ -761,10 +781,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
-			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))
@@ -880,7 +903,8 @@ pub async fn verify_db_creds(
 
 fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Compute the hash and verify the password
-	let hash = PasswordHash::new(hash).unwrap();
+	let hash =
+		PasswordHash::new(hash).map_err(|e| anyhow::anyhow!("Invalid password hash: {}", e))?;
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
@@ -907,6 +931,7 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
@@ -915,9 +940,9 @@ mod tests {
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
-	use crate::sql::Ast;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Literal};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1035,8 +1060,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::statements::DefineUserStatement;
-		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
 			TestLevel {
@@ -1077,9 +1101,9 @@ mod tests {
 						.to_string(),
 				),
 				roles: vec!["nonexistent".to_owned()],
-				token_duration: None,
-				session_duration: None,
-				comment: None,
+				token_duration: Expr::Literal(Literal::None),
+				session_duration: Expr::Literal(Literal::None),
+				comment: Expr::Literal(Literal::None),
 			};
 
 			let ast = Ast {
@@ -1214,8 +1238,8 @@ mod tests {
 	#[case::with_generic_id(vec!["user:2k9qnabxuxh8k4d5gfto"], None, "secret", false)]
 	#[case::with_numeric_ids(vec!["user:1", "user:2", "user:100", "user:10000000"], None, "secret", false)]
 	#[case::with_alphanumeric_ids(vec!["user:username", "user:username1", "user:username10", "user:username100"], None, "secret", false)]
-	#[case::with_ids_including_special_characters(vec!["user:⟨user.name⟩", "user:⟨user.name1⟩", "user:⟨user.name10⟩", "user:⟨user.name100⟩"], None, "secret", false)]
-	#[case::with_uuid_ids(vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"], None, "secret", false)]
+	#[case::with_ids_including_special_characters(vec!["user:`user.name`", "user:`user.name1`", "user:`user.name10`", "user:`user.name100`"], None, "secret", false)]
+	#[case::with_uuid_ids(vec!["user:`83149446-95f5-4c0d-9f42-136e7b272456`"], None, "secret", false)]
 	#[tokio::test]
 	async fn test_token_record(
 		#[case] ids: Vec<&'static str>,
@@ -1666,8 +1690,7 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+		ds.execute(format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
 				.as_str(),
 			&sess,
 			None,
@@ -2069,11 +2092,11 @@ mod tests {
 
     				CREATE user:1 SET enabled = false;
 				"#).as_str(),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Prepare the claims object
 			let mut claims = claims.clone();

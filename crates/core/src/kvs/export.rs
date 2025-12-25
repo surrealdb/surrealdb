@@ -10,7 +10,7 @@ use super::Transaction;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
@@ -18,9 +18,10 @@ use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
-use crate::val::record::Record;
+use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(default)]
 pub struct Config {
 	pub users: bool,
 	pub accesses: bool,
@@ -60,6 +61,9 @@ pub enum TableConfig {
 	Some(Vec<String>),
 }
 
+// TODO: This should probably be removed
+// This is not a good from implementation,
+// It is not directly create what true and false mean when converted to a table config.
 impl From<bool> for TableConfig {
 	fn from(value: bool) -> Self {
 		match value {
@@ -157,7 +161,7 @@ impl Transaction {
 		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
+		self.export_section("OPTION", [OptionStatement::import()].into_iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {
@@ -390,13 +394,16 @@ impl Transaction {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);
-					let sql =
-						format!("INSERT RELATION {} VERSION d'{:?}';", record.data.as_ref(), ts);
+					let sql = format!(
+						"INSERT RELATION {} VERSION d'{:?}';",
+						record.data.as_ref().to_sql(),
+						ts
+					);
 					records_relate.push(sql);
 					String::new()
 				} else {
 					// If no version exists, push the value to the records_relate vector.
-					records_relate.push(record.data.as_ref().to_string());
+					records_relate.push(record.data.as_ref().to_sql());
 					String::new()
 				}
 			}
@@ -405,17 +412,18 @@ impl Transaction {
 				if let Some(is_tombstone) = is_tombstone {
 					if is_tombstone {
 						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {}:{};", rid.table, rid.key)
+						format!("DELETE {}:{};", rid.table, rid.key.to_sql())
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
-						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
-						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
+						let ts =
+							Utc.timestamp_nanos(version.expect("version should be set") as i64);
+						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref().to_sql(), ts)
 					}
 				} else {
 					// If no tombstone or version information is provided, push the value to the
 					// records_normal vector.
-					records_normal.push(record.data.as_ref().to_string());
+					records_normal.push(record.data.as_ref().to_sql());
 					String::new()
 				}
 			}

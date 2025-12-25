@@ -1,11 +1,23 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+/// AST node for `ALTER TABLE`.
+///
+/// Supported operations include (order-insensitive after the table name):
+/// - `TYPE NORMAL | RELATION [IN <from> [OUT <to>]] | ANY`
+/// - `SCHEMAFULL` / `SCHEMALESS`
+/// - `PERMISSIONS ...`
+/// - `CHANGEFEED ...` / `DROP CHANGEFEED`
+/// - `COMMENT <string>` / `DROP COMMENT`
+/// - `COMPACT` (request table keyspace compaction)
+///
+/// Note: `COMPACT` is parsed and preserved on the expression side, however it is
+/// currently not rendered by this node's `ToSql` implementation.
 pub struct AlterTableStatement {
 	pub name: String,
 	pub if_exists: bool,
@@ -14,89 +26,88 @@ pub struct AlterTableStatement {
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
+	/// Request table‑level compaction when true.
+	pub compact: bool,
 }
 
-impl Display for AlterTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER TABLE")?;
+impl ToSql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER TABLE");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write_sql!(f, fmt, " {}", EscapeKwIdent(&self.name, &["IF"]));
 		if let Some(kind) = &self.kind {
-			write!(f, " TYPE")?;
+			write_sql!(f, fmt, " TYPE");
 			match &kind {
 				TableType::Normal => {
-					f.write_str(" NORMAL")?;
+					write_sql!(f, fmt, " NORMAL");
 				}
 				TableType::Relation(rel) => {
-					f.write_str(" RELATION")?;
+					write_sql!(f, fmt, " RELATION");
 					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(f, " IN ",)?;
+						write_sql!(f, fmt, " IN ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								write!(f, " | ")?;
+								write_sql!(f, fmt, " | ");
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(f, " OUT ",)?;
+						write_sql!(f, fmt, " OUT ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								write!(f, " | ")?;
+								write_sql!(f, fmt, " | ");
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
 				}
 				TableType::Any => {
-					f.write_str(" ANY")?;
+					write_sql!(f, fmt, " ANY");
 				}
 			}
 		}
 
 		match self.schemafull {
-			AlterKind::Set(_) => " SCHEMAFULL".fmt(f)?,
-			AlterKind::Drop => " SCHEMALESS".fmt(f)?,
+			AlterKind::Set(_) => write_sql!(f, fmt, " SCHEMAFULL"),
+			AlterKind::Drop => write_sql!(f, fmt, " SCHEMALESS"),
 			AlterKind::None => {}
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
-			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::Set(ref comment) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(comment)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
-			AlterKind::Drop => write!(f, " DROP CHANGEFEED")?,
+			AlterKind::Set(ref changefeed) => write_sql!(f, fmt, " {}", changefeed),
+			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
-
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
 		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
+			write_sql!(f, fmt, " {permissions}");
 		}
-		Ok(())
+
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
 	}
 }
 
 impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableStatement {
 	fn from(v: AlterTableStatement) -> Self {
 		crate::expr::statements::alter::AlterTableStatement {
-			name: v.name,
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }
@@ -104,13 +115,14 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
 	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
 		AlterTableStatement {
-			name: v.name,
+			name: v.name.into_string(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),
 			changefeed: v.changefeed.into(),
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
+			compact: v.compact,
 		}
 	}
 }

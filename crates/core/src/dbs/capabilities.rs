@@ -4,8 +4,14 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+#[cfg(feature = "surrealism")]
+use std::str::FromStr;
 
+#[cfg(feature = "surrealism")]
+use anyhow::bail;
 use ipnet::IpNet;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::capabilities::SurrealismCapabilities;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
@@ -114,21 +120,19 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
-	RecordReferences,
 	GraphQL,
-	BearerAccess,
 	DefineApi,
 	Files,
+	Surrealism,
 }
 
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::RecordReferences => write!(f, "record_references"),
 			Self::GraphQL => write!(f, "graphql"),
-			Self::BearerAccess => write!(f, "bearer_access"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
+			Self::Surrealism => write!(f, "surrealism"),
 		}
 	}
 }
@@ -142,11 +146,10 @@ impl Target for ExperimentalTarget {
 impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
-			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
-			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
+			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 		}
 	}
 }
@@ -172,11 +175,10 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim().to_ascii_lowercase().as_str() {
-			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
-			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
+			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
@@ -311,15 +313,15 @@ impl std::str::FromStr for NetTarget {
 
 		// Parse the host and port parts from a string in the form of 'host' or
 		// 'host:port'
-		if let Ok(url) = Url::parse(format!("http://{s}").as_str()) {
-			if let Some(host) = url.host() {
-				// Url::parse will return port=None if the provided port was 80 (given we are
-				// using the http scheme). Get the original port from the string.
-				if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
-					return Ok(NetTarget::Host(host.to_owned(), Some(port)));
-				} else {
-					return Ok(NetTarget::Host(host.to_owned(), None));
-				}
+		if let Ok(url) = Url::parse(format!("http://{s}").as_str())
+			&& let Some(host) = url.host()
+		{
+			// Url::parse will return port=None if the provided port was 80 (given we are
+			// using the http scheme). Get the original port from the string.
+			if let Some(Ok(port)) = s.split(':').next_back().map(|p| p.parse::<u16>()) {
+				return Ok(NetTarget::Host(host.to_owned(), Some(port)));
+			} else {
+				return Ok(NetTarget::Host(host.to_owned(), None));
 			}
 		}
 
@@ -845,6 +847,41 @@ impl Capabilities {
 
 	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
 		self.allow_http.matches(target) && !self.deny_http.matches(target)
+	}
+
+	/// Checks wether capabilities required by a Surrealism package are allowed.
+	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
+	/// runtime.
+	#[cfg(feature = "surrealism")]
+	pub fn validate_surrealism_capabilities(
+		&self,
+		capabilities: SurrealismCapabilities,
+	) -> anyhow::Result<()> {
+		if capabilities.allow_scripting && !self.allows_scripting() {
+			bail!("Surrealism package requires scripting, but it is not allowed");
+		}
+
+		if !capabilities.allow_functions.is_empty() {
+			for fnc in capabilities.allow_functions.iter() {
+				if !self.allows_function_name(fnc) {
+					bail!("Surrealism package requires function '{}', but it is not allowed", fnc);
+				}
+			}
+		}
+
+		if !capabilities.allow_net.is_empty() {
+			for net in capabilities.allow_net.iter() {
+				let target = NetTarget::from_str(net)?;
+				if !self.allows_network_target(&target) {
+					bail!(
+						"Surrealism package requires network target '{}', but it is not allowed",
+						net
+					);
+				}
+			}
+		}
+
+		Ok(())
 	}
 }
 

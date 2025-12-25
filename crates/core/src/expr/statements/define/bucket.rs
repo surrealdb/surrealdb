@@ -1,16 +1,12 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::{CursorDoc, DefineKind};
-use crate::buc::{self, BucketConnectionKey};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -23,18 +19,7 @@ pub(crate) struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineBucketStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.backend.iter().for_each(|action| action.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
+	pub comment: Expr,
 }
 
 impl Default for DefineBucketStatement {
@@ -45,16 +30,17 @@ impl Default for DefineBucketStatement {
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
 
 impl DefineBucketStatement {
+	#[instrument(level = "trace", name = "DefineBucketStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -71,7 +57,7 @@ impl DefineBucketStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::BuAlreadyExists {
-							value: bucket.name.to_string(),
+							value: bucket.name.clone(),
 						});
 					}
 				}
@@ -93,61 +79,34 @@ impl DefineBucketStatement {
 			None
 		};
 
-		// Validate the store
-		let store = if let Some(ref backend) = backend {
-			buc::connect(backend, false, self.readonly).await?
-		} else {
-			buc::connect_global(ns, db, &name).await?
-		};
-
-		// Persist the store to cache
+		// Create and cache a new backend
 		if let Some(buckets) = ctx.get_buckets() {
-			let key = BucketConnectionKey::new(ns, db, &name);
-			buckets.insert(key, store);
+			buckets.new_backend(ns, db, &name, self.readonly, backend.as_deref()).await?;
+		} else {
+			bail!(Error::BucketUnavailable(name));
 		}
 
 		// Process the statement
 		let key = crate::key::database::bu::new(ns, db, &name);
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		let ap = BucketDefinition {
 			id: None,
 			name: name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE BUCKET")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-
-		if self.readonly {
-			write!(f, " READONLY")?;
-		}
-
-		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {backend}")?;
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
-		}
-
-		Ok(())
 	}
 }

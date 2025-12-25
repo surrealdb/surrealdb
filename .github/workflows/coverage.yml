@@ -4,8 +4,7 @@ run-name: "Coverage report for ${{ github.ref_name }}"
 
 on:
   schedule:
-    # Run daily at 2 AM UTC
-    - cron: "0 2 * * *"
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       ref:
@@ -17,14 +16,11 @@ on:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: "1.87"
-
 jobs:
   coverage:
     name: Generate coverage report
-    runs-on: [ runner-arm64-4xlarge ]
-    timeout-minutes: 120
+    runs-on: [ runner-arm64-2xlarge ]
+    timeout-minutes: 60
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -34,8 +30,7 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
-          save-cache: false  # Don't pollute cache with coverage artifacts
+          save-cache: false
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -43,7 +38,7 @@ jobs:
           tools: cargo-llvm-cov,cargo-nextest,cargo-make
 
       - name: Generate coverage report
-        run: cargo make ci-workspace-coverage
+        run: cargo make ci-workspace-coverage-with-server
 
       - name: Upload coverage report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -52,9 +47,12 @@ jobs:
           path: target/llvm-cov/html/
           retention-days: 30
 
-      - name: Upload coverage to Codecov (if main branch)
-        if: github.ref == 'refs/heads/main'
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
         with:
-          file: target/llvm-cov/lcov.info
+          files: lcov.info
           fail_ci_if_error: false
+          flags: workspace-tests
+          name: coverage
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

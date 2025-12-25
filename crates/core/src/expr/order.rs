@@ -1,10 +1,10 @@
+use std::cmp;
 use std::ops::Deref;
-use std::{cmp, fmt};
 
-use crate::expr::expression::VisitExpression;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use crate::expr::Value;
 use crate::expr::idiom::Idiom;
-use crate::expr::{Expr, Value};
-use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Ordering {
@@ -12,23 +12,10 @@ pub(crate) enum Ordering {
 	Order(OrderList),
 }
 
-impl VisitExpression for Ordering {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Self::Order(orderlist) = self {
-			orderlist.visit(visitor);
-		}
-	}
-}
-
-impl fmt::Display for Ordering {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Ordering::Random => write!(f, "ORDER BY RAND()"),
-			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
-		}
+impl ToSql for Ordering {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_ordering: crate::sql::order::Ordering = self.clone().into();
+		sql_ordering.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -42,9 +29,10 @@ impl Deref for OrderList {
 	}
 }
 
-impl fmt::Display for OrderList {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", Fmt::comma_separated(&self.0))
+impl ToSql for OrderList {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_order_list: crate::sql::order::OrderList = self.clone().into();
+		sql_order_list.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -69,15 +57,6 @@ impl OrderList {
 	}
 }
 
-impl VisitExpression for OrderList {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.iter().for_each(|order| order.visit(visitor));
-	}
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Order {
 	/// The value to order by
@@ -88,27 +67,9 @@ pub(crate) struct Order {
 	pub(crate) direction: bool,
 }
 
-impl VisitExpression for Order {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.value.visit(visitor)
-	}
-}
-
-impl fmt::Display for Order {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.value)?;
-		if self.collate {
-			write!(f, " COLLATE")?;
-		}
-		if self.numeric {
-			write!(f, " NUMERIC")?;
-		}
-		if !self.direction {
-			write!(f, " DESC")?;
-		}
-		Ok(())
+impl ToSql for Order {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let sql_order: crate::sql::Order = self.clone().into();
+		sql_order.fmt_sql(f, sql_fmt);
 	}
 }

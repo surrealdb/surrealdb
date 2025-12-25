@@ -1,13 +1,12 @@
-use std::fmt::{self, Display};
-
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -20,17 +19,16 @@ pub enum PassType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
 	pub pass_type: PassType,
 	pub roles: Vec<String>,
-	pub token_duration: Option<Expr>,
-	pub session_duration: Option<Expr>,
+	pub token_duration: Expr,
+	pub session_duration: Expr,
 
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineUserStatement {
@@ -41,61 +39,50 @@ impl Default for DefineUserStatement {
 			base: Base::Root,
 			pass_type: PassType::Unset,
 			roles: vec![],
-			token_duration: None,
-			session_duration: None,
-			comment: None,
+			token_duration: Expr::Literal(Literal::None),
+			session_duration: Expr::Literal(Literal::None),
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE USER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
 
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		match self.pass_type {
-			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
-			PassType::Hash(ref x) => write!(f, " PASSHASH {}", QuoteStr(x))?,
-			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
+			PassType::Unset => write_sql!(f, fmt, " PASSHASH \"\" "),
+			PassType::Hash(ref x) => write_sql!(f, fmt, " PASSHASH {}", QuoteStr(x)),
+			PassType::Password(ref x) => write_sql!(f, fmt, " PASSWORD {}", QuoteStr(x)),
 		}
 
-		write!(
-			f,
-			" ROLES {}",
-			Fmt::comma_separated(
-				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
-			),
-		)?;
+		write_sql!(f, fmt, " ROLES ");
+		for (idx, r) in self.roles.iter().enumerate() {
+			if idx != 0 {
+				f.push_str(", ");
+			}
+
+			let r = r.to_uppercase();
+			EscapeKwFreeIdent(&r).fmt_sql(f, fmt);
+		}
+
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.token_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.session_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		f.push_str(" DURATION FOR TOKEN ");
+		CoverStmts(&self.token_duration).fmt_sql(f, fmt);
+		f.push_str(", FOR SESSION ");
+		CoverStmts(&self.session_duration).fmt_sql(f, fmt);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		Ok(())
 	}
 }
 
@@ -108,7 +95,7 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			// TODO: Move out of AST.
 			PassType::Password(p) => Argon2::default()
 				.hash_password(p.as_bytes(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 		};
 
@@ -126,10 +113,10 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			code,
 			roles: v.roles,
 			duration: crate::expr::user::UserDuration {
-				token: v.token_duration.map(Into::into),
-				session: v.session_duration.map(Into::into),
+				token: v.token_duration.into(),
+				session: v.session_duration.into(),
 			},
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -142,9 +129,9 @@ impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement 
 			base: v.base.into(),
 			pass_type: PassType::Hash(v.hash),
 			roles: v.roles,
-			token_duration: v.duration.token.map(Into::into),
-			session_duration: v.duration.session.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			token_duration: v.duration.token.into(),
+			session_duration: v.duration.session.into(),
+			comment: v.comment.into(),
 		}
 	}
 }

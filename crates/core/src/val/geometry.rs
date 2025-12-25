@@ -1,25 +1,23 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
-
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::hash;
 use std::iter::once;
-use std::{fmt, hash};
 
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Object;
 use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "$surrealdb::private::Geometry")]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Geometry {
 	Point(Point<f64>),
@@ -408,7 +406,6 @@ impl Geometry {
 }
 
 impl PartialOrd for Geometry {
-	#[rustfmt::skip]
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		fn coord(v: &Coord) -> (f64, f64) {
 			v.x_y()
@@ -494,7 +491,9 @@ impl PartialOrd for Geometry {
 			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
 			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
 			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
+			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => {
+				multipolygon(a).partial_cmp(multipolygon(b))
+			}
 			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
 		}
 	}
@@ -628,80 +627,89 @@ impl From<surrealdb_types::Geometry> for Geometry {
 	}
 }
 
-impl fmt::Display for Geometry {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Geometry {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::Point(v) => {
-				write!(f, "({}, {})", v.x(), v.y())
+				write_sql!(f, sql_fmt, "({}, {})", v.x(), v.y())
 			}
-			Self::Line(v) => write!(
+			Self::Line(v) => write_sql!(
 				f,
+				sql_fmt,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 					f,
+					fmt,
 					"[{}, {}]",
 					v.x(),
 					v.y()
 				))))
 			),
-			Self::Polygon(v) => write!(
+			Self::Polygon(v) => write_sql!(
 				f,
+				sql_fmt,
 				"{{ type: 'Polygon', coordinates: [{}] }}",
 				Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(|v| Fmt::new(
 					v,
-					|v, f| write!(
+					|v, f, fmt| write_sql!(
 						f,
+						fmt,
 						"[{}]",
-						Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
-							f,
-							"[{}, {}]",
-							v.x(),
-							v.y()
-						))))
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
+						)))
 					)
 				)))
 			),
 			Self::MultiPoint(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'MultiPoint', coordinates: [{}] }}",
-					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 						f,
+						fmt,
 						"[{}, {}]",
 						v.x(),
 						v.y()
 					))))
 				)
 			}
-			Self::MultiLine(v) => write!(
-				f,
-				"{{ type: 'MultiLineString', coordinates: [{}] }}",
-				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+			Self::MultiLine(v) => {
+				write_sql!(
 					f,
-					"[{}]",
-					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+					sql_fmt,
+					"{{ type: 'MultiLineString', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 						f,
-						"[{}, {}]",
-						v.x(),
-						v.y()
+						fmt,
+						"[{}]",
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
+						)))
 					))))
-				))))
-			),
+				)
+			}
 			Self::MultiPolygon(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'MultiPolygon', coordinates: [{}] }}",
-					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
-						write!(
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| {
+						write_sql!(
 							f,
+							fmt,
 							"[{}]",
 							Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(
-								|v| Fmt::new(v, |v, f| write!(
+								|v| Fmt::new(v, |v, f, fmt| write_sql!(
 									f,
+									fmt,
 									"[{}]",
 									Fmt::comma_separated(v.points().map(|v| Fmt::new(
 										v,
-										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+										|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
 									)))
 								))
 							))
@@ -710,8 +718,9 @@ impl fmt::Display for Geometry {
 				)
 			}
 			Self::Collection(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'GeometryCollection', geometries: [{}] }}",
 					Fmt::comma_separated(v)
 				)

@@ -1,22 +1,18 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
-use crate::catalog::providers::{CatalogProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{EventDefinition, TableDefinition};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr};
-use crate::fmt::Fmt;
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineEventStatement {
@@ -25,35 +21,23 @@ pub(crate) struct DefineEventStatement {
 	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineEventStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.target_table.visit(visitor);
-		self.when.visit(visitor);
-		self.then.iter().for_each(|comment| comment.visit(visitor));
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
+	pub comment: Expr,
 }
 
 impl DefineEventStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineEventStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
-		let target_table =
-			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?;
-		let comment = map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, _doc, x => String));
+		let target_table = TableName::new(
+			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?,
+		);
 
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
@@ -78,10 +62,13 @@ impl DefineEventStatement {
 		}
 
 		// Ensure the table exists
-		let tb = {
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &target_table, opt.strict).await?
-		};
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table).await?;
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, _doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 
 		// Process the statement
 		let key = crate::key::table::ev::new(ns, db, &target_table, &name);
@@ -92,7 +79,7 @@ impl DefineEventStatement {
 				target_table: target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
-				comment: comment.clone(),
+				comment,
 			},
 			None,
 		)
@@ -114,28 +101,5 @@ impl DefineEventStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE EVENT",)?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
-			Fmt::comma_separated(self.then.iter())
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		Ok(())
 	}
 }

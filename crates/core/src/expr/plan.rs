@@ -1,32 +1,11 @@
-use std::fmt::{self, Display, Formatter};
-
 use crate::expr::Expr;
 use crate::expr::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
-use crate::fmt::Fmt;
 
 #[derive(Clone, Debug)]
 pub(crate) struct LogicalPlan {
 	pub(crate) expressions: Vec<TopLevelExpr>,
-}
-
-impl Display for LogicalPlan {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		Display::fmt(
-			&Fmt::one_line_separated(
-				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
-			),
-			f,
-		)
-	}
-}
-
-impl LogicalPlan {
-	// Check if we require a writeable transaction
-	//pub(crate) fn read_only(&self) -> bool {
-	//self.expressions.iter().all(|x| x.read_only())
-	//}
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -61,19 +40,16 @@ impl TopLevelExpr {
 	}
 }
 
-impl Display for TopLevelExpr {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			TopLevelExpr::Begin => write!(f, "BEGIN"),
-			TopLevelExpr::Cancel => write!(f, "CANCEL"),
-			TopLevelExpr::Commit => write!(f, "COMMIT"),
-			TopLevelExpr::Access(s) => s.fmt(f),
-			TopLevelExpr::Kill(s) => s.fmt(f),
-			TopLevelExpr::Live(s) => s.fmt(f),
-			TopLevelExpr::Option(s) => s.fmt(f),
-			TopLevelExpr::Use(s) => s.fmt(f),
-			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Expr(e) => e.fmt(f),
-		}
+impl surrealdb_types::ToSql for TopLevelExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_expr: crate::sql::TopLevelExpr = self.clone().into();
+		sql_expr.fmt_sql(f, fmt);
+	}
+}
+
+impl surrealdb_types::ToSql for LogicalPlan {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_ast: crate::sql::Ast = self.clone().into();
+		sql_ast.fmt_sql(f, fmt);
 	}
 }

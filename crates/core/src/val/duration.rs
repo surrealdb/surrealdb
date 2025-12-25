@@ -5,8 +5,8 @@ use std::{fmt, ops, time};
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -23,21 +23,8 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone,
-	Copy,
-	Debug,
-	Default,
-	Eq,
-	PartialEq,
-	PartialOrd,
-	Serialize,
-	Deserialize,
-	Hash,
-	Ord,
-	Encode,
-	BorrowDecode,
+	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, BorrowDecode,
 )]
-#[serde(rename = "$surrealdb::private::Duration")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Duration(pub time::Duration);
@@ -73,7 +60,7 @@ impl From<Duration> for crate::types::PublicDuration {
 
 impl From<crate::types::PublicDuration> for Duration {
 	fn from(value: crate::types::PublicDuration) -> Self {
-		Self(value.inner())
+		Self(value.into_inner())
 	}
 }
 
@@ -99,10 +86,7 @@ impl Duration {
 	pub fn new(secs: u64, nanos: u32) -> Duration {
 		time::Duration::new(secs, nanos).into()
 	}
-	/// Convert the Duration to a raw String
-	pub fn to_raw(self) -> String {
-		self.to_string()
-	}
+
 	/// Get the total number of nanoseconds
 	pub fn nanos(&self) -> u128 {
 		self.0.as_nanos()
@@ -232,6 +216,12 @@ impl fmt::Display for Duration {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for Duration {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, sql_fmt)
 	}
 }
 

@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use futures::channel::oneshot::{Receiver, Sender, channel};
@@ -12,12 +13,16 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -29,8 +34,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
-use crate::val::record::Record;
-use crate::val::{Object, RecordId, RecordIdKey, Value};
+use crate::val::{Object, RecordId, RecordIdKey, TableName, Value};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -116,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.to_string().into());
+				o.insert("error".to_string(), error.into());
 				"error"
 			}
 		};
@@ -131,17 +135,17 @@ type IndexBuilding = Arc<Building>;
 struct IndexKey {
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: String,
-	ix: String,
+	tb: TableName,
+	ix: IndexId,
 }
 
 impl IndexKey {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> Self {
 		Self {
 			ns,
 			db,
 			tb: tb.to_owned(),
-			ix: ix.to_owned(),
+			ix,
 		}
 	}
 }
@@ -160,16 +164,18 @@ impl IndexBuilder {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn start_building(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix)?);
 		let b = building.clone();
 		spawn(async move {
 			let guard = BuildingFinishGuard(b.clone());
@@ -177,26 +183,27 @@ impl IndexBuilder {
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
 			}
-			if let Some(s) = sdr {
-				if s.send(r).is_err() {
-					warn!("Failed to send index building result to the consumer");
-				}
-			}
 			drop(guard);
+			if let Some(s) = sdr
+				&& s.send(r).is_err()
+			{
+				warn!("Failed to send index building result to the consumer");
+			}
 		});
 		Ok(building)
 	}
 
 	pub(crate) async fn build(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: Options,
-		ns: NamespaceId,
-		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		ix.expect_not_prepare_remove()?;
+		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -209,15 +216,15 @@ impl IndexBuilder {
 				ensure!(
 					e.get().is_finished(),
 					Error::IndexAlreadyBuilding {
-						name: e.key().ix.clone(),
+						name: ix.name.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -227,13 +234,13 @@ impl IndexBuilder {
 	pub(crate) async fn consume(
 		&self,
 		db: &DatabaseDefinition,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		ix: &IndexDefinition,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
@@ -246,7 +253,7 @@ impl IndexBuilder {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.read().await.get(&key) {
 			b.status.read().await.clone()
 		} else {
@@ -258,8 +265,8 @@ impl IndexBuilder {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
-		ix: &str,
+		tb: &TableName,
+		ix: IndexId,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
@@ -270,7 +277,7 @@ impl IndexBuilder {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
@@ -325,10 +332,11 @@ impl QueueSequences {
 }
 
 struct Building {
-	ctx: Context,
+	ctx: FrozenContext,
 	opt: Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: TableId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<IndexDefinition>,
@@ -340,19 +348,21 @@ struct Building {
 
 impl Building {
 	fn new(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tf: TransactionFactory,
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 		Ok(Self {
-			ctx: MutableContext::new_concurrent(ctx).freeze(),
+			ctx: Context::new_concurrent(ctx).freeze(),
 			opt,
 			ns,
 			db,
+			tb,
 			ikb,
 			tf,
 			ix,
@@ -373,7 +383,7 @@ impl Building {
 
 	async fn maybe_consume(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
@@ -411,17 +421,51 @@ impl Building {
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction> {
-		self.tf.transaction(TransactionType::Read, Optimistic).await
+		self.tf
+			.transaction(TransactionType::Read, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.await
 	}
 
-	async fn new_write_tx_ctx(&self) -> Result<Context> {
-		let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?.into();
-		let mut ctx = MutableContext::new(&self.ctx);
+	async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
+		let tx = self
+			.tf
+			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.await?
+			.into();
+		let mut ctx = Context::new(&self.ctx);
 		ctx.set_transaction(tx);
 		Ok(ctx.freeze())
 	}
 
+	async fn check_prepare_remove_with_tx(
+		&self,
+		last_prepare_remove_check: &mut Instant,
+		tx: &Transaction,
+	) -> Result<()> {
+		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
+			return Ok(());
+		};
+		// Check the index still exists and is not decommissioned
+		catch!(
+			tx,
+			tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
+				.await?
+				.expect_not_prepare_remove()
+		);
+		*last_prepare_remove_check = Instant::now();
+		Ok(())
+	}
+
+	async fn check_prepare_remove(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
+		let tx = self.new_read_tx().await?;
+		self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await?;
+		tx.cancel().await?;
+		Ok(())
+	}
+
 	async fn run(&self) -> Result<()> {
+		let mut last_prepare_remove_check = Instant::now();
+
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
@@ -445,14 +489,17 @@ impl Building {
 			updated: None,
 		})
 		.await;
+
 		while let Some(rng) = next {
 			if self.is_aborted().await {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
+				// Check if the index has been decommissioned
+				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
+				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
 			// Set the next scan range
@@ -489,6 +536,8 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
+			// Check the index still exists and is not decommissioned
+			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -531,7 +580,7 @@ impl Building {
 
 	async fn index_initial_batch(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tx: &Transaction,
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
@@ -539,7 +588,7 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
 				return Ok(());
 			}
@@ -581,6 +630,7 @@ impl Building {
 				&self.opt,
 				self.ns,
 				self.db,
+				self.tb,
 				&self.ix,
 				None,
 				opt_values.clone(),
@@ -605,7 +655,7 @@ impl Building {
 
 	async fn index_appending_range(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		tx: &Transaction,
 		range: Range<u32>,
 		initial: usize,
@@ -622,7 +672,7 @@ impl Building {
 			if let Some(a) = tx.get(&ia, None).await? {
 				tx.del(&ia).await?;
 				let rid = RecordId {
-					table: self.ikb.table().to_string(),
+					table: self.ikb.table().clone(),
 					key: a.id,
 				};
 				let mut io = IndexOperation::new(
@@ -630,6 +680,7 @@ impl Building {
 					&self.opt,
 					self.ns,
 					self.db,
+					self.tb,
 					&self.ix,
 					a.old_values,
 					a.new_values,
@@ -660,7 +711,7 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()).await?;
 		*rc = false;
 		Ok(())
 	}
@@ -685,10 +736,10 @@ impl Building {
 	}
 
 	fn is_beyond_threshold(&self, count: Option<usize>) -> Result<()> {
-		if let Some(count) = count {
-			if count % 100 != 0 {
-				return Ok(());
-			}
+		if let Some(count) = count
+			&& count % 100 != 0
+		{
+			return Ok(());
 		}
 		if ALLOC.is_beyond_threshold() {
 			Err(anyhow::Error::new(Error::QueryBeyondMemoryThreshold))

@@ -2,7 +2,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
@@ -10,15 +9,14 @@ use chrono::{DateTime, Utc};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
-use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
-use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::{Pretty, QuoteStr};
+use crate::expr::{self, ClosureExpr};
+use crate::fmt::QuoteStr;
 use crate::sql::expression::convert_public_value_to_internal;
 
 pub(crate) mod array;
@@ -31,9 +29,9 @@ pub(crate) mod geometry;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod range;
-pub(crate) mod record;
 pub(crate) mod record_id;
 pub(crate) mod regex;
+pub(crate) mod set;
 pub(crate) mod table;
 pub(crate) mod uuid;
 pub(crate) mod value;
@@ -50,7 +48,8 @@ pub(crate) use self::object::Object;
 pub(crate) use self::range::Range;
 pub(crate) use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub(crate) use self::regex::Regex;
-pub(crate) use self::table::Table;
+pub(crate) use self::set::Set;
+pub(crate) use self::table::TableName;
 pub(crate) use self::uuid::Uuid;
 pub(crate) use self::value::{CastError, CoerceError};
 
@@ -67,10 +66,7 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
-)]
-#[serde(rename = "$surrealdb::private::Value")]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum Value {
@@ -84,16 +80,15 @@ pub(crate) enum Value {
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Array(Array),
+	Set(Set),
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	Table(Table),
+	Table(TableName),
 	RecordId(RecordId),
 	File(File),
-	#[serde(skip)]
 	Regex(Regex),
 	Range(Box<Range>),
-	#[serde(skip)]
 	Closure(Box<Closure>),
 	// Add new variants here
 }
@@ -149,6 +144,7 @@ impl Value {
 			Value::Datetime(_) => true,
 			Value::Bytes(v) => !v.is_empty(),
 			Value::Array(v) => !v.is_empty(),
+			Value::Set(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
 			Value::String(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
@@ -173,7 +169,7 @@ impl Value {
 	}
 
 	/// Check if this Value is a RecordId of a specific type
-	pub fn is_record_type(&self, types: &[String]) -> bool {
+	pub fn is_record_type(&self, types: &[TableName]) -> bool {
 		match self {
 			Value::RecordId(v) => v.is_table_type(types),
 			_ => false,
@@ -216,9 +212,9 @@ impl Value {
 	pub fn into_raw_string(self) -> String {
 		match self {
 			Value::String(v) => v,
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
-			_ => self.to_string(),
+			Value::Uuid(v) => v.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
@@ -226,9 +222,9 @@ impl Value {
 	pub fn to_raw_string(&self) -> String {
 		match self {
 			Value::String(v) => v.clone(),
-			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
-			_ => self.to_string(),
+			Value::Uuid(v) => v.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
@@ -244,6 +240,7 @@ impl Value {
 			Self::Bool(_) => "bool",
 			Self::Uuid(_) => "uuid",
 			Self::Array(_) => "array",
+			Self::Set(_) => "set",
 			Self::Object(_) => "object",
 			Self::String(_) => "string",
 			Self::Duration(_) => "duration",
@@ -307,6 +304,10 @@ impl Value {
 				Value::Array(w) => v == w,
 				_ => false,
 			},
+			Value::Set(v) => match other {
+				Value::Set(w) => v == w,
+				_ => false,
+			},
 			Value::Object(v) => match other {
 				Value::Object(w) => v == w,
 				_ => false,
@@ -335,6 +336,7 @@ impl Value {
 	pub fn all_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().all(|v| v.equal(other)),
+			Value::Set(v) => v.iter().all(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
@@ -343,6 +345,7 @@ impl Value {
 	pub fn any_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Set(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
@@ -351,8 +354,9 @@ impl Value {
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Set(v) => v.contains(other),
 			Value::Uuid(v) => match other {
-				Value::String(w) => v.to_raw().contains(w.as_str()),
+				Value::String(w) => v.to_string().contains(w.as_str()),
 				_ => false,
 			},
 			Value::String(v) => match other {
@@ -384,7 +388,7 @@ impl Value {
 		}
 	}
 
-	/// Check if all Values in an Array contain another Value
+	/// Check if all Values in an Array, Set or String contain another Value
 	pub fn contains_all(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
@@ -399,8 +403,27 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().all(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
 			Value::Array(v) => v.iter().all(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
+				Value::Geometry(_) => self.contains(v),
+				_ => false,
+			}),
+			Value::Set(v) => v.iter().all(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
@@ -412,7 +435,7 @@ impl Value {
 		}
 	}
 
-	/// Check if any Values in an Array contain another Value
+	/// Check if any Values in an Array, Set or String contain another Value
 	pub fn contains_any(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
@@ -427,8 +450,27 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().any(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
 			Value::Array(v) => v.iter().any(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
+				Value::Geometry(_) => self.contains(v),
+				_ => false,
+			}),
+			Value::Set(v) => v.iter().any(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
@@ -440,7 +482,7 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value intersects another Value
+	/// Check if this Geometry intersects another Value
 	pub fn intersects(&self, other: &Value) -> bool {
 		match self {
 			Value::Geometry(v) => match other {
@@ -494,6 +536,11 @@ impl Value {
 			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
 			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
 			Value::Array(array) => expr::Expr::Literal(expr::Literal::Array(array.into_literal())),
+			Value::Set(set) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				expr::Expr::Literal(expr::Literal::Array(set.into_literal()))
+			}
 			Value::Object(object) => {
 				expr::Expr::Literal(expr::Literal::Object(object.into_literal()))
 			}
@@ -504,48 +551,46 @@ impl Value {
 			}
 			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
-			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
+			Value::Closure(closure) => expr::Expr::Closure(Box::new(ClosureExpr {
+				returns: closure.returns.clone(),
+				args: closure.args.clone(),
+				body: closure.body.clone(),
+			})),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(t.into_string()),
-		}
-	}
-}
-
-impl fmt::Display for Value {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match &self {
-			Value::None => write!(f, "NONE"),
-			Value::Null => write!(f, "NULL"),
-			Value::Array(v) => write!(f, "{v}"),
-			Value::Bool(v) => write!(f, "{v}"),
-			Value::Bytes(v) => write!(f, "{v}"),
-			Value::Datetime(v) => write!(f, "{v}"),
-			Value::Duration(v) => write!(f, "{v}"),
-			Value::Geometry(v) => write!(f, "{v}"),
-			Value::Number(v) => write!(f, "{v}"),
-			Value::Object(v) => write!(f, "{v}"),
-			Value::Range(v) => write!(f, "{v}"),
-			Value::Regex(v) => write!(f, "{v}"),
-			Value::String(v) => write!(f, "{}", QuoteStr(v)),
-			Value::RecordId(v) => write!(f, "{v}"),
-			Value::Uuid(v) => write!(f, "{v}"),
-			Value::Closure(v) => write!(f, "{v}"),
-			Value::File(v) => write!(f, "{v}"),
-			Value::Table(v) => write!(f, "{v}"),
+			Value::Table(t) => expr::Expr::Table(t),
 		}
 	}
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Value::None => f.push_str("NONE"),
+			Value::Null => f.push_str("NULL"),
+			Value::Bool(v) => v.fmt_sql(f, sql_fmt),
+			Value::Number(v) => v.fmt_sql(f, sql_fmt),
+			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v)),
+			Value::Duration(v) => v.fmt_sql(f, sql_fmt),
+			Value::Datetime(v) => v.fmt_sql(f, sql_fmt),
+			Value::Uuid(v) => v.fmt_sql(f, sql_fmt),
+			Value::Array(v) => v.fmt_sql(f, sql_fmt),
+			Value::Set(v) => v.fmt_sql(f, sql_fmt),
+			Value::Object(v) => v.fmt_sql(f, sql_fmt),
+			Value::Geometry(v) => v.fmt_sql(f, sql_fmt),
+			Value::Bytes(v) => v.fmt_sql(f, sql_fmt),
+			Value::Table(v) => v.fmt_sql(f, sql_fmt),
+			Value::RecordId(v) => v.fmt_sql(f, sql_fmt),
+			Value::File(v) => v.fmt_sql(f, sql_fmt),
+			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
+			Value::Range(v) => v.fmt_sql(f, sql_fmt),
+			Value::Closure(v) => v.fmt_sql(f, sql_fmt),
+		}
 	}
 }
 
 impl InfoStructure for Value {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -695,7 +740,7 @@ impl TryNeg for Value {
 	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => bail!(Error::TryNeg(v.to_string())),
+			v => bail!(Error::TryNeg(v.to_sql())),
 		})
 	}
 }
@@ -796,11 +841,12 @@ subtypes! {
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
 	String(String) => (is_strand,as_strand,into_strand),
-	Table(Table) => (is_table,as_table,into_table),
+	Table(TableName) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
 	Uuid(Uuid) => (is_uuid,as_uuid,into_uuid),
 	Array(Array) => (is_array,as_array,into_array),
+	Set(Set) => (is_set,as_set,into_set),
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
@@ -947,6 +993,7 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::Duration(value) => convert_duration_to_public(value),
 		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
 		crate::val::Value::Array(value) => convert_array_to_public(value),
+		crate::val::Value::Set(value) => convert_set_to_public(value),
 		crate::val::Value::Object(value) => convert_object_to_public(value),
 		crate::val::Value::Geometry(value) => convert_geometry_to_public(value),
 		crate::val::Value::Bytes(value) => convert_bytes_to_public(value),
@@ -954,11 +1001,7 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::File(value) => convert_file_to_public(value),
 		crate::val::Value::Range(value) => convert_range_to_public(*value),
 		crate::val::Value::Regex(value) => convert_regex_to_public(value),
-		crate::val::Value::Table(value) => {
-			let s = value.into_string();
-			tracing::debug!("Converting table value to public value: {s}");
-			Ok(surrealdb_types::Value::String(s))
-		}
+		crate::val::Value::Table(value) => Ok(surrealdb_types::Value::Table(value.into())),
 		crate::val::Value::Closure(_) => {
 			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
 		}
@@ -975,7 +1018,7 @@ fn convert_number_to_public(value: crate::val::Number) -> Result<surrealdb_types
 }
 
 fn convert_datetime_to_public(value: crate::val::Datetime) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::Datetime(surrealdb_types::Datetime::new(value.0)))
+	Ok(surrealdb_types::Value::Datetime(surrealdb_types::Datetime::from(value.0)))
 }
 
 fn convert_duration_to_public(value: crate::val::Duration) -> Result<surrealdb_types::Value> {
@@ -983,22 +1026,19 @@ fn convert_duration_to_public(value: crate::val::Duration) -> Result<surrealdb_t
 }
 
 fn convert_uuid_to_public(value: crate::val::Uuid) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::Uuid(surrealdb_types::Uuid(value.0)))
+	Ok(surrealdb_types::Value::Uuid(surrealdb_types::Uuid::from(value.0)))
 }
 
 fn convert_bytes_to_public(value: crate::val::Bytes) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::Bytes(surrealdb_types::Bytes::new(value.0)))
+	Ok(surrealdb_types::Value::Bytes(surrealdb_types::Bytes::from(value.0)))
 }
 
 fn convert_regex_to_public(value: crate::val::Regex) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::Regex(surrealdb_types::Regex(value.0)))
+	Ok(surrealdb_types::Value::Regex(surrealdb_types::Regex::from(value.0)))
 }
 
 fn convert_file_to_public(value: crate::val::File) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(
-		value.bucket.clone(),
-		value.key.clone(),
-	)))
+	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(value.bucket, value.key)))
 }
 
 fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_types::Value> {
@@ -1030,16 +1070,25 @@ fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_t
 fn convert_array_to_public(value: crate::val::Array) -> Result<surrealdb_types::Value> {
 	let converted: Result<Vec<_>> =
 		value.0.into_iter().map(convert_value_to_public_value).collect();
-	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from_values(converted?)))
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted?)))
+}
+
+fn convert_set_to_public(value: crate::val::Set) -> Result<surrealdb_types::Value> {
+	// Set is stored as a sorted Vec internally
+	let converted: Result<Vec<surrealdb_types::Value>> =
+		value.0.into_iter().map(convert_value_to_public_value).collect();
+	Ok(surrealdb_types::Value::Set(surrealdb_types::Set::from(converted?)))
 }
 
 fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types::Value> {
-	let converted: Result<std::collections::BTreeMap<_, _>> = value
-		.0
-		.into_iter()
-		.map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v)))
-		.collect();
-	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from_map(converted?)))
+	let converted = convert_object_to_public_map(value)?;
+	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from(converted)))
+}
+
+pub(crate) fn convert_object_to_public_map(
+	value: crate::val::Object,
+) -> Result<BTreeMap<String, surrealdb_types::Value>> {
+	value.0.into_iter().map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v))).collect()
 }
 
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
@@ -1057,7 +1106,7 @@ fn convert_record_id_key_to_public(
 		crate::val::RecordIdKey::Number(n) => Ok(surrealdb_types::RecordIdKey::Number(n)),
 		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s)),
 		crate::val::RecordIdKey::Uuid(u) => {
-			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid(u.0)))
+			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid::from(u.0)))
 		}
 		crate::val::RecordIdKey::Array(a) => {
 			let converted_array = convert_array_to_public(a)?;
@@ -1076,54 +1125,34 @@ fn convert_record_id_key_to_public(
 			}
 		}
 		crate::val::RecordIdKey::Range(r) => {
-			let start = match r.start {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_record_id_key_to_public(k)?)
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_record_id_key_to_public(k)?)
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
-			let end = match r.end {
-				std::ops::Bound::Included(k) => {
-					std::ops::Bound::Included(convert_record_id_key_to_public(k)?)
-				}
-				std::ops::Bound::Excluded(k) => {
-					std::ops::Bound::Excluded(convert_record_id_key_to_public(k)?)
-				}
-				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-			};
 			Ok(surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
-				start,
-				end,
+				start: match r.start {
+					Bound::Included(k) => Bound::Included(convert_record_id_key_to_public(k)?),
+					Bound::Excluded(k) => Bound::Excluded(convert_record_id_key_to_public(k)?),
+					Bound::Unbounded => Bound::Unbounded,
+				},
+				end: match r.end {
+					Bound::Included(k) => Bound::Included(convert_record_id_key_to_public(k)?),
+					Bound::Excluded(k) => Bound::Excluded(convert_record_id_key_to_public(k)?),
+					Bound::Unbounded => Bound::Unbounded,
+				},
 			})))
 		}
 	}
 }
 
 fn convert_range_to_public(value: crate::val::Range) -> Result<surrealdb_types::Value> {
-	let start = match value.start {
-		std::ops::Bound::Included(v) => {
-			std::ops::Bound::Included(convert_value_to_public_value(v)?)
-		}
-		std::ops::Bound::Excluded(v) => {
-			std::ops::Bound::Excluded(convert_value_to_public_value(v)?)
-		}
-		std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-	};
-	let end = match value.end {
-		std::ops::Bound::Included(v) => {
-			std::ops::Bound::Included(convert_value_to_public_value(v)?)
-		}
-		std::ops::Bound::Excluded(v) => {
-			std::ops::Bound::Excluded(convert_value_to_public_value(v)?)
-		}
-		std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
-	};
 	Ok(surrealdb_types::Value::Range(Box::new(surrealdb_types::Range {
-		start,
-		end,
+		start: match value.start {
+			Bound::Included(v) => Bound::Included(convert_value_to_public_value(v)?),
+			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value(v)?),
+			Bound::Unbounded => Bound::Unbounded,
+		},
+		end: match value.end {
+			Bound::Included(v) => Bound::Included(convert_value_to_public_value(v)?),
+			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value(v)?),
+			Bound::Unbounded => Bound::Unbounded,
+		},
 	})))
 }
 

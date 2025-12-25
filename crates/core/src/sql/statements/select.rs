@@ -1,13 +1,12 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Literal, Splits, Start, With,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
@@ -23,61 +22,60 @@ pub struct SelectStatement {
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Expr>,
-	pub timeout: Option<Timeout>,
+	pub version: Expr,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
 }
 
-impl fmt::Display for SelectStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {}", self.expr)?;
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "SELECT {}", self.expr);
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
+			write_sql!(f, fmt, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmts)));
 		}
-		write!(f, " FROM")?;
+		write_sql!(f, fmt, " FROM");
 		if self.only {
-			f.write_str(" ONLY")?
+			write_sql!(f, fmt, " ONLY");
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.split {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.order {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.start {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 
@@ -96,8 +94,8 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			limit: v.limit.map(Into::into),
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
-			version: v.version.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			version: v.version.into(),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
@@ -120,8 +118,8 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			limit: v.limit.map(Into::into),
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
-			version: v.version.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			version: v.version.into(),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,

@@ -28,9 +28,6 @@ defaults:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: "1.87"
-
 jobs:
   # ----------------------------------------
   # Server build
@@ -55,7 +52,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
@@ -95,7 +91,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check format
-        run: cargo make ci-format
+        run: cargo make ci-fmt
 
   clippy:
     name: Check clippy
@@ -107,7 +103,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -127,7 +122,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -147,7 +141,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -166,7 +159,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -179,7 +171,7 @@ jobs:
     name: Check workspace (MSRV)
     runs-on: ubuntu-latest
     env:
-      msrv: "1.87" # This should be updated if the MSRV is updated.
+      msrv: "1.89" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -206,7 +198,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -226,7 +217,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install revision-lock
@@ -245,7 +235,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -253,6 +242,50 @@ jobs:
 
       - name: Check docs
         run: cargo make ci-docs
+
+  feature-check:
+    name: Check feature combinations
+    runs-on: ubuntu-latest
+    # Only run on main branch to avoid slowing down PR CI
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Install cargo-hack
+        run: cargo install cargo-hack
+
+      - name: Check feature combinations
+        run: cargo make ci-feature-check
+
+  unused-deps:
+    name: Check unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Install cargo-machete
+        run: cargo install cargo-machete
+
+      - name: Check unused dependencies
+        run: cargo make ci-unused-deps
 
   # ----------------------------------------
   # Integration tests
@@ -268,7 +301,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -287,7 +319,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -306,7 +337,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -325,7 +355,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -344,49 +373,29 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
 
-      #- name: Run GraphQL integration tests
-        #run: cargo make ci-graphql-integration
+      - name: Run GraphQL integration tests
+        run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
   # ----------------------------------------
 
   test:
-    name: Test workspace + coverage
+    name: Test workspace
     runs-on: [ runner-amd64-2xlarge ]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
+      - name: Test workspace
+        uses: ./.github/actions/test-workspace
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-        with:
-          tools: cargo-nextest,cargo-llvm-cov,cargo-make
-
-      - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-          flags: workspace-tests
-          name: coverage
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ----------------------------------------
   # Storage engine tests
@@ -396,9 +405,9 @@ jobs:
     name: KVS - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        engine: [mem, rocksdb, surrealkv, tikv, fdb]
+        engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -406,7 +415,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs-${{ matrix.engine }}
 
@@ -419,10 +427,9 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
-        run: cargo make ci-${{ matrix.engine }}-kvs
+        run: cargo make ci-kvs-${{ matrix.engine }}
 
   # ----------------------------------------
   # Rust SDK tests
@@ -438,7 +445,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
@@ -453,9 +459,9 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        engine: [any, ws, http, mem, rocksdb, surrealkv, tikv, fdb]
+        engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -463,7 +469,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: sdk-${{ matrix.engine }}
 
@@ -476,7 +481,6 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
         run: cargo make ci-api-integration-${{ matrix.engine }}
@@ -495,7 +499,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -509,9 +512,9 @@ jobs:
     name: SurrealQL tests - ${{ matrix.engine }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        engine: [mem, surrealkv] # TODO(tobiemh): add 'rocksdb' and 'tikv' in KVS PR
+        engine: [mem, surrealkv, rocksdb, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -519,7 +522,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
           cache-key: lang-${{ matrix.engine }}
@@ -531,7 +533,6 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Run language tests
         run: cargo make ci-lang-test-${{ matrix.engine }}
@@ -546,7 +547,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             crates/language-tests
@@ -972,7 +972,7 @@ jobs:
   sdk-output:
     name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '❌ SDK tests failed' || '✅ SDK tests passed' }}
     runs-on: ubuntu-latest
-    if: always()
+    if: success() || failure()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -1003,6 +1003,7 @@ jobs:
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
+    if: success() || failure()
     needs:
       # Server build
       - build
@@ -1016,6 +1017,7 @@ jobs:
       - check-wasm
       - check-revision
       - check-docs
+      - unused-deps
       # Integration tests
       - cli-integration
       - http-integration
@@ -1035,5 +1037,49 @@ jobs:
       - lang-tests
       - upgrade-tests
     steps:
-      - name: All required checks passed
-        run: echo "All required CI checks have passed successfully!"
+      - name: Check for failures
+        run: |
+          echo "Checking results of all required jobs..."
+
+          # List of all job results
+          results=(
+            "${{ needs.build.result }}"
+            "${{ needs.format.result }}"
+            "${{ needs.clippy.result }}"
+            "${{ needs.clippy-release.result }}"
+            "${{ needs.check.result }}"
+            "${{ needs.check-release.result }}"
+            "${{ needs.check-msrv.result }}"
+            "${{ needs.check-wasm.result }}"
+            "${{ needs.check-revision.result }}"
+            "${{ needs.check-docs.result }}"
+            "${{ needs.unused-deps.result }}"
+            "${{ needs.cli-integration.result }}"
+            "${{ needs.http-integration.result }}"
+            "${{ needs.ws-integration.result }}"
+            "${{ needs.ml-integration.result }}"
+            "${{ needs.graphql-integration.result }}"
+            "${{ needs.test.result }}"
+            "${{ needs.sdk-build.result }}"
+            "${{ needs.sdk-engines.result }}"
+            "${{ needs.kvs-engines.result }}"
+            "${{ needs.db-upgrade.result }}"
+            "${{ needs.lang-tests.result }}"
+            "${{ needs.upgrade-tests.result }}"
+          )
+
+          # Check if any job failed (skipped is ok for conditional jobs)
+          failed=false
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "❌ A required job had result: $result"
+              failed=true
+            fi
+          done
+
+          if [[ "$failed" == "true" ]]; then
+            echo "❌ One or more required checks failed"
+            exit 1
+          else
+            echo "✅ All required CI checks have passed successfully!"
+          fi

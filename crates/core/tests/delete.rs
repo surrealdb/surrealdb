@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -137,14 +139,29 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 	let statement = "DELETE person:test";
 
-	for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
+	for ((level, role), (ns, db), should_succeed, msg) in tests {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
 				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.await
+				.unwrap();
+			let res = resp.remove(0).output();
+			assert!(
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
+				"unexpected error creating person record"
+			);
+
+			// Create the other NS & DBs for cross-namespace tests.
+			let mut resp = ds
+				.execute(
+					"USE NS OTHER_NS DB DB; USE NS NS DB OTHER_DB",
+					&Session::owner().with_ns("OTHER_NS"),
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -163,7 +180,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
+				res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -177,7 +194,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
+				res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -253,7 +270,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -299,7 +316,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -360,7 +377,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
 			.execute(
@@ -405,7 +422,7 @@ async fn check_permissions_auth_disabled() {
 	}
 
 	{
-		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
+		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
 
 		// When the table exists and grants full permissions
 		let mut resp = ds
@@ -453,7 +470,7 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<()> {
-	let dbs = new_ds().await?.with_notifications();
+	let dbs = new_ds("test", "test").await?.with_notifications();
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -494,6 +511,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 		notification,
 		Notification::new(
 			live_id,
+			None,
 			Action::Delete,
 			Value::RecordId(RecordId::new("person".to_owned(), "test_true".to_owned())),
 			syn::value(

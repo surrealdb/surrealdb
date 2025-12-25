@@ -1,8 +1,8 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb",
 	feature = "kv-surrealkv",
 	feature = "protocol-http",
 ))]
@@ -11,6 +11,7 @@
 // Supported by the storage engines and the HTTP protocol
 
 use futures::StreamExt as _;
+use surrealdb::opt::Config;
 use surrealdb::types::Value;
 use tokio::fs::remove_file;
 use ulid::Ulid;
@@ -18,7 +19,8 @@ use ulid::Ulid;
 use super::{ApiRecordId, CreateDb, Record};
 
 pub async fn export_import(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
@@ -66,7 +68,8 @@ pub async fn export_import(new_db: impl CreateDb) {
 }
 
 pub async fn export_with_config(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
@@ -100,7 +103,9 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 	// Export, remove table, and import
 	let res = async {
 		db.export(&file).with_config().tables(vec!["user"]).await.unwrap();
-		db.query("REMOVE TABLE user; REMOVE TABLE group;").await.unwrap();
+		db.query("REMOVE TABLE user; REMOVE TABLE group; DEFINE TABLE user; DEFINE TABLE group;")
+			.await
+			.unwrap();
 		db.import(&file).await.unwrap();
 		Ok::<(), surrealdb::Error>(())
 	}
@@ -130,7 +135,8 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 
 #[cfg(feature = "ml")]
 pub async fn ml_export_import(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 	db.import("../../tests/linear_test.surml").ml().await.unwrap();
@@ -142,7 +148,8 @@ pub async fn ml_export_import(new_db: impl CreateDb) {
 }
 
 pub async fn export_escaped_table_names(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
@@ -176,7 +183,8 @@ relate person:`a`->`friends2\`;\nDEFINE USER IF NOT EXISTS pwned ON ROOT PASSWOR
 
 	std::fs::write(&file_path, &export_text).unwrap();
 
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 

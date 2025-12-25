@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::val::{Array, Object, Value};
@@ -27,7 +28,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 				let key = match entry.first() {
 					Some(v) => match v {
 						Value::String(v) => v.clone(),
-						v => v.to_string(),
+						v => v.to_sql(),
 					},
 					_ => {
 						bail!(Error::InvalidArguments {
@@ -97,7 +98,8 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 					bail!(Error::InvalidArguments {
 						name: "object::remove".to_string(),
 						message: format!(
-							"'{target}' cannot be used as a key. Please use a string instead."
+							"'{}' cannot be used as a key. Please use a string instead.",
+							target.to_sql()
 						),
 					});
 				};
@@ -107,7 +109,10 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 		other => {
 			bail!(Error::InvalidArguments {
 				name: "object::remove".to_string(),
-				message: format!("'{other}' cannot be used as a key. Please use a string instead."),
+				message: format!(
+					"'{}' cannot be used as a key. Please use a string instead.",
+					other.to_sql()
+				),
 			})
 		}
 	}

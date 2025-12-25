@@ -1,15 +1,13 @@
 /**
 [test]
 
-[test.results]
-parsing-error = """
-Invalid token, failed to parse duration digits: number too large to fit in target type
-  --> [15:1]
-   |
-15 | 18446744073709551616s
-   | ^^^^^^^^^^^^^^^^^^^^^
-"""
+[[test.results]]
+value = "584942417355y3w5d7h15s999ms999µs999ns"
+
+[[test.results]]
+error = "Failed to compute: \"584942417355y3w5d7h15s999ms999µs999ns + 1ns\", as the operation results in an arithmetic overflow."
 
 */
-/// 1 nano second higher then maximum duration
-18446744073709551616s
+duration::max;
+/// 1 nano second higher than maximum duration
+duration::max + 1ns;

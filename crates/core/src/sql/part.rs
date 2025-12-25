@@ -1,11 +1,9 @@
-use std::fmt;
-use std::fmt::Write;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Part {
 	All,
 	Flatten,
@@ -84,51 +82,60 @@ impl From<crate::expr::Part> for Part {
 	}
 }
 
-impl fmt::Display for Part {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Part {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Part::All => f.write_str(".*"),
-			Part::Last => f.write_str("[$]"),
-			Part::First => f.write_str("[0]"),
-			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
-			Part::Flatten => f.write_str("…"),
-			Part::Where(v) => write!(f, "[WHERE {v}]"),
-			Part::Graph(v) => write!(f, "{v}"),
-			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::All => f.push_str(".*"),
+			Part::Last => f.push_str("[$]"),
+			Part::First => f.push_str("[0]"),
+			Part::Start(v) => v.fmt_sql(f, fmt),
+			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v)),
+			Part::Flatten => f.push('…'),
+			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),
+			Part::Graph(v) => v.fmt_sql(f, fmt),
+			Part::Value(v) => write_sql!(f, fmt, "[{v}]"),
+			Part::Method(v, a) => {
+				write_sql!(
+					f,
+					fmt,
+					".{}({})",
+					EscapeKwFreeIdent(v),
+					Fmt::comma_separated(a.iter().map(CoverStmts))
+				)
+			}
 			Part::Destructure(v) => {
-				f.write_str(".{")?;
-				if !is_pretty() {
-					f.write_char(' ')?;
+				f.push_str(".{");
+				if !fmt.is_pretty() {
+					f.push(' ');
 				}
 				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(v))?;
-					drop(indent);
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v));
 				}
-				if is_pretty() {
-					f.write_char('}')
+				if fmt.is_pretty() {
+					f.push('}');
 				} else {
-					f.write_str(" }")
+					f.push_str(" }");
 				}
 			}
-			Part::Optional => write!(f, "?"),
+			Part::Optional => f.push_str(".?"),
 			Part::Recurse(v, nest, instruction) => {
-				write!(f, ".{{{v}")?;
+				write_sql!(f, fmt, ".{{{v}");
 				if let Some(instruction) = instruction {
-					write!(f, "+{instruction}")?;
+					write_sql!(f, fmt, "+{instruction}");
 				}
-				write!(f, "}}")?;
+				f.push('}');
 
 				if let Some(nest) = nest {
-					write!(f, "({nest})")?;
+					f.push('(');
+					for p in nest.0.iter() {
+						p.fmt_sql(f, fmt);
+					}
+					f.push(')');
 				}
-
-				Ok(())
 			}
-			Part::Doc => write!(f, "@"),
-			Part::RepeatRecurse => write!(f, ".@"),
+			Part::Doc => f.push('@'),
+			Part::RepeatRecurse => f.push_str(".@"),
 		}
 	}
 }
@@ -144,14 +151,14 @@ pub enum DestructurePart {
 	Destructure(String, Vec<DestructurePart>),
 }
 
-impl fmt::Display for DestructurePart {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for DestructurePart {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
-			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
+			DestructurePart::All(fd) => write_sql!(f, fmt, "{}.*", EscapeKwFreeIdent(fd)),
+			DestructurePart::Field(fd) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write_sql!(f, fmt, "{}: {v}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", EscapeIdent(&fd), Part::Destructure(d.clone()))
+				write_sql!(f, fmt, "{}{}", EscapeKwFreeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -192,15 +199,25 @@ pub enum Recurse {
 	Range(Option<u32>, Option<u32>),
 }
 
-impl fmt::Display for Recurse {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Recurse {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			Recurse::Fixed(v) => write!(f, "{v}"),
+			Recurse::Fixed(v) => f.push_str(&v.to_string()),
 			Recurse::Range(beg, end) => match (beg, end) {
-				(None, None) => write!(f, ".."),
-				(Some(beg), None) => write!(f, "{beg}.."),
-				(None, Some(end)) => write!(f, "..{end}"),
-				(Some(beg), Some(end)) => write!(f, "{beg}..{end}"),
+				(None, None) => f.push_str(".."),
+				(Some(beg), None) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+				}
+				(None, Some(end)) => {
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
+				(Some(beg), Some(end)) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
 			},
 		}
 	}
@@ -226,7 +243,6 @@ impl From<crate::expr::part::Recurse> for Recurse {
 // ------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -244,42 +260,36 @@ pub enum RecurseInstruction {
 	},
 }
 
-impl fmt::Display for RecurseInstruction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for RecurseInstruction {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Path {
 				inclusive,
 			} => {
-				write!(f, "path")?;
+				f.push_str("path");
 
 				if *inclusive {
-					write!(f, "+inclusive")?;
+					f.push_str("+inclusive");
 				}
-
-				Ok(())
 			}
 			Self::Collect {
 				inclusive,
 			} => {
-				write!(f, "collect")?;
+				f.push_str("collect");
 
 				if *inclusive {
-					write!(f, "+inclusive")?;
+					f.push_str("+inclusive");
 				}
-
-				Ok(())
 			}
 			Self::Shortest {
 				expects,
 				inclusive,
 			} => {
-				write!(f, "shortest={expects}")?;
+				write_sql!(f, fmt, "shortest={expects}");
 
 				if *inclusive {
-					write!(f, "+inclusive")?;
+					f.push_str("+inclusive");
 				}
-
-				Ok(())
 			}
 		}
 	}

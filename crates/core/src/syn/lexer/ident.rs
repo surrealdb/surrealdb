@@ -40,7 +40,7 @@ impl Lexer<'_> {
 		loop {
 			// lexer ensures that backtick tokens end with `.
 			let before = reader.offset();
-			let x = reader.next().unwrap();
+			let x = reader.next().expect("lexer validated input");
 			match x {
 				b'\\' => {
 					// Lexer already ensures there is a valid character after the \
@@ -61,18 +61,18 @@ impl Lexer<'_> {
 		span: Span,
 		buffer: &'a mut Vec<u8>,
 	) -> Result<&'a str, SyntaxError> {
-		assert_eq!(reader.complete_char(BRACKET_START_CHARACTER).unwrap(), '⟨');
+		assert_eq!(reader.complete_char(BRACKET_START_CHARACTER).expect("valid character"), '⟨');
 		loop {
 			// lexer ensures that backtick tokens end with `
 			let before = reader.offset();
-			let x = reader.next().unwrap();
+			let x = reader.next().expect("lexer validated input");
 			match x {
 				b'\\' => {
 					// Lexer already ensures there is a valid character after the \
 					Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
 				}
 				x if !x.is_ascii() => {
-					let c = reader.complete_char(x).unwrap();
+					let c = reader.complete_char(x).expect("valid character");
 					if c == '⟩' {
 						break;
 					} else {
@@ -95,11 +95,11 @@ impl Lexer<'_> {
 	/// Expected the lexer to have already eaten the param starting `$`
 	pub(super) fn lex_param(&mut self) -> Token {
 		loop {
-			if let Some(x) = self.reader.peek() {
-				if x.is_ascii_alphanumeric() || x == b'_' {
-					self.reader.next();
-					continue;
-				}
+			if let Some(x) = self.reader.peek()
+				&& (x.is_ascii_alphanumeric() || x == b'_')
+			{
+				self.reader.next();
+				continue;
 			}
 			return self.finish_token(TokenKind::Parameter);
 		}
@@ -128,11 +128,11 @@ impl Lexer<'_> {
 	/// The scratch should contain only identifier valid chars.
 	pub(super) fn lex_ident(&mut self) -> Token {
 		loop {
-			if let Some(x) = self.reader.peek() {
-				if is_identifier_continue(x) {
-					self.reader.next();
-					continue;
-				}
+			if let Some(x) = self.reader.peek()
+				&& is_identifier_continue(x)
+			{
+				self.reader.next();
+				continue;
 			}
 
 			let str = self.span_str(self.current_span());

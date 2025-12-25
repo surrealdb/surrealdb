@@ -1,13 +1,13 @@
 use anyhow::Result;
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 
 impl Document {
 	pub async fn process_changefeeds(
 		&self,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
@@ -18,7 +18,7 @@ impl Document {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the table for this record
-		let tbv = self.tb(ctx, opt).await?;
+		let tbv = self.tb().await?;
 		// Get the database for this record
 		let dbv = self.db(ctx, opt).await?;
 		// Get the changefeed definition on the database
@@ -29,10 +29,10 @@ impl Document {
 		if let Some(cf) = dbcf.or(tbcf) {
 			// Create the changefeed entry
 			if let Some(id) = &self.id {
-				ctx.tx().lock().await.record_change(
+				ctx.tx().changefeed_buffer_record_change(
 					ns,
 					db,
-					tbv.name.as_str(),
+					&tbv.name,
 					id.as_ref(),
 					self.initial.doc.clone(),
 					self.current.doc.clone(),

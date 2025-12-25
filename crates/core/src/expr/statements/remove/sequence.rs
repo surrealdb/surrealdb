@@ -1,14 +1,11 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -21,14 +18,6 @@ pub(crate) struct RemoveSequenceStatement {
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveSequenceStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
-}
 impl Default for RemoveSequenceStatement {
 	fn default() -> Self {
 		Self {
@@ -42,7 +31,7 @@ impl RemoveSequenceStatement {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -82,16 +71,5 @@ impl RemoveSequenceStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveSequenceStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE SEQUENCE")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {}", self.name)?;
-		Ok(())
 	}
 }

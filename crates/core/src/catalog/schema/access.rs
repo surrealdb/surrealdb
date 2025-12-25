@@ -2,12 +2,13 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::val::Value;
 
 /// The type of access methods available
@@ -16,7 +17,6 @@ use crate::val::Value;
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 
@@ -116,7 +116,7 @@ impl InfoStructure for JwtAccess {
 		Value::from(map! {
 			"verify".to_string() => match self.verify {
 				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"url".to_string() => v.url.to_string().into(),
+					"url".to_string() => v.url.into(),
 				}),
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){
@@ -213,8 +213,8 @@ impl fmt::Display for Algorithm {
 }
 
 impl ToSql for Algorithm {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, sql_fmt)
 	}
 }
 
@@ -233,39 +233,47 @@ pub struct AccessDefinition {
 impl_kv_value_revisioned!(AccessDefinition);
 
 impl AccessDefinition {
-	fn to_sql_definition(&self) -> crate::sql::statements::define::DefineAccessStatement {
+	fn to_sql_definition(&self) -> sql::statements::define::DefineAccessStatement {
 		// Create a redacted version of the access type
 		let redacted_access_type = self.access_type.clone().redacted();
 
-		crate::sql::statements::define::DefineAccessStatement {
-			kind: crate::sql::statements::define::DefineKind::Default,
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			access_type: crate::sql::AccessType::from(crate::expr::AccessType::from(
-				redacted_access_type,
-			)),
+		sql::statements::define::DefineAccessStatement {
+			kind: sql::statements::define::DefineKind::Default,
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
+			access_type: sql::AccessType::from(crate::expr::AccessType::from(redacted_access_type)),
 			authenticate: self.authenticate.clone().map(|e| e.into()),
-			duration: crate::sql::access::AccessDuration {
-				grant: self.grant_duration.map(|d| {
-					crate::sql::Expr::Literal(crate::sql::Literal::Duration(
-						crate::types::PublicDuration::from(d),
-					))
-				}),
-				token: self.token_duration.map(|d| {
-					crate::sql::Expr::Literal(crate::sql::Literal::Duration(
-						crate::types::PublicDuration::from(d),
-					))
-				}),
-				session: self.session_duration.map(|d| {
-					crate::sql::Expr::Literal(crate::sql::Literal::Duration(
-						crate::types::PublicDuration::from(d),
-					))
-				}),
+			duration: sql::access::AccessDuration {
+				grant: self
+					.grant_duration
+					.map(|d| {
+						sql::Expr::Literal(sql::Literal::Duration(
+							crate::types::PublicDuration::from(d),
+						))
+					})
+					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				token: self
+					.token_duration
+					.map(|d| {
+						sql::Expr::Literal(sql::Literal::Duration(
+							crate::types::PublicDuration::from(d),
+						))
+					})
+					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				session: self
+					.session_duration
+					.map(|d| {
+						sql::Expr::Literal(sql::Literal::Duration(
+							crate::types::PublicDuration::from(d),
+						))
+					})
+					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|c| crate::sql::Expr::Literal(crate::sql::Literal::String(c))),
-			base: crate::sql::Base::from(crate::expr::Base::from(self.base.clone())),
+				.map(|c| sql::Expr::Literal(sql::Literal::String(c)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+			base: sql::Base::from(crate::expr::Base::from(self.base.clone())),
 		}
 	}
 }
@@ -351,8 +359,8 @@ impl InfoStructure for AccessDefinition {
 }
 
 impl ToSql for AccessDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt)
 	}
 }
 
@@ -450,7 +458,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 			alg: v.alg.into(),
 			key: match v.key {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.key.to_string(),
+				_ => v.key.to_sql(),
 			},
 		}
 	}
@@ -469,7 +477,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 		Self {
 			url: match v.url {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.url.to_string(),
+				_ => v.url.to_sql(),
 			},
 		}
 	}
@@ -490,7 +498,7 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 			alg: v.alg.into(),
 			key: match v.key {
 				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
-				_ => v.key.to_string(),
+				_ => v.key.to_sql(),
 			},
 		}
 	}

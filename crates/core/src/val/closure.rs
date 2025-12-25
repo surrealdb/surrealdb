@@ -1,16 +1,15 @@
 use std::cmp::Ordering;
-use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
@@ -19,7 +18,7 @@ pub(crate) struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
-	pub vars: Variables,
+	pub captures: Variables,
 }
 
 impl PartialOrd for Closure {
@@ -34,31 +33,25 @@ impl Ord for Closure {
 }
 
 impl Closure {
-	pub(crate) async fn compute(&self, ctx: &Context) -> Result<Value> {
-		let mut closure = self.clone();
-		closure.vars.extend(Variables::from_expr(&self.body, ctx));
-		Ok(Value::Closure(Box::new(closure)))
-	}
-
 	pub(crate) async fn invoke(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 		args: Vec<Value>,
 	) -> Result<Value> {
-		let mut ctx = MutableContext::new_isolated(ctx);
-		ctx.attach_variables(self.vars.clone())?;
+		let mut ctx = Context::new_isolated(ctx);
+		ctx.attach_variables(self.captures.clone())?;
 
 		// check for missing arguments.
-		if self.args.len() > args.len() {
-			if let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none()) {
-				bail!(Error::InvalidArguments {
-					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value for {}", x.0),
-				})
-			}
+		if self.args.len() > args.len()
+			&& let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none())
+		{
+			bail!(Error::InvalidArguments {
+				name: "ANONYMOUS".to_string(),
+				message: format!("Expected a value for {}", x.0.to_sql()),
+			})
 		}
 
 		for ((name, kind), val) in self.args.iter().zip(args.into_iter()) {
@@ -67,7 +60,11 @@ impl Closure {
 			} else {
 				bail!(Error::InvalidArguments {
 					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value of type '{kind}' for argument {name}"),
+					message: format!(
+						"Expected a value of type '{}' for argument {}",
+						kind.to_sql(),
+						name.to_sql()
+					),
 				});
 			}
 		}
@@ -88,33 +85,24 @@ impl Closure {
 	}
 }
 
-impl VisitExpression for Closure {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.body.visit(visitor)
-	}
-}
-
-impl fmt::Display for Closure {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("|")?;
+impl ToSql for Closure {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "|");
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
-				f.write_str(", ")?;
+				write_sql!(f, sql_fmt, ", ");
 			}
-			write!(f, "{name}: ")?;
+			write_sql!(f, sql_fmt, "{name}: ");
 			match kind {
-				k @ Kind::Either(_) => write!(f, "<{k}>")?,
-				k => write!(f, "{k}")?,
+				k @ Kind::Either(_) => write_sql!(f, sql_fmt, "<{k}>"),
+				k => write_sql!(f, sql_fmt, "{k}"),
 			}
 		}
-		f.write_str("|")?;
+		write_sql!(f, sql_fmt, "|");
 		if let Some(returns) = &self.returns {
-			write!(f, " -> {returns}")?;
+			write_sql!(f, sql_fmt, " -> {returns}");
 		}
-		write!(f, " {}", self.body)
+		write_sql!(f, sql_fmt, " {}", self.body);
 	}
 }
 

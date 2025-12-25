@@ -1,4 +1,3 @@
-use std::fmt;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -7,18 +6,17 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
-	NodeProvider, TableProvider, UserProvider,
+	NodeProvider, RootProvider, TableProvider, UserProvider,
 };
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
-use crate::val::{Datetime, Object, Value};
+use crate::val::{Datetime, Object, TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum InfoStatement {
@@ -39,10 +37,11 @@ pub(crate) enum InfoStatement {
 
 impl InfoStatement {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "InfoStatement::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -56,10 +55,14 @@ impl InfoStatement {
 				if *structured {
 					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?),
+						"defaults".to_string() => txn.get_default_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
 						"users".to_string() => process(txn.all_root_users().await?),
+						"config".to_string() => opt.dynamic_configuration().clone().structure()
 					};
 					Ok(Value::Object(Object(object)))
 				} else {
@@ -71,6 +74,9 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"defaults".to_string() => txn.get_default_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
@@ -92,6 +98,9 @@ impl InfoStatement {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
+						},
+						"config".to_string() => {
+							opt.dynamic_configuration().clone().structure()
 						}
 					};
 					Ok(Value::Object(Object(object)))
@@ -165,6 +174,7 @@ impl InfoStatement {
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+						"modules".to_string() => process(txn.all_db_modules(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
@@ -199,7 +209,7 @@ impl InfoStatement {
 						"buckets".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_buckets(ns, db).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -207,6 +217,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
+							}
+							out.into()
+						},
+						"modules".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_modules(ns, db).await?.iter() {
+								out.insert(v.get_storage_name()?, v.to_sql().into());
 							}
 							out.into()
 						},
@@ -227,7 +244,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
-								out.insert(v.name.clone(), v.to_sql().into());
+								out.insert(v.name.clone().into_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -241,7 +258,7 @@ impl InfoStatement {
 						"configs".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
-								out.insert(v.name(), v.to_string().into());
+								out.insert(v.name(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -263,7 +280,7 @@ impl InfoStatement {
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Compute table name
-				let tb = expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?;
+				let tb = TableName::new(expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?);
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -319,7 +336,7 @@ impl InfoStatement {
 						"tables".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
-								out.insert(v.name.clone(), v.to_sql().into());
+								out.insert(v.name.clone().into_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -382,15 +399,16 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Compute table & index names
 				let index = expr_to_ident(stk, ctx, opt, doc, index, "index name").await?;
-				let table = expr_to_ident(stk, ctx, opt, doc, table, "table name").await?;
+				let table =
+					TableName::new(expr_to_ident(stk, ctx, opt, doc, table, "table name").await?);
 				// Get the transaction
 				let txn = ctx.tx();
 
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					let res = txn.expect_tb_index(ns, db, &table, &index).await?;
-					let status = ib.get_status(ns, db, &res).await;
+					let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
+					let status = ib.get_status(ns, db, &ix).await;
 					let mut out = Object::default();
 					out.insert("building".to_string(), status.into());
 					return Ok(out.into());
@@ -400,68 +418,6 @@ impl InfoStatement {
 		}
 	}
 }
-
-impl VisitExpression for InfoStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			InfoStatement::Root(_) | InfoStatement::Ns(_) => {}
-			InfoStatement::Db(_, expr) | InfoStatement::Tb(_, _, expr) => {
-				expr.iter().for_each(|expr| expr.visit(visitor))
-			}
-			InfoStatement::User(expr, _, _) => expr.visit(visitor),
-			InfoStatement::Index(expr1, expr2, _) => {
-				expr1.visit(visitor);
-				expr2.visit(visitor);
-			}
-		}
-	}
-}
-
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Root(false) => f.write_str("INFO FOR ROOT"),
-			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
-			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
-			Self::Db(false, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
-				None => f.write_str("INFO FOR DATABASE"),
-			},
-			Self::Db(true, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
-				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
-			},
-			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
-				None => write!(f, "INFO FOR TABLE {}", t),
-			},
-
-			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
-				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
-			},
-			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
-				None => write!(f, "INFO FOR USER {}", u),
-			},
-			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
-				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
-			},
-			Self::Index(i, t, false) => {
-				write!(f, "INFO FOR INDEX {} ON {}", i, t)
-			}
-			Self::Index(i, t, true) => {
-				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
-			}
-		}
-	}
-}
-
 pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
@@ -482,6 +438,5 @@ async fn system() -> Value {
 		"memory_usage".to_string() => info.memory_usage.into(),
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),
-		"threads".to_string() => info.threads.into(),
 	})
 }

@@ -9,14 +9,18 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = { version= "0.4.7", features = ["arbitrary-derive"] }
-arbitrary = { version = "1.3.2", features = ["derive"] }
-futures = "0.3.29"
 tokio = "1.44.2"
 
 [dependencies.surrealdb-core]
 path = "../core"
 features = ["kv-mem", "arbitrary"]
 default-features = false
+
+[dependencies.surrealdb-types]
+version = "3.0.0-beta.1"
+features = ["arbitrary"]
+default-features = false
+
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -40,5 +44,12 @@ doc = false
 [[bin]]
 name = "fuzz_structured_executor"
 path = "fuzz_targets/fuzz_structured_executor.rs"
+test = false
+doc = false
+
+
+[[bin]]
+name = "fuzz_format"
+path = "fuzz_targets/fuzz_format.rs"
 test = false
 doc = false

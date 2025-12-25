@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::validate_data;
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::Resource;
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// A merge future
@@ -51,7 +51,7 @@ macro_rules! into_future {
 			let content = content.into_value();
 			Box::pin(async move {
 				let content = match content {
-					surrealdb_types::Value::None | surrealdb_types::Value::Null => None,
+					crate::types::Value::None | crate::types::Value::Null => None,
 					data => {
 						validate_data(
 							&data,
@@ -82,13 +82,13 @@ macro_rules! into_future {
 					}
 				};
 
-				let cmd = Command::RawQuery {
+				let cmd = Command::Query {
 					txn,
 					query,
 					variables,
 				};
 
-				router.$method(cmd).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};
@@ -97,7 +97,7 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -108,7 +108,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
@@ -120,7 +120,7 @@ where
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: SurrealValue + 'static,
+	D: SurrealValue,
 	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;

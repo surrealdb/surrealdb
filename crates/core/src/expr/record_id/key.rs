@@ -1,16 +1,14 @@
-use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -71,74 +69,10 @@ impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	}
 }
 
-impl VisitExpression for RecordIdKeyLit {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			RecordIdKeyLit::Array(array) => {
-				array.iter().for_each(|expr| expr.visit(visitor));
-			}
-			RecordIdKeyLit::Object(object) => {
-				object.iter().for_each(|entry| entry.visit(visitor));
-			}
-			RecordIdKeyLit::Range(range) => {
-				range.visit(visitor);
-			}
-			_ => {}
-		}
-	}
-}
-
-impl Display for RecordIdKeyLit {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(v) => Display::fmt(v, f),
-			Self::Array(v) => {
-				let mut f = Pretty::from(f);
-				f.write_char('[')?;
-				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(v.iter()))?;
-					drop(indent);
-				}
-				f.write_char(']')
-			}
-			Self::Object(v) => {
-				let mut f = Pretty::from(f);
-				if is_pretty() {
-					f.write_char('{')?;
-				} else {
-					f.write_str("{ ")?;
-				}
-				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(
-						f,
-						"{}",
-						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
-							args,
-							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), &entry.value)
-						)),)
-					)?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			}
-			Self::Generate(v) => match v {
-				RecordIdKeyGen::Rand => Display::fmt("rand()", f),
-				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
-				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
-			},
-			Self::Range(v) => Display::fmt(v, f),
-		}
+impl ToSql for RecordIdKeyLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_record_id_key_lit: crate::sql::RecordIdKeyLit = self.clone().into();
+		sql_record_id_key_lit.fmt_sql(f, fmt);
 	}
 }
 
@@ -159,7 +93,7 @@ impl RecordIdKeyLit {
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<RecordIdKey> {

@@ -1,9 +1,10 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
@@ -20,8 +21,8 @@ pub struct MlModelDefinition {
 impl_kv_value_revisioned!(MlModelDefinition);
 
 impl MlModelDefinition {
-	fn to_sql_definition(&self) -> crate::sql::DefineModelStatement {
-		crate::sql::DefineModelStatement {
+	fn to_sql_definition(&self) -> sql::DefineModelStatement {
+		sql::DefineModelStatement {
 			kind: DefineKind::Default,
 			hash: self.hash.clone(),
 			name: self.name.clone(),
@@ -30,7 +31,8 @@ impl MlModelDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
 }
@@ -47,7 +49,7 @@ impl InfoStructure for MlModelDefinition {
 }
 
 impl ToSql for MlModelDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }

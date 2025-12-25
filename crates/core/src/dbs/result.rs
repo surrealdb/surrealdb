@@ -2,10 +2,10 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
-use crate::dbs::group::GroupsCollector;
+use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
@@ -13,7 +13,9 @@ use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
+#[derive(Default)]
 pub(super) enum Results {
+	#[default]
 	None,
 	Memory(MemoryCollector),
 	MemoryRandom(MemoryRandom),
@@ -21,25 +23,25 @@ pub(super) enum Results {
 	MemoryOrderedLimit(MemoryOrderedLimit),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
-	Groups(GroupsCollector),
+	Groups(GroupCollector),
 }
 
 impl Results {
 	pub(super) fn prepare(
 		&mut self,
-		#[cfg(storage)] ctx: &Context,
+		#[cfg(storage)] ctx: &FrozenContext,
 		stm: &Statement<'_>,
 		start: Option<u32>,
 		limit: Option<u32>,
 	) -> Result<Self> {
 		if stm.expr().is_some() && stm.group().is_some() {
-			return Ok(Self::Groups(GroupsCollector::new(stm)));
+			return Ok(Self::Groups(GroupCollector::new(stm)?));
 		}
 		#[cfg(storage)]
-		if stm.tempfiles() {
-			if let Some(temp_dir) = ctx.temporary_directory() {
-				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
-			}
+		if stm.tempfiles()
+			&& let Some(temp_dir) = ctx.temporary_directory()
+		{
+			return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
 		}
 		if let Some(ordering) = stm.order() {
 			return match ordering {
@@ -47,7 +49,13 @@ impl Results {
 				Ordering::Order(orders) => {
 					if let Some(limit) = limit {
 						let limit = start.unwrap_or(0) + limit;
-						if limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+						// Use the priority-queue optimization only when both conditions hold:
+						// - the effective limit (start + limit) does not exceed
+						//   MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE
+						// - there is no SPLIT clause (SPLIT can change the number of produced
+						//   records)
+						// Otherwise, fall back to full in-memory ordering.
+						if stm.split().is_none() && limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
 								orders.clone(),
@@ -64,9 +72,8 @@ impl Results {
 	pub(super) async fn push(
 		&mut self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		val: Value,
 	) -> Result<()> {
@@ -89,7 +96,7 @@ impl Results {
 				e.push(val).await?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, rs, val).await?;
+				g.push(stk, ctx, opt, rs, val).await?;
 			}
 		}
 		Ok(())
@@ -191,12 +198,6 @@ impl Results {
 				g.explain(exp);
 			}
 		}
-	}
-}
-
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
 	}
 }
 

@@ -5,9 +5,10 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{FlowResultExt as _, Function};
@@ -39,7 +40,7 @@ impl Analyzer {
 	pub(in crate::idx::ft) async fn analyze_content(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		content: Vec<Value>,
 		stage: FilteringStage,
@@ -55,7 +56,7 @@ impl Analyzer {
 	pub(super) async fn analyze_value(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		val: Value,
 		stage: FilteringStage,
@@ -64,10 +65,10 @@ impl Analyzer {
 		match val {
 			Value::String(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
 			Value::Number(n) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_sql()).await?)
 			}
 			Value::Bool(b) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, b.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, b.to_sql()).await?)
 			}
 			Value::Array(a) => {
 				for v in a.0 {
@@ -87,7 +88,7 @@ impl Analyzer {
 	pub(super) async fn generate_tokens(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		stage: FilteringStage,
 		mut input: String,
@@ -122,7 +123,7 @@ impl Analyzer {
 	pub(crate) async fn analyze(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		input: String,
 	) -> Result<Value> {
@@ -173,7 +174,8 @@ mod tests {
 	use std::sync::Arc;
 
 	use super::Analyzer;
-	use crate::ctx::MutableContext;
+	use crate::cnf::dynamic::DynamicConfiguration;
+	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::expr::DefineAnalyzerStatement;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
@@ -186,7 +188,7 @@ mod tests {
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
 		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let mut ctx = MutableContext::default();
+		let mut ctx = Context::default();
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 
@@ -200,7 +202,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::default();
+		let opts = Options::new(ds.id(), DynamicConfiguration::default());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(

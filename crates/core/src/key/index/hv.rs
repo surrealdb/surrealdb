@@ -8,8 +8,10 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::impl_kv_key_storekey;
+use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Hv<'a> {
 	__: u8,
 	_a: u8,
@@ -17,7 +19,7 @@ pub(crate) struct Hv<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: Cow<'a, TableName>,
 	_d: u8,
 	pub ix: IndexId,
 	_e: u8,
@@ -32,7 +34,7 @@ impl<'a> Hv<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &'a str,
+		tb: &'a TableName,
 		ix: IndexId,
 		vec: &'a SerializedVector,
 	) -> Self {
@@ -60,15 +62,41 @@ mod tests {
 	use crate::kvs::KVKey;
 
 	#[test]
-	fn key() {
-		let vec = SerializedVector::I16(vec![2]);
-		let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
-		let enc = Hv::encode_key(&val).unwrap();
-		assert_eq!(
-			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x06\x80\x02\0",
-			"{}",
-			String::from_utf8_lossy(&enc)
+	fn test_key() {
+		let test = |vec: SerializedVector, expected: &[u8], info: &str| {
+			let tb = TableName::from("testtb");
+			let val = Hv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &vec);
+			let enc = Hv::encode_key(&val).unwrap();
+			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
+		};
+		test(
+			SerializedVector::I16(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x04\x03\x01\x01\x01\0\x02\x01\0\x03\x01\0\0",
+			"i16",
+		);
+
+		test(
+			SerializedVector::I32(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x03\x03\x01\x01\x01\0\x01\0\x01\0\x02\x01\0\x01\0\x01\0\x03\x01\0\x01\0\x01\0\0",
+			"i32",
+		);
+
+		test(
+			SerializedVector::I64(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x02\x03\x01\x01\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x02\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\0",
+			"i64",
+		);
+
+		test(
+			SerializedVector::F32(vec![1.0, 2.0, 3.0]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\x01\x03\x01\0\x01\0\x80\x3F\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x40\x40\0",
+			"f32",
+		);
+
+		test(
+			SerializedVector::F64(vec![1.0, 2.0, 3.0]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\xF0\x3F\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x08\x40\0",
+			"f64",
 		);
 	}
 }

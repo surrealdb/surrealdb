@@ -1,9 +1,7 @@
-use std::fmt::{self, Display};
-
 use anyhow::Result;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
@@ -18,7 +16,7 @@ pub(crate) struct RemoveModelStatement {
 
 impl RemoveModelStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Get the transaction
@@ -45,17 +43,5 @@ impl RemoveModelStatement {
 		// TODO Remove the model file from storage
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE MODEL")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " ml::{}<{}>", self.name, self.version)?;
-		Ok(())
 	}
 }

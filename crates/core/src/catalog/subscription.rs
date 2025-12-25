@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -9,14 +9,31 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::Value;
+use crate::sql::statements::live::LiveFields;
+use crate::val::{TableName, Value};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum SubscriptionFields {
+	Diff,
+	Select(Fields),
+}
+
+impl InfoStructure for SubscriptionFields {
+	fn structure(self) -> Value {
+		match self {
+			SubscriptionFields::Diff => "diff".to_string().into(),
+			SubscriptionFields::Select(x) => x.to_sql().into(),
+		}
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SubscriptionDefinition {
 	pub(crate) id: Uuid,
 	pub(crate) node: Uuid,
-	pub(crate) fields: Fields,
+	pub(crate) fields: SubscriptionFields,
 	pub(crate) what: Expr,
 	pub(crate) cond: Option<Expr>,
 	pub(crate) fetch: Option<Fetchs>,
@@ -41,8 +58,13 @@ impl_kv_value_revisioned!(SubscriptionDefinition);
 
 impl SubscriptionDefinition {
 	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
+		let fields = match &self.fields {
+			SubscriptionFields::Diff => LiveFields::Diff,
+			SubscriptionFields::Select(x) => LiveFields::Select(x.clone().into()),
+		};
+
 		crate::sql::LiveStatement {
-			fields: self.fields.clone().into(),
+			fields,
 			what: self.what.clone().into(),
 			cond: self.cond.clone().map(|c| crate::sql::Cond(c.into())),
 			fetch: self.fetch.clone().map(|f| f.into()),
@@ -55,7 +77,7 @@ impl InfoStructure for SubscriptionDefinition {
 		Value::from(map! {
 			"id".to_string() => crate::val::Uuid(self.id).into(),
 			"node".to_string() => crate::val::Uuid(self.node).into(),
-			"expr".to_string() => self.fields.structure(),
+			"fields".to_string() => self.fields.structure(),
 			"what".to_string() => self.what.structure(),
 			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
@@ -64,8 +86,8 @@ impl InfoStructure for SubscriptionDefinition {
 }
 
 impl ToSql for &SubscriptionDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -75,6 +97,6 @@ impl ToSql for &SubscriptionDefinition {
 pub(crate) struct NodeLiveQuery {
 	pub(crate) ns: NamespaceId,
 	pub(crate) db: DatabaseId,
-	pub(crate) tb: String,
+	pub(crate) tb: TableName,
 }
 impl_kv_value_revisioned!(NodeLiveQuery);

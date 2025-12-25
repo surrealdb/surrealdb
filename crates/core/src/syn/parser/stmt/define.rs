@@ -5,31 +5,34 @@ use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, HnswParams, VectorType};
+use crate::sql::kind::KindLiteral;
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
+use crate::sql::statements::define::config::defaults::DefaultConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
-	DefineSequenceStatement,
-};
-use crate::sql::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
-	access_type, table_type,
+	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	Scoring, TableType, access_type, table_type,
 };
+#[cfg(feature = "surrealism")]
+use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::types::PublicDuration;
+#[cfg(feature = "surrealism")]
+use crate::types::PublicFile;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -61,6 +64,7 @@ impl Parser<'_> {
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
 			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
+			t!("MODULE") => self.parse_define_module(stk).await.map(DefineStatement::Module),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -88,7 +92,7 @@ impl Parser<'_> {
 
 		while let t!("COMMENT") = self.peek_kind() {
 			self.pop_peek();
-			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+			res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		}
 
 		Ok(res)
@@ -117,11 +121,15 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
+				}
+				t!("STRICT") => {
+					self.pop_peek();
+					res.strict = true;
 				}
 				_ => break,
 			}
@@ -177,7 +185,7 @@ impl Parser<'_> {
 			block,
 			kind,
 			returns,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			permissions: Permission::default(),
 		};
 
@@ -185,7 +193,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -196,6 +204,107 @@ impl Parser<'_> {
 		}
 
 		Ok(res)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		_stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		bail!(
+			"Surrealism modules are not supported in WASM environments",
+			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+		)
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+			)
+		}
+
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+
+		let name = if self.eat(t!("mod")) {
+			expected!(self, t!("::"));
+			let name = self.parse_ident()?;
+			expected!(self, t!("AS"));
+			Some(name)
+		} else {
+			None
+		};
+
+		let peek = self.peek();
+		let executable = match peek.kind {
+			t!("silo") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				let organisation = self.parse_ident()?;
+				expected!(self, t!("::"));
+				let package = self.parse_ident()?;
+				expected!(self, t!("<"));
+				let major = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let minor = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let patch = self.next_token_value::<u32>()?;
+				expected!(self, t!(">"));
+
+				ModuleExecutable::Silo(SiloExecutable {
+					organisation,
+					package,
+					major,
+					minor,
+					patch,
+				})
+			}
+			t!("f\"") | t!("f'") => {
+				let file = self.next_token_value::<PublicFile>()?;
+				ModuleExecutable::Surrealism(SurrealismExecutable(file.into()))
+			}
+			_ => {
+				unexpected!(self, peek, "a module executable");
+			}
+		};
+
+		let mut definition = DefineModuleStatement {
+			kind,
+			name,
+			executable,
+			comment: Expr::Literal(Literal::None),
+			permissions: Permission::default(),
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					definition.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					definition.permissions =
+						stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				_ => break,
+			}
+		}
+
+		Ok(definition)
 	}
 
 	pub(crate) async fn parse_define_user(
@@ -224,7 +333,7 @@ impl Parser<'_> {
 			                                   * the viewer role
 			                                   * by default */
 			// TODO: Move out of the parser
-			token_duration: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600)))), /* defaults to 1 hour. */
+			token_duration: Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
 		};
 
@@ -232,7 +341,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("PASSWORD") => {
 					let token = self.pop_peek();
@@ -278,32 +387,13 @@ impl Parser<'_> {
 						match token.kind {
 							t!("TOKEN") => {
 								self.pop_peek();
-								let peek = self.peek();
-								match peek.kind {
-									t!("NONE") => {
-										// Currently, SurrealDB does not accept tokens without
-										// expiration. For this reason, some token
-										// duration must be set.
-										unexpected!(self, peek, "a token duration");
-									}
-									_ => {
-										res.token_duration =
-											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
-									}
-								}
+								res.token_duration =
+									stk.run(|ctx| self.parse_expr_field(ctx)).await?
 							}
 							t!("SESSION") => {
 								self.pop_peek();
-								match self.peek_kind() {
-									t!("NONE") => {
-										self.pop_peek();
-										res.session_duration = None;
-									}
-									_ => {
-										res.session_duration =
-											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
-									}
-								}
+								res.session_duration =
+									stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 							}
 							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
 						}
@@ -337,7 +427,6 @@ impl Parser<'_> {
 		};
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
-		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
 
 		let mut res = DefineAccessStatement {
@@ -347,14 +436,14 @@ impl Parser<'_> {
 			authenticate: None,
 			access_type: AccessType::default(),
 			duration: AccessDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		};
 
 		loop {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -401,16 +490,6 @@ impl Parser<'_> {
 										}
 									}
 									t!("REFRESH") => {
-										// TODO(gguillemas): Remove this once bearer access is no
-										// longer experimental.
-										if !self.settings.bearer_access_enabled {
-											unexpected!(
-												self,
-												peek,
-												"the experimental bearer access feature to be enabled"
-											);
-										}
-
 										self.pop_peek();
 										ac.bearer = Some(access_type::BearerAccess {
 											kind: access_type::BearerAccessType::Refresh,
@@ -420,11 +499,7 @@ impl Parser<'_> {
 										});
 									}
 									_ => {
-										if self.settings.bearer_access_enabled {
-											unexpected!(self, token, "JWT or REFRESH")
-										} else {
-											unexpected!(self, token, "JWT")
-										}
+										unexpected!(self, token, "JWT or REFRESH")
 									}
 								}
 								self.eat(t!(","));
@@ -432,22 +507,13 @@ impl Parser<'_> {
 							res.access_type = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
-							// TODO(gguillemas): Remove this once bearer access is no longer
-							// experimental.
-							if !self.settings.bearer_access_enabled {
-								unexpected!(
-									self,
-									peek,
-									"the experimental bearer access feature to be enabled"
-								);
-							}
-
 							self.pop_peek();
 							let mut ac = access_type::BearerAccess {
 								..Default::default()
 							};
 							expected!(self, t!("FOR"));
-							match self.peek_kind() {
+							let peek = self.peek();
+							match peek.kind {
 								t!("USER") => {
 									self.pop_peek();
 									ac.subject = access_type::BearerAccessSubject::User;
@@ -455,7 +521,9 @@ impl Parser<'_> {
 								t!("RECORD") => {
 									match &res.base {
 										Base::Db => (),
-										_ => unexpected!(self, peek, "USER"),
+										_ => {
+											unexpected!(self, peek, "USER", => "`RECORD` bearer can only be defined on a database")
+										}
 									}
 									self.pop_peek();
 									ac.subject = access_type::BearerAccessSubject::Record;
@@ -485,48 +553,18 @@ impl Parser<'_> {
 						match peek.kind {
 							t!("GRANT") => {
 								self.pop_peek();
-								match self.peek_kind() {
-									t!("NONE") => {
-										self.pop_peek();
-										res.duration.grant = None
-									}
-									_ => {
-										res.duration.grant =
-											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
-									}
-								}
+								res.duration.grant =
+									stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 							}
 							t!("TOKEN") => {
 								self.pop_peek();
-								let peek = self.peek();
-								match peek.kind {
-									t!("NONE") => {
-										// Currently, SurrealDB does not accept tokens without
-										// expiration. For this reason, some token
-										// duration must be set. In the future, allowing
-										// issuing tokens without expiration may be useful.
-										// Tokens issued by access methods can be consumed by third
-										// parties that support it.
-										unexpected!(self, peek, "a token duration");
-									}
-									_ => {
-										res.duration.token =
-											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
-									}
-								}
+								res.duration.token =
+									stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 							}
 							t!("SESSION") => {
 								self.pop_peek();
-								match self.peek_kind() {
-									t!("NONE") => {
-										self.pop_peek();
-										res.duration.session = None
-									}
-									_ => {
-										res.duration.session =
-											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
-									}
-								}
+								res.duration.session =
+									stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 							}
 							_ => unexpected!(self, peek, "GRANT, TOKEN or SESSIONS"),
 						}
@@ -559,7 +597,7 @@ impl Parser<'_> {
 			name,
 			kind,
 			value: Expr::Literal(Literal::None),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			permissions: Permission::default(),
 		};
 
@@ -571,7 +609,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -609,7 +647,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("DROP") => {
 					self.pop_peek();
@@ -706,7 +744,7 @@ impl Parser<'_> {
 				middleware: Vec::new(),
 				permissions: Permission::Full,
 			},
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		};
 
 		loop {
@@ -714,7 +752,8 @@ impl Parser<'_> {
 				break;
 			}
 
-			match self.peek().kind {
+			let peek = self.peek();
+			match peek.kind {
 				t!("ANY") => {
 					self.pop_peek();
 					res.config = self.parse_api_config(stk).await?;
@@ -733,10 +772,12 @@ impl Parser<'_> {
 							t!("POST") => ApiMethod::Post,
 							t!("PUT") => ApiMethod::Put,
 							t!("TRACE") => ApiMethod::Trace,
-							found => {
-								bail!(
-									"Expected one of `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
-								);
+							_ => {
+								unexpected!(
+									self,
+									peek,
+									"one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`"
+								)
 							}
 						};
 
@@ -758,16 +799,18 @@ impl Parser<'_> {
 						config,
 					});
 				}
-				found => {
-					bail!(
-						"Expected one of `any`, `delete`, `get`, `patch`, `post`, `put` or `trace`, found {found}"
-					);
+				_ => {
+					unexpected!(
+						self,
+						peek,
+						"one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`"
+					)
 				}
 			}
 		}
 
 		if self.eat(t!("COMMENT")) {
-			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+			res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		}
 
 		Ok(res)
@@ -798,7 +841,7 @@ impl Parser<'_> {
 			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		};
 
 		loop {
@@ -816,7 +859,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				_ => break,
 			}
@@ -854,11 +897,39 @@ impl Parser<'_> {
 				// FLEX, FLEXI and FLEXIBLE are all the same token type.
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = true;
+					bail!("FLEXIBLE must be specified after TYPE", @self.last_span);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
 					res.field_kind = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
+
+					// Check if FLEXIBLE follows TYPE
+					if self.eat(t!("FLEXIBLE")) {
+						// Validate that the field_kind contains an object
+						fn kind_contains_object(kind: &Kind) -> bool {
+							match kind {
+								Kind::Object => true,
+								Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+								Kind::Array(inner, _) | Kind::Set(inner, _) => {
+									kind_contains_object(inner)
+								}
+								Kind::Literal(KindLiteral::Object(_)) => true,
+								Kind::Literal(KindLiteral::Array(x)) => {
+									x.iter().any(kind_contains_object)
+								}
+								_ => false,
+							}
+						}
+
+						let is_valid_for_flexible =
+							res.field_kind.as_ref().is_some_and(kind_contains_object);
+
+						if !is_valid_for_flexible {
+							bail!("FLEXIBLE can only be used with types containing object", @self.last_span);
+						}
+
+						res.flexible = true;
+					}
 				}
 				t!("READONLY") => {
 					self.pop_peek();
@@ -888,16 +959,9 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = Some(self.parse_reference(stk).await?);
 				}
@@ -936,9 +1000,11 @@ impl Parser<'_> {
 			kind,
 			cols: Vec::new(),
 			index: Index::Idx,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			concurrently: false,
 		};
+
+		let mut field_span = None;
 
 		loop {
 			match self.peek_kind() {
@@ -949,6 +1015,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -964,7 +1031,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -1000,49 +1066,12 @@ impl Parser<'_> {
 						hl,
 					});
 				}
-				t!("MTREE") => {
-					self.pop_peek();
-					expected!(self, t!("DIMENSION"));
-					let dimension = self.next_token_value()?;
-					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
-					let mut capacity = 40;
-					let mut mtree_cache = 100;
-					loop {
-						match self.peek_kind() {
-							t!("DISTANCE") => {
-								self.pop_peek();
-								distance = self.parse_distance()?
-							}
-							t!("TYPE") => {
-								self.pop_peek();
-								vector_type = self.parse_vector_type()?
-							}
-							t!("CAPACITY") => {
-								self.pop_peek();
-								capacity = self.next_token_value()?
-							}
-							t!("MTREE_CACHE") => {
-								self.pop_peek();
-								mtree_cache = self.next_token_value()?
-							}
-							_ => break,
-						}
-					}
-					res.index = Index::MTree(MTreeParams {
-						dimension,
-						distance,
-						vector_type,
-						capacity,
-						mtree_cache,
-					})
-				}
 				t!("HNSW") => {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
+					let mut vector_type = VectorType::F32;
 					let mut m = None;
 					let mut m0 = None;
 					let mut ml = None;
@@ -1110,13 +1139,32 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
+				}
+			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none", @self.recent_span());
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}
@@ -1141,7 +1189,7 @@ impl Parser<'_> {
 			function: None,
 			tokenizers: None,
 			filters: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 
 			kind,
 		};
@@ -1233,7 +1281,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				_ => break,
 			}
@@ -1284,7 +1332,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				_ => {
 					break;
@@ -1347,6 +1395,7 @@ impl Parser<'_> {
 		let inner = match next.kind {
 			t!("API") => self.parse_api_config(stk).await.map(ConfigInner::Api)?,
 			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
+			t!("DEFAULT") => self.parse_default_config(stk).await.map(ConfigInner::Default)?,
 			_ => unexpected!(self, next, "a type of config"),
 		};
 
@@ -1354,6 +1403,33 @@ impl Parser<'_> {
 			inner,
 			kind,
 		})
+	}
+
+	pub(crate) async fn parse_default_config(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefaultConfig> {
+		let mut config = DefaultConfig::default();
+
+		let peek = self.peek();
+		if !matches!(peek.kind, t!("NAMESPACE") | t!("DATABASE")) {
+			unexpected!(self, peek, "a namespace or database name");
+		}
+
+		loop {
+			match self.peek_kind() {
+				t!("NAMESPACE") => {
+					self.pop_peek();
+					config.namespace = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				}
+				t!("DATABASE") => {
+					self.pop_peek();
+					config.database = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				}
+				_ => break,
+			}
+		}
+		Ok(config)
 	}
 
 	pub(crate) async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
@@ -1380,6 +1456,13 @@ impl Parser<'_> {
 								bail!("Custom middlewares are not yet supported")
 							}
 							_ => {
+								if middleware.is_empty() {
+									unexpected!(
+										self,
+										self.peek(),
+										"at least one middleware function"
+									);
+								}
 								break;
 							}
 						};
@@ -1459,15 +1542,14 @@ impl Parser<'_> {
 
 					let next = self.next();
 					match next.kind {
-						t!("INCLUDE") => {}
-						t!("EXCLUDE") => {}
 						t!("NONE") => {
 							tmp_fncs = Some(FunctionsConfig::None);
 						}
 						t!("AUTO") => {
 							tmp_fncs = Some(FunctionsConfig::Auto);
 						}
-						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+						//TODO: Actually implement INCLUDE and EXCLUDE
+						_ => unexpected!(self, next, "`NONE`, `AUTO`"),
 					}
 				}
 				_ => break,
@@ -1603,14 +1685,14 @@ impl Parser<'_> {
 							TokenKind::Algorithm(alg) => {
 								// If an algorithm is already defined, a different value is not
 								// expected.
-								if let JwtAccessVerify::Key(ref ver) = res.verify {
-									if alg != ver.alg {
-										unexpected!(
-											self,
-											next,
-											"a compatible algorithm or no algorithm"
-										);
-									}
+								if let JwtAccessVerify::Key(ref ver) = res.verify
+									&& alg != ver.alg
+								{
+									unexpected!(
+										self,
+										next,
+										"a compatible algorithm or no algorithm"
+									);
 								}
 								iss.alg = alg;
 							}
@@ -1622,10 +1704,11 @@ impl Parser<'_> {
 						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
-						if let JwtAccessVerify::Key(ref ver) = res.verify {
-							if ver.alg.is_symmetric() && key != ver.key {
-								unexpected!(self, peek, "a symmetric key or no key");
-							}
+						if let JwtAccessVerify::Key(ref ver) = res.verify
+							&& ver.alg.is_symmetric()
+							&& key != ver.key
+						{
+							unexpected!(self, peek, "a symmetric key or no key");
 						}
 						iss.key = key;
 					}

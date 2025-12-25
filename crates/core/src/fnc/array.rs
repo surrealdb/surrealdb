@@ -8,7 +8,7 @@ use reblessive::tree::Stk;
 
 use super::args::{Optional, Rest};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -50,13 +50,13 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value> {
 }
 
 pub async fn all(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
@@ -74,13 +74,13 @@ pub async fn all(
 }
 
 pub async fn any(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					// TODO: Don't clone the closure every time the function is called.
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
@@ -223,8 +223,8 @@ pub fn fill(
 
 		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -296,14 +296,14 @@ pub fn fill(
 }
 
 pub async fn filter(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, check): (Array, Value),
 ) -> Result<Value> {
 	Ok(match check {
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
@@ -318,7 +318,7 @@ pub async fn filter(
 }
 
 pub async fn filter_index(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
@@ -351,13 +351,13 @@ pub async fn filter_index(
 }
 
 pub async fn find(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
-				for arg in array.into_iter() {
+				for arg in array {
 					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
@@ -372,7 +372,7 @@ pub async fn find(
 }
 
 pub async fn find_index(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
@@ -416,7 +416,7 @@ pub fn flatten((array,): (Array,)) -> Result<Value> {
 }
 
 pub async fn fold(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, init, mapper): (Array, Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -574,7 +574,7 @@ pub fn logical_xor((mut lh, mut rh): (Array, Array)) -> Result<Value> {
 }
 
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -627,8 +627,8 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 			end: Bound::Excluded(end),
 		}
 	} else if start_range.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = start_range.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = start_range.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -668,7 +668,7 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 }
 
 pub async fn reduce(
-	(stk, ctx, opt, doc): (&mut Stk, &Context, Option<&Options>, Option<&CursorDoc>),
+	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
@@ -756,8 +756,8 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),

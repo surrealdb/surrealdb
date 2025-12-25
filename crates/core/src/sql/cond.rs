@@ -1,14 +1,15 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Cond(pub(crate) Expr);
 
-impl fmt::Display for Cond {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "WHERE {}", self.0)
+impl ToSql for Cond {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "WHERE {}", CoverStmts(&self.0))
 	}
 }
 

@@ -1,14 +1,15 @@
 use std::ops::Deref;
-use std::{fmt, str};
+use std::str;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -81,10 +82,11 @@ impl Deref for Param {
 
 impl Param {
 	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "Param::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
-		ctx: &Context,
+		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
@@ -158,8 +160,9 @@ impl Param {
 	}
 }
 
-impl fmt::Display for Param {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", EscapeKwFreeIdent(&self.0))
+impl ToSql for Param {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('$');
+		EscapeKwFreeIdent(&self.0).fmt_sql(f, fmt);
 	}
 }

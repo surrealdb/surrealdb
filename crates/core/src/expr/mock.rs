@@ -1,12 +1,10 @@
-use std::fmt;
-use std::ops::Bound;
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::fmt::EscapeKwFreeIdent;
 use crate::val::range::{IntegerRangeIter, TypedRange};
-use crate::val::{RecordId, RecordIdKey};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub(crate) struct IntoIter {
-	table: String,
+	table: TableName,
 	key: IntoIterKey,
 }
 
@@ -68,9 +66,17 @@ impl Iterator for IntoIter {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Mock {
-	Count(String, i64),
-	Range(String, TypedRange<i64>),
-	// Add new variants here
+	Count(TableName, i64),
+	Range(TableName, TypedRange<i64>),
+}
+
+impl Mock {
+	pub(crate) fn table(&self) -> &TableName {
+		match self {
+			Mock::Count(t, _) => t,
+			Mock::Range(t, _) => t,
+		}
+	}
 }
 
 impl IntoIterator for Mock {
@@ -90,25 +96,9 @@ impl IntoIterator for Mock {
 	}
 }
 
-impl fmt::Display for Mock {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Mock::Count(tb, c) => {
-				write!(f, "|{}:{}|", EscapeKwFreeIdent(tb), c)
-			}
-			Mock::Range(tb, r) => {
-				write!(f, "|{}:", EscapeKwFreeIdent(tb))?;
-				match r.start {
-					Bound::Included(x) => write!(f, "{x}..")?,
-					Bound::Excluded(x) => write!(f, "{x}>..")?,
-					Bound::Unbounded => write!(f, "..")?,
-				}
-				match r.end {
-					Bound::Included(x) => write!(f, "={x}|"),
-					Bound::Excluded(x) => write!(f, "{x}|"),
-					Bound::Unbounded => write!(f, "|"),
-				}
-			}
-		}
+impl ToSql for Mock {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let mock: crate::sql::Mock = self.clone().into();
+		mock.fmt_sql(f, sql_fmt);
 	}
 }

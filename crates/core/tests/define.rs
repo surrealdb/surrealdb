@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -8,8 +10,6 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
 use surrealdb_types::Value;
-use test_log::test;
-use tracing::info;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<()> {
@@ -17,7 +17,7 @@ async fn define_statement_namespace() -> Result<()> {
 		DEFINE NAMESPACE test;
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("other", "other").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -29,7 +29,9 @@ async fn define_statement_namespace() -> Result<()> {
 	let val = syn::value(
 		"{
 			accesses: {},
-			namespaces: { test: 'DEFINE NAMESPACE test' },
+			config: { 'QUERY_TIMEOUT': None },
+			defaults: {},
+			namespaces: { other: 'DEFINE NAMESPACE other', test: 'DEFINE NAMESPACE test' },
 			nodes: {},
 			system: {
 				available_parallelism: 0,
@@ -42,7 +44,6 @@ async fn define_statement_namespace() -> Result<()> {
 				memory_allocated: 0,
 				memory_usage: 0,
 				physical_cores: 0,
-                threads: 0
 			},
 			users: {},
 		}",
@@ -59,7 +60,7 @@ async fn define_statement_database() -> Result<()> {
 		DEFINE DATABASE test;
 		INFO FOR NS;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "otherdb").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -71,7 +72,7 @@ async fn define_statement_database() -> Result<()> {
 	let val = syn::value(
 		"{
 			accesses: {},
-			databases: { test: 'DEFINE DATABASE test' },
+			databases: { otherdb: 'DEFINE DATABASE otherdb', test: 'DEFINE DATABASE test' },
 			users: {},
 		}",
 	)
@@ -88,9 +89,8 @@ async fn define_statement_index_concurrently_building_status(
 	appended_size: usize,
 ) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
-	let ds = new_ds().await?;
+	let ds = new_ds("test", "test").await?;
 	// Populate initial records
-	info!("Populate: {}", initial_size);
 	for i in 0..initial_size {
 		let mut responses = ds
 			.execute(
@@ -102,7 +102,6 @@ async fn define_statement_index_concurrently_building_status(
 		skip_ok(&mut responses, 1)?;
 	}
 	// Create the index concurrently
-	info!("Indexing starts");
 	let mut r = ds.execute(def_index, &session, None).await?;
 	assert_eq!(r.len(), skip_def);
 	skip_ok(&mut r, skip_def)?;
@@ -114,7 +113,6 @@ async fn define_statement_index_concurrently_building_status(
 	let mut updated_count = None;
 	let mut appended_count = 0;
 	// While the concurrent indexing is running, we update and delete records
-	info!("Loop");
 	let time_out = Duration::from_secs(300);
 	loop {
 		if now.elapsed().map_err(|e| anyhow::anyhow!(e.to_string()))?.gt(&time_out) {
@@ -136,63 +134,56 @@ async fn define_statement_index_concurrently_building_status(
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
-		if let Value::Object(o) = &tmp {
-			if let Some(Value::Object(o)) = o.get("building") {
-				if let Some(Value::String(s)) = o.get("status") {
-					let new_initial = o.get("initial").cloned();
-					let new_pending = o.get("pending").cloned();
-					let new_updated = o.get("updated").cloned();
-					match s.as_str() {
-						"started" => {
-							info!("Started");
-							continue;
-						}
-						"cleaning" => {
-							info!("Cleaning");
-							continue;
-						}
-						"indexing" => {
-							{
-								if new_initial != initial_count {
-									assert!(new_initial > initial_count, "{new_initial:?}");
-									info!("New initial count: {:?}", new_initial);
-									initial_count = new_initial;
-								}
-							}
-							{
-								if new_pending != pending_count {
-									info!("New pending count: {:?}", new_pending);
-									pending_count = new_pending;
-								}
-							}
-							{
-								if new_updated != updated_count {
-									assert!(new_updated > updated_count, "{new_updated:?}");
-									info!("New updated count: {:?}", new_updated);
-									updated_count = new_updated;
-								}
-							}
-							continue;
-						}
-						"ready" => {
-							let initial = new_initial.unwrap().into_int()? as usize;
-							let pending = new_pending.unwrap().into_int()?;
-							let updated = new_updated.unwrap().into_int()? as usize;
-							assert!(initial > 0, "{initial} > 0");
-							assert!(initial <= initial_size, "{initial} <= {initial_size}");
-							assert_eq!(pending, 0);
-							assert!(updated > 0, "{updated} > 0");
-							assert!(updated <= appended_count, "{updated} <= appended_count");
-							break;
-						}
-						_ => {}
-					}
+		if let Value::Object(o) = &tmp
+			&& let Some(Value::Object(o)) = o.get("building")
+			&& let Some(Value::String(s)) = o.get("status")
+		{
+			let new_initial = o.get("initial").cloned();
+			let new_pending = o.get("pending").cloned();
+			let new_updated = o.get("updated").cloned();
+			match s.as_str() {
+				"started" => {
+					continue;
 				}
+				"cleaning" => {
+					continue;
+				}
+				"indexing" => {
+					{
+						if new_initial != initial_count {
+							assert!(new_initial > initial_count, "{new_initial:?}");
+							initial_count = new_initial;
+						}
+					}
+					{
+						if new_pending != pending_count {
+							pending_count = new_pending;
+						}
+					}
+					{
+						if new_updated != updated_count {
+							assert!(new_updated > updated_count, "{new_updated:?}");
+							updated_count = new_updated;
+						}
+					}
+					continue;
+				}
+				"ready" => {
+					let initial = new_initial.unwrap().into_int()? as usize;
+					let pending = new_pending.unwrap().into_int()?;
+					let updated = new_updated.unwrap().into_int()? as usize;
+					assert!(initial > 0, "{initial} > 0");
+					assert!(initial <= initial_size, "{initial} <= {initial_size}");
+					assert_eq!(pending, 0);
+					assert!(updated > 0, "{updated} > 0");
+					assert!(updated <= appended_count, "{updated} <= appended_count");
+					break;
+				}
+				_ => {}
 			}
 		}
 		panic!("Invalid info: {tmp:#?}");
 	}
-	info!("Appended: {appended_count}");
 	Ok(())
 }
 
@@ -218,7 +209,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -230,7 +221,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -253,7 +244,7 @@ async fn define_statement_search_index() -> Result<()> {
 		INFO FOR TABLE blog;
 	"#;
 
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -286,7 +277,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 		INFO FOR ROOT;
 	";
-	let dbs = new_ds().await?;
+	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner();
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
@@ -305,7 +296,7 @@ async fn define_statement_user_root() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_ns() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -376,7 +367,7 @@ async fn define_statement_user_ns() -> Result<()> {
 
 #[tokio::test]
 async fn define_statement_user_db() -> Result<()> {
-	let dbs = new_ds().await?;
+	let dbs = new_ds("ns", "db").await?;
 	let ses = Session::owner();
 
 	// Create a NS user and retrieve it.
@@ -445,8 +436,8 @@ async fn permissions_checks_define_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -544,8 +535,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -585,8 +576,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -626,8 +617,8 @@ async fn permissions_checks_define_access_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -765,8 +756,8 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -809,8 +800,8 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
-	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -992,8 +983,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1036,8 +1027,8 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: { account: "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: { account: "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1077,8 +1068,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: { param: "DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL" }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { param: "DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL" }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1115,8 +1106,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1156,7 +1147,7 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
 	let check_error =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 

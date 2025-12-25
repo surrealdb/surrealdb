@@ -5,11 +5,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use surrealdb_types::{self, SurrealValue, Value, Variables};
-
-use crate::opt::auth::{Credentials, Jwt};
+use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
-use crate::{Connect, Connection, OnceLockExt, Surreal};
+use crate::types::{SurrealValue, Value, Variables};
+use crate::{Connect, Connection, OnceLockExt, SessionClone, Surreal};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -39,6 +38,7 @@ mod unset;
 mod update;
 mod upsert;
 mod use_db;
+mod use_defaults;
 mod use_ns;
 mod version;
 
@@ -60,7 +60,7 @@ pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::{Query, QueryStream};
+pub use query::{IntoVariables, Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;
@@ -72,6 +72,7 @@ pub use unset::Unset;
 pub use update::Update;
 pub use upsert::Upsert;
 pub use use_db::UseDb;
+pub use use_defaults::UseDefaults;
 pub use use_ns::UseNs;
 pub use version::Version;
 
@@ -195,13 +196,12 @@ where
 	/// }
 	/// ```
 	pub fn init() -> Self {
-		Self {
-			inner: Arc::new(super::Inner {
-				router: OnceLock::new(),
-				waiter: watch::channel(None),
-			}),
-			engine: PhantomData,
-		}
+		Arc::new(super::Inner {
+			router: OnceLock::new(),
+			waiter: watch::channel(None),
+			session_clone: SessionClone::new(),
+		})
+		.into()
 	}
 
 	/// Connects to a local or remote database endpoint
@@ -232,9 +232,27 @@ where
 		}
 	}
 
-	pub fn transaction(&self) -> Begin<C> {
+	pub fn begin(self) -> Begin<C> {
 		Begin {
-			client: self.clone(),
+			client: self,
+		}
+	}
+
+	/// Use the default namespace and database configuration
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.use_defaults().await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn use_defaults(&self) -> UseDefaults<'_, C> {
+		UseDefaults {
+			client: Cow::Borrowed(self),
 		}
 	}
 
@@ -250,7 +268,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_ns(&'_ self, ns: impl Into<String>) -> UseNs<'_, C> {
+	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<'_, C> {
 		UseNs {
 			client: Cow::Borrowed(self),
 			ns: ns.into(),
@@ -269,7 +287,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_db(&'_ self, db: impl Into<String>) -> UseDb<'_, C> {
+	pub fn use_db(&self, db: impl Into<String>) -> UseDb<'_, C> {
 		UseDb {
 			client: Cow::Borrowed(self),
 			ns: None,
@@ -407,11 +425,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&'_ self, credentials: impl Credentials<auth::Signup, R>) -> Signup<'_, C, R> {
+	pub fn signup(&'_ self, credentials: impl Credentials<auth::Signup>) -> Signup<'_, C> {
 		Signup {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
@@ -524,11 +541,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&'_ self, credentials: impl Credentials<auth::Signin, R>) -> Signin<'_, C, R> {
+	pub fn signin(&'_ self, credentials: impl Credentials<auth::Signin>) -> Signin<'_, C> {
 		Signin {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
@@ -547,6 +563,8 @@ where
 	pub fn invalidate(&'_ self) -> Invalidate<'_, C> {
 		Invalidate {
 			client: Cow::Borrowed(self),
+			token: Value::None,
+			typ: PhantomData,
 		}
 	}
 
@@ -563,10 +581,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&'_ self, token: impl Into<Jwt>) -> Authenticate<'_, C> {
+	pub fn authenticate(&'_ self, token: impl Into<Token>) -> Authenticate<'_, C> {
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
+			token_type: PhantomData,
 		}
 	}
 
@@ -586,8 +605,7 @@ where
 	///
 	/// // Run queries
 	/// let mut result = db
-	///     .query("CREATE person")
-	///     .query("SELECT * FROM $table")
+	///     .query("CREATE person; SELECT * FROM $table")
 	///     .bind(("table", Table::from("person")))
 	///     .await?;
 	///

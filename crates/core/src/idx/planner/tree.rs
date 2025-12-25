@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
+use crate::expr::visit::MutVisitor;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -20,7 +22,7 @@ use crate::idx::planner::executor::{
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, Number, TableName, Value};
 
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
@@ -43,7 +45,7 @@ impl Tree {
 	pub(super) async fn build<'a>(
 		stk: &mut Stk,
 		stm_ctx: &'a StatementContext<'a>,
-		table: &'a str,
+		table: &'a TableName,
 	) -> Result<Self> {
 		let mut b = TreeBuilder::new(stm_ctx, table);
 		if let Some(cond) = stm_ctx.cond {
@@ -68,9 +70,9 @@ impl Tree {
 
 struct TreeBuilder<'a> {
 	ctx: &'a StatementContext<'a>,
-	table: &'a str,
+	table: &'a TableName,
 	first_order: Option<&'a Order>,
-	schemas: HashMap<String, SchemaCache>,
+	schemas: HashMap<TableName, SchemaCache>,
 	idioms_indexes: HashMap<String, HashMap<Arc<Idiom>, LocalIndexRefs>>,
 	resolved_expressions: HashMap<Arc<Expr>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
@@ -98,7 +100,7 @@ pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
-	fn new(ctx: &'a StatementContext<'a>, table: &'a str) -> Self {
+	fn new(ctx: &'a StatementContext<'a>, table: &'a TableName) -> Self {
 		let with_indexes = WithIndexes::with_capacity(ctx.with);
 		let first_order = if let Some(Ordering::Order(OrderList(o))) = ctx.order {
 			o.first()
@@ -131,30 +133,30 @@ impl<'a> TreeBuilder<'a> {
 	async fn lazy_load_schema_resolver(
 		&mut self,
 		tx: &Transaction,
-		table: &str,
+		table: &TableName,
 	) -> Result<SchemaCache> {
 		if let Some(sc) = self.schemas.get(table).cloned() {
 			return Ok(sc);
 		}
 		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
 		let sc = SchemaCache::new(ns, db, table, tx).await?;
-		self.schemas.insert(table.to_owned(), sc.clone());
+		self.schemas.insert(table.clone(), sc.clone());
 		Ok(sc)
 	}
 
 	async fn eval_order(&mut self) -> Result<()> {
-		if let Some(o) = self.first_order {
-			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-				for (index_reference, id_col) in &irf {
-					if *id_col == 0 {
-						self.index_map.order_limit = Some(IndexOption::new(
-							index_reference.clone(),
-							Some(id),
-							IdiomPosition::None,
-							IndexOperator::Order(!o.direction),
-						));
-						break;
-					}
+		if let Some(o) = self.first_order
+			&& let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await?
+		{
+			for (index_reference, id_col) in &irf {
+				if *id_col == 0 && index_reference.index.supports_order() {
+					self.index_map.order_limit = Some(IndexOption::new(
+						index_reference.clone(),
+						Some(id),
+						IdiomPosition::None,
+						IndexOperator::Order(!o.direction),
+					));
+					break;
 				}
 			}
 		}
@@ -166,34 +168,37 @@ impl<'a> TreeBuilder<'a> {
 		self.knn_condition = if self.knn_expressions.is_empty() {
 			None
 		} else {
-			KnnConditionRewriter::build(&self.knn_expressions, cond)
+			let mut cond = cond.0.clone();
+			let _ = KnnConditionRewriter(&self.knn_expressions).visit_mut_expr(&mut cond);
+			Some(Cond(cond))
 		};
 		Ok(())
 	}
 
-	async fn eval_count(&mut self, table: &str) -> Result<()> {
-		if let Some(f) = self.ctx.fields {
-			if f.is_count_all_only() {
-				if let Some(g) = self.ctx.group {
-					if g.is_group_all_only() {
-						let tx = self.ctx.ctx.tx();
-						let schema = self.lazy_load_schema_resolver(&tx, table).await?;
-						for (pos, ix) in schema.indexes.iter().enumerate() {
-							if let Index::Count(cond) = &ix.index {
-								if self.ctx.cond.eq(&cond.as_ref()) {
-									let index_reference = schema.new_reference(pos);
-									if self.check_allowed_by_with_indexes(&index_reference) {
-										self.index_map.index_count = Some(IndexOption::new(
-											index_reference,
-											None,
-											IdiomPosition::None,
-											IndexOperator::Count,
-										));
-										break;
-									}
-								}
-							}
-						}
+	async fn eval_count(&mut self, table: &TableName) -> Result<()> {
+		if let Some(f) = self.ctx.fields
+			&& f.is_count_all_only()
+			&& let Some(g) = self.ctx.group
+			&& g.is_group_all_only()
+		{
+			let tx = self.ctx.ctx.tx();
+			let schema = self.lazy_load_schema_resolver(&tx, table).await?;
+			for (pos, ix) in schema.indexes.iter().enumerate() {
+				if ix.prepare_remove {
+					continue;
+				}
+				if let Index::Count(cond) = &ix.index
+					&& self.ctx.cond.eq(&cond.as_ref())
+				{
+					let index_reference = schema.new_reference(pos);
+					if self.check_allowed_by_with_indexes(&index_reference) {
+						self.index_map.index_count = Some(IndexOption::new(
+							index_reference,
+							None,
+							IdiomPosition::None,
+							IndexOperator::Count,
+						));
+						break;
 					}
 				}
 			}
@@ -255,8 +260,8 @@ impl<'a> TreeBuilder<'a> {
 					group,
 					exp: exp.clone(),
 					io,
-					left: left.clone(),
-					right: right.clone(),
+					left,
+					right,
 				};
 				self.resolved_expressions.insert(exp, re.clone());
 				Ok(re.into())
@@ -281,7 +286,7 @@ impl<'a> TreeBuilder<'a> {
 				Ok(Node::Computable)
 			}
 			Expr::Literal(Literal::Array(a)) => self.eval_array(stk, a).await,
-			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v))),
+			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v.to_sql()))),
 		}
 	}
 
@@ -289,7 +294,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(if n == Node::Computable {
 			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
 				Ok(v) => Node::Computed(v.into()),
-				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v)),
+				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v.to_sql())),
 			}
 		} else {
 			n
@@ -317,15 +322,15 @@ impl<'a> TreeBuilder<'a> {
 		};
 
 		// Compute the idiom value if it is a param
-		if let Some(Part::Start(x)) = i.0.first() {
-			if matches!(x, Expr::Param(_)) {
-				let v = stk
-					.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
-					.await
-					.catch_return()?;
-				let v = v.into_literal();
-				return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
-			}
+		if let Some(Part::Start(x)) = i.0.first()
+			&& matches!(x, Expr::Param(_))
+		{
+			let v = stk
+				.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+				.await
+				.catch_return()?;
+			let v = v.into_literal();
+			return stk.run(|stk| self.eval_value(stk, gr, &v)).await;
 		}
 
 		let n = self.resolve_idiom(i).await?;
@@ -356,13 +361,16 @@ impl<'a> TreeBuilder<'a> {
 
 	fn resolve_indexes(&mut self, t: &str, i: &Idiom, schema: &SchemaCache) -> LocalIndexRefs {
 		// Did we already resolve this idiom?
-		if let Some(m) = self.idioms_indexes.get(t) {
-			if let Some(irs) = m.get(i).cloned() {
-				return irs;
-			}
+		if let Some(m) = self.idioms_indexes.get(t)
+			&& let Some(irs) = m.get(i).cloned()
+		{
+			return irs;
 		}
 		let mut irs = Vec::new();
 		for (idx, ix) in schema.indexes.iter().enumerate() {
+			if ix.prepare_remove {
+				continue;
+			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allows the index to be used
@@ -408,29 +416,29 @@ impl<'a> TreeBuilder<'a> {
 		idiom: &Arc<Idiom>,
 	) -> Result<Option<RecordOptions>> {
 		for field in fields.iter() {
-			if let Some(Kind::Record(tables)) = &field.field_kind {
-				if idiom.starts_with(&field.name.0) {
-					let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
-					if remote_field.is_empty() {
-						return Ok(None);
-					}
-					let local_field = Idiom(local_field.to_vec());
-					let schema = self.lazy_load_schema_resolver(tx, self.table).await?;
-					let locals = self.resolve_indexes(self.table, &local_field, &schema);
-					let remote_field = Arc::new(Idiom(remote_field.to_vec()));
-					let mut remotes = vec![];
-					for table in tables {
-						let schema = self.lazy_load_schema_resolver(tx, table).await?;
-						let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
-						remotes.push((remote_field.clone(), remote_irs));
-					}
-					let ro = RecordOptions {
-						locals,
-						remotes: Arc::new(remotes),
-					};
-					self.idioms_record_options.insert(idiom.clone(), ro.clone());
-					return Ok(Some(ro));
+			if let Some(Kind::Record(tables)) = &field.field_kind
+				&& idiom.starts_with(&field.name.0)
+			{
+				let (local_field, remote_field) = idiom.0.split_at(field.name.0.len());
+				if remote_field.is_empty() {
+					return Ok(None);
 				}
+				let local_field = Idiom(local_field.to_vec());
+				let schema = self.lazy_load_schema_resolver(tx, self.table).await?;
+				let locals = self.resolve_indexes(self.table, &local_field, &schema);
+				let remote_field = Arc::new(Idiom(remote_field.to_vec()));
+				let mut remotes = vec![];
+				for table in tables {
+					let schema = self.lazy_load_schema_resolver(tx, table).await?;
+					let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+					remotes.push((remote_field.clone(), remote_irs));
+				}
+				let ro = RecordOptions {
+					locals,
+					remotes: Arc::new(remotes),
+				};
+				self.idioms_record_options.insert(idiom.clone(), ro.clone());
+				return Ok(Some(ro));
 			}
 		}
 		Ok(None)
@@ -457,10 +465,10 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn check_leaf_node_with_index(&mut self, io: Option<&IndexOption>) {
-		if let Some(io) = io {
-			if self.with_indexes.allowed_index(io.index_reference().index_id) {
-				self.leaf_nodes_with_index_count += 2;
-			}
+		if let Some(io) = io
+			&& self.with_indexes.allowed_index(io.index_reference().index_id)
+		{
+			self.leaf_nodes_with_index_count += 2;
 		}
 	}
 
@@ -516,16 +524,15 @@ impl<'a> TreeBuilder<'a> {
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
 				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
 				_ => None,
 			};
-			if res.is_none() {
-				if let Some(op) = op {
-					let io = IndexOption::new(index_reference.clone(), Some(id.clone()), p, op);
-					self.index_map.options.push((e.clone(), io.clone()));
-					res = Some(io);
-				}
+			if res.is_none()
+				&& let Some(op) = op
+			{
+				let io = IndexOption::new(index_reference.clone(), Some(id.clone()), p, op);
+				self.index_map.options.push((e.clone(), io.clone()));
+				res = Some(io);
 			}
 		}
 		Ok(res)
@@ -542,33 +549,12 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn eval_matches_operator(op: &BinaryOperator, n: &Node) -> Option<IndexOperator> {
-		if let Some(v) = n.is_computed() {
-			if let BinaryOperator::Matches(mr) = op {
-				return Some(IndexOperator::Matches(v.to_raw_string(), mr.clone()));
-			}
+		if let Some(v) = n.is_computed()
+			&& let BinaryOperator::Matches(mr) = op
+		{
+			return Some(IndexOperator::Matches(v.to_raw_string(), mr.clone()));
 		}
 		None
-	}
-
-	fn eval_mtree_knn(
-		&mut self,
-		exp: &Arc<Expr>,
-		op: &BinaryOperator,
-		n: &Node,
-	) -> Result<Option<IndexOperator>> {
-		let BinaryOperator::NearestNeighbor(nn) = op else {
-			return Ok(None);
-		};
-		let NearestNeighbor::KTree(k) = &**nn else {
-			return Ok(None);
-		};
-
-		if let Node::Computed(v) = n {
-			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-			self.knn_expressions.insert(exp.clone());
-			return Ok(Some(IndexOperator::Knn(vec, *k)));
-		}
-		Ok(None)
 	}
 
 	fn eval_hnsw_knn(
@@ -712,10 +698,10 @@ impl WithIndexes {
 
 	/// Check if an index is allowed to be used
 	pub(super) fn allowed_index(&self, index_id: IndexId) -> bool {
-		if let Some(wi) = &self.0 {
-			if !wi.contains(&index_id) {
-				return false;
-			}
+		if let Some(wi) = &self.0
+			&& !wi.contains(&index_id)
+		{
+			return false;
 		}
 		true
 	}
@@ -796,7 +782,12 @@ struct SchemaCache {
 }
 
 impl SchemaCache {
-	async fn new(ns: NamespaceId, db: DatabaseId, table: &str, tx: &Transaction) -> Result<Self> {
+	async fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		table: &TableName,
+		tx: &Transaction,
+	) -> Result<Self> {
 		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {

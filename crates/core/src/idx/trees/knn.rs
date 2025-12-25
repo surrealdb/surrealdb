@@ -1,9 +1,7 @@
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
 
-#[cfg(debug_assertions)]
-use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -12,20 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
-
-#[derive(Debug, Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
-pub(super) struct PriorityNode(Reverse<FloatKey>, NodeId);
-
-impl PriorityNode {
-	pub(super) fn new(d: f64, id: NodeId) -> Self {
-		Self(Reverse(FloatKey::new(d)), id)
-	}
-
-	pub(super) fn id(&self) -> NodeId {
-		self.1
-	}
-}
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
@@ -86,7 +70,7 @@ impl DoublePriorityQueue {
 	pub(super) fn peek_first(&self) -> Option<(f64, ElementId)> {
 		self.0.first_key_value().map(|(k, q)| {
 			let k = k.0;
-			let v = *q.iter().next().unwrap(); // By design the contains always contains one element
+			let v = *q.iter().next().expect("contains always has one element"); // By design the contains always contains one element
 			(k, v)
 		})
 	}
@@ -143,12 +127,6 @@ impl DoublePriorityQueue {
 /// BTreeSet.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FloatKey(f64);
-
-impl FloatKey {
-	pub(super) fn new(f: f64) -> Self {
-		FloatKey(f)
-	}
-}
 impl From<FloatKey> for f64 {
 	fn from(v: FloatKey) -> Self {
 		v.0
@@ -361,7 +339,7 @@ impl Ids64 {
 		}
 	}
 
-	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
+	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
 			Self::One(d) => Box::new(OneDocIterator(Some(*d))),
@@ -536,12 +514,11 @@ impl KnnResultBuilder {
 		}
 	}
 	pub(super) fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() >= self.knn {
-			if let Some(pr) = self.priority_list.keys().last() {
-				if dist > pr.0 {
-					return false;
-				}
-			}
+		if self.docs.len() >= self.knn
+			&& let Some(pr) = self.priority_list.keys().last()
+			&& dist > pr.0
+		{
+			return false;
 		}
 		true
 	}
@@ -563,23 +540,18 @@ impl KnnResultBuilder {
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
-		if docs_len > self.knn {
-			if let Some((_, d)) = self.priority_list.last_key_value() {
-				if docs_len - d.len() >= self.knn {
-					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						evicted_docs.remove_to(&mut self.docs);
-						return evicted_docs;
-					}
-				}
-			}
+		if docs_len > self.knn
+			&& let Some((_, d)) = self.priority_list.last_key_value()
+			&& docs_len - d.len() >= self.knn
+			&& let Some((_, evicted_docs)) = self.priority_list.pop_last()
+		{
+			evicted_docs.remove_to(&mut self.docs);
+			return evicted_docs;
 		}
 		Ids64::Empty
 	}
 
-	pub(super) fn build(
-		self,
-		#[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>,
-	) -> KnnResult {
+	pub(super) fn build(self) -> KnnResult {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
 		let mut left = self.knn;
 		for (pr, docs) in self.priority_list {
@@ -602,17 +574,12 @@ impl KnnResultBuilder {
 		trace!("sorted_docs: {:?}", sorted_docs);
 		KnnResult {
 			docs: sorted_docs,
-			#[cfg(debug_assertions)]
-			visited_nodes,
 		}
 	}
 }
 
 pub struct KnnResult {
 	pub(in crate::idx::trees) docs: VecDeque<(DocId, f64)>,
-	#[cfg(debug_assertions)]
-	#[cfg_attr(all(debug_assertions, not(test)), expect(dead_code))]
-	pub(in crate::idx::trees) visited_nodes: HashMap<NodeId, usize>,
 }
 
 #[cfg(test)]
@@ -623,8 +590,6 @@ pub(super) mod tests {
 	use std::io::{BufRead, BufReader};
 	use std::time::SystemTime;
 
-	#[cfg(debug_assertions)]
-	use ahash::HashMap;
 	use ahash::HashSet;
 	use anyhow::Result;
 	use flate2::read::GzDecoder;
@@ -687,10 +652,10 @@ pub(super) mod tests {
 		let mut res = Vec::new();
 		// Iterate over each line in the file
 		for (i, line_result) in reader.lines().enumerate() {
-			if let Some(l) = limit {
-				if l == i {
-					break;
-				}
+			if let Some(l) = limit
+				&& l == i
+			{
+				break;
 			}
 			let line = line_result?;
 			let Value::Array(array) = convert_public_value_to_internal(syn::value(&line).unwrap())
@@ -830,10 +795,7 @@ pub(super) mod tests {
 		b.add(0.2, Ids64::Vec3([0, 1, 2]));
 		b.add(0.2, Ids64::One(3));
 		b.add(0.2, Ids64::Vec2([6, 8]));
-		let res = b.build(
-			#[cfg(debug_assertions)]
-			HashMap::default(),
-		);
+		let res = b.build();
 		assert_eq!(
 			res.docs,
 			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])
@@ -890,8 +852,7 @@ pub(super) mod tests {
 
 	#[test]
 	fn test_priority_node() {
-		let (n1, n2, n3) =
-			((FloatKey::new(1.0), 1), (FloatKey::new(2.0), 2), (FloatKey::new(3.0), 3));
+		let (n1, n2, n3) = ((FloatKey(1.0), 1), (FloatKey(2.0), 2), (FloatKey(3.0), 3));
 		let mut q = BinaryHeap::from([n3, n1, n2]);
 
 		assert_eq!(q.pop(), Some(n3));
@@ -937,7 +898,7 @@ pub(super) mod tests {
 		assert_eq!(q.peek_first(), None);
 		assert_eq!(q.peek_last_dist(), None);
 
-		let mut q = DoublePriorityQueue::from(2.0, 2).clone();
+		let mut q = DoublePriorityQueue::from(2.0, 2);
 		q.push(3.0, 4);
 		q.push(3.0, 3);
 		q.push(1.0, 1);
@@ -977,7 +938,7 @@ pub(super) mod tests {
 		const TOTAL: usize = 500;
 		let mut pns = Vec::with_capacity(TOTAL);
 		for i in 0..TOTAL {
-			pns.push((FloatKey::new(i as f64), i as u64));
+			pns.push((FloatKey(i as f64), i as u64));
 		}
 
 		// Test BTreeSet

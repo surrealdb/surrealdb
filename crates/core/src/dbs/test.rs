@@ -1,18 +1,21 @@
 use std::sync::Arc;
 
-use crate::ctx::{Context, MutableContext};
+use uuid::Uuid;
+
+use crate::cnf::dynamic::DynamicConfiguration;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::iam::{Auth, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 
-pub async fn mock() -> (Context, Options) {
-	let opt = Options::default().with_auth(Arc::new(Auth::for_root(Role::Owner)));
+pub async fn mock() -> (FrozenContext, Options) {
+	let opt = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+		.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 	let kvs = Datastore::new("memory").await.unwrap();
-	let txn = kvs.transaction(Write, Optimistic).await.unwrap();
-	let txn = txn.rollback_and_ignore().await.enclose();
-	let mut ctx = MutableContext::default();
+	let txn = kvs.transaction(Write, Optimistic).await.unwrap().enclose();
+	let mut ctx = Context::default();
 	ctx.set_transaction(txn);
 	(ctx.freeze(), opt)
 }

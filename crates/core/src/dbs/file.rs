@@ -66,11 +66,11 @@ impl FileCollector {
 	}
 
 	fn check_reader(&mut self) -> Result<(), Error> {
-		if self.reader.is_none() {
-			if let Some(writer) = self.writer.take() {
-				writer.flush()?;
-				self.reader = Some(FileReader::new(self.len, &self.dir)?);
-			}
+		if self.reader.is_none()
+			&& let Some(writer) = self.writer.take()
+		{
+			writer.flush()?;
+			self.reader = Some(FileReader::new(self.len, &self.dir)?);
 		}
 		Ok(())
 	}
@@ -89,13 +89,13 @@ impl FileCollector {
 
 	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.check_reader()?;
-		if let Some(mut reader) = self.reader.take() {
-			if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
-				if let Some(orders) = self.orders.take() {
-					return self.sort_and_take_vec(reader, orders, start, num).await;
-				}
-				return reader.take_vec(start, num);
+		if let Some(mut reader) = self.reader.take()
+			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u32)
+		{
+			if let Some(orders) = self.orders.take() {
+				return self.sort_and_take_vec(reader, orders, start, num).await;
 			}
+			return reader.take_vec(start, num);
 		}
 		Ok(vec![])
 	}
@@ -272,9 +272,8 @@ impl FileReader {
 	fn read_usize<R: Read>(reader: &mut R) -> Result<usize, io::Error> {
 		let mut buf = vec![0u8; FileCollector::USIZE_SIZE];
 		reader.read_exact(&mut buf)?;
-		// Safe to call unwrap because we know the slice length matches the expected
-		// length
-		let u = usize::from_be_bytes(buf.try_into().unwrap());
+		// Safe because we know the slice length matches the expected length
+		let u = usize::from_be_bytes(buf.try_into().expect("buffer size matches usize"));
 		Ok(u)
 	}
 

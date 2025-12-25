@@ -1,7 +1,7 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::CoverStmts;
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 
@@ -43,23 +43,19 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked
-	/// as schemafull.
-	pub flex: bool,
 	pub field_kind: Option<Kind>,
+	pub flexible: bool,
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -69,76 +65,69 @@ impl Default for DefineFieldStatement {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
-			flex: false,
 			field_kind: None,
+			flexible: false,
 			readonly: false,
 			value: None,
 			assert: None,
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
 }
 
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
+impl ToSql for DefineFieldStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		f.push_str("DEFINE FIELD");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.flex {
-			write!(f, " FLEXIBLE")?
-		}
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?
+			write_sql!(f, sql_fmt, " TYPE {}", v);
+			if self.flexible {
+				f.push_str(" FLEXIBLE");
+			}
 		}
-
 		match self.default {
 			DefineDefault::None => {}
 			DefineDefault::Always(ref expr) => {
-				write!(f, " DEFAULT ALWAYS {expr}")?;
+				write_sql!(f, sql_fmt, " DEFAULT ALWAYS {}", CoverStmts(expr));
 			}
 			DefineDefault::Set(ref expr) => {
-				write!(f, " DEFAULT {expr}")?;
+				write_sql!(f, sql_fmt, " DEFAULT {}", CoverStmts(expr));
 			}
 		}
-
 		if self.readonly {
-			write!(f, " READONLY")?
+			f.push_str(" READONLY");
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
+			write_sql!(f, sql_fmt, " VALUE {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
+			write_sql!(f, sql_fmt, " ASSERT {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
+			write_sql!(f, sql_fmt, " COMPUTED {}", CoverStmts(v))
 		}
 		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
+			write_sql!(f, sql_fmt, " REFERENCE {v}");
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			sql_fmt.write_indent(f);
 		} else {
-			f.write_char(' ')?;
-			None
-		};
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
-		Ok(())
+			f.push(' ');
+		}
+		self.permissions.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -148,15 +137,15 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
+			flexible: v.flexible,
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}
@@ -169,15 +158,15 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
+			flexible: v.flexible,
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}

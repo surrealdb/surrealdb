@@ -1,10 +1,10 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Cond, Fields, Groups};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct View {
 	pub expr: Fields,
 	pub what: Vec<String>,
@@ -12,29 +12,30 @@ pub(crate) struct View {
 	pub group: Option<Groups>,
 }
 
-impl fmt::Display for View {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
+impl ToSql for View {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(
 			f,
+			fmt,
 			"AS SELECT {} FROM {}",
 			self.expr,
-			Fmt::comma_separated(self.what.iter().map(EscapeIdent))
-		)?;
+			Fmt::comma_separated(self.what.iter().map(|x| EscapeKwFreeIdent(x.as_ref())))
+		);
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 
 impl From<View> for crate::expr::View {
 	fn from(v: View) -> Self {
 		crate::expr::View {
+			materialize: true,
 			expr: v.expr.into(),
-			what: v.what.clone(),
+			what: v.what.into_iter().map(TableName::new).collect(),
 			cond: v.cond.map(Into::into),
 			group: v.group.map(Into::into),
 		}
@@ -45,7 +46,7 @@ impl From<crate::expr::View> for View {
 	fn from(v: crate::expr::View) -> Self {
 		View {
 			expr: v.expr.into(),
-			what: v.what.clone(),
+			what: v.what.into_iter().map(TableName::into_string).collect(),
 			cond: v.cond.map(Into::into),
 			group: v.group.map(Into::into),
 		}

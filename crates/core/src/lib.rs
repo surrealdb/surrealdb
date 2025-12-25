@@ -1,7 +1,10 @@
 // Temporary allow deprecated until the 3.0
 #![allow(deprecated)]
-// This triggers because we have regex's in or Value type which have a unsafecell inside.
+// This triggers because we have regex's in our Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
+// Increased to support #[instrument] on complex async functions. Those are compiled out in release
+// builds.
+#![recursion_limit = "256"]
 
 //! # Surrealdb Core
 //!
@@ -29,13 +32,18 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
-mod buc;
+#[doc(hidden)]
+pub mod buc;
 mod cf;
 mod doc;
 mod exe;
+mod fmt;
 mod fnc;
-mod idg;
 mod key;
+#[doc(hidden)]
+pub mod str;
+#[cfg(feature = "surrealism")]
+mod surrealism;
 mod sys;
 
 pub mod api;
@@ -46,8 +54,8 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
-//pub mod gql;
-mod fmt;
+#[cfg(feature = "graphql")]
+pub mod gql;
 pub mod iam;
 pub mod idx;
 pub mod kvs;
@@ -56,10 +64,9 @@ pub mod obs;
 pub mod options;
 pub mod rpc;
 pub mod sql;
-pub mod str;
 pub mod syn;
-mod val;
-pub mod vs;
+#[doc(hidden)]
+pub mod val;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.
@@ -71,18 +78,14 @@ pub(crate) mod types {
 		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
-		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
-		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Set as PublicSet,
+		SurrealValue, Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
 		Variables as PublicVariables,
 	};
 }
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
-
-#[cfg(feature = "enterprise")]
-#[rustfmt::skip]
-pub mod ent;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
@@ -110,4 +113,5 @@ pub mod channel {
 /// // Pass the composer to init functions
 /// surreal::init(CommunityComposer())
 /// ```
+#[derive(Default)]
 pub struct CommunityComposer();
