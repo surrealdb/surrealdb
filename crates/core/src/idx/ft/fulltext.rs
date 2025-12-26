@@ -653,6 +653,15 @@ impl FullTextIndex {
 		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
+
+		// Read compacted value first
+		let compacted_key = self.ikb.new_dc_compacted()?;
+		if let Some(v) = tx.get(&compacted_key, None).await? {
+			let st: DocLengthAndCount = revision::from_slice(&v)?;
+			dlc.doc_count += st.doc_count;
+			dlc.total_docs_length += st.total_docs_length;
+		}
+
 		let (beg, end) = self.ikb.new_dc_range()?;
 		let range = beg..end;
 		// Compute the total number of documents (DocCount) and the total number of
