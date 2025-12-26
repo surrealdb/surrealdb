@@ -17,6 +17,7 @@ use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
+use crate::key::index::dle::Dle;
 use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
@@ -32,7 +33,7 @@ use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::IndexCompactionKey;
-use crate::kvs::Key;
+use crate::kvs::{KVKey, Key};
 use crate::val::{RecordIdKey, TableName};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -165,6 +166,21 @@ impl IndexKeyBase {
 
 	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
 		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
+	}
+
+	pub(crate) fn new_dle(&self, chunk_id: u64) -> Dle<'_> {
+		Dle::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, chunk_id)
+	}
+
+	#[allow(dead_code)] // Reserved for batch loading optimization
+	pub(crate) fn new_dle_range(
+		&self,
+		start_chunk: u64,
+		end_chunk: u64,
+	) -> Result<(Vec<u8>, Vec<u8>)> {
+		let beg = Dle::encode_key(&self.new_dle(start_chunk))?;
+		let end = Dle::encode_key(&self.new_dle(end_chunk + 1))?;
+		Ok((beg, end))
 	}
 
 	pub(crate) fn table(&self) -> &TableName {

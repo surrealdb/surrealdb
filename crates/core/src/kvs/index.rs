@@ -174,8 +174,12 @@ impl IndexBuilder {
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
+		blocking: bool,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix)?);
+		// When blocking is true, the creating transaction hasn't been committed yet,
+		// so we skip prepare_remove checks to avoid "index does not exist" errors.
+		let building =
+			Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix, blocking)?);
 		let b = building.clone();
 		spawn(async move {
 			let guard = BuildingFinishGuard(b.clone());
@@ -219,12 +223,12 @@ impl IndexBuilder {
 						name: ix.name.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr, blocking)?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr, blocking)?;
 				e.insert(ib);
 			}
 		};
@@ -344,9 +348,13 @@ struct Building {
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
 	finished: AtomicBool,
+	/// When true, skip all prepare_remove checks. This is needed when the
+	/// creating transaction hasn't been committed yet (blocking mode).
+	skip_prepare_remove_checks: bool,
 }
 
 impl Building {
+	#[allow(clippy::too_many_arguments)]
 	fn new(
 		ctx: &FrozenContext,
 		tf: TransactionFactory,
@@ -355,6 +363,7 @@ impl Building {
 		db: DatabaseId,
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
+		skip_prepare_remove_checks: bool,
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 		Ok(Self {
@@ -370,6 +379,7 @@ impl Building {
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
+			skip_prepare_remove_checks,
 		})
 	}
 
@@ -497,8 +507,11 @@ impl Building {
 			self.is_beyond_threshold(None)?;
 			let batch = {
 				let tx = self.new_read_tx().await?;
-				// Check if the index has been decommissioned
-				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
+				// Check if the index has been decommissioned (skip in blocking mode
+				// because the creating transaction may not be committed yet)
+				if !self.skip_prepare_remove_checks {
+					self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
+				}
 				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
@@ -522,7 +535,7 @@ impl Building {
 			}
 		}
 		// Second iteration, we index/remove any records that has been added or removed
-		// since the initial indexing
+		// since the initial indexing.
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -536,8 +549,11 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Check the index still exists and is not decommissioned
-			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
+			// Check the index still exists and is not decommissioned (skip in blocking mode
+			// because the creating transaction may not be committed yet)
+			if !self.skip_prepare_remove_checks {
+				self.check_prepare_remove(&mut last_prepare_remove_check).await?;
+			}
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
