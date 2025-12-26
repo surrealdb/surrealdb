@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::key::root::tl::Tl;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
+use crate::kvs::{LockType, Transaction, TransactionType, impl_kv_value_revisioned};
 
 #[derive(Debug)]
 pub(crate) enum TaskLeaseType {
@@ -23,6 +23,16 @@ pub(crate) enum TaskLeaseType {
 	IndexCompaction,
 }
 
+/// Represents a distributed task lease stored in the datastore.
+///
+/// A TaskLease records which node currently owns the exclusive right to perform
+/// a specific task, and when that right expires. The lease is stored in the
+/// datastore and checked/updated atomically to ensure only one node can hold
+/// the lease at any given time.
+///
+/// # Fields
+/// * `owner` - UUID of the node that currently owns this lease
+/// * `expiration` - UTC timestamp when this lease will expire
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct TaskLease {
@@ -32,6 +42,35 @@ pub(crate) struct TaskLease {
 
 impl_kv_value_revisioned!(TaskLease);
 
+/// Represents the current status of a lease based on its expiration time.
+///
+/// The status determines whether a lease can be used as-is, needs renewal,
+/// or has expired and can be replaced. Status is calculated by comparing
+/// the current time against the lease's expiration time and duration.
+///
+/// # Variants
+///
+/// * `Valid` - The lease has more than half its duration remaining before expiration. The owning
+///   node can continue using it without renewal.
+///
+/// * `Renewable` - The lease has less than half its duration remaining before expiration, but
+///   hasn't expired yet. The owning node should renew it to maintain ownership.
+///
+/// * `Expired` - The lease's expiration time has passed. Any node can attempt to acquire a new
+///   lease to replace it.
+///
+/// # Status Transitions
+///
+/// ```text
+/// Valid (>50% remaining) → Renewable (0-50% remaining) → Expired (past expiration)
+/// ```
+#[derive(Debug)]
+enum LeaseStatus {
+	Valid,
+	Renewable,
+	Expired,
+}
+
 /// Manages distributed task leases in a multi-node environment.
 ///
 /// The LeaseHandler provides a mechanism for coordinating tasks across multiple
@@ -39,10 +78,19 @@ impl_kv_value_revisioned!(TaskLease);
 /// node at a time performs a specific task, preventing duplicate work and race
 /// conditions in a distributed setup.
 ///
+/// # Race Condition Prevention
+///
+/// The handler uses optimistic locking with conditional writes (putc) to prevent
+/// race conditions when multiple nodes attempt to acquire the same lease simultaneously.
+/// Only one node can successfully acquire a lease, even under high contention.
+///
+/// # Features
+///
 /// The handler uses a datastore to persist lease information, with built-in
 /// support for:
 /// - Lease acquisition with exponential backoff and jitter to handle contention
 /// - Automatic lease expiration based on configurable duration
+/// - Automatic lease renewal when more than half the duration has elapsed
 /// - Lease ownership verification
 pub struct LeaseHandler {
 	sequences: Sequences,
@@ -57,6 +105,21 @@ pub struct LeaseHandler {
 }
 
 impl LeaseHandler {
+	/// Creates a new LeaseHandler for managing distributed task leases.
+	///
+	/// This constructor initializes a lease handler that will manage leases for a specific
+	/// task type using the provided transaction factory and lease duration.
+	///
+	/// # Arguments
+	/// * `node` - UUID of the current node that will attempt to acquire leases
+	/// * `tf` - Transaction factory for performing database operations
+	/// * `task_type` - The type of task this handler will manage leases for
+	/// * `lease_duration` - How long each acquired lease should remain valid before expiring
+	///
+	/// # Returns
+	/// * `Ok(Self)` - A new LeaseHandler instance ready to manage leases
+	/// * `Err` - If the lease_duration cannot be converted to chrono::Duration (e.g., if it's too
+	///   large)
 	pub(super) fn new(
 		sequences: Sequences,
 		node: Uuid,
@@ -111,103 +174,228 @@ impl LeaseHandler {
 		bail!(Error::QueryTimedout(start.elapsed().into()))
 	}
 
-	/// Attempts to maintain the current lease by checking and potentially
-	/// renewing it.
+	/// Attempts to maintain the current lease by checking and potentially renewing it.
 	///
-	/// This method is a simplified wrapper around `check_lease()` that:
+	/// This method provides lease ownership status to allow callers to decide whether to
+	/// continue processing or stop. It performs these operations:
 	/// 1. Checks if the current node owns a valid lease
-	/// 2. Renews the lease if needed
-	/// 3. Ignores the boolean return value from `check_lease()`
+	/// 2. Renews the lease if needed and possible
+	/// 3. Returns whether the node currently owns the lease
+	///
+	/// # Design Rationale
+	///
+	/// When called periodically during long-running task processing (e.g., in loops processing
+	/// multiple items), this method ensures the node makes a best effort to maintain its lease.
+	/// It returns the current lease ownership status, allowing callers to decide their behavior:
+	/// - **Continue processing**: Callers may choose to complete work already started even if the
+	///   lease is lost, preventing inconsistent state
+	/// - **Stop processing**: Callers may choose to abort immediately when losing the lease to
+	///   avoid duplicate work with another node
+	///
+	/// The initial lease check (via `has_lease()`) at the start of a task ensures only one node
+	/// begins processing. This method is for lease maintenance and ownership verification during
+	/// execution.
 	///
 	/// # Returns
-	/// * `Ok(())` - If the lease check completed successfully (regardless of ownership)
+	/// * `Ok(true)` - The node successfully maintained or renewed the lease and still owns it
+	/// * `Ok(false)` - The node lost the lease to another node (or another node acquired it during
+	///   a race condition)
 	/// * `Err` - If database operations fail
-	pub(crate) async fn try_maintain_lease(&self) -> Result<()> {
-		self.check_lease().await?;
-		Ok(())
+	///
+	/// # Example Usage
+	/// ```ignore
+	/// // Check lease before starting work
+	/// if !lease_handler.has_lease().await? {
+	///     return Ok(()); // Another node owns the lease
+	/// }
+	///
+	/// // Example 1: Continue processing regardless of lease status (complete work once started)
+	/// for item in items {
+	///     let _ = lease_handler.try_maintain_lease().await?; // Ignore lease ownership
+	///     process_item(item).await?;
+	/// }
+	///
+	/// // Example 2: Stop processing immediately if lease is lost
+	/// for item in items {
+	///     if !lease_handler.try_maintain_lease().await? {
+	///         return Ok(()); // Another node owns the lease now
+	///     }
+	///     process_item(item).await?;
+	/// }
+	/// ```
+	pub(crate) async fn try_maintain_lease(&self) -> Result<bool> {
+		// Check and potentially renew the lease, returning ownership status.
+		// Callers can use this information to decide whether to continue or stop processing.
+		self.check_lease().await
 	}
 
-	/// Checks if a lease exists and attempts to acquire it if it doesn't or has
-	/// expired.
+	/// Checks if a lease exists and attempts to acquire or renew it.
 	///
-	/// This method performs the actual lease checking and acquisition logic:
-	/// 1. First checks if there's an existing valid lease in the datastore
-	/// 2. If a valid lease exists, returns whether the current node is the owner
-	/// 3. If no valid lease exists or it has expired, attempts to create a new lease
+	/// This method performs the actual lease checking, acquisition, and renewal logic:
+	/// 1. Checks if there's an existing lease in the datastore
+	/// 2. If another node owns a non-expired lease, returns false
+	/// 3. If this node owns the lease and it's still valid (more than half duration remaining),
+	///    returns true without renewal
+	/// 4. If this node owns the lease and it's renewable (less than half duration remaining),
+	///    attempts to renew it
+	/// 5. If no lease exists or it has expired, attempts to acquire a new lease
 	///
 	/// # Returns
-	/// * `Ok(true)` - If the node successfully acquired or already owns the lease
+	/// * `Ok(true)` - If the node successfully acquired, renewed, or already owns a valid lease
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If database operations fail
 	async fn check_lease(&self) -> Result<bool> {
 		let now = Utc::now();
 		// First check if there's already a valid lease
-		if let Some(current_lease) = self.check_valid_lease(now).await? {
-			// If another node owns the lease, we don't have the lease
-			if current_lease.owner != self.node {
+		if let Some((current_lease, lease_status)) = self.read_lease(now).await? {
+			// If another node owns a non-expired lease, we cannot acquire it
+			if current_lease.owner != self.node && !matches!(lease_status, LeaseStatus::Expired) {
 				return Ok(false);
 			}
-			// If we own the lease and it's not close to expiring (more than half the lease
-			// duration remaining), we can continue using it without renewal
-			// First ensure the lease hasn't expired (defensive check)
-			if current_lease.expiration > now
-				&& current_lease.expiration - now > self.lease_duration / 2
-			{
+			// If we own the lease and it's still valid (more than half the lease duration
+			// remaining), we can continue using it without renewal
+			if matches!(lease_status, LeaseStatus::Valid) {
 				return Ok(true);
 			}
-			// If we reach here, we own the lease but it's close to expiring,
-			// so we'll try to acquire a new lease below
+			// If we reach here, we own the lease but it's in Renewable state (close to expiring),
+			// so we'll try to acquire a new lease below to extend it
 		}
 
-		// If no valid lease exists or it has expired, acquire a new one
-		self.acquire_new_lease().await
+		// Acquire a new lease - this handles three scenarios:
+		// 1. No lease exists yet
+		// 2. An expired lease exists (any owner)
+		// 3. We own a renewable lease that needs to be extended
+		self.acquire_new_lease(now).await
 	}
 
-	/// Checks if there's an existing valid lease and determines if the current
-	/// node is the owner.
+	/// Convenience wrapper that creates a read-only transaction and retrieves the lease.
+	///
+	/// This method is used when checking lease status without intending to modify it.
+	/// It creates a read transaction and delegates to `get_lease()` for the actual retrieval.
+	///
+	/// # Arguments
+	/// * `current` - The current timestamp to use for determining lease status
 	///
 	/// # Returns
-	/// * `Ok(Some(TaskLease))` - If a valid lease exists, returns the lease object
-	/// * `Ok(None)` - If no valid lease exists (either no lease or it has expired)
+	/// * `Ok(Some((lease, status)))` - If a lease exists, returns it with its current status
+	/// * `Ok(None)` - If no lease exists for this task type
 	/// * `Err` - If database operations fail
-	async fn check_valid_lease(&self, t: DateTime<Utc>) -> Result<Option<TaskLease>> {
+	async fn read_lease(&self, current: DateTime<Utc>) -> Result<Option<(TaskLease, LeaseStatus)>> {
 		let tx = self
 			.tf
 			.transaction(TransactionType::Read, LockType::Optimistic, self.sequences.clone())
 			.await?;
-		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
-			// If the lease hasn't expired yet, return the lease object
-			if l.expiration > t {
-				// Return the lease object which contains owner information
-				return Ok(Some(l));
-			}
-			// If we reach here, the lease exists but has expired
-		}
-		// If we reach here, either no lease exists or it has expired
-		Ok(None)
+		self.get_lease(&tx, current).await
 	}
 
-	/// Attempts to acquire a new lease for the current node.
+	/// Retrieves the current lease from the datastore and determines its status.
+	///
+	/// This method fetches the lease for the handler's task type and calculates its status
+	/// by comparing the current time against the lease's expiration time and duration:
+	///
+	/// - **Valid**: More than 50% of the lease duration remains (no action needed)
+	/// - **Renewable**: Between 0% and 50% of the lease duration remains (should renew soon)
+	/// - **Expired**: Past the expiration time (can be replaced by any node)
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use for database operations
+	/// * `current` - The current timestamp to use for determining lease status
 	///
 	/// # Returns
-	/// * `Ok(true)` - If the lease was successfully acquired
+	/// * `Ok(Some((lease, status)))` - If a lease exists, returns it with its calculated status
+	/// * `Ok(None)` - If no lease exists for this task type
 	/// * `Err` - If database operations fail
-	async fn acquire_new_lease(&self) -> Result<bool> {
-		// Attempt to acquire a new lease by writing to the datastore
+	async fn get_lease(
+		&self,
+		tx: &Transaction,
+		current: DateTime<Utc>,
+	) -> Result<Option<(TaskLease, LeaseStatus)>> {
+		if let Some(lease) = tx.get(&Tl::new(&self.task_type), None).await? {
+			let status = if current > lease.expiration {
+				LeaseStatus::Expired
+			} else if current > lease.expiration - self.lease_duration / 2 {
+				LeaseStatus::Renewable
+			} else {
+				LeaseStatus::Valid
+			};
+			Ok(Some((lease, status)))
+		} else {
+			Ok(None)
+		}
+	}
+
+	/// Attempts to acquire a new lease for the current node using atomic conditional writes.
+	///
+	/// This method implements the core lease acquisition logic with race condition protection.
+	/// It uses optimistic locking with conditional writes to ensure that only one node can
+	/// successfully acquire a lease at a time, even when multiple nodes attempt acquisition
+	/// simultaneously.
+	///
+	/// # Race Condition Handling
+	///
+	/// When multiple nodes attempt to acquire or renew a lease simultaneously, the conditional
+	/// write (`putc`) may fail with `TxConditionNotMet` if another node wrote to the lease
+	/// between our read and write operations. This is gracefully handled by returning `Ok(false)`
+	/// rather than propagating an error, allowing ongoing tasks to continue processing while
+	/// acknowledging that another node now owns the lease.
+	///
+	/// # Returns
+	/// * `Ok(true)` - If the lease was successfully acquired by this node
+	/// * `Ok(false)` - If another node owns a valid lease or acquired it during our attempt
+	/// * `Err` - Only if database operations fail (network errors, transaction failures, etc.)
+	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool> {
 		let tx = self
 			.tf
 			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
 			.await?;
-		let lease = TaskLease {
-			owner: self.node,
-			expiration: Utc::now() + self.lease_duration, /* Set expiration to current time plus
-			                                               * lease duration */
+
+		// Optimization: If a valid (non-expired) lease already exists and we don't own it,
+		// return early without attempting to write. This avoids unnecessary transaction overhead.
+		let previous_lease = if let Some((current_lease, current_status)) =
+			self.get_lease(&tx, current).await?
+		{
+			if current_lease.owner != self.node && !matches!(current_status, LeaseStatus::Expired) {
+				return Ok(false);
+			}
+			Some(current_lease)
+		} else {
+			None
 		};
-		let key = Tl::new(&self.task_type);
-		tx.set(&key, &lease, None).await?;
-		tx.commit().await?;
-		// Successfully acquired the lease
-		Ok(true)
+
+		let new_lease = TaskLease {
+			owner: self.node,
+			expiration: current + self.lease_duration,
+		};
+
+		// Use putc() (conditional put) to atomically write the lease ONLY if the current value
+		// matches what we read earlier. This prevents race conditions:
+		// - If previous_lease is None: writes succeed only if the key still doesn't exist
+		// - If previous_lease is Some(expired): writes succeed only if the value hasn't changed
+		// - If another node wrote between our get() and putc(): condition fails with
+		//   TxConditionNotMet
+		//
+		// This ensures mutual exclusion: only one node can successfully acquire the lease when
+		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired
+		// lease).
+		match tx.putc(&Tl::new(&self.task_type), &new_lease, previous_lease.as_ref()).await {
+			Ok(()) => {
+				tx.commit().await?;
+				Ok(true)
+			}
+			// CRITICAL: Convert TxConditionNotMet to Ok(false) rather than propagating as an error.
+			// This race condition occurs when another node acquires/renews the lease between our
+			// read and write operations. By returning Ok(false) instead of Err, we enable the
+			// best-effort lease maintenance behavior: try_maintain_lease() can ignore the result
+			// and allow ongoing tasks to complete even when another node takes over the lease.
+			// This prevents tasks from aborting mid-process when lease ownership changes.
+			Err(e) => {
+				if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+					Ok(false)
+				} else {
+					Err(e)
+				}
+			}
+		}
 	}
 }
 
@@ -221,12 +409,16 @@ mod tests {
 	use chrono::Utc;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
+	#[cfg(feature = "kv-mem")]
+	use tokio::time::sleep;
 	use uuid::Uuid;
 
 	use crate::dbs::node::Timestamp;
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
 	use crate::kvs::sequences::Sequences;
+	#[cfg(feature = "kv-mem")]
+	use crate::kvs::tasklease::LeaseStatus;
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 
 	/// Tracks the results of lease acquisition attempts by a node.
@@ -247,7 +439,7 @@ mod tests {
 	/// specified duration.
 	///
 	/// This function represents a single node in a distributed system that
-	/// continuously tries to acquire a task lease for the ChangeFeedCleanup
+	/// continuously tries to acquire a task lease for the IndexCompaction
 	/// task. It runs for a fixed duration and collects statistics on the
 	/// outcomes of each attempt.
 	///
@@ -271,7 +463,7 @@ mod tests {
 		lease_duration: Duration,
 	) -> NodeResult {
 		let lh =
-			LeaseHandler::new(sequences, id, tf, TaskLeaseType::ChangeFeedCleanup, lease_duration)
+			LeaseHandler::new(sequences, id, tf, TaskLeaseType::IndexCompaction, lease_duration)
 				.unwrap();
 		let mut result = NodeResult::default();
 		let start_time = Instant::now();
@@ -406,16 +598,17 @@ mod tests {
 		let tf = TransactionFactory::new(clock, Box::new(flavor));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
-		// Set lease duration to 10 minutes
-		let lease_duration = Duration::from_secs(600); // 10 minutes
 		let node_id = Uuid::new_v4();
+
+		// Set lease duration to 5 seconds
+		let lease_duration = Duration::from_secs(5);
 
 		// Create a lease handler
 		let lh = LeaseHandler::new(
 			sequences,
 			node_id,
 			tf,
-			TaskLeaseType::ChangeFeedCleanup,
+			TaskLeaseType::IndexCompaction,
 			lease_duration,
 		)
 		.unwrap();
@@ -425,74 +618,42 @@ mod tests {
 		let has_lease = lh.check_lease().await.unwrap();
 		assert!(has_lease, "Should successfully acquire the lease initially");
 
-		// Get the current lease to check its expiration
-		let now = Utc::now();
-		let current_lease = lh.check_valid_lease(now).await.unwrap();
-		assert!(current_lease.is_some(), "Should have a valid lease");
-		let initial_expiration = current_lease.unwrap().expiration;
+		let (initial_lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert_eq!(initial_lease.owner, node_id);
+		assert!(
+			matches!(status, LeaseStatus::Valid),
+			"Lease should be initially valid (not expired and not renewable) - {status:?}"
+		);
 
 		// PART 2: Verify no renewal when more than half duration remains
 		// Check again immediately - should return true without re-acquiring
 		let has_lease = lh.check_lease().await.unwrap();
 		assert!(has_lease, "Should still have the lease without re-acquiring");
 
-		// Verify the expiration hasn't changed (no renewal)
-		let current_lease = lh.check_valid_lease(now).await.unwrap();
-		assert_eq!(
-			current_lease.unwrap().expiration,
-			initial_expiration,
-			"Lease should not be renewed when more than half duration remains"
+		let (lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		// Verify the status
+		assert!(
+			matches!(status, LeaseStatus::Valid),
+			"Lease should still be valid (not expired and not renewable) - {status:?}"
 		);
+		// Verify the expiration hasn't changed (no renewal)
+		assert_eq!(lease.expiration, initial_lease.expiration);
 
 		// PART 3: Verify the condition for renewal
-		// We can't directly control Utc::now() in check_lease(), so we'll manually
-		// verify the condition that would trigger renewal
+		// Wait half the lease duration
+		sleep(Duration::from_secs(3)).await;
 
-		// Calculate a time that would be beyond the halfway point of the lease
-		let after_halfway = now + chrono::Duration::minutes(6); // 6 minutes into a 10-minute lease
+		// Get the current lease status
+		let (_, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert!(matches!(status, LeaseStatus::Renewable), "Lease should be renewable - {status:?}");
 
-		// Get the current lease
-		let current_lease = lh.check_valid_lease(now).await.unwrap().unwrap();
-
-		// Calculate remaining duration if the current time was after_halfway
-		let remaining_duration = current_lease.expiration - after_halfway;
-		let half_duration = lh.lease_duration / 2;
-
-		// Verify that this would trigger the renewal condition in check_lease()
-		assert!(
-			remaining_duration < half_duration,
-			"The condition for renewal (less than half duration remaining) should be true"
-		);
-
-		// PART 4: Force a renewal and verify it happened
-		// We can't directly control time, but we can force a renewal by manipulating
-		// the lease First, let's get the current lease expiration
-		let current_lease = lh.check_valid_lease(now).await.unwrap().unwrap();
-		let original_expiration = current_lease.expiration;
-
-		// Now force a renewal by calling check_lease() again
-		// In a real scenario with time passing, this would only renew if less than half
-		// duration remains But for testing purposes, we're forcing it to demonstrate
-		// the renewal behavior
+		// Now trigger the renewal
 		let has_lease = lh.check_lease().await.unwrap();
-		assert!(has_lease, "Should still have the lease after attempted renewal");
+		assert!(has_lease, "Should still have the lease after renewal");
 
-		// Get the lease again and check if it was renewed
-		let renewed_lease = lh.check_valid_lease(now).await.unwrap();
-
-		// In a real scenario with less than half duration remaining, the expiration
-		// would change But in our test without time control, it might not change
-		// unless we forced it The important part is that the code correctly
-		// implements the condition check
-		if renewed_lease.unwrap().expiration > original_expiration {
-			// If the expiration changed, the lease was renewed
-			println!("Lease was renewed as expected when conditions were right");
-		} else {
-			// If not, it's because our test can't fully simulate time passing
-			println!("Note: Lease wasn't renewed in test, but the renewal condition was verified");
-		}
-
-		// The most important assertion is that the condition for renewal is
-		// correctly implemented which we verified above
+		// Get the renewed lease
+		let (new_lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert!(matches!(status, LeaseStatus::Valid), "Lease should be valid - {status:?}");
+		assert!(new_lease.expiration > initial_lease.expiration, "Lease should have been renewed");
 	}
 }
