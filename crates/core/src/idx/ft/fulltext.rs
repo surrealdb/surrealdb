@@ -654,7 +654,6 @@ impl FullTextIndex {
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
 
-		// Read compacted value first
 		let compacted_key = self.ikb.new_dc_compacted()?;
 		if let Some(v) = tx.get(&compacted_key, None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -856,8 +855,9 @@ impl Scorer {
 	/// parameters. It calculates the average document length for use in the
 	/// BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
-		let doc_count = dlc.doc_count as f64;
-		let average_doc_length = (dlc.total_docs_length as f64) / doc_count;
+		let doc_count = (dlc.doc_count as f64).max(1.0);
+		let total_docs_length = (dlc.total_docs_length as f64).max(1.0);
+		let average_doc_length = total_docs_length / doc_count;
 		let k1 = bm25.k1 as f64;
 		let b = bm25.b as f64;
 		Self {
@@ -902,7 +902,8 @@ impl Scorer {
 	/// Computes the Okapi-BM25 score for a single term.
 	///
 	/// Variant:
-	/// • IDF is clamped to ≥ 0 (avoids negative weights for very common terms).
+	/// • IDF uses Lucene's formula: ln(1 + (N - n + 0.5) / (n + 0.5))
+	///   This ensures IDF ≥ 0 for all term frequencies.
 	/// • Term-frequency is lower-bounded with 1 + ln(tf) as proposed in
 	///   “Lower-Bounding Term Frequency Normalization” (Lv & Zhai, CIKM 2011).
 	///
@@ -912,8 +913,10 @@ impl Scorer {
 	///     tf′ + k1 · (1 − b + b · doc_len / avg_doc_len)
 	///
 	/// where
-	///   idf = ln((N − n(qᵢ) + 0.5)/(n(qᵢ) + 0.5)), clamped to ≥ 0
+	///   idf = ln(1 + (N − n(qᵢ) + 0.5) / (n(qᵢ) + 0.5))  (Lucene-style)
 	///   tf′ = 1 + ln(tf)
+	///
+	/// Reference: https://github.com/apache/lucene/blob/main/lucene/core/src/java/org/apache/lucene/search/similarities/BM25Similarity.java
 	fn compute_bm25_score(&self, term_freq: f64, term_doc_count: f64, doc_length: f64) -> f64 {
 		// Early return for zero-term frequency
 		if term_freq <= 0.0 {
@@ -921,14 +924,10 @@ impl Scorer {
 		}
 
 		// ---------- 1. Inverse Document Frequency (IDF) ---------------------
+		let effective_doc_count = self.doc_count.max(term_doc_count);
 		let denominator = term_doc_count + 0.5; // n(qᵢ) + 0.5
-		let numerator = self.doc_count - term_doc_count + 0.5; // N − n(qᵢ) + 0.5
-		let idf = (numerator / denominator).ln().max(0.0); // floor at 0
-
-		// Early return for zero IDF (very common terms)
-		if idf == 0.0 {
-			return 0.0;
-		}
+		let numerator = effective_doc_count - term_doc_count + 0.5; // N − n(qᵢ) + 0.5
+		let idf = (1.0 + numerator / denominator).ln();
 
 		// ---------- 2. Lower-bounded term-frequency -------------------------
 		let tf_prime = 1.0 + term_freq.ln(); // 1 + ln(tf)
@@ -940,7 +939,14 @@ impl Scorer {
 		let numerator = idf * self.k1_plus_1 * tf_prime;
 		let denominator = tf_prime + self.k1 * length_norm;
 
-		numerator / denominator
+		let score = numerator / denominator;
+
+		// Final safety check: return 0 if score is NaN or negative
+		if score.is_nan() || score < 0.0 {
+			return 0.0;
+		}
+
+		score
 	}
 }
 
@@ -1196,5 +1202,158 @@ mod tests {
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
 		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+	}
+
+	/// Helper to create a Scorer with specified doc_count and average doc length
+	fn create_scorer(doc_count: i64, total_docs_length: i128) -> super::Scorer {
+		let dlc = super::DocLengthAndCount {
+			total_docs_length,
+			doc_count,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+		super::Scorer::new(dlc, bm25)
+	}
+
+	#[test]
+	fn test_bm25_high_frequency_terms_have_positive_score() {
+		let scorer = create_scorer(3, 30); // 3 docs, avg length 10
+
+		let score = scorer.compute_bm25_score(1.0, 2.0, 10.0);
+
+		assert!(score > 0.0, "High-frequency terms should have positive score, got {}", score);
+	}
+
+	#[test]
+	fn test_bm25_term_in_all_documents_has_positive_score() {
+		let scorer = create_scorer(3, 30);
+
+		let score = scorer.compute_bm25_score(1.0, 3.0, 10.0);
+
+		assert!(score > 0.0, "Terms in all documents should have positive score, got {}", score);
+	}
+
+	#[test]
+	fn test_bm25_rare_terms_score_higher_than_common() {
+		let scorer = create_scorer(100, 1000); // 100 docs, avg length 10
+
+		let rare_score = scorer.compute_bm25_score(1.0, 5.0, 10.0);
+
+		let common_score = scorer.compute_bm25_score(1.0, 80.0, 10.0);
+
+		assert!(
+			rare_score > common_score,
+			"Rare terms should score higher than common terms: rare={}, common={}",
+			rare_score,
+			common_score
+		);
+	}
+
+	#[test]
+	fn test_bm25_zero_term_frequency_returns_zero() {
+		let scorer = create_scorer(10, 100);
+
+		let score = scorer.compute_bm25_score(0.0, 5.0, 10.0);
+		assert_eq!(score, 0.0, "Zero term frequency should return 0");
+
+		let score_negative = scorer.compute_bm25_score(-1.0, 5.0, 10.0);
+		assert_eq!(score_negative, 0.0, "Negative term frequency should return 0");
+	}
+
+	#[test]
+	fn test_bm25_scores_are_always_non_negative() {
+		let scorer = create_scorer(10, 100);
+
+		let test_cases = [
+			(1.0, 1.0, 10.0),  // rare term
+			(1.0, 5.0, 10.0),  // medium frequency
+			(1.0, 9.0, 10.0),  // high frequency (90%)
+			(1.0, 10.0, 10.0), // term in all docs
+			(5.0, 5.0, 10.0),  // higher term frequency
+			(1.0, 5.0, 1.0),   // short document
+			(1.0, 5.0, 100.0), // long document
+		];
+
+		for (tf, term_doc_count, doc_length) in test_cases {
+			let score = scorer.compute_bm25_score(tf, term_doc_count, doc_length);
+			assert!(
+				score >= 0.0,
+				"Score should be non-negative for tf={}, term_doc_count={}, doc_length={}, got {}",
+				tf,
+				term_doc_count,
+				doc_length,
+				score
+			);
+		}
+	}
+
+	#[test]
+	fn test_bm25_higher_term_frequency_increases_score() {
+		let scorer = create_scorer(10, 100);
+
+		let score_tf1 = scorer.compute_bm25_score(1.0, 5.0, 10.0);
+		let score_tf5 = scorer.compute_bm25_score(5.0, 5.0, 10.0);
+
+		assert!(
+			score_tf5 > score_tf1,
+			"Higher term frequency should increase score: tf1={}, tf5={}",
+			score_tf1,
+			score_tf5
+		);
+	}
+
+	#[test]
+	fn test_bm25_lucene_idf_formula() {
+		let scorer = create_scorer(10, 100);
+
+		// For N=10 docs, n=5 docs containing term:
+		// IDF = ln(1 + (10 - 5 + 0.5) / (5 + 0.5))
+		//     = ln(1 + 5.5 / 5.5)
+		//     = ln(2)
+		//     ≈ 0.693
+
+		let score = scorer.compute_bm25_score(1.0, 5.0, 10.0);
+
+		// The score should be positive and reasonable
+		assert!(score > 0.0, "Score should be positive");
+		assert!(score < 10.0, "Score should be reasonable (not too high)");
+	}
+
+	#[test]
+	fn test_bm25_handles_term_doc_count_exceeding_doc_count() {
+		// Edge case: term_doc_count > doc_count (can happen with stale data or concurrent updates)
+		// This should NOT produce NaN or panic, but return a valid (small) score
+		let scorer = create_scorer(10, 100); // 10 docs
+
+		// Term appears in 20 documents, but we only know about 10 total
+		// This is an inconsistent state but should be handled gracefully
+		let score = scorer.compute_bm25_score(1.0, 20.0, 10.0);
+
+		assert!(!score.is_nan(), "Score should not be NaN when term_doc_count > doc_count");
+		assert!(score >= 0.0, "Score should be non-negative, got {}", score);
+	}
+
+	#[test]
+	fn test_bm25_handles_zero_doc_count() {
+		// Edge case: zero doc_count (empty index)
+		let scorer = create_scorer(0, 0);
+
+		let score = scorer.compute_bm25_score(1.0, 1.0, 10.0);
+
+		assert!(!score.is_nan(), "Score should not be NaN with zero doc_count");
+		assert!(score >= 0.0, "Score should be non-negative, got {}", score);
+	}
+
+	#[test]
+	fn test_bm25_handles_zero_doc_length() {
+		// Edge case: zero document length
+		let scorer = create_scorer(10, 100);
+
+		let score = scorer.compute_bm25_score(1.0, 5.0, 0.0);
+
+		assert!(!score.is_nan(), "Score should not be NaN with zero doc_length");
+		assert!(score >= 0.0, "Score should be non-negative, got {}", score);
 	}
 }
