@@ -182,13 +182,23 @@ pub struct FullTextParams {
 }
 
 /// Scoring for Full-Text search.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug)]
 pub enum Scoring {
 	/// BestMatching25 scoring.
 	///
 	/// <https://en.wikipedia.org/wiki/Okapi_BM25>
 	Bm {
+		/// The k~1~ parameter.
+		k1: f32,
+		/// The b parameter.
+		b: f32,
+	},
+	/// BestMatching25 scoring with accurate (non-optimized) calculations.
+	///
+	/// <https://en.wikipedia.org/wiki/Okapi_BM25>
+	#[revision(start = 2)]
+	BmAccurate {
 		/// The k~1~ parameter.
 		k1: f32,
 		/// The b parameter.
@@ -213,6 +223,16 @@ impl PartialEq for Scoring {
 					b: other_b,
 				},
 			) => k1.to_bits() == other_k1.to_bits() && b.to_bits() == other_b.to_bits(),
+			(
+				Scoring::BmAccurate {
+					k1,
+					b,
+				},
+				Scoring::BmAccurate {
+					k1: other_k1,
+					b: other_b,
+				},
+			) => k1.to_bits() == other_k1.to_bits() && b.to_bits() == other_b.to_bits(),
 			(Scoring::Vs, Scoring::Vs) => true,
 			_ => false,
 		}
@@ -226,10 +246,19 @@ impl Hash for Scoring {
 				k1,
 				b,
 			} => {
+				0u8.hash(state);
 				k1.to_bits().hash(state);
 				b.to_bits().hash(state);
 			}
-			Scoring::Vs => 0.hash(state),
+			Scoring::BmAccurate {
+				k1,
+				b,
+			} => {
+				1u8.hash(state);
+				k1.to_bits().hash(state);
+				b.to_bits().hash(state);
+			}
+			Scoring::Vs => 2u8.hash(state),
 		}
 	}
 }

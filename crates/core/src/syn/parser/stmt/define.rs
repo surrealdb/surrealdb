@@ -1053,6 +1053,25 @@ impl Parser<'_> {
 									scoring = Some(Default::default());
 								};
 							}
+							t!("BM25_ACCURATE") => {
+								self.pop_peek();
+								if self.eat(t!("(")) {
+									let open = self.last_span();
+									let k1 = self.next_token_value()?;
+									expected!(self, t!(","));
+									let b = self.next_token_value()?;
+									self.expect_closing_delimiter(t!(")"), open)?;
+									scoring = Some(Scoring::BmAccurate {
+										k1,
+										b,
+									})
+								} else {
+									scoring = Some(Scoring::BmAccurate {
+										k1: 1.2,
+										b: 0.75,
+									});
+								};
+							}
 							t!("HIGHLIGHTS") => {
 								self.pop_peek();
 								hl = true;

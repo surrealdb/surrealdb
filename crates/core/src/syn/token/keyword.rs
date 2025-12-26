@@ -48,6 +48,7 @@ keyword! {
 	Bucket => "BUCKET",
 	Reject => "REJECT",
 	Bm25 => "BM25",
+	Bm25Accurate => "BM25_ACCURATE",
 	Break => "BREAK",
 	By => "BY",
 	Camel => "CAMEL",
