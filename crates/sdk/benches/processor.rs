@@ -59,10 +59,21 @@ struct Input {
 
 async fn prepare_data() -> Input {
 	let dbs = Datastore::new("memory").await.unwrap();
+
+	// Create namespace and database first
+	dbs.execute("DEFINE NAMESPACE bench", &Session::owner(), None).await.unwrap();
+	dbs.execute(
+		"DEFINE DATABASE bench",
+		&Session::owner().with_ns("bench"),
+		None,
+	)
+	.await
+	.unwrap();
+
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = r"DEFINE INDEX number ON item FIELDS number;
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
-		DEFINE INDEX search ON item FIELDS label SEARCH ANALYZER simple BM25"
+		DEFINE INDEX search ON item FIELDS label FULLTEXT ANALYZER simple BM25"
 		.to_owned();
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	for _ in 0..3 {

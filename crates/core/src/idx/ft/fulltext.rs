@@ -895,16 +895,17 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	}
 }
 
-use parking_lot::RwLock;
 
 use crate::idx::ft::smallfloat::{NormCache, SmallFloat};
 use crate::key::index::dle::{CHUNK_SIZE, Dle};
+use parking_lot::RwLock;
 
 /// Fast BM25 scorer using SmallFloat-encoded lengths and precomputed norms.
 ///
-/// This scorer trades ~12.5% precision for ~50% latency reduction by:
+/// This scorer trades ~12.5% precision for reduced storage by:
 /// - Using a 256-entry lookup table for length normalization
-/// - Loading encoded doc lengths from DLE chunks on demand
+/// - Loading encoded doc lengths from DLE chunks (1 byte per doc vs 8 bytes)
+/// - Caching loaded chunks to avoid repeated disk reads
 /// - Avoiding per-document division during scoring
 pub(in crate::idx) struct FastScorer {
 	/// BM25 k1 parameter
@@ -915,8 +916,12 @@ pub(in crate::idx) struct FastScorer {
 	doc_count: f64,
 	/// Precomputed normalization cache indexed by encoded length
 	norm_cache: NormCache,
-	/// Cached encoded lengths (uses RwLock for thread-safe interior mutability)
-	doc_lengths: RwLock<HashMap<DocId, u8>>,
+	/// Cached DLE chunks (chunk_id -> chunk data)
+	/// Caching at chunk level is efficient because:
+	/// - Each chunk holds 4096 doc lengths
+	/// - Documents in same chunk share one cache entry
+	/// - Much fewer cache entries than per-document caching
+	chunk_cache: RwLock<HashMap<u64, Vec<u8>>>,
 }
 
 impl FastScorer {
@@ -933,51 +938,64 @@ impl FastScorer {
 			k1_plus_1: k1 + 1.0,
 			doc_count,
 			norm_cache: NormCache::new(k1, b, avg_doc_len),
-			doc_lengths: RwLock::new(HashMap::new()),
+			chunk_cache: RwLock::new(HashMap::new()),
 		}
 	}
 
-	/// Loads the encoded length for a document from DLE chunk.
+	/// Gets the encoded length for a document, using chunk cache.
 	/// Falls back to legacy dl key if DLE chunk is missing (for backward compatibility
 	/// with indexes created before the SmallFloat optimization).
-	/// Caches the result to avoid repeated lookups for the same doc_id.
-	async fn get_or_load_encoded_length(
+	async fn get_encoded_length(
 		&self,
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<u8> {
-		// Check cache first
-		if let Some(&cached) = self.doc_lengths.read().get(&doc_id) {
-			return Ok(cached);
-		}
-
-		// Try loading from DLE chunk first (new format)
 		let chunk_id = Dle::chunk_id(doc_id);
 		let offset = Dle::offset(doc_id);
-		let dle_key = ikb.new_dle(chunk_id);
 
-		let encoded = if let Some(chunk) = tx.get(&dle_key, None).await? {
-			let chunk_data: Vec<u8> = chunk;
-			if offset < chunk_data.len() && chunk_data[offset] != 0 {
-				// Found non-zero encoded length in DLE chunk
+		// Check chunk cache first
+		let cache_result = {
+			let cache = self.chunk_cache.read();
+			cache.get(&chunk_id).map(|chunk_data| {
+				if offset < chunk_data.len() && chunk_data[offset] != 0 {
+					Some(chunk_data[offset])
+				} else {
+					None
+				}
+			})
+		};
+		if let Some(result) = cache_result {
+			if let Some(encoded) = result {
+				return Ok(encoded);
+			}
+			// Chunk exists but offset is empty - fall back to legacy
+			return self.load_from_legacy_dl(ikb, tx, doc_id).await;
+		}
+
+		// Load chunk from storage
+		let dle_key = ikb.new_dle(chunk_id);
+		if let Some(chunk_data) = tx.get(&dle_key, None).await? {
+			let chunk_data: Vec<u8> = chunk_data;
+			// Cache the chunk for future lookups
+			let encoded = if offset < chunk_data.len() && chunk_data[offset] != 0 {
 				chunk_data[offset]
 			} else {
-				// DLE chunk exists but this offset is empty/zero - fall back to legacy
-				self.load_from_legacy_dl(ikb, tx, doc_id).await?
-			}
-		} else {
-			// No DLE chunk - fall back to legacy dl key (pre-optimization index)
-			self.load_from_legacy_dl(ikb, tx, doc_id).await?
-		};
+				// Will fall back to legacy after caching
+				0
+			};
+			self.chunk_cache.write().insert(chunk_id, chunk_data);
 
-		// Cache for future lookups
-		self.doc_lengths.write().insert(doc_id, encoded);
-		Ok(encoded)
+			if encoded != 0 {
+				return Ok(encoded);
+			}
+		}
+
+		// Fall back to legacy dl key (pre-optimization index)
+		self.load_from_legacy_dl(ikb, tx, doc_id).await
 	}
 
-	/// Loads document length from legacy dl key and encodes it on-the-fly.
-	/// Used for backward compatibility with indexes created before SmallFloat optimization.
+	/// Loads document length from legacy dl key and encodes it.
 	async fn load_from_legacy_dl(
 		&self,
 		ikb: &IndexKeyBase,
@@ -986,11 +1004,9 @@ impl FastScorer {
 	) -> Result<u8> {
 		let dl_key = ikb.new_dl(doc_id);
 		if let Some(dl) = tx.get(&dl_key, None).await? {
-			// Legacy format stores DocLength (u64) directly
 			let doc_length: u64 = dl;
 			Ok(SmallFloat::encode(doc_length as u32))
 		} else {
-			// No document length found - this shouldn't happen for valid documents
 			Ok(0)
 		}
 	}
@@ -1005,7 +1021,7 @@ impl FastScorer {
 	) -> Result<Score> {
 		let mut sc = 0.0;
 		let tl = qt.tokens.list();
-		let encoded_len = self.get_or_load_encoded_length(&fti.ikb, tx, doc_id).await?;
+		let encoded_len = self.get_encoded_length(&fti.ikb, tx, doc_id).await?;
 
 		for (i, d) in qt.docs.iter().enumerate() {
 			if let Some(docs) = d
@@ -1022,10 +1038,10 @@ impl FastScorer {
 		Ok(sc as f32)
 	}
 
-	/// Computes BM25 score using encoded length from cache.
+	/// Computes BM25 score using encoded length.
 	///
 	/// Uses the same Lucene-style IDF formula as AccurateScorer but
-	/// retrieves length normalization from precomputed cache.
+	/// retrieves length normalization from precomputed NormCache table.
 	fn compute_score(&self, term_freq: f64, term_doc_count: f64, encoded_len: u8) -> f64 {
 		if term_freq <= 0.0 {
 			return 0.0;
