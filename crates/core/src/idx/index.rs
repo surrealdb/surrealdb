@@ -294,20 +294,38 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
-		let txn = self.ctx.tx();
-		let hnsw = self
-			.ctx
-			.get_index_stores()
-			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
-			.await?;
-		let mut hnsw = hnsw.write().await;
+		let index_stores = self.ctx.get_index_stores();
+
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&txn, self.rid.key.clone(), &o).await?;
+			index_stores
+				.remove_hnsw_document_with_retry(
+					self.ns,
+					self.db,
+					self.ctx,
+					self.tb,
+					self.ix,
+					p,
+					self.rid.key.clone(),
+					&o,
+				)
+				.await?;
 		}
+
 		// Create the new index data
 		if let Some(n) = self.n.take() {
-			hnsw.index_document(&txn, &self.rid.key, &n).await?;
+			index_stores
+				.index_hnsw_document_with_retry(
+					self.ns,
+					self.db,
+					self.ctx,
+					self.tb,
+					self.ix,
+					p,
+					&self.rid.key,
+					&n,
+				)
+				.await?;
 		}
 		Ok(())
 	}

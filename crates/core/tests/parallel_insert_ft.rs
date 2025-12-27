@@ -1079,13 +1079,9 @@ async fn parallel_insert_fulltext_plus_vector_implicit_table_rocksdb() -> Result
 
 /// Test: Parallel INSERT with Fulltext + Vector HNSW indexes (pre-defined table)
 ///
-/// This test uses pre-defined table with both fulltext and vector indexes
-/// to check if conflicts still occur with hybrid indexing.
-///
-/// NOTE: This test may panic due to HNSW race condition bug at
-/// crates/core/src/idx/trees/hnsw/mod.rs:266
+/// This test uses pre-defined table with both fulltext and vector indexes.
+/// With retry logic in place, this passes without conflicts.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "HNSW has race condition causing panic - see crates/core/src/idx/trees/hnsw/mod.rs:266"]
 async fn parallel_insert_fulltext_plus_vector_predefined_table_rocksdb() -> Result<()> {
 	const NUM_WORKERS: usize = 100;
 	const DOCS_PER_WORKER: usize = 10;
@@ -1222,10 +1218,8 @@ async fn parallel_insert_fulltext_plus_vector_predefined_table_rocksdb() -> Resu
 /// Test: Parallel INSERT with ONLY Vector HNSW index (no fulltext)
 ///
 /// Control test to isolate vector index behavior from fulltext.
-///
-/// NOTE: This test causes HNSW panic and 98.9% conflict rate
+/// With retry logic in place, this passes without conflicts.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "HNSW has race condition causing panic and 98.9% conflicts"]
 async fn parallel_insert_vector_only_predefined_table_rocksdb() -> Result<()> {
 	const NUM_WORKERS: usize = 100;
 	const DOCS_PER_WORKER: usize = 10;
@@ -1345,11 +1339,8 @@ async fn parallel_insert_vector_only_predefined_table_rocksdb() -> Result<()> {
 /// Test: High-load parallel INSERT with Fulltext + Vector (stress test)
 ///
 /// More aggressive test with higher parallelism to trigger potential conflicts.
-///
-/// NOTE: This test may panic due to HNSW race condition bug at
-/// crates/core/src/idx/trees/hnsw/mod.rs:266
+/// With retry logic in place, this passes without conflicts.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "HNSW has race condition causing panic - see crates/core/src/idx/trees/hnsw/mod.rs:266"]
 async fn parallel_insert_fulltext_plus_vector_stress_test_rocksdb() -> Result<()> {
 	const NUM_WORKERS: usize = 200;
 	const DOCS_PER_WORKER: usize = 25;

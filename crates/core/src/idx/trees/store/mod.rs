@@ -2,8 +2,11 @@ pub(crate) mod hnsw;
 mod mapper;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use rand::{Rng, thread_rng};
+use tokio::time::sleep;
 
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
@@ -15,7 +18,12 @@ use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::kvs::Transaction;
+use crate::kvs::TransactionFactory;
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::{LockType, TransactionType};
+use crate::val::RecordIdKey;
+use crate::val::Value;
 
 #[derive(Clone)]
 pub struct IndexStores(Arc<Inner>);
@@ -24,6 +32,8 @@ struct Inner {
 	hnsw_indexes: HnswIndexes,
 	mappers: Mappers,
 	vector_cache: VectorCache,
+	transaction_factory: Option<TransactionFactory>,
+	sequences: Option<Sequences>,
 }
 
 impl Default for IndexStores {
@@ -32,11 +42,213 @@ impl Default for IndexStores {
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
 			vector_cache: VectorCache::default(),
+			transaction_factory: None,
+			sequences: None,
 		}))
 	}
 }
 
 impl IndexStores {
+	/// Creates a new IndexStores with transaction factory for retry logic
+	pub(crate) fn new(tf: TransactionFactory, sequences: Sequences) -> Self {
+		Self(Arc::new(Inner {
+			hnsw_indexes: HnswIndexes::default(),
+			mappers: Mappers::default(),
+			vector_cache: VectorCache::default(),
+			transaction_factory: Some(tf),
+			sequences: Some(sequences),
+		}))
+	}
+
+	/// Index a document in HNSW with retry logic for transaction conflicts.
+	///
+	/// This method handles transaction conflicts by retrying with exponential backoff,
+	/// similar to how sequences handle batch allocation conflicts.
+	pub(crate) async fn index_hnsw_document_with_retry(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &FrozenContext,
+		tb: TableId,
+		ix: &IndexDefinition,
+		p: &HnswParams,
+		id: &RecordIdKey,
+		content: &[Value],
+	) -> Result<()> {
+		// If we don't have transaction factory, fall back to non-retry behavior
+		let (tf, sequences) = match (&self.0.transaction_factory, &self.0.sequences) {
+			(Some(tf), Some(seq)) => (tf, seq),
+			_ => {
+				let hnsw = self.get_index_hnsw(ns, db, ctx, tb, ix, p).await?;
+				let txn = ctx.tx();
+				let mut hnsw = hnsw.write().await;
+				return hnsw.index_document(&txn, id, content).await;
+			}
+		};
+
+		// Retry with exponential backoff
+		let mut tempo = 4u64;
+		const MAX_BACKOFF: u64 = 32_768;
+		const MAX_RETRIES: u32 = 50;
+		let mut retries = 0u32;
+
+		loop {
+			let tx = tf
+				.transaction(TransactionType::Write, LockType::Optimistic, sequences.clone())
+				.await?;
+
+			// Get the HNSW index and perform operation in a scope to release lock before sleep
+			let result = {
+				let hnsw = self.get_index_hnsw(ns, db, ctx, tb, ix, p).await?;
+				let mut hnsw = hnsw.write().await;
+				hnsw.index_document(&tx, id, content).await
+			};
+
+			match result {
+				Ok(_) => {
+					// Try to commit
+					match tx.commit().await {
+						Ok(_) => return Ok(()),
+						Err(e) => {
+							let err_str = e.to_string();
+							if err_str.contains("Resource busy")
+								|| err_str.contains("TryAgain")
+								|| err_str.contains("transaction conflict")
+							{
+								// Retry with backoff (lock already released)
+								retries += 1;
+								if retries >= MAX_RETRIES {
+									return Err(e);
+								}
+								let sleep_ms = thread_rng().gen_range(1..=tempo);
+								sleep(Duration::from_millis(sleep_ms)).await;
+								if tempo < MAX_BACKOFF {
+									tempo *= 2;
+								}
+								continue;
+							}
+							return Err(e);
+						}
+					}
+				}
+				Err(e) => {
+					let _ = tx.cancel().await;
+					let err_str = e.to_string();
+					if err_str.contains("Resource busy")
+						|| err_str.contains("TryAgain")
+						|| err_str.contains("transaction conflict")
+					{
+						// Retry with backoff (lock already released)
+						retries += 1;
+						if retries >= MAX_RETRIES {
+							return Err(e);
+						}
+						let sleep_ms = thread_rng().gen_range(1..=tempo);
+						sleep(Duration::from_millis(sleep_ms)).await;
+						if tempo < MAX_BACKOFF {
+							tempo *= 2;
+						}
+						continue;
+					}
+					return Err(e);
+				}
+			}
+		}
+	}
+
+	/// Remove a document from HNSW with retry logic for transaction conflicts.
+	pub(crate) async fn remove_hnsw_document_with_retry(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ctx: &FrozenContext,
+		tb: TableId,
+		ix: &IndexDefinition,
+		p: &HnswParams,
+		id: RecordIdKey,
+		content: &[Value],
+	) -> Result<()> {
+		// If we don't have transaction factory, fall back to non-retry behavior
+		let (tf, sequences) = match (&self.0.transaction_factory, &self.0.sequences) {
+			(Some(tf), Some(seq)) => (tf, seq),
+			_ => {
+				// Fallback: use the provided transaction without retry
+				let hnsw = self.get_index_hnsw(ns, db, ctx, tb, ix, p).await?;
+				let txn = ctx.tx();
+				let mut hnsw = hnsw.write().await;
+				return hnsw.remove_document(&txn, id, content).await;
+			}
+		};
+
+		let mut tempo = 4u64;
+		const MAX_BACKOFF: u64 = 32_768;
+		const MAX_RETRIES: u32 = 50;
+		let mut retries = 0u32;
+
+		loop {
+			let tx = tf
+				.transaction(TransactionType::Write, LockType::Optimistic, sequences.clone())
+				.await?;
+
+			// Get the HNSW index and perform operation in a scope to release lock before sleep
+			let result = {
+				let hnsw = self.get_index_hnsw(ns, db, ctx, tb, ix, p).await?;
+				let mut hnsw = hnsw.write().await;
+				hnsw.remove_document(&tx, id.clone(), content).await
+			};
+
+			match result {
+				Ok(_) => {
+					// Try to commit
+					match tx.commit().await {
+						Ok(_) => return Ok(()),
+						Err(e) => {
+							let err_str = e.to_string();
+							if err_str.contains("Resource busy")
+								|| err_str.contains("TryAgain")
+								|| err_str.contains("transaction conflict")
+							{
+								// Retry with backoff (lock already released)
+								retries += 1;
+								if retries >= MAX_RETRIES {
+									return Err(e);
+								}
+								let sleep_ms = thread_rng().gen_range(1..=tempo);
+								sleep(Duration::from_millis(sleep_ms)).await;
+								if tempo < MAX_BACKOFF {
+									tempo *= 2;
+								}
+								continue;
+							}
+							return Err(e);
+						}
+					}
+				}
+				Err(e) => {
+					let _ = tx.cancel().await;
+					let err_str = e.to_string();
+					if err_str.contains("Resource busy")
+						|| err_str.contains("TryAgain")
+						|| err_str.contains("transaction conflict")
+					{
+						// Retry with backoff (lock already released)
+						retries += 1;
+						if retries >= MAX_RETRIES {
+							return Err(e);
+						}
+						let sleep_ms = thread_rng().gen_range(1..=tempo);
+						sleep(Duration::from_millis(sleep_ms)).await;
+						if tempo < MAX_BACKOFF {
+							tempo *= 2;
+						}
+						continue;
+					}
+					return Err(e);
+				}
+			}
+		}
+	}
+
 	pub(crate) async fn get_index_hnsw(
 		&self,
 		ns: NamespaceId,
