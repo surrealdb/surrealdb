@@ -72,8 +72,7 @@ mod tests {
 		assert!(res.remove(0).result.is_ok(), "DEFINE INDEX should succeed");
 
 		// Remove the index
-		let mut res =
-			ds.execute("REMOVE INDEX test_idx ON test_table", &ses, None).await.unwrap();
+		let mut res = ds.execute("REMOVE INDEX test_idx ON test_table", &ses, None).await.unwrap();
 		assert!(res.remove(0).result.is_ok(), "REMOVE INDEX should succeed");
 
 		// Verify the index is gone by checking INFO FOR TABLE
@@ -107,17 +106,17 @@ mod tests {
 		assert!(res.remove(0).result.is_ok());
 
 		// Insert some data that uses the indexed field
-		let mut res = ds
-			.execute("CREATE test_table SET name = 'test'", &ses, None)
-			.await
-			.unwrap();
+		let mut res = ds.execute("CREATE test_table SET name = 'test'", &ses, None).await.unwrap();
 		assert!(res.remove(0).result.is_ok(), "INSERT should succeed with index present");
 
 		// Query using the indexed field
 		let mut res =
 			ds.execute("SELECT * FROM test_table WHERE name = 'test'", &ses, None).await.unwrap();
 		let val = res.remove(0).result.unwrap();
-		assert!(val.is_array() && !val.as_array().unwrap().is_empty(), "Query should return results");
+		assert!(
+			val.is_array() && !val.as_array().unwrap().is_empty(),
+			"Query should return results"
+		);
 	}
 
 	/// Test that verifies multiple sequential index operations work correctly
@@ -148,8 +147,7 @@ mod tests {
 		assert!(info.contains("idx1") && info.contains("idx2"), "Both indexes should be visible");
 
 		// Remove first index
-		let mut res =
-			ds.execute("REMOVE INDEX idx1 ON test_table", &ses, None).await.unwrap();
+		let mut res = ds.execute("REMOVE INDEX idx1 ON test_table", &ses, None).await.unwrap();
 		assert!(res.remove(0).result.is_ok());
 
 		// Verify only second index remains
