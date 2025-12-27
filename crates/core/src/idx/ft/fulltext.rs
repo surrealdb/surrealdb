@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
+use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -1068,6 +1069,94 @@ impl FastScorer {
 			score
 		}
 	}
+
+	/// Loads chunks using a single range query (for dense chunk distribution).
+	async fn load_range(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		min_chunk: u64,
+		max_chunk: u64,
+	) -> Result<Vec<(u64, Vec<u8>)>> {
+		let (beg, end) = ikb.new_dle_range(min_chunk, max_chunk)?;
+		let mut result = Vec::new();
+
+		for (k, v) in tx.getr(beg..end, None).await? {
+			let dle = Dle::decode_key(&k)?;
+			result.push((dle.chunk_id, v));
+		}
+
+		Ok(result)
+	}
+
+	/// Loads chunks in parallel using individual point queries (for sparse chunk distribution).
+	async fn load_individual(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		chunk_ids: &BTreeSet<u64>,
+	) -> Result<Vec<(u64, Vec<u8>)>> {
+		let futures: Vec<_> = chunk_ids
+			.iter()
+			.map(|&chunk_id| {
+				let key = ikb.new_dle(chunk_id);
+				async move {
+					let data = tx.get(&key, None).await?;
+					Ok::<_, anyhow::Error>((chunk_id, data.unwrap_or_default()))
+				}
+			})
+			.collect();
+
+		try_join_all(futures).await
+	}
+
+	/// Preloads encoded lengths for all doc_ids using adaptive strategy.
+	/// Uses range query if chunks are dense, individual queries if sparse.
+	pub(crate) async fn preload_chunks(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+	) -> Result<()> {
+		if doc_ids.is_empty() {
+			return Ok(());
+		}
+
+		// Determine needed chunks
+		let needed_chunks: BTreeSet<u64> = doc_ids.iter().map(|id| Dle::chunk_id(*id)).collect();
+
+		// Early return if all chunks already cached
+		{
+			let cache = self.chunk_cache.read();
+			if needed_chunks.iter().all(|id| cache.contains_key(id)) {
+				return Ok(());
+			}
+		}
+
+		let Some(&min_chunk) = needed_chunks.first() else {
+			return Ok(());
+		};
+		let Some(&max_chunk) = needed_chunks.last() else {
+			return Ok(());
+		};
+		let range_size = max_chunk - min_chunk + 1;
+
+		// Adaptive strategy: range query if dense, individual if sparse
+		let chunks_data = if range_size <= needed_chunks.len() as u64 * 2 {
+			self.load_range(ikb, tx, min_chunk, max_chunk).await?
+		} else {
+			self.load_individual(ikb, tx, &needed_chunks).await?
+		};
+
+		// Populate cache
+		let mut cache = self.chunk_cache.write();
+		for (chunk_id, data) in chunks_data {
+			cache.insert(chunk_id, data);
+		}
+
+		Ok(())
+	}
+
 }
 
 /// Accurate BM25 scorer using exact document lengths.
@@ -1183,6 +1272,7 @@ impl AccurateScorer {
 
 		score
 	}
+
 }
 
 /// Dual-mode BM25 scorer: Fast (SmallFloat) or Accurate (exact).
@@ -1229,6 +1319,41 @@ impl Scorer {
 			Scorer::Fast(scorer) => scorer.score(fti, tx, qt, doc_id).await,
 			Scorer::Accurate(scorer) => scorer.score(fti, tx, qt, doc_id).await,
 		}
+	}
+
+	/// Preloads DLE chunks for all documents matching the query terms.
+	///
+	/// This should be called before scoring begins to batch-load all needed
+	/// chunks in a single pass, avoiding per-document chunk loading overhead.
+	/// Only FastScorer benefits from this; AccurateScorer is a no-op.
+	///
+	/// Memory optimization: Collects chunk_ids directly from bitmaps instead
+	/// of materializing all doc_ids. Uses O(chunks) memory instead of O(docs).
+	pub(crate) async fn preload_for_query(
+		&self,
+		fti: &FullTextIndex,
+		tx: &Transaction,
+		qt: &QueryTerms,
+	) -> Result<()> {
+		if let Scorer::Fast(scorer) = self {
+			// Collect chunk_ids directly - O(chunks) memory instead of O(docs)
+			let needed_chunks: BTreeSet<u64> = qt
+				.docs
+				.iter()
+				.flatten()
+				.flat_map(|bitmap| bitmap.iter().map(Dle::chunk_id))
+				.collect();
+
+			// Skip preload if too many chunks (would use too much memory)
+			// Threshold: 1024 chunks = 4MB max cache size
+			const MAX_PRELOAD_CHUNKS: usize = 1024;
+			if needed_chunks.len() > MAX_PRELOAD_CHUNKS {
+				return Ok(());
+			}
+
+			scorer.preload_chunks_by_id(&fti.ikb, tx, &needed_chunks).await?;
+		}
+		Ok(())
 	}
 }
 

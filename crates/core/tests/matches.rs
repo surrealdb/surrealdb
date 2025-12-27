@@ -239,11 +239,12 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 	skip_ok(res, 6)?;
 	//
 	let tmp = res.remove(0).result?;
+	// Score uses Lucene-style IDF: ln(1 + (N - n + 0.5) / (n + 0.5))
 	let val = syn::value(
 		"[
 			{
 				id: blog:3,
-				score: 0.9227996468544006
+				score: 1.3112574815750122
 			}
 		]",
 	)
@@ -277,11 +278,12 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 	skip_ok(res, 7)?;
 	//
 	let tmp = res.remove(0).result?;
+	// Score uses Lucene-style IDF: ln(1 + (N - n + 0.5) / (n + 0.5))
 	let val = syn::value(
 		"[
 			{
 				id: blog:3,
-				score: 0.9227996468544006
+				score: 1.3112574815750122
 			}
 		]",
 	)

@@ -862,6 +862,14 @@ impl FullTextEntry {
 		if let Matches(qs, mo) = io.op() {
 			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
+
+			// Preload DLE chunks for all matching documents
+			// This batch-loads chunks before scoring begins for better I/O efficiency
+			if let Some(ref scorer) = scorer {
+				let tx = ctx.tx();
+				scorer.preload_for_query(fti, &tx, &qt).await?;
+			}
+
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				bo: mo.operator,
 				io,
