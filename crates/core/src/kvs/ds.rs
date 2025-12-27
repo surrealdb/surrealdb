@@ -643,7 +643,7 @@ impl Datastore {
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::new(tf.clone(), sequences.clone()),
-			index_builder: IndexBuilder::new(tf.clone()),
+			index_builder: IndexBuilder::new(tf),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(storage)]

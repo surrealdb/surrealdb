@@ -64,6 +64,7 @@ impl IndexStores {
 	///
 	/// This method handles transaction conflicts by retrying with exponential backoff,
 	/// similar to how sequences handle batch allocation conflicts.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn index_hnsw_document_with_retry(
 		&self,
 		ns: NamespaceId,
@@ -157,6 +158,7 @@ impl IndexStores {
 	}
 
 	/// Remove a document from HNSW with retry logic for transaction conflicts.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn remove_hnsw_document_with_retry(
 		&self,
 		ns: NamespaceId,
