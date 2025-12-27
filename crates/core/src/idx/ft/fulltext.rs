@@ -1110,42 +1110,41 @@ impl FastScorer {
 		try_join_all(futures).await
 	}
 
-	/// Preloads encoded lengths for all doc_ids using adaptive strategy.
+	/// Preloads chunks by their IDs using adaptive strategy.
 	/// Uses range query if chunks are dense, individual queries if sparse.
-	pub(crate) async fn preload_chunks(
+	pub(crate) async fn preload_chunks_by_id(
 		&self,
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
-		doc_ids: &[DocId],
+		chunk_ids: &BTreeSet<u64>,
 	) -> Result<()> {
-		if doc_ids.is_empty() {
+		if chunk_ids.is_empty() {
 			return Ok(());
 		}
 
-		// Determine needed chunks
-		let needed_chunks: BTreeSet<u64> = doc_ids.iter().map(|id| Dle::chunk_id(*id)).collect();
-
-		// Early return if all chunks already cached
-		{
+		// Filter out already cached chunks
+		let uncached: BTreeSet<u64> = {
 			let cache = self.chunk_cache.read();
-			if needed_chunks.iter().all(|id| cache.contains_key(id)) {
-				return Ok(());
-			}
+			chunk_ids.iter().copied().filter(|id| !cache.contains_key(id)).collect()
+		};
+
+		if uncached.is_empty() {
+			return Ok(());
 		}
 
-		let Some(&min_chunk) = needed_chunks.first() else {
+		let Some(&min_chunk) = uncached.first() else {
 			return Ok(());
 		};
-		let Some(&max_chunk) = needed_chunks.last() else {
+		let Some(&max_chunk) = uncached.last() else {
 			return Ok(());
 		};
 		let range_size = max_chunk - min_chunk + 1;
 
 		// Adaptive strategy: range query if dense, individual if sparse
-		let chunks_data = if range_size <= needed_chunks.len() as u64 * 2 {
+		let chunks_data = if range_size <= uncached.len() as u64 * 2 {
 			self.load_range(ikb, tx, min_chunk, max_chunk).await?
 		} else {
-			self.load_individual(ikb, tx, &needed_chunks).await?
+			self.load_individual(ikb, tx, &uncached).await?
 		};
 
 		// Populate cache
@@ -1156,7 +1155,6 @@ impl FastScorer {
 
 		Ok(())
 	}
-
 }
 
 /// Accurate BM25 scorer using exact document lengths.
