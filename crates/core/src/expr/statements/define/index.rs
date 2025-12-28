@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Index, IndexDefinition, TableDefinition, TableId};
+use crate::catalog::{DatabaseId, Index, IndexDefinition, NamespaceId, TableDefinition, TableId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -152,8 +152,15 @@ impl DefineIndexStatement {
 		}
 		// Clear the cache
 		txn.clear_cache();
-		// Process the index
-		run_indexing(ctx, opt, tb.table_id, index_def.into(), !self.concurrently).await?;
+
+		// Commit the index definition BEFORE running index building.
+		// This prevents transaction conflicts when bulk indexing creates millions
+		// of sequence numbers - the original transaction's snapshot would be stale
+		// by the time it tries to commit after index building completes.
+		txn.commit().await?;
+
+		// Process the index (uses its own transactions internally)
+		run_indexing(ctx, opt, tb.namespace_id, tb.database_id, tb.table_id, index_def.into(), !self.concurrently).await?;
 
 		// Ok all good
 		Ok(Value::None)
@@ -162,6 +169,8 @@ impl DefineIndexStatement {
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &FrozenContext,
 	opt: &Options,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: TableId,
 	ix: Arc<IndexDefinition>,
 	blocking: bool,
@@ -169,7 +178,7 @@ pub(in crate::expr::statements) async fn run_indexing(
 	let rcv = ctx
 		.get_index_builder()
 		.ok_or_else(|| Error::unreachable("No Index Builder"))?
-		.build(ctx, opt.clone(), tb, ix, blocking)
+		.build(ctx, opt.clone(), ns, db, tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
 		rcv.await.map_err(|_| Error::IndexingBuildingCancelled {
