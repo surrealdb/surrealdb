@@ -11,7 +11,7 @@ use crate::syn::error::bail;
 use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{self, Glued, Span, Token, TokenKind, t};
+use crate::syn::token::{Span, Token, TokenKind, t};
 use crate::types::PublicDuration;
 
 impl Parser<'_> {
@@ -89,15 +89,16 @@ impl Parser<'_> {
 			}
 
 			t!("<") => {
-				let peek = self.peek_whitespace1();
-				if matches!(peek.kind, t!("-") | t!("~") | t!("->") | t!("..")) {
+				if let Some(peek) = self.peek_whitespace1()
+					&& let t!("-") | t!("~") | t!("->") | t!("..") = peek.kind
+				{
 					return None;
 				}
 				Some(BindingPower::Relation)
 			}
 
 			t!(">") => {
-				if self.peek_whitespace1().kind == t!("..") {
+				if let Some(t!("..")) = self.peek_whitespace1().map(|x| x.kind) {
 					return Some(BindingPower::Range);
 				}
 				Some(BindingPower::Relation)
@@ -146,17 +147,18 @@ impl Parser<'_> {
 			t!("!") | t!("+") | t!("-") => Some(BindingPower::Prefix),
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
-				let peek = self.peek_whitespace1();
-				if peek.kind == t!("-") {
-					let recover = self.recent_span();
-					if self.peek2().kind == TokenKind::Digits {
-						self.backup_after(recover);
-						return Some(BindingPower::Prefix);
+				if let Some(peek) = self.peek_whitespace1() {
+					if peek.kind == t!("-") {
+						let recover = self.recent_span();
+						if self.peek2().kind == TokenKind::Digits {
+							self.backup_after(recover);
+							return Some(BindingPower::Prefix);
+						}
+						return None;
 					}
-					return None;
-				}
-				if matches!(peek.kind, t!("~") | t!("->")) {
-					return None;
+					if let t!("~") | t!("->") = peek.kind {
+						return None;
+					}
 				}
 				Some(BindingPower::Prefix)
 			}
@@ -167,20 +169,23 @@ impl Parser<'_> {
 	fn postfix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
 		match token {
 			t!(">") => {
-				if self.peek_whitespace1().kind != t!("..") {
+				if let Some(peek) = self.peek_whitespace1()
+					&& let t!("..") = peek.kind
+				{
 					return None;
 				}
 
-				let peek2 = self.peek_whitespace2().kind;
-				if peek2 == t!("=") || Self::kind_starts_expression(peek2) {
+				if let Some(peek) = self.peek_whitespace2()
+					&& (t!("=") == peek.kind || Self::kind_starts_expression(peek.kind))
+				{
 					return None;
 				}
 
 				Some(BindingPower::Range)
 			}
-			t!("..") => match self.peek_whitespace1().kind {
-				t!("=") => None,
-				x if Self::kind_starts_expression(x) => None,
+			t!("..") => match self.peek_whitespace1().map(|x| x.kind) {
+				Some(t!("=")) => None,
+				Some(x) if Self::kind_starts_expression(x) => None,
 				_ => Some(BindingPower::Range),
 			},
 			t!("(") => Some(BindingPower::Call),
@@ -193,8 +198,7 @@ impl Parser<'_> {
 		let operator = match token.kind {
 			t!("+") => {
 				// +123 is a single number token, so parse it as such
-				let p = self.peek_whitespace1();
-				if matches!(p.kind, TokenKind::Digits) {
+				if let Some(TokenKind::Digits) = self.peek_whitespace1().map(|x| x.kind) {
 					// This is a bit of an annoying special case.
 					// The problem is that `+` and `-` can be an prefix operator and a the start
 					// of a number token.
@@ -231,8 +235,7 @@ impl Parser<'_> {
 			}
 			t!("-") => {
 				// -123 is a single number token, so parse it as such
-				let p = self.peek_whitespace1();
-				if matches!(p.kind, TokenKind::Digits) {
+				if let Some(TokenKind::Digits) = self.peek_whitespace1().map(|x| x.kind) {
 					// This is a bit of an annoying special case.
 					// The problem is that `+` and `-` can be an prefix operator and a the start
 					// of a number token.
@@ -279,14 +282,17 @@ impl Parser<'_> {
 			}
 			t!("..") => {
 				self.pop_peek();
-				if self.peek_whitespace().kind == t!("=") {
-					self.pop_peek();
-					PrefixOperator::RangeInclusive
-				} else {
-					if !Self::kind_starts_prime_value(self.peek_whitespace().kind) {
+				if let Some(x) = self.peek_whitespace() {
+					if let t!("=") = x.kind {
+						self.pop_peek();
+						PrefixOperator::RangeInclusive
+					} else if !Self::kind_starts_prime_value(x.kind) {
 						// unbounded range.
 						return Ok(Expr::Literal(Literal::UnboundedRange));
+					} else {
+						PrefixOperator::Range
 					}
+				} else {
 					PrefixOperator::Range
 				}
 			}
@@ -311,7 +317,7 @@ impl Parser<'_> {
 					let d = self.parse_distance()?;
 					NearestNeighbor::K(amount, d)
 				}
-				TokenKind::Digits | TokenKind::Glued(token::Glued::Number) => {
+				TokenKind::Digits => {
 					let ef = self.next_token_value()?;
 					NearestNeighbor::Approximate(amount, ef)
 				}
@@ -454,9 +460,9 @@ impl Parser<'_> {
 			}
 
 			t!(">") => {
-				if self.peek_whitespace().kind == t!("..") {
+				if let Some(t!("..")) = self.peek_whitespace().map(|x| x.kind) {
 					self.pop_peek();
-					if self.peek_whitespace().kind == t!("=") {
+					if let Some(t!("=")) = self.peek_whitespace().map(|x| x.kind) {
 						self.pop_peek();
 						BinaryOperator::RangeSkipInclusive
 					} else {
@@ -467,7 +473,7 @@ impl Parser<'_> {
 				}
 			}
 			t!("..") => {
-				if self.peek_whitespace().kind == t!("=") {
+				if let Some(t!("=")) = self.peek_whitespace().map(|x| x.kind) {
 					self.pop_peek();
 					BinaryOperator::RangeInclusive
 				} else {
@@ -523,7 +529,7 @@ impl Parser<'_> {
 	fn parse_matches(&mut self) -> ParseResult<MatchesOperator> {
 		let peek = self.peek();
 		match peek.kind {
-			TokenKind::Digits | TokenKind::Glued(Glued::Number) => {
+			TokenKind::Digits => {
 				let number = self.next_token_value()?;
 				let op = if self.eat(t!(",")) {
 					let peek = self.next();

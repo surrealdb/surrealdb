@@ -3,8 +3,6 @@ use std::ops::Bound;
 
 use reblessive::Stk;
 
-use super::basic::NumberToken;
-use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupKind;
 use crate::sql::{
@@ -12,10 +10,10 @@ use crate::sql::{
 };
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
-use crate::syn::lexer::compound::{self, Numeric};
+use crate::syn::lexer::compound::{self};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
-use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::syn::token::{Span, TokenKind, t};
 use crate::types::{PublicDuration, PublicGeometry};
 use crate::val::range::TypedRange;
 
@@ -23,20 +21,6 @@ impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
 		let token = self.peek();
 		match token.kind {
-			TokenKind::Glued(Glued::Duration) => {
-				let duration = pop_glued!(self, Duration);
-				Ok(Expr::Literal(Literal::Duration(duration)))
-			}
-			TokenKind::Glued(Glued::Number) => {
-				let v = self.next_token_value()?;
-				match v {
-					NumberToken::Float(f) => Ok(Expr::Literal(Literal::Float(f))),
-					NumberToken::Integer(i) => {
-						Ok(Expr::Literal(Literal::Integer(i.into_int(token.span)?)))
-					}
-					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
-				}
-			}
 			TokenKind::Infinity => Ok(Expr::Literal(Literal::Float(f64::INFINITY))),
 			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
@@ -89,22 +73,27 @@ impl Parser<'_> {
 			}
 			t!("<") => {
 				self.pop_peek();
-				let peek = self.peek_whitespace();
-				if peek.kind == t!("~") {
-					self.pop_peek();
-					let lookup =
-						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
-					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
-				} else if peek.kind == t!("-") {
-					self.pop_peek();
-					let lookup =
-						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?;
-					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
-				} else if peek.kind == t!("->") {
-					self.pop_peek();
-					let lookup =
-						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?;
-					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+				if let Some(peek) = self.peek_whitespace() {
+					if peek.kind == t!("~") {
+						self.pop_peek();
+						let lookup =
+							stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
+						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+					} else if peek.kind == t!("-") {
+						self.pop_peek();
+						let lookup = stk
+							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In)))
+							.await?;
+						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+					} else if peek.kind == t!("->") {
+						self.pop_peek();
+						let lookup = stk
+							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both)))
+							.await?;
+						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+					} else {
+						unexpected!(self, token, "`<-`, `<->` or `<~`")
+					}
 				} else {
 					unexpected!(self, token, "`<-`, `<->` or `<~`")
 				}
@@ -150,10 +139,7 @@ impl Parser<'_> {
 					Expr::Literal(Literal::String(s))
 				}
 			}
-			t!("+")
-			| t!("-")
-			| TokenKind::Digits
-			| TokenKind::Glued(Glued::Number | Glued::Duration) => self.parse_number_like_prime()?,
+			t!("+") | t!("-") | TokenKind::Digits => self.parse_number_like_prime()?,
 			TokenKind::Infinity => {
 				self.pop_peek();
 				Expr::Literal(Literal::Float(f64::INFINITY))
@@ -512,39 +498,33 @@ impl Parser<'_> {
 		start: Span,
 	) -> ParseResult<Expr> {
 		let peek = self.peek();
-		let res = match peek.kind {
-			TokenKind::NaN
-			| TokenKind::Infinity
-			| TokenKind::Digits
-			| TokenKind::Glued(Glued::Number)
-			| t!("+")
-			| t!("-") => {
-				if self.glue_and_peek1()?.kind == t!(",") {
-					let number_span = self.peek().span;
-					let number = self.next_token_value::<Numeric>()?;
-					// eat ','
-					self.next();
+		match peek.kind {
+			t!("+") | t!("-") | TokenKind::NaN | TokenKind::Infinity | TokenKind::Digits => {
+				if let Some(x) = self
+					.speculate(stk, async |_, this| {
+						let Ok(x) = this.next_token_value::<f64>() else {
+							return Ok(None);
+						};
 
-					let x = match number {
-						Numeric::Duration(_) | Numeric::Decimal(_) => {
-							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
-								@number_span => "Coordinate numbers can't be NaN or a decimal");
+						if !this.eat(t!(",")) {
+							return Ok(None);
 						}
-						Numeric::Float(x) => x,
-						Numeric::Integer(x) => x.into_int(number_span)? as f64,
-					};
 
-					let y = self.next_token_value::<f64>()?;
-					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Expr::Literal(Literal::Geometry(PublicGeometry::Point(
-						geo::Point::new(x, y),
-					))));
-				} else {
-					stk.run(|ctx| self.parse_expr_inherit(ctx)).await?
-				}
+						let y = this.next_token_value::<f64>()?;
+						this.expect_closing_delimiter(t!(")"), start)?;
+						Ok(Some(Expr::Literal(Literal::Geometry(PublicGeometry::Point(
+							geo::Point::new(x, y),
+						)))))
+					})
+					.await?
+				{
+					return Ok(x);
+				};
 			}
-			_ => stk.run(|ctx| self.parse_expr_inherit(ctx)).await?,
+			_ => {}
 		};
+
+		let res = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 		let token = self.peek();
 		if token.kind != t!(")")
 			&& Self::starts_disallowed_subquery_statement(peek.kind)

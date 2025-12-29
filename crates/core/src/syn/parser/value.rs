@@ -5,13 +5,12 @@ use std::ops::Bound;
 
 use reblessive::Stk;
 
-use super::basic::NumberToken;
 use super::{ParseResult, Parser};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
-use crate::syn::parser::mac::{expected, pop_glued};
+use crate::syn::parser::mac::{expected, expected_whitespace};
 use crate::syn::parser::unexpected;
-use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::syn::token::{Span, TokenKind, t};
 use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
 	PublicRange, PublicRecordId, PublicRecordIdKey, PublicSet, PublicTable, PublicUuid,
@@ -79,47 +78,33 @@ impl Parser<'_> {
 					return Ok(PublicValue::Set(PublicSet::new()));
 				}
 
-				// Use glue_and_peek1 for simple tokens
-				match self.glue_and_peek1()?.kind {
-					t!(":") => {
-						// It's an object
-						let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
-						//HACK: This is an annoying hack to have geometries work.
-						//
-						// Geometries look exactly like objects and are a strict subsect of objects.
-						// However in code they are distinct and in surrealql the have different
-						// behavior.
-						//
-						// Geom functions don't work with objects and vice-versa.
-						//
-						// The previous parse automatically converted an object to geometry if it
-						// found an matching object. Now it no longer does that and relies on
-						// the 'planning' stage to convert it. But here we still need to do it
-						// in the parser.
-						if let Some(geom) = PublicGeometry::try_from_object(&object) {
-							PublicValue::Geometry(geom)
-						} else {
-							PublicValue::Object(object)
-						}
-					}
-					t!("}") => {
-						// Single-element object: `{value}`
-						// We could parse this in SQON, but in SurrealQL this is a block statement.
-						// So we instead throw an error and require the user to add a trailing
-						// comma for a set.
-						unexpected!(
-							self,
-							token,
-							"`,`",
-							=> "Sets with a single value must have at least a single comma"
-						);
-					}
-					_ => {
-						// It must be a set: `{1, 2, 3}` or `{value}`
-						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
-						PublicValue::Set(set)
-					}
+				if let t!("\"") | t!("'") | TokenKind::Identifier | TokenKind::Digits =
+					self.peek().kind
+					&& let Some(x) = self
+						.speculate(stk, async |stk, this| {
+							let key = this.parse_object_key()?;
+							if !this.eat(t!(":")) {
+								return Ok(None);
+							}
+							let value = stk.run(|stk| this.parse_value(stk)).await?;
+							let mut res = BTreeMap::new();
+							res.insert(key, value);
+
+							if this.eat(t!(",")) {
+								this.parse_value_object::<SurrealQL>(stk, open, res).await.map(Some)
+							} else {
+								this.expect_closing_delimiter(t!("}"), open)?;
+								Ok(Some(PublicObject::from(res)))
+							}
+						})
+						.await?
+				{
+					return Ok(PublicValue::Object(x));
 				}
+
+				// It must be a set: `{1, 2, 3}` or `{value}`
+				let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
+				PublicValue::Set(set)
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -204,25 +189,26 @@ impl Parser<'_> {
 			}
 			t!("..") => {
 				self.pop_peek();
-				let peek = self.peek_whitespace().kind;
-				if peek == t!("=") {
-					self.pop_peek();
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Unbounded,
-						end: Bound::Included(v),
-					}))
-				} else if Self::kind_starts_expression(peek) {
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Unbounded,
-						end: Bound::Excluded(v),
-					}))
-				} else {
-					PublicValue::Range(Box::new(PublicRange {
+				match self.peek_whitespace().map(|x| x.kind) {
+					Some(t!("=")) => {
+						self.pop_peek();
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Unbounded,
+							end: Bound::Included(v),
+						}))
+					}
+					Some(x) if Self::kind_starts_expression(x) => {
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Unbounded,
+							end: Bound::Excluded(v),
+						}))
+					}
+					_ => PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
-					}))
+					})),
 				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
@@ -237,73 +223,61 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => PublicValue::Number(PublicNumber::Decimal(x)),
 				}
 			}
-			TokenKind::Glued(Glued::Number) => {
-				let number = self.next_token_value()?;
-				match number {
-					NumberToken::Integer(i) => {
-						PublicValue::Number(PublicNumber::Int(i.into_int(self.recent_span())?))
-					}
-					NumberToken::Float(f) => PublicValue::Number(PublicNumber::Float(f)),
-					NumberToken::Decimal(d) => PublicValue::Number(PublicNumber::Decimal(d)),
-				}
-			}
-			TokenKind::Glued(Glued::Duration) => {
-				let duration = pop_glued!(self, Duration);
-				PublicValue::Duration(duration)
-			}
 			_ => self
 				.parse_value_record_id_inner::<SurrealQL>(stk)
 				.await
 				.map(PublicValue::RecordId)?,
 		};
 
-		match self.peek_whitespace().kind {
-			t!(">") => {
+		match self.peek_whitespace().map(|x| x.kind) {
+			Some(t!(">")) => {
 				self.pop_peek();
-				expected!(self, t!(".."));
-				let peek = self.peek_whitespace().kind;
-				if peek == t!("=") {
-					self.pop_peek();
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Excluded(res),
-						end: Bound::Included(v),
-					})))
-				} else if Self::kind_starts_expression(peek) {
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Excluded(res),
-						end: Bound::Excluded(v),
-					})))
-				} else {
-					Ok(PublicValue::Range(Box::new(PublicRange {
+				expected_whitespace!(self, t!(".."));
+				match self.peek_whitespace().map(|x| x.kind) {
+					Some(t!("=")) => {
+						self.pop_peek();
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						Ok(PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Excluded(res),
+							end: Bound::Included(v),
+						})))
+					}
+					Some(x) if Self::kind_starts_expression(x) => {
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						Ok(PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Excluded(res),
+							end: Bound::Excluded(v),
+						})))
+					}
+					_ => Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Excluded(res),
 						end: Bound::Unbounded,
-					})))
+					}))),
 				}
 			}
-			t!("..") => {
+			Some(t!("..")) => {
 				self.pop_peek();
 
-				let peek = self.peek_whitespace().kind;
-				if peek == t!("=") {
-					self.pop_peek();
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Included(res),
-						end: Bound::Included(v),
-					})))
-				} else if Self::kind_starts_expression(peek) {
-					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(PublicValue::Range(Box::new(PublicRange {
-						start: Bound::Included(res),
-						end: Bound::Excluded(v),
-					})))
-				} else {
-					Ok(PublicValue::Range(Box::new(PublicRange {
+				match self.peek_whitespace().map(|x| x.kind) {
+					Some(t!("=")) => {
+						self.pop_peek();
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						Ok(PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Included(res),
+							end: Bound::Included(v),
+						})))
+					}
+					Some(x) if Self::kind_starts_expression(x) => {
+						let v = stk.run(|stk| self.parse_value(stk)).await?;
+						Ok(PublicValue::Range(Box::new(PublicRange {
+							start: Bound::Included(res),
+							end: Bound::Excluded(v),
+						})))
+					}
+					_ => Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Included(res),
 						end: Bound::Unbounded,
-					})))
+					}))),
 				}
 			}
 			_ => Ok(res),
@@ -327,7 +301,9 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<Json>(stk, token.span).await.map(PublicValue::Object)
+				self.parse_value_object::<Json>(stk, token.span, BTreeMap::new())
+					.await
+					.map(PublicValue::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -352,10 +328,6 @@ impl Parser<'_> {
 					Numeric::Float(x) => Ok(PublicValue::Number(PublicNumber::Float(x))),
 					Numeric::Decimal(x) => Ok(PublicValue::Number(PublicNumber::Decimal(x))),
 				}
-			}
-			TokenKind::Glued(Glued::Duration) => {
-				let glued = pop_glued!(self, Duration);
-				Ok(PublicValue::Duration(glued))
 			}
 			_ => {
 				match self.parse_value_record_id_inner::<Json>(stk).await.map(PublicValue::RecordId)
@@ -390,11 +362,11 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		start: Span,
+		mut obj: BTreeMap<String, PublicValue>,
 	) -> ParseResult<PublicObject>
 	where
 		VP: ValueParseFunc,
 	{
-		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
 				return Ok(PublicObject::from(obj));
@@ -425,7 +397,21 @@ impl Parser<'_> {
 			set.insert(value);
 
 			if !self.eat(t!(",")) {
+				if set.len() <= 1 {
+					// Single-element object: `{value}`
+					// We could parse this in SQON, but in SurrealQL this is a block statement.
+					// So we instead throw an error and require the user to add a trailing
+					// comma for a set.
+					unexpected!(
+						self,
+						self.peek(),
+						"`,`",
+						=> "Sets with a single value must have at least a single comma"
+					);
+				}
+
 				self.expect_closing_delimiter(t!("}"), start)?;
+
 				return Ok(set);
 			}
 		}
@@ -477,7 +463,9 @@ impl Parser<'_> {
 			t!("u'") | t!("u\"") => PublicRecordIdKey::Uuid(self.next_token_value::<PublicUuid>()?),
 			t!("{") => {
 				let peek = self.pop_peek();
-				PublicRecordIdKey::Object(self.parse_value_object::<VP>(stk, peek.span).await?)
+				PublicRecordIdKey::Object(
+					self.parse_value_object::<VP>(stk, peek.span, BTreeMap::new()).await?,
+				)
 			}
 			t!("[") => {
 				let peek = self.pop_peek();
@@ -486,21 +474,23 @@ impl Parser<'_> {
 			t!("+") => {
 				self.pop_peek();
 				// starting with a + so it must be a number
-				let digits_token = self.peek_whitespace();
-				match digits_token.kind {
-					TokenKind::Digits => {}
-					_ => unexpected!(self, digits_token, "an integer"),
-				}
+				let digits_token = if let Some(digits_token) = self.peek_whitespace() {
+					match digits_token.kind {
+						TokenKind::Digits => digits_token,
+						_ => unexpected!(self, digits_token, "an integer"),
+					}
+				} else {
+					bail!("Unexpected whitespace",@self.last_span() => "No whitespace allowed after this token")
+				};
 
-				let next = self.peek_whitespace();
-				match next.kind {
-					t!(".") => {
+				match self.peek_whitespace().map(|x| x.kind) {
+					Some(t!(".")) => {
 						// TODO(delskayn) explain that record-id's cant have matissas,
 						// exponents or a number suffix
-						unexpected!(self, next, "an integer", => "Numeric Record-id keys can only be integers");
+						unexpected!(self, self.peek(), "an integer", => "Numeric Record-id keys can only be integers");
 					}
-					x if Self::kind_is_identifier(x) => {
-						let span = peek.span.covers(next.span);
+					Some(x) if Self::kind_is_identifier(x) => {
+						let span = peek.span.covers(self.peek().span);
 						bail!("Unexpected token `{x}` expected an integer", @span);
 					}
 					// allowed
@@ -534,7 +524,8 @@ impl Parser<'_> {
 			}
 			TokenKind::Digits => {
 				if self.settings.flexible_record_id
-					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
+					&& let Some(peek) = self.peek_whitespace1()
+					&& Self::kind_is_identifier(peek.kind)
 				{
 					let ident = self.parse_flexible_ident()?;
 					PublicRecordIdKey::String(ident)
@@ -548,15 +539,6 @@ impl Parser<'_> {
 						PublicRecordIdKey::String(digits_str.to_owned())
 					}
 				}
-			}
-			TokenKind::Glued(Glued::Duration) if self.settings.flexible_record_id => {
-				let slice = self.lexer.reader.span(peek.span);
-				if slice.iter().any(|x| !x.is_ascii()) {
-					unexpected!(self, peek, "a identifier");
-				}
-				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).expect("parser validated utf8");
-				PublicRecordIdKey::String(text)
 			}
 			_ => {
 				let ident = if self.settings.flexible_record_id {

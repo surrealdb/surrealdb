@@ -86,8 +86,8 @@ impl Span {
 
 	/// Returns if this span immediately follows the given.
 	pub fn follows_from(&self, other: &Self) -> bool {
-		let end = self.offset as usize + self.len as usize;
-		other.offset as usize == end
+		let end = other.offset as usize + other.len as usize;
+		self.offset as usize == end
 	}
 }
 
@@ -337,25 +337,9 @@ impl StringKind {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum Glued {
-	Number,
-	Duration,
-}
-
-impl Glued {
-	fn as_str(&self) -> &'static str {
-		match self {
-			Glued::Number => "a number",
-			Glued::Duration => "a duration",
-		}
-	}
-}
-
 /// The type of token
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum TokenKind {
-	WhiteSpace,
 	Keyword(Keyword),
 	Algorithm(Algorithm),
 	Language(Language),
@@ -409,10 +393,6 @@ pub enum TokenKind {
 	NaN,
 	/// The infinity number token.
 	Infinity,
-	/// A token which is a compound token which has been glued together and then
-	/// put back into the token buffer. This is required for some places where
-	/// we need to look past possible compound tokens.
-	Glued(Glued),
 	/// A token which could not be properly lexed.
 	Invalid,
 }
@@ -429,7 +409,7 @@ const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
-		matches!(self, TokenKind::Identifier | TokenKind::Glued(_))
+		matches!(self, TokenKind::Identifier)
 	}
 
 	fn algorithm_as_str(alg: Algorithm) -> &'static str {
@@ -484,12 +464,10 @@ impl TokenKind {
 			TokenKind::At => "@",
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
-			TokenKind::WhiteSpace => "whitespace",
 			TokenKind::String(x) => x.as_str(),
 			TokenKind::Digits => "a number",
 			TokenKind::NaN => "NaN",
 			TokenKind::Infinity => "Infinity",
-			TokenKind::Glued(x) => x.as_str(),
 			// below are small broken up tokens which are most of the time identifiers.
 		}
 	}
@@ -509,22 +487,9 @@ impl Token {
 		}
 	}
 
-	/// Returns if the token is invalid.
-	pub fn is_invalid(&self) -> bool {
-		matches!(self.kind, TokenKind::Invalid)
-	}
-
 	/// Returns if the token is `end of file`.
 	pub fn is_eof(&self) -> bool {
 		matches!(self.kind, TokenKind::Eof)
-	}
-
-	pub fn is_followed_by(&self, other: &Token) -> bool {
-		self.span.is_followed_by(&other.span)
-	}
-
-	pub fn follows_from(&self, other: &Token) -> bool {
-		self.span.follows_from(&other.span)
 	}
 }
 

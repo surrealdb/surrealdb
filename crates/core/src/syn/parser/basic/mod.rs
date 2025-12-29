@@ -1,18 +1,13 @@
-use std::mem;
-
 use rust_decimal::Decimal;
 
-use super::GluedValue;
-use super::mac::pop_glued;
 use crate::sql::Param;
 use crate::sql::language::Language;
-use crate::syn::error::{bail, syntax_error};
+use crate::syn::error::bail;
 use crate::syn::lexer::Lexer;
-use crate::syn::lexer::compound::{self, NumberKind, ParsedInt, prepare_number_str};
+use crate::syn::lexer::compound::{self, ParsedInt};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
-use crate::syn::token::{self, Span, TokenKind, t};
-use crate::val::DecimalExt as _;
+use crate::syn::token::{Span, TokenKind, t};
 
 mod number;
 
@@ -62,7 +57,6 @@ impl TokenValue for surrealdb_types::Duration {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Duration) => Ok(pop_glued!(parser, Duration)),
 			TokenKind::Digits => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::duration)?.value;
@@ -231,37 +225,6 @@ impl TokenValue for NumberToken {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			TokenKind::Glued(token::Glued::Number) => {
-				parser.pop_peek();
-				let GluedValue::Number(x) = mem::take(&mut parser.glued_value) else {
-					panic!("Glued token was next but glued value was not of the correct value");
-				};
-				let number_str = prepare_number_str(parser.lexer.span_str(token.span));
-				match x {
-					NumberKind::Integer => Ok(NumberToken::Integer(ParsedInt::from_number_str(
-						number_str.as_ref(),
-						token.span,
-					)?)),
-					NumberKind::Float => number_str
-						.trim_end_matches("f")
-						.parse()
-						.map(NumberToken::Float)
-						.map_err(|e| syntax_error!("Failed to parse number: {e}", @token.span)),
-					NumberKind::Decimal => {
-						let number_str = number_str.trim_end_matches("dec");
-						let decimal = if number_str.contains(['e', 'E']) {
-							Decimal::from_scientific(number_str).map_err(
-								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
-							)?
-						} else {
-							Decimal::from_str_normalized(number_str).map_err(
-								|e| syntax_error!("Failed to parser decimal: {e}", @token.span),
-							)?
-						};
-						Ok(NumberToken::Decimal(decimal))
-					}
-				}
-			}
 			t!("+") | t!("-") | TokenKind::Digits => {
 				parser.pop_peek();
 				let token = parser.lexer.lex_compound(token, compound::number)?;
@@ -345,17 +308,20 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => {
-				let peek = self.peek_whitespace();
-				let span = match peek.kind {
-					x if Self::kind_is_keyword_like(x) => {
-						self.pop_peek();
-						token.span.covers(peek.span)
+				let span = if let Some(peek) = self.peek_whitespace() {
+					match peek.kind {
+						x if Self::kind_is_keyword_like(x) => {
+							self.pop_peek();
+							token.span.covers(peek.span)
+						}
+						TokenKind::Identifier => {
+							self.pop_peek();
+							token.span.covers(peek.span)
+						}
+						_ => token.span,
 					}
-					TokenKind::Identifier => {
-						self.pop_peek();
-						token.span.covers(peek.span)
-					}
-					_ => token.span,
+				} else {
+					token.span
 				};
 				Ok(self.lexer.span_str(span).to_owned())
 			}

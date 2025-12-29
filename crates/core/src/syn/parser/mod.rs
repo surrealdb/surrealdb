@@ -67,15 +67,12 @@ use self::token_buffer::TokenBuffer;
 use crate::sql;
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
-use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::types::{PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicUuid};
 
 mod basic;
 mod builtin;
 mod expression;
 mod function;
-mod glue;
 mod idiom;
 mod kind;
 pub(crate) mod mac;
@@ -115,18 +112,6 @@ pub enum PartialResult<T> {
 		err: SyntaxError,
 		used: usize,
 	},
-}
-
-#[derive(Default)]
-pub enum GluedValue {
-	Duration(PublicDuration),
-	Datetime(PublicDatetime),
-	Uuid(PublicUuid),
-	Number(NumberKind),
-	#[default]
-	None,
-	Bytes(PublicBytes),
-	File(PublicFile),
 }
 
 #[derive(Clone, Debug)]
@@ -185,7 +170,6 @@ pub struct Parser<'a> {
 	lexer: Lexer<'a>,
 	last_span: Span,
 	token_buffer: TokenBuffer<4>,
-	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
 	settings: ParserSettings,
 	unscape_buffer: Vec<u8>,
@@ -208,7 +192,6 @@ impl<'a> Parser<'a> {
 			lexer: Lexer::new(source),
 			last_span: Span::empty(),
 			token_buffer: TokenBuffer::new(),
-			glued_value: GluedValue::None,
 			table_as_field: true,
 			settings,
 			unscape_buffer: Vec::new(),
@@ -223,12 +206,7 @@ impl<'a> Parser<'a> {
 	/// Returns the next token and advance the parser one token forward.
 	#[expect(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> Token {
-		let res = loop {
-			let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
-			if res.kind != TokenKind::WhiteSpace {
-				break res;
-			}
-		};
+		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
 		self.last_span = res.span;
 		res
 	}
@@ -237,10 +215,12 @@ impl<'a> Parser<'a> {
 	///
 	/// This function is like next but returns whitespace tokens which are
 	/// normally skipped
-	pub fn next_whitespace(&mut self) -> Token {
-		let res = self.token_buffer.pop().unwrap_or_else(|| self.lexer.next_token());
-		self.last_span = res.span;
-		res
+	pub fn next_whitespace(&mut self) -> Option<Token> {
+		if let Some(x) = self.peek_whitespace() {
+			self.pop_peek();
+			return Some(x);
+		}
+		None
 	}
 
 	/// Returns if there is a token in the token buffer, meaning that a token
@@ -261,23 +241,12 @@ impl<'a> Parser<'a> {
 
 	/// Returns the next token without consuming it.
 	pub fn peek(&mut self) -> Token {
-		loop {
-			let Some(x) = self.token_buffer.first() else {
-				let res = loop {
-					let res = self.lexer.next_token();
-					if res.kind != TokenKind::WhiteSpace {
-						break res;
-					}
-				};
-				self.token_buffer.push(res);
-				return res;
-			};
-			if x.kind == TokenKind::WhiteSpace {
-				self.token_buffer.pop();
-				continue;
-			}
-			break x;
-		}
+		let Some(x) = self.token_buffer.first() else {
+			let res = self.lexer.next_token();
+			self.token_buffer.push(res);
+			return res;
+		};
+		x
 	}
 
 	/// Returns the next token without consuming it.
@@ -285,13 +254,20 @@ impl<'a> Parser<'a> {
 	/// This function is like peek but returns whitespace tokens which are
 	/// normally skipped Does not undo tokens skipped in a previous normal
 	/// peek.
-	pub fn peek_whitespace(&mut self) -> Token {
-		let Some(x) = self.token_buffer.first() else {
-			let res = self.lexer.next_token();
-			self.token_buffer.push(res);
-			return res;
+	pub fn peek_whitespace(&mut self) -> Option<Token> {
+		let token = if let Some(x) = self.token_buffer.first() {
+			x
+		} else {
+			let token = self.lexer.next_token();
+			self.token_buffer.push(token);
+			token
 		};
-		x
+
+		if !token.span.follows_from(&self.last_span) {
+			return None;
+		}
+
+		Some(token)
 	}
 
 	/// Return the token kind of the next token without consuming it.
@@ -303,12 +279,7 @@ impl<'a> Parser<'a> {
 	/// `peek_token_at(0)` is equivalent to `peek`.
 	pub(crate) fn peek_token_at(&mut self, at: u8) -> Token {
 		for _ in self.token_buffer.len()..=at {
-			let r = loop {
-				let r = self.lexer.next_token();
-				if r.kind != TokenKind::WhiteSpace {
-					break r;
-				}
-			};
+			let r = self.lexer.next_token();
 			self.token_buffer.push(r);
 		}
 		self.token_buffer.at(at).expect("token exists at index")
@@ -323,21 +294,41 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Returns the next n'th token without consuming it.
+	/// This function will return None if there was any whitespace between the 'nth - 1; token
+	/// and the nth token.
+	///
 	/// `peek_token_at(0)` is equivalent to `peek`.
-	pub fn peek_whitespace_token_at(&mut self, at: u8) -> Token {
-		for _ in self.token_buffer.len()..=at {
-			let r = self.lexer.next_token();
-			self.token_buffer.push(r);
+	pub fn peek_whitespace_token_at<const AT: u8>(&mut self) -> Option<Token> {
+		const { assert!(AT < 4, "Peeking more then 4 tokens is not supported") };
+		if AT == 0 {
+			return self.peek_whitespace();
 		}
-		self.token_buffer.at(at).expect("token exists at index")
+
+		for _ in self.token_buffer.len()..=AT {
+			let res = self.lexer.next_token();
+			self.token_buffer.push(res);
+		}
+
+		let Some(token) = self.token_buffer.at(AT) else {
+			unreachable!()
+		};
+		let Some(prev_token) = self.token_buffer.at(AT - 1) else {
+			unreachable!()
+		};
+
+		if !token.span.follows_from(&prev_token.span) {
+			return None;
+		}
+
+		Some(token)
 	}
 
-	pub fn peek_whitespace1(&mut self) -> Token {
-		self.peek_whitespace_token_at(1)
+	pub fn peek_whitespace1(&mut self) -> Option<Token> {
+		self.peek_whitespace_token_at::<1>()
 	}
 
-	pub fn peek_whitespace2(&mut self) -> Token {
-		self.peek_whitespace_token_at(2)
+	pub fn peek_whitespace2(&mut self) -> Option<Token> {
+		self.peek_whitespace_token_at::<2>()
 	}
 
 	/// Returns the span of the next token if it was already peeked, otherwise
@@ -375,9 +366,12 @@ impl<'a> Parser<'a> {
 	/// Eat the next token if it is of the given kind.
 	/// Returns whether a token was eaten.
 	///
-	/// Unlike [`Parser::eat`] this doesn't skip whitespace tokens
+	/// Unlike [`Parser::eat`] this function will not consume the token if there is whitespace
+	/// between the last and next token.
 	pub fn eat_whitespace(&mut self, token: TokenKind) -> bool {
-		let peek = self.peek_whitespace();
+		let Some(peek) = self.peek_whitespace() else {
+			return false;
+		};
 		if token == peek.kind {
 			self.token_buffer.pop();
 			self.last_span = peek.span;
@@ -385,12 +379,6 @@ impl<'a> Parser<'a> {
 		} else {
 			false
 		}
-	}
-
-	/// Forces the next token to be the given one.
-	/// Used in token gluing to replace the current one with the glued token.
-	fn prepend_token(&mut self, token: Token) {
-		self.token_buffer.push_front(token);
 	}
 
 	/// Checks if the next token is of the given kind. If it isn't it returns a
@@ -455,7 +443,9 @@ impl<'a> Parser<'a> {
 	/// - Third, any parsing using speculating and then recovering is doing extra work it ideally
 	///   didn't have to do.
 	///
-	/// Please limit the use of this function to small branches that can't recurse.
+	/// Please limit the usage to only syntax that can't be efficiently parsed without backtracking
+	/// and do not use it for implementing new syntax. If new syntax requires this function to
+	/// implement it consider altering the syntax to remove the need for backtracking.
 	pub(crate) async fn speculate<T, F>(&mut self, stk: &mut Stk, cb: F) -> ParseResult<Option<T>>
 	where
 		F: AsyncFnOnce(&mut Stk, &mut Parser) -> ParseResult<Option<T>>,

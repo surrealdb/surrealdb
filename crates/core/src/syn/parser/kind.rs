@@ -10,7 +10,7 @@ use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
-use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
+use crate::syn::token::{Keyword, Span, TokenKind, t};
 use crate::types::PublicDuration;
 
 impl Parser<'_> {
@@ -214,7 +214,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Ok(KindLiteral::Float(f64::INFINITY))
 			}
-			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
+			t!("+") | t!("-") => {
 				let kind = self.next_token_value::<NumberToken>()?;
 				let kind = match kind {
 					NumberToken::Float(f) => KindLiteral::Float(f),
@@ -225,7 +225,6 @@ impl Parser<'_> {
 				};
 				Ok(kind)
 			}
-			TokenKind::Glued(Glued::Duration) => self.next_token_value().map(KindLiteral::Duration),
 			TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
@@ -274,7 +273,6 @@ impl Parser<'_> {
 				| t!("false")
 				| t!("'") | t!("\"")
 				| t!("+") | t!("-")
-				| TokenKind::Glued(Glued::Duration | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)

@@ -5,7 +5,9 @@ use crate::sql::arbitrary::{
 	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
 use crate::sql::kind::KindLiteral;
-use crate::sql::statements::alter::{AlterIndexStatement, AlterKind};
+use crate::sql::statements::alter::{
+	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterSystemStatement,
+};
 use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
 };
@@ -301,6 +303,29 @@ impl<'a> arbitrary::Arbitrary<'a> for AlterIndexStatement {
 			if_exists: u.arbitrary()?,
 			comment,
 			prepare_remove,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterSystemStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let query_timeout = match u.int_in_range(0u8..=1)? {
+			0 => AlterKind::Drop,
+			1 => AlterKind::Set(u.arbitrary()?),
+			_ => unreachable!(),
+		};
+
+		Ok(AlterSystemStatement {
+			query_timeout,
+			compact: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterDatabaseStatement {
+	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(AlterDatabaseStatement {
+			compact: true,
 		})
 	}
 }

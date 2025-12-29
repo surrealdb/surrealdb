@@ -106,7 +106,7 @@ impl Parser<'_> {
 				| t!("[") | t!("/")
 				| t!("|") | t!("||")
 				| t!("<") | t!("$param")
-				| t!("..") | TokenKind::Glued(_)
+				| t!("..")
 		) || Self::kind_starts_subquery(kind)
 			|| Self::kind_is_identifier(kind)
 	}
