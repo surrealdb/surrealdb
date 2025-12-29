@@ -520,7 +520,7 @@ pub(super) struct ConcurrentCollector<'a> {
 	ite: &'a mut Iterator,
 }
 impl Collector for ConcurrentCollector<'_> {
-	#[instrument(skip_all)]
+	#[instrument(level = "trace", skip_all)]
 	async fn collect(&mut self, collectable: Collectable) -> Result<()> {
 		// if it is skippable don't need to process the document
 		if self.ite.skippable() > 0 {
@@ -545,7 +545,7 @@ pub(super) struct ConcurrentDistinctCollector<'a> {
 }
 
 impl Collector for ConcurrentDistinctCollector<'_> {
-	#[instrument(skip_all)]
+	#[instrument(level = "trace", skip_all)]
 	async fn collect(&mut self, collectable: Collectable) -> Result<()> {
 		let skippable = self.coll.ite.skippable() > 0;
 		// If it is skippable, we just need to collect the record id (if any)
