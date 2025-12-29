@@ -19,7 +19,8 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+	DatabaseDefinition, DatabaseId, FullTextParams, Index, IndexDefinition, IndexId, NamespaceId,
+	Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, FrozenContext};
@@ -27,8 +28,9 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::ft::fulltext::{FullTextIndex, TermBatch};
 use crate::idx::index::IndexOperation;
+use crate::idx::seqdocids::DocId;
 use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
@@ -585,6 +587,11 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<()> {
+		// Check if this is a fulltext index - if so, use batch indexing
+		if let Index::FullText(ref p) = self.ix.index {
+			return self.index_initial_batch_fulltext(ctx, tx, values, count, p).await;
+		}
+
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
@@ -650,6 +657,102 @@ impl Building {
 		// Check if we trigger the compaction
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
+		Ok(())
+	}
+
+	/// Batch index fulltext documents efficiently.
+	/// This method uses TermBatch to accumulate all writes and flush them at once.
+	async fn index_initial_batch_fulltext(
+		&self,
+		ctx: &FrozenContext,
+		tx: &Transaction,
+		values: Vec<(Key, Val)>,
+		count: &mut usize,
+		p: &FullTextParams,
+	) -> Result<()> {
+		let mut stack = TreeStack::new();
+
+		// Create the FullTextIndex once for the entire batch
+		let fti = FullTextIndex::new(ctx.get_index_stores(), tx, self.ikb.clone(), p).await?;
+
+		// Collect documents to index (excluding those with pending appending)
+		let mut docs_to_index: Vec<(RecordIdKey, Vec<Value>)> = Vec::with_capacity(values.len());
+
+		for (k, v) in &values {
+			if self.is_aborted().await {
+				return Ok(());
+			}
+			let key = record::RecordKey::decode_key(k)?;
+			let val = Record::kv_decode_value(v.clone())?;
+			let rid: Arc<RecordId> = RecordId {
+				table: key.tb.into_owned(),
+				key: key.id,
+			}
+			.into();
+
+			// Do we already have an appended value?
+			let ip = self.ikb.new_ip_key(rid.key.clone());
+			if tx.get(&ip, None).await?.is_some() {
+				// Skip - this document has a pending update in the appending queue
+				continue;
+			}
+
+			// Build the values to index
+			let doc = CursorDoc::new(Some(rid.clone()), None, val);
+			let opt_values = stack
+				.enter(|stk| Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc))
+				.finish()
+				.await?;
+
+			if let Some(values) = opt_values {
+				docs_to_index.push((rid.key.clone(), values));
+			}
+		}
+
+		if docs_to_index.is_empty() {
+			return Ok(());
+		}
+
+		// Allocate doc_ids in batch
+		let doc_count = docs_to_index.len() as u64;
+		let start_doc_id = fti.doc_ids().allocate_doc_ids(ctx, doc_count).await?;
+
+		// Create a TermBatch to accumulate writes
+		let mut batch = TermBatch::new();
+
+		// Index each document using the batch
+		for (i, (record_id, content)) in docs_to_index.into_iter().enumerate() {
+			if self.is_aborted().await {
+				return Ok(());
+			}
+			self.is_beyond_threshold(Some(*count))?;
+
+			let doc_id: DocId = start_doc_id + i as u64;
+
+			// Create doc_id mappings
+			fti.doc_ids().create_doc_mapping(tx, doc_id, record_id).await?;
+
+			// Index the content using batch method
+			stack
+				.enter(|stk| {
+					fti.index_content_batch(stk, ctx, &self.opt, doc_id, content, &mut batch)
+				})
+				.finish()
+				.await?;
+
+			// Increment the count and update the status
+			*count += 1;
+			self.set_status(BuildingStatus::Indexing {
+				initial: Some(*count),
+				pending: Some(self.queue.read().await.pending() as usize),
+				updated: None,
+			})
+			.await;
+		}
+
+		// Flush the batch
+		fti.flush_batch(tx, self.opt.id(), batch).await?;
+
 		Ok(())
 	}
 

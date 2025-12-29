@@ -17,7 +17,7 @@ use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use memory_manager::MemoryManager;
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
-	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	OptimisticTransactionOptions, Options, ReadOptions, WriteBatchWithTransaction, WriteOptions,
 };
 use tokio::sync::Mutex;
 
@@ -527,6 +527,39 @@ impl Transactable for Transaction {
 		// Mark this transaction as containing a write operation
 		self.store_writes();
 		// Return result
+		Ok(())
+	}
+
+	/// Write multiple key-value pairs in a single batch operation.
+	///
+	/// This method bypasses the transaction's conflict checking and writes
+	/// directly to the database using a WriteBatch. This is significantly
+	/// faster for bulk operations but should only be used when conflict
+	/// detection is not needed (e.g., during index building with unique keys).
+	async fn batch_write(&self, entries: Vec<(Key, Val)>) -> Result<()> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(false) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Create a WriteBatch and add all entries
+		let mut batch = WriteBatchWithTransaction::<true>::default();
+		for (key, val) in entries {
+			batch.put(key, val);
+		}
+		// Write the batch directly to the database, bypassing transaction conflict checking
+		self.db.write(batch)?;
+		// If we have a coordinator, wait for the grouped fsync
+		if let Some(coordinator) = &self.commit_coordinator {
+			coordinator.wait_for_sync().await?;
+		}
 		Ok(())
 	}
 
