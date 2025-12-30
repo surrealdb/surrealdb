@@ -579,6 +579,30 @@ async fn receive_all_pending_notifications<S: Stream<Item = Result<Notification<
 	results
 }
 
+/// Test that LIVE SELECT returns UUID via take() method
+/// This is a regression test for https://github.com/surrealdb/surrealdb/issues/6693
+pub async fn live_select_returns_uuid(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	db.query(format!("DEFINE TABLE {table}")).await.unwrap();
+
+	// Execute LIVE SELECT and get the result via take()
+	let mut response = db.query(format!("LIVE SELECT * FROM {table}")).await.unwrap();
+
+	// The response should have 1 statement
+	assert_eq!(response.num_statements(), 1, "LIVE SELECT should return exactly one result");
+
+	// Take the result - it should be a UUID
+	let result: Value = response.take(0).unwrap();
+	assert!(result.is_uuid(), "LIVE SELECT should return a UUID, got: {:?}", result);
+
+	drop(permit);
+}
+
 define_include_tests!(live => {
 	#[test_log::test(tokio::test)]
 	live_select_table,
@@ -592,4 +616,6 @@ define_include_tests!(live => {
 	live_select_with_fetch,
 	#[test_log::test(tokio::test)]
 	live_query_delete_notifications,
+	#[test_log::test(tokio::test)]
+	live_select_returns_uuid,
 });
