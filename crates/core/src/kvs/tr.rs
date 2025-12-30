@@ -185,6 +185,12 @@ impl Transactor {
 		self.inner.replace(key, val).await
 	}
 
+	/// Write multiple key-value pairs in a single batch operation.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn batch_write(&self, entries: Vec<(Key, Val)>) -> Result<()> {
+		self.inner.batch_write(entries).await
+	}
+
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<()>

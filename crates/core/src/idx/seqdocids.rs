@@ -139,6 +139,49 @@ impl SeqDocIds {
 		tx.get(&ikb.new_ii_key(doc_id), None).await
 	}
 
+	/// Allocates a batch of new document IDs.
+	///
+	/// This method allocates `count` new document IDs from the sequence
+	/// without creating any mappings. The caller is responsible for
+	/// creating the id -> doc_id and doc_id -> id mappings.
+	///
+	/// # Arguments
+	/// * `ctx` - The context containing transaction and sequence information
+	/// * `count` - The number of document IDs to allocate
+	///
+	/// # Returns
+	/// * `Ok(start_doc_id)` - The first allocated document ID. The allocated range is
+	///   [start_doc_id, start_doc_id + count).
+	pub(crate) async fn allocate_doc_ids(&self, ctx: &FrozenContext, count: u64) -> Result<DocId> {
+		let start = ctx
+			.try_get_sequences()?
+			.next_fts_doc_id_range(Some(ctx), self.ikb.clone(), count)
+			.await?;
+		Ok(start)
+	}
+
+	/// Creates the bidirectional mappings for a document ID.
+	///
+	/// This is used after `allocate_doc_ids` to create the mappings
+	/// for each allocated document ID.
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use
+	/// * `doc_id` - The document ID
+	/// * `id` - The record ID to map to
+	pub(crate) async fn create_doc_mapping(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+		id: RecordIdKey,
+	) -> Result<()> {
+		let id_key = self.ikb.new_id_key(id.clone());
+		tx.set(&id_key, &doc_id, None).await?;
+		let k = self.ikb.new_ii_key(doc_id);
+		tx.set(&k, &id, None).await?;
+		Ok(())
+	}
+
 	/// Removes a document ID and its associated record ID
 	///
 	/// Deletes both the forward (record ID to document ID) and reverse

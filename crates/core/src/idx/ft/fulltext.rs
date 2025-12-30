@@ -125,6 +125,126 @@ pub(crate) struct Bm25Params {
 	pub(in crate::idx) b: f32,
 }
 
+/// Batch accumulator for bulk fulltext indexing.
+/// Collects all writes and flushes them efficiently using batch_write.
+pub(crate) struct TermBatch {
+	td_writes: HashMap<(String, DocId), TermDocument>,
+	tt_entries: HashSet<(String, DocId)>,
+	dl_writes: HashMap<DocId, DocLength>,
+	total_doc_length: u64,
+	doc_count: u64,
+}
+
+impl TermBatch {
+	/// Create a new batch accumulator
+	pub fn new() -> Self {
+		Self {
+			td_writes: HashMap::new(),
+			tt_entries: HashSet::new(),
+			dl_writes: HashMap::new(),
+			total_doc_length: 0,
+			doc_count: 0,
+		}
+	}
+
+	/// Add a document's terms to the batch (without offsets, internal use only)
+	fn add_document_terms(
+		&mut self,
+		doc_id: DocId,
+		doc_length: DocLength,
+		term_frequencies: HashMap<&str, TermFrequency>,
+	) {
+		// Accumulate term-document entries
+		for (term, freq) in term_frequencies {
+			let key = (term.to_string(), doc_id);
+			self.td_writes.insert(
+				key.clone(),
+				TermDocument {
+					f: freq,
+					o: Vec::new(),
+				},
+			);
+			self.tt_entries.insert(key);
+		}
+
+		// Track document length
+		self.total_doc_length += doc_length;
+		self.doc_count += 1;
+		self.dl_writes.insert(doc_id, doc_length);
+	}
+
+	/// Add a document's terms with offsets to the batch (internal use only)
+	fn add_document_terms_with_offsets(
+		&mut self,
+		doc_id: DocId,
+		doc_length: DocLength,
+		term_offsets: HashMap<&str, Vec<Offset>>,
+	) {
+		// Accumulate term-document entries with offsets
+		for (term, offsets) in term_offsets {
+			let key = (term.to_string(), doc_id);
+			self.td_writes.insert(
+				key.clone(),
+				TermDocument {
+					f: offsets.len() as TermFrequency,
+					o: offsets,
+				},
+			);
+			self.tt_entries.insert(key);
+		}
+
+		// Track document length
+		self.total_doc_length += doc_length;
+		self.doc_count += 1;
+		self.dl_writes.insert(doc_id, doc_length);
+	}
+
+	/// Flush all accumulated writes to the transaction (internal use only)
+	async fn flush(self, tx: &Transaction, ikb: &IndexKeyBase, nid: Uuid) -> Result<()> {
+		use crate::kvs::{KVKey, KVValue};
+
+		// Collect all entries that can be written in a single batch
+		let mut entries: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(
+			self.td_writes.len() + self.tt_entries.len() + self.dl_writes.len() + 1,
+		);
+
+		// 1. Term-document entries
+		for ((term, doc_id), td) in self.td_writes {
+			let key = ikb.new_td(&term, doc_id);
+			entries.push((key.encode_key()?, td.kv_encode_value()?));
+		}
+
+		// 2. Term transaction log entries
+		for (term, doc_id) in self.tt_entries {
+			let key = ikb.new_tt(&term, doc_id, nid, Uuid::now_v7(), true);
+			entries.push((key.encode_key()?, String::new().kv_encode_value()?));
+		}
+
+		// 3. Document length entries
+		for (doc_id, doc_length) in self.dl_writes {
+			let key = ikb.new_dl(doc_id);
+			entries.push((key.encode_key()?, doc_length.kv_encode_value()?));
+		}
+
+		// 4. DocLengthAndCount delta
+		if self.doc_count > 0 {
+			let key = ikb.new_dc_with_id(0, nid, Uuid::now_v7());
+			let dcl = DocLengthAndCount {
+				total_docs_length: self.total_doc_length as i128,
+				doc_count: self.doc_count as i64,
+			};
+			entries.push((key.encode_key()?, dcl.kv_encode_value()?));
+		}
+
+		// Write all entries in a single batch
+		if !entries.is_empty() {
+			tx.batch_write(entries).await?;
+		}
+
+		Ok(())
+	}
+}
+
 /// The main full-text index implementation that supports concurrent read and
 /// write operations
 pub(crate) struct FullTextIndex {
@@ -295,6 +415,48 @@ impl FullTextIndex {
 		}
 		// We're done
 		Ok(())
+	}
+
+	/// Batch index multiple documents efficiently.
+	/// This method accumulates all writes and flushes them at once,
+	/// significantly reducing the number of individual KV operations.
+	pub(crate) async fn index_content_batch(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc_id: DocId,
+		content: Vec<Value>,
+		batch: &mut TermBatch,
+	) -> Result<()> {
+		// Collect the tokens
+		let tokens =
+			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
+
+		if self.highlighting {
+			let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
+			batch.add_document_terms_with_offsets(doc_id, dl, offsets);
+		} else {
+			let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
+			batch.add_document_terms(doc_id, dl, tf);
+		}
+
+		Ok(())
+	}
+
+	/// Flush a TermBatch to the transaction
+	pub(crate) async fn flush_batch(
+		&self,
+		tx: &Transaction,
+		nid: Uuid,
+		batch: TermBatch,
+	) -> Result<()> {
+		batch.flush(tx, &self.ikb, nid).await
+	}
+
+	/// Returns a reference to the document ID manager
+	pub(crate) fn doc_ids(&self) -> &SeqDocIds {
+		&self.doc_ids
 	}
 
 	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {

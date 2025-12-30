@@ -347,6 +347,15 @@ impl Transaction {
 		Ok(self.tr.replace(key, val).await.map_err(Error::from)?)
 	}
 
+	/// Write multiple key-value pairs in a single batch operation.
+	///
+	/// This method provides an optimized path for bulk writes.
+	/// The entries should be pre-encoded as (key_bytes, value_bytes) pairs.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn batch_write(&self, entries: Vec<(Vec<u8>, Vec<u8>)>) -> Result<()> {
+		Ok(self.tr.batch_write(entries).await.map_err(Error::from)?)
+	}
+
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys, in a single request to the

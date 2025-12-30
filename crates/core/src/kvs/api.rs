@@ -160,6 +160,27 @@ pub trait Transactable: requirements::TransactionRequirements {
 		self.delc(key, chk).await
 	}
 
+	/// Write multiple key-value pairs in a single batch operation.
+	///
+	/// This method provides an optimized path for bulk writes. The default
+	/// implementation writes each entry individually, but storage backends
+	/// may override this for better performance (e.g., RocksDB uses WriteBatch).
+	async fn batch_write(&self, entries: Vec<(Key, Val)>) -> Result<()> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Default implementation: write each entry individually
+		for (key, val) in entries {
+			self.set(key, val, None).await?;
+		}
+		Ok(())
+	}
+
 	/// Fetch many keys from the datastore.
 	///
 	/// This function fetches all matching keys pairs from the underlying
