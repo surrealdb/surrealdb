@@ -51,7 +51,7 @@ use crate::dbs::{
 	Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session,
 };
 use crate::err::Error;
-use crate::exec::logical_plan_to_execution_plan;
+use crate::exec::planner::logical_plan_to_execution_plan;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
@@ -136,7 +136,7 @@ pub struct Datastore {
 }
 
 #[derive(Clone)]
-pub(super) struct TransactionFactory {
+pub(crate) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
@@ -1796,7 +1796,7 @@ impl Datastore {
 			Ok(execution_plan) => {
 				let stream_executor = StreamExecutor::new(execution_plan);
 
-				stream_executor.execute_collected().await
+				stream_executor.execute_collected(self).await
 			}
 			Err((plan, err)) => {
 				tracing::debug!(
