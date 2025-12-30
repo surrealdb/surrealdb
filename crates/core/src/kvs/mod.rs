@@ -46,6 +46,8 @@ pub(crate) mod slowlog;
 pub(crate) mod tasklease;
 pub(crate) mod version;
 
+pub(crate) use ds::TransactionFactory;
+
 pub use api::Transactable;
 pub use clock::SizedClock;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
