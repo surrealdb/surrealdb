@@ -467,10 +467,18 @@ impl Building {
 		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
 			return Ok(());
 		};
-		// Check the index still exists and is not decommissioned
-		tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
-			.await?
-			.expect_not_prepare_remove()?;
+		// Check the index still exists and is not decommissioned.
+		// Note: We use get_tb_index instead of expect_tb_index because the index
+		// definition might not be committed yet when running in blocking mode.
+		// This happens because IndexBuilder runs within the DEFINE INDEX transaction,
+		// and the transaction is only committed after the indexing completes.
+		// If the index is not found, we assume it's because the transaction hasn't
+		// committed yet and continue. The prepare_remove flag is only set during
+		// REMOVE INDEX, which would happen in a separate transaction.
+		if let Some(ix) = tx.get_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name).await?
+		{
+			catch!(tx, ix.expect_not_prepare_remove());
+		}
 		*last_prepare_remove_check = Instant::now();
 		Ok(())
 	}
