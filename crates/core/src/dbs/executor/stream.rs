@@ -26,7 +26,7 @@ use futures::TryStreamExt;
 use surrealdb_types::{Array, Value};
 use tokio_util::sync::CancellationToken;
 
-use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::dbs::response::QueryResult;
 use crate::dbs::{QueryResultBuilder, QueryType};
@@ -58,6 +58,17 @@ impl SessionState {
 		}
 	}
 
+	/// Initialize session state from existing ns/db definitions.
+	fn with_ns_db(
+		ns: Option<Arc<NamespaceDefinition>>,
+		db: Option<Arc<DatabaseDefinition>>,
+	) -> Self {
+		Self {
+			ns,
+			db,
+		}
+	}
+
 	/// Get the current context level based on what's selected.
 	fn current_level(&self) -> ContextLevel {
 		match (&self.ns, &self.db) {
@@ -85,9 +96,16 @@ impl StreamExecutor {
 	/// NOTE: This is not optimal, we should execute all outputs in parallel (as parallel as
 	/// possible) and stream the results back rather than executing them sequentially and
 	/// collecting the results.
+	///
+	/// # Parameters
+	/// - `ds`: The datastore to execute against
+	/// - `initial_ns`: Optional namespace name to initialize the session with
+	/// - `initial_db`: Optional database name to initialize the session with
 	pub(crate) async fn execute_collected(
 		self,
 		ds: &Datastore,
+		initial_ns: Option<&str>,
+		initial_db: Option<&str>,
 	) -> Result<Vec<QueryResult>, anyhow::Error> {
 		let txn = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
 		let mut outputs = Vec::with_capacity(self.outputs.len());
@@ -104,8 +122,27 @@ impl StreamExecutor {
 			cancellation: CancellationToken::new(),
 		};
 
-		// Track session state (ns/db selection)
-		let mut session = SessionState::new();
+		// Initialize session state from provided ns/db names
+		let mut session = if let Some(ns_name) = initial_ns {
+			// Look up namespace definition (already returns Arc<NamespaceDefinition>)
+			let ns = txn
+				.expect_ns_by_name(ns_name)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to look up namespace '{}': {}", ns_name, e))?;
+
+			// Optionally look up database definition (already returns Arc<DatabaseDefinition>)
+			let db = if let Some(db_name) = initial_db {
+				Some(txn.expect_db_by_name(ns_name, db_name).await.map_err(|e| {
+					anyhow::anyhow!("Failed to look up database '{}': {}", db_name, e)
+				})?)
+			} else {
+				None
+			};
+
+			SessionState::with_ns_db(Some(ns), db)
+		} else {
+			SessionState::new()
+		};
 
 		for statement in self.outputs {
 			let query_result_builder = QueryResultBuilder::started_now();
@@ -113,14 +150,8 @@ impl StreamExecutor {
 			match statement {
 				PlannedStatement::SessionCommand(cmd) => {
 					// Handle session commands (USE, BEGIN, COMMIT, CANCEL)
-					let result = handle_session_command(
-						cmd,
-						&mut session,
-						&root_ctx,
-						&txn,
-						&params,
-					)
-					.await;
+					let result =
+						handle_session_command(cmd, &mut session, &root_ctx, &txn, &params).await;
 
 					match result {
 						Ok(value) => {
@@ -146,8 +177,7 @@ impl StreamExecutor {
 					}
 
 					// Build the execution context based on current session state
-					let exec_ctx =
-						build_execution_context(&session, &root_ctx, &txn)?;
+					let exec_ctx = build_execution_context(&session, &root_ctx, &txn)?;
 
 					// Execute the plan
 					let output_stream = plan.execute(&exec_ctx)?;
@@ -205,9 +235,10 @@ async fn handle_session_command(
 				let ns_name = ns_value
 					.coerce_to::<String>()
 					.map_err(|e| Error::Thrown(format!("NS must be a string: {}", e)))?;
-				let ns_def = txn.get_or_add_ns(None, &ns_name).await.map_err(|e| {
-					Error::Thrown(format!("Failed to get namespace: {}", e))
-				})?;
+				let ns_def = txn
+					.get_or_add_ns(None, &ns_name)
+					.await
+					.map_err(|e| Error::Thrown(format!("Failed to get namespace: {}", e)))?;
 				session.ns = Some(ns_def);
 				// Clear DB when NS changes
 				session.db = None;
@@ -231,9 +262,10 @@ async fn handle_session_command(
 				let db_name = db_value
 					.coerce_to::<String>()
 					.map_err(|e| Error::Thrown(format!("DB must be a string: {}", e)))?;
-				let db_def = txn.get_or_add_db(None, &ns_def.name, &db_name).await.map_err(|e| {
-					Error::Thrown(format!("Failed to get database: {}", e))
-				})?;
+				let db_def = txn
+					.get_or_add_db(None, &ns_def.name, &db_name)
+					.await
+					.map_err(|e| Error::Thrown(format!("Failed to get database: {}", e)))?;
 				session.db = Some(db_def);
 			}
 

@@ -1,6 +1,6 @@
 use futures::stream;
 
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
 use crate::val::RecordId;
@@ -26,33 +26,19 @@ impl ExecutionPlan for RecordIdLookup {
 
 		// Clone what we need for the async block
 		let record_id = self.record_id.clone();
-		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let db_name = db_ctx.db.name.clone();
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let _ns_name = db_ctx.ns_ctx.ns.name.clone();
+		let db_id = db_ctx.db.database_id;
+		let _db_name = db_ctx.db.name.clone();
 		let txn = db_ctx.ns_ctx.txn.clone();
 
 		// Create an async stream that looks up the record
 		let stream = stream::once(async move {
 			use crate::expr::ControlFlow;
 
-			// Get namespace and database IDs
-			let ns_id = txn
-				.expect_ns_by_name(&ns_name)
-				.await
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get namespace: {}", e)))?;
-			let db_id = txn
-				.expect_db_by_name(&ns_name, &db_name)
-				.await
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get database: {}", e)))?;
-
 			// Look up the record
 			let record = txn
-				.get_record(
-					ns_id.namespace_id,
-					db_id.database_id,
-					&record_id.table,
-					&record_id.key,
-					None,
-				)
+				.get_record(ns_id, db_id, &record_id.table, &record_id.key, None)
 				.await
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {}", e)))?;
 

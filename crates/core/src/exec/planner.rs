@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use crate::err::Error;
-use crate::exec::{PlannedStatement, SessionCommand};
+use crate::exec::filter::Filter;
+use crate::exec::lookup::RecordIdLookup;
+use crate::exec::scan::Scan;
+use crate::exec::union::Union;
+use crate::exec::{ExecutionPlan, PlannedStatement, SessionCommand};
 use crate::expr::{Expr, TopLevelExpr};
 
 /// Attempts to convert a logical plan to an execution plan.
@@ -104,7 +108,7 @@ fn convert_use_statement(
 }
 
 fn expr_to_physical_expr(expr: Expr) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	use crate::exec::{Field, Literal as PhysicalLiteral, Param};
+	use crate::exec::{BinaryOp, Field, Literal as PhysicalLiteral, Param};
 
 	match expr {
 		Expr::Literal(lit) => {
@@ -114,9 +118,22 @@ fn expr_to_physical_expr(expr: Expr) -> Result<Arc<dyn crate::exec::PhysicalExpr
 		}
 		Expr::Param(param) => Ok(Arc::new(Param(param.as_str().to_string()))),
 		Expr::Idiom(idiom) => Ok(Arc::new(Field(idiom))),
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			let left_phys = expr_to_physical_expr(*left)?;
+			let right_phys = expr_to_physical_expr(*right)?;
+			Ok(Arc::new(BinaryOp {
+				left: left_phys,
+				op,
+				right: right_phys,
+			}))
+		}
 		_ => Err(Error::Unimplemented(format!(
 			"Expression type not yet supported in execution plans: {:?}",
-			expr
+			std::mem::discriminant(&expr)
 		))),
 	}
 }
@@ -159,6 +176,147 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 	}
 }
 
-fn expr_to_execution_plan(_expr: Expr) -> Result<PlannedStatement, Error> {
-	Err(Error::Unimplemented("Query execution plans not yet implemented".to_string()))
+fn expr_to_execution_plan(expr: Expr) -> Result<PlannedStatement, Error> {
+	match expr {
+		Expr::Select(select) => plan_select(*select),
+		_ => Err(Error::Unimplemented(format!(
+			"Expression type not yet supported in execution plans: {:?}",
+			std::mem::discriminant(&expr)
+		))),
+	}
+}
+
+/// Plan a SELECT statement
+fn plan_select(
+	select: crate::expr::statements::SelectStatement,
+) -> Result<PlannedStatement, Error> {
+	// Build the source plan from `what` (FROM clause)
+	let source = plan_select_sources(&select.what)?;
+
+	// Apply WHERE clause if present
+	let plan = if let Some(cond) = select.cond {
+		let predicate = expr_to_physical_expr(cond.0)?;
+		Arc::new(Filter {
+			input: source,
+			predicate,
+		}) as Arc<dyn ExecutionPlan>
+	} else {
+		source
+	};
+
+	// TODO: Handle projections (select.expr), GROUP BY, ORDER BY, LIMIT, etc.
+	// For now, we only support SELECT * (all fields)
+
+	Ok(PlannedStatement::Query(plan))
+}
+
+/// Plan the FROM sources - handles multiple targets with Union
+fn plan_select_sources(what: &[Expr]) -> Result<Arc<dyn ExecutionPlan>, Error> {
+	if what.is_empty() {
+		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
+	}
+
+	// Convert each source to a plan
+	let mut source_plans = Vec::with_capacity(what.len());
+	for expr in what {
+		let plan = plan_single_source(expr)?;
+		source_plans.push(plan);
+	}
+
+	// If multiple sources, wrap in Union; otherwise just return the single source
+	if source_plans.len() == 1 {
+		Ok(source_plans.pop().unwrap())
+	} else {
+		Ok(Arc::new(Union {
+			inputs: source_plans,
+		}))
+	}
+}
+
+/// Plan a single FROM source (table or record ID)
+fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
+	match expr {
+		// Table name: SELECT * FROM users
+		Expr::Table(table_name) => {
+			// Convert table name to a literal string for the physical expression
+			let table_expr = expr_to_physical_expr(Expr::Literal(
+				crate::expr::literal::Literal::String(table_name.as_str().to_string()),
+			))?;
+			Ok(Arc::new(Scan {
+				table: table_expr,
+			}))
+		}
+
+		// Record ID literal: SELECT * FROM users:123
+		Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
+			// Convert the RecordIdLit to an actual RecordId
+			// For now, we only support static record IDs (table:key)
+			// More complex expressions would need async evaluation
+			let record_id = record_id_lit_to_record_id(record_id_lit)?;
+			Ok(Arc::new(RecordIdLookup {
+				record_id,
+			}))
+		}
+
+		// Idiom that might be a table or record reference
+		Expr::Idiom(idiom) => {
+			// Simple idiom (just a name) is a table reference
+			// Convert to a table scan using the idiom as a physical expression
+			let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
+			Ok(Arc::new(Scan {
+				table: table_expr,
+			}))
+		}
+
+		// Parameter that will be resolved at runtime
+		Expr::Param(param) => {
+			// Parameters could be record IDs or table names
+			// We'll treat them as table references - Scan evaluates at runtime
+			let table_expr = expr_to_physical_expr(Expr::Param(param.clone()))?;
+			Ok(Arc::new(Scan {
+				table: table_expr,
+			}))
+		}
+
+		_ => Err(Error::Unimplemented(format!(
+			"Unsupported FROM source type: {:?}",
+			std::mem::discriminant(expr)
+		))),
+	}
+}
+
+/// Convert a RecordIdLit to an actual RecordId
+/// For now, only supports static key patterns (Number, String, Uuid)
+fn record_id_lit_to_record_id(
+	record_id_lit: &crate::expr::RecordIdLit,
+) -> Result<crate::val::RecordId, Error> {
+	use crate::expr::record_id::RecordIdKeyLit;
+	use crate::val::RecordIdKey;
+
+	let key = match &record_id_lit.key {
+		RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
+		RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
+		RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
+		RecordIdKeyLit::Generate(generator) => generator.compute(),
+		RecordIdKeyLit::Array(_) => {
+			return Err(Error::Unimplemented(
+				"Array record keys not yet supported in execution plans".to_string(),
+			));
+		}
+		RecordIdKeyLit::Object(_) => {
+			return Err(Error::Unimplemented(
+				"Object record keys not yet supported in execution plans".to_string(),
+			));
+		}
+		RecordIdKeyLit::Range(_) => {
+			return Err(Error::Unimplemented(
+				"Range record keys not yet supported in execution plans".to_string(),
+			));
+		}
+	};
+
+	Ok(crate::val::RecordId {
+		table: record_id_lit.table.clone(),
+		key,
+	})
 }

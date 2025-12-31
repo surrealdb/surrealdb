@@ -1796,7 +1796,10 @@ impl Datastore {
 			Ok(execution_plan) => {
 				let stream_executor = StreamExecutor::new(execution_plan);
 
-				stream_executor.execute_collected(self).await
+				// Pass session's ns/db to initialize the stream executor's context
+				stream_executor
+					.execute_collected(self, sess.ns.as_deref(), sess.db.as_deref())
+					.await
 			}
 			Err((plan, err)) => {
 				tracing::debug!(
