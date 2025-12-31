@@ -4,10 +4,15 @@ use futures::stream;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::err::Error;
-use crate::exec::{EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatchStream};
+use crate::exec::{
+	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatchStream,
+};
 use crate::val::{TableName, Value};
 
-/// Full table scan - iterates over all records in a table
+/// Full table scan - iterates over all records in a table.
+///
+/// Requires database-level context since it reads from a specific table
+/// in the selected namespace and database.
 #[derive(Debug, Clone)]
 pub struct Scan {
 	pub(crate) table: Arc<dyn PhysicalExpr>,
@@ -15,15 +20,22 @@ pub struct Scan {
 }
 
 impl ExecutionPlan for Scan {
+	fn required_context(&self) -> ContextLevel {
+		ContextLevel::Database
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
 		use crate::exec::ValueBatch;
 
+		// Get database context - we declared Database level, so this should succeed
+		let db_ctx = ctx.database()?;
+
 		// Clone the context for the async block (all fields are Arc/String so cheap to clone)
 		let table_expr = self.table.clone();
-		let ns = ctx.ns.clone();
-		let db = ctx.db.clone();
-		let txn = ctx.txn.clone();
-		let params = ctx.params.clone();
+		let ns_name = db_ctx.ns_ctx.ns.name.clone();
+		let db_name = db_ctx.db.name.clone();
+		let txn = db_ctx.ns_ctx.txn.clone();
+		let params = db_ctx.ns_ctx.root.params.clone();
 
 		// Create state for the scan
 		#[derive(Clone)]
@@ -38,8 +50,8 @@ impl ExecutionPlan for Scan {
 		// Create an async stream using try_unfold
 		let stream = stream::try_unfold(None::<ScanState>, move |state| {
 			let table_expr = table_expr.clone();
-			let ns = ns.clone();
-			let db = db.clone();
+			let ns_name = ns_name.clone();
+			let db_name = db_name.clone();
 			let txn = txn.clone();
 			let params = params.clone();
 
@@ -51,9 +63,13 @@ impl ExecutionPlan for Scan {
 					s
 				} else {
 					// Evaluate the table expression to get the table name
-					let eval_ctx =
-						EvalContext::scalar(&params, Some(&ns), Some(&db), Some(&txn.as_ref()));
-					let table_value = table_expr.evaluate(&eval_ctx).await.map_err(|e| {
+					let eval_ctx = EvalContext::scalar(
+						&params,
+						Some(&ns_name),
+						Some(&db_name),
+						Some(txn.as_ref()),
+					);
+					let table_value = table_expr.evaluate(eval_ctx).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!(
 							"Failed to evaluate table expression: {}",
 							e
@@ -73,10 +89,10 @@ impl ExecutionPlan for Scan {
 					};
 
 					// Get namespace and database IDs
-					let ns_id = txn.expect_ns_by_name(&ns).await.map_err(|e| {
+					let ns_id = txn.expect_ns_by_name(&ns_name).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to get namespace: {}", e))
 					})?;
-					let db_id = txn.expect_db_by_name(&ns, &db).await.map_err(|e| {
+					let db_id = txn.expect_db_by_name(&ns_name, &db_name).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to get database: {}", e))
 					})?;
 

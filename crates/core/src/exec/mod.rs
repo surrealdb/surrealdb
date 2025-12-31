@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -12,10 +10,16 @@ use crate::expr::{FlowResult, Idiom};
 use crate::kvs::Transaction;
 use crate::val::Value;
 
+pub(crate) mod context;
 pub(crate) mod filter;
 pub(crate) mod lookup;
 pub(crate) mod planner;
 pub(crate) mod scan;
+
+// Re-export context types
+pub(crate) use context::{
+	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
+};
 
 /// A batch of values returned by an execution plan.
 ///
@@ -33,35 +37,33 @@ pub(crate) struct ValueBatch {
 
 pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
 
-/// Immutable for the duration of a single statement execution
-pub(crate) struct ExecutionContext {
-	pub(crate) ns: String,
-	pub(crate) db: String,
-	pub(crate) txn: Arc<Transaction>,
-	pub(crate) params: Arc<Parameters>,
-	// Could also include: runtime config, memory limits, cancellation token
-}
-
-impl ExecutionContext {
-	pub(crate) fn new(
-		ns: impl Into<String>,
-		db: impl Into<String>,
-		txn: Arc<Transaction>,
-		params: Arc<Parameters>,
-	) -> Self {
-		Self {
-			ns: ns.into(),
-			db: db.into(),
-			txn,
-			params,
-		}
-	}
-}
-
 /// A trait for execution plans that can be executed and produce a stream of value batches.
+///
+/// Execution plans form a tree structure where each node declares its minimum required
+/// context level via `required_context()`. The executor validates that the current session
+/// meets these requirements before execution begins.
 pub(crate) trait ExecutionPlan: Debug + Send + Sync {
+	/// The minimum context level required to execute this plan.
+	///
+	/// Used for pre-flight validation: the executor checks that the current session
+	/// has at least this context level before calling `execute()`.
+	fn required_context(&self) -> ContextLevel;
+
 	/// Executes the execution plan and returns a stream of value batches.
+	///
+	/// The context is guaranteed to meet the requirements declared by `required_context()`
+	/// if the executor performs proper validation.
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error>;
+
+	/// Returns references to child execution plans for tree traversal.
+	///
+	/// Used for:
+	/// - Pre-flight validation (recursive context requirement checking)
+	/// - Query optimization
+	/// - EXPLAIN output
+	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+		vec![]
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +78,6 @@ pub(crate) enum SessionCommand {
 		ns: Option<Arc<dyn PhysicalExpr>>,
 		db: Option<Arc<dyn PhysicalExpr>>,
 	},
-	// TODO: Maybe add an isolation level here in the future?
 	Begin,
 	Commit,
 	Cancel,
@@ -106,9 +107,11 @@ pub(crate) enum SessionCommand {
 // 	}
 // }
 
-type Parameters = HashMap<Cow<'static, str>, Arc<Value>>;
-
-/// Evaluation context - what's available during expression evaluation
+/// Evaluation context - what's available during expression evaluation.
+///
+/// This is a borrowed view into the execution context for expression evaluation.
+/// It provides access to parameters, namespace/database names, and the current row
+/// (for per-row expressions like filters and projections).
 pub struct EvalContext<'a> {
 	pub params: &'a Parameters,
 	pub ns: Option<&'a str>,
@@ -121,9 +124,25 @@ pub struct EvalContext<'a> {
 }
 
 impl<'a> EvalContext<'a> {
-	/// Convert from ExecutionContext for expression evaluation
+	/// Convert from ExecutionContext enum for expression evaluation.
+	///
+	/// This extracts the appropriate fields based on the context level:
+	/// - Root: params only, no ns/db/txn
+	/// - Namespace: params, ns, txn
+	/// - Database: params, ns, db, txn
 	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
-		Self::scalar(&exec_ctx.params, Some(&exec_ctx.ns), Some(&exec_ctx.db), Some(&exec_ctx.txn))
+		match exec_ctx {
+			ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
+			ExecutionContext::Namespace(n) => {
+				Self::scalar(&n.root.params, Some(&n.ns.name), None, Some(&n.txn))
+			}
+			ExecutionContext::Database(d) => Self::scalar(
+				&d.ns_ctx.root.params,
+				Some(&d.ns_ctx.ns.name),
+				Some(&d.db.name),
+				Some(&d.ns_ctx.txn),
+			),
+		}
 	}
 
 	/// For session-level scalar evaluation (USE, LIMIT, etc.)
@@ -151,12 +170,12 @@ impl<'a> EvalContext<'a> {
 	}
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub trait PhysicalExpr: Send + Sync + Debug {
 	/// Evaluate this expression to a value.
 	///
 	/// May execute subqueries internally, hence async.
-	async fn evaluate(&self, ctx: &EvalContext<'_>) -> anyhow::Result<Value>;
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value>;
 
 	/// Does this expression reference the current row?
 	/// If false, can be evaluated in scalar context.
@@ -169,7 +188,7 @@ pub struct Literal(pub(crate) Value);
 
 #[async_trait]
 impl PhysicalExpr for Literal {
-	async fn evaluate(&self, _ctx: &EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		Ok(self.0.clone())
 	}
 
@@ -184,7 +203,7 @@ pub struct Param(pub(crate) String);
 
 #[async_trait]
 impl PhysicalExpr for Param {
-	async fn evaluate(&self, ctx: &EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		ctx.params
 			.get(self.0.as_str())
 			.map(|v| (**v).clone())
@@ -202,7 +221,7 @@ pub struct Field(pub(crate) Idiom);
 
 #[async_trait]
 impl PhysicalExpr for Field {
-	async fn evaluate(&self, ctx: &EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let current = ctx
 			.current_value
 			.ok_or_else(|| anyhow::anyhow!("Field access requires current value"))?;
@@ -245,7 +264,7 @@ fn get_field_simple(value: &Value, path: &[crate::expr::part::Part]) -> Value {
 			}
 		}
 		// Start part - evaluate the expression (simplified)
-		(_, Part::Start(expr)) => {
+		(_, Part::Start(_expr)) => {
 			// For simple cases, we can't evaluate expressions here
 			// This would require the full compute machinery
 			// For now, return None - this will need to be extended later
@@ -287,7 +306,7 @@ pub struct ScalarSubquery {
 
 #[async_trait]
 impl PhysicalExpr for ScalarSubquery {
-	async fn evaluate(&self, ctx: &EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// TODO: Implement scalar subquery evaluation
 		// This requires bridging EvalContext (which has borrowed &Transaction)
 		// with ExecutionContext (which needs Arc<Transaction>).

@@ -4,10 +4,14 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch, ValueBatchStream,
+	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ValueBatchStream,
 };
 
-/// Filters a stream of values based on a predicate
+/// Filters a stream of values based on a predicate.
+///
+/// Requires database-level context for expression evaluation, and also
+/// inherits the context requirements of its input plan.
 #[derive(Debug, Clone)]
 pub struct Filter {
 	pub(crate) input: Arc<dyn ExecutionPlan>,
@@ -15,19 +19,32 @@ pub struct Filter {
 }
 
 impl ExecutionPlan for Filter {
+	fn required_context(&self) -> ContextLevel {
+		// Filter needs Database for expression evaluation, but also
+		// inherits child requirements (take the maximum)
+		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+		vec![&self.input]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+		// Get database context - we declared Database level, so this should succeed
+		let db_ctx = ctx.database()?;
+
 		let input_stream = self.input.execute(ctx)?;
 		let predicate = self.predicate.clone();
-		let params = ctx.params.clone();
-		let ns = ctx.ns.clone();
-		let db = ctx.db.clone();
-		let txn = ctx.txn.clone();
+		let params = db_ctx.ns_ctx.root.params.clone();
+		let ns_name = db_ctx.ns_ctx.ns.name.clone();
+		let db_name = db_ctx.db.name.clone();
+		let txn = db_ctx.ns_ctx.txn.clone();
 
 		let filtered = input_stream.filter_map(move |batch_result| {
 			let predicate = predicate.clone();
 			let params = params.clone();
-			let ns = ns.clone();
-			let db = db.clone();
+			let ns_name = ns_name.clone();
+			let db_name = db_name.clone();
 			let txn = txn.clone();
 
 			async move {
@@ -37,17 +54,19 @@ impl ExecutionPlan for Filter {
 					Err(e) => return Some(Err(e)),
 				};
 
-				// Create evaluation context
-				let eval_ctx =
-					EvalContext::scalar(&params, Some(&ns), Some(&db), Some(&txn.as_ref()));
-
 				let mut kept = Vec::new();
 				for value in batch.values {
-					// Create per-row context
-					let row_ctx = eval_ctx.with_value(&value);
+					// Create per-row evaluation context
+					let eval_ctx = EvalContext::scalar(
+						&params,
+						Some(&ns_name),
+						Some(&db_name),
+						Some(txn.as_ref()),
+					)
+					.with_value(&value);
 
 					// Evaluate predicate
-					match predicate.evaluate(&row_ctx).await {
+					match predicate.evaluate(eval_ctx).await {
 						Ok(result) => {
 							// Check if result is truthy
 							if is_truthy(&result) {
