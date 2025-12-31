@@ -884,7 +884,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 9.0.x
+          - 10.0.x
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
