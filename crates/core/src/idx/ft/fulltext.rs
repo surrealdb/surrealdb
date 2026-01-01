@@ -896,7 +896,6 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	}
 }
 
-
 use crate::idx::ft::smallfloat::{NormCache, SmallFloat};
 use crate::key::index::dle::{CHUNK_SIZE, Dle};
 use parking_lot::RwLock;
@@ -1270,7 +1269,6 @@ impl AccurateScorer {
 
 		score
 	}
-
 }
 
 /// Dual-mode BM25 scorer: Fast (SmallFloat) or Accurate (exact).
@@ -1971,9 +1969,964 @@ mod tests {
 		let score_short = fast.compute_score(1.0, 5.0, encoded_short);
 		let score_long = fast.compute_score(1.0, 5.0, encoded_long);
 
-		assert_ne!(
-			score_short, score_long,
-			"Different lengths should produce different scores"
+		assert_ne!(score_short, score_long, "Different lengths should produce different scores");
+	}
+
+	// BM25 Golden Tests
+
+	/// Manually compute BM25 score using the Lucene formula for verification.
+	/// This is the reference implementation to test against.
+	fn reference_bm25(
+		term_freq: f64,
+		term_doc_count: f64,
+		doc_length: f64,
+		doc_count: f64,
+		avg_doc_length: f64,
+		k1: f64,
+		b: f64,
+	) -> f64 {
+		if term_freq <= 0.0 {
+			return 0.0;
+		}
+
+		// IDF (Lucene formula): ln(1 + (N - n + 0.5) / (n + 0.5))
+		let effective_doc_count = doc_count.max(term_doc_count);
+		let idf =
+			(1.0 + (effective_doc_count - term_doc_count + 0.5) / (term_doc_count + 0.5)).ln();
+
+		// Lower-bounded TF: 1 + ln(tf)
+		let tf_prime = 1.0 + term_freq.ln();
+
+		// Length normalization: (1 - b) + b * doc_length / avg_doc_length
+		let length_norm = (1.0 - b) + b * doc_length / avg_doc_length;
+
+		// BM25 formula
+		idf * (k1 + 1.0) * tf_prime / (tf_prime + k1 * length_norm)
+	}
+
+	#[test]
+	fn test_golden_accurate_scorer_matches_reference() {
+		// Test that AccurateScorer matches our reference implementation exactly
+		let test_cases = [
+			// (tf, term_doc_count, doc_length, doc_count, total_length, k1, b)
+			(1.0, 5.0, 100.0, 10, 1000, 1.2, 0.75),
+			(3.0, 2.0, 50.0, 100, 10000, 1.2, 0.75),
+			(1.0, 50.0, 200.0, 100, 10000, 1.2, 0.75),
+			(10.0, 1.0, 500.0, 1000, 100000, 2.0, 0.5),
+			(1.0, 100.0, 100.0, 100, 10000, 0.5, 1.0),
+		];
+
+		for (tf, term_doc_count, doc_length, doc_count, total_length, k1, b) in test_cases {
+			let avg_doc_length = total_length as f64 / doc_count as f64;
+
+			let dlc = super::DocLengthAndCount {
+				total_docs_length: total_length,
+				doc_count,
+			};
+			let bm25 = super::Bm25Params {
+				k1: k1 as f32,
+				b: b as f32,
+			};
+
+			let scorer = super::AccurateScorer::new(dlc, bm25);
+			let actual = scorer.compute_bm25_score(tf, term_doc_count, doc_length);
+			let expected = reference_bm25(
+				tf,
+				term_doc_count,
+				doc_length,
+				doc_count as f64,
+				avg_doc_length,
+				k1,
+				b,
+			);
+
+			// Allow small floating-point error (f32 vs f64 precision difference)
+			let rel_error = if expected.abs() > 1e-10 {
+				(actual - expected).abs() / expected.abs()
+			} else {
+				(actual - expected).abs()
+			};
+			assert!(
+				rel_error < 1e-6,
+				"AccurateScorer mismatch for tf={}, n={}, dl={}, N={}: expected {}, got {} (rel_error={})",
+				tf,
+				term_doc_count,
+				doc_length,
+				doc_count,
+				expected,
+				actual,
+				rel_error
+			);
+		}
+	}
+
+	#[test]
+	fn test_golden_known_values() {
+		// Hand-calculated BM25 scores for verification
+		// Using default params: k1=1.2, b=0.75, N=10, avg_dl=100
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 1000,
+			doc_count: 10,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+		let scorer = super::AccurateScorer::new(dlc, bm25);
+
+		// Case 1: tf=1, n=1, dl=100 (rare term, avg-length doc)
+		// IDF = ln(1 + (10 - 1 + 0.5) / (1 + 0.5)) = ln(1 + 9.5/1.5) = ln(7.333) ≈ 1.992
+		// tf' = 1 + ln(1) = 1
+		// norm = (1 - 0.75) + 0.75 * 100/100 = 0.25 + 0.75 = 1.0
+		// score = 1.992 * 2.2 * 1 / (1 + 1.2 * 1.0) = 4.383 / 2.2 ≈ 1.992
+		let score1 = scorer.compute_bm25_score(1.0, 1.0, 100.0);
+		assert!((score1 - 1.992).abs() < 0.01, "Case 1: expected ~1.992, got {}", score1);
+
+		// Case 2: tf=1, n=5, dl=100 (medium frequency term)
+		// IDF = ln(1 + (10 - 5 + 0.5) / (5 + 0.5)) = ln(1 + 5.5/5.5) = ln(2) ≈ 0.693
+		// score = 0.693 * 2.2 * 1 / (1 + 1.2 * 1.0) = 1.525 / 2.2 ≈ 0.693
+		let score2 = scorer.compute_bm25_score(1.0, 5.0, 100.0);
+		assert!((score2 - 0.693).abs() < 0.01, "Case 2: expected ~0.693, got {}", score2);
+
+		// Case 3: tf=1, n=9, dl=100 (very common term)
+		// IDF = ln(1 + (10 - 9 + 0.5) / (9 + 0.5)) = ln(1 + 1.5/9.5) = ln(1.158) ≈ 0.147
+		let score3 = scorer.compute_bm25_score(1.0, 9.0, 100.0);
+		assert!((score3 - 0.147).abs() < 0.01, "Case 3: expected ~0.147, got {}", score3);
+
+		// Verify ordering: rare > medium > common
+		assert!(score1 > score2, "Rare term should score higher than medium");
+		assert!(score2 > score3, "Medium term should score higher than common");
+	}
+
+	#[test]
+	fn test_golden_fast_scorer_approximates_reference() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// FastScorer should approximate reference within SmallFloat precision bounds
+		let test_cases = [
+			(1.0, 5.0, 100u32, 10i64, 1000i128, 1.2f32, 0.75f32),
+			(3.0, 2.0, 50, 100, 10000, 1.2, 0.75),
+			(1.0, 50.0, 200, 100, 10000, 1.2, 0.75),
+			(5.0, 10.0, 1000, 1000, 100000, 1.5, 0.6),
+		];
+
+		for (tf, term_doc_count, doc_length, doc_count, total_length, k1, b) in test_cases {
+			let avg_doc_length = total_length as f64 / doc_count as f64;
+
+			let dlc = super::DocLengthAndCount {
+				total_docs_length: total_length,
+				doc_count,
+			};
+			let bm25 = super::Bm25Params {
+				k1,
+				b,
+			};
+
+			let fast = super::FastScorer::new(dlc, bm25);
+			let encoded = SmallFloat::encode(doc_length);
+			let actual = fast.compute_score(tf, term_doc_count, encoded);
+
+			let expected = reference_bm25(
+				tf,
+				term_doc_count,
+				doc_length as f64,
+				doc_count as f64,
+				avg_doc_length,
+				k1 as f64,
+				b as f64,
+			);
+
+			// Allow up to 15% difference due to SmallFloat quantization
+			let diff_pct = if expected > 0.001 {
+				((actual - expected).abs() / expected) * 100.0
+			} else {
+				0.0
+			};
+
+			assert!(
+				diff_pct < 15.0,
+				"FastScorer exceeds 15% error: tf={}, n={}, dl={}: expected {:.4}, got {:.4} ({:.1}% diff)",
+				tf,
+				term_doc_count,
+				doc_length,
+				expected,
+				actual,
+				diff_pct
+			);
+		}
+	}
+
+	// SmallFloat Precision Analysis Tests
+
+	#[test]
+	fn test_precision_loss_distribution() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 100000,
+			doc_count: 1000,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Test across a range of document lengths
+		let lengths: Vec<u32> = (1..=1000).chain((1000..=10000).step_by(100)).collect();
+		let mut max_error = 0.0f64;
+		let mut total_error = 0.0f64;
+		let mut error_count = 0;
+
+		for len in &lengths {
+			let encoded = SmallFloat::encode(*len);
+			let fast_score = fast.compute_score(1.0, 100.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 100.0, *len as f64);
+
+			if accurate_score > 0.001 {
+				let error = ((fast_score - accurate_score).abs() / accurate_score) * 100.0;
+				max_error = max_error.max(error);
+				total_error += error;
+				error_count += 1;
+			}
+		}
+
+		let avg_error = total_error / error_count as f64;
+
+		// Maximum error should be under 15%
+		assert!(max_error < 15.0, "Max precision loss {:.2}% exceeds 15% threshold", max_error);
+
+		// Average error should be much lower
+		assert!(avg_error < 5.0, "Average precision loss {:.2}% exceeds 5% threshold", avg_error);
+	}
+
+	#[test]
+	fn test_precision_at_boundary_lengths() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Test at SmallFloat encoding boundaries where precision loss is highest
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Boundary values: just before each power of 2 (worst case for quantization)
+		let boundary_lengths = [7, 15, 31, 63, 127, 255, 511, 1023, 2047, 4095];
+
+		for &len in &boundary_lengths {
+			let encoded = SmallFloat::encode(len);
+			let decoded = SmallFloat::decode(encoded);
+
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, len as f64);
+
+			// Verify decoded length is reasonable
+			let len_error = ((decoded as i64 - len as i64).abs() as f64 / len as f64) * 100.0;
+			assert!(
+				len_error <= 12.5,
+				"Length {} decoded to {} ({:.1}% error)",
+				len,
+				decoded,
+				len_error
+			);
+
+			// Verify score is within bounds
+			let score_error = if accurate_score > 0.001 {
+				((fast_score - accurate_score).abs() / accurate_score) * 100.0
+			} else {
+				0.0
+			};
+			assert!(
+				score_error < 15.0,
+				"Boundary length {}: score error {:.1}% (fast={:.4}, accurate={:.4})",
+				len,
+				score_error,
+				fast_score,
+				accurate_score
+			);
+		}
+	}
+
+	#[test]
+	fn test_precision_with_varying_avg_doc_length() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Precision can vary based on avg_doc_length since NormCache is precomputed
+		let avg_lengths = [10, 50, 100, 500, 1000, 5000];
+
+		for &avg_len in &avg_lengths {
+			let dlc = super::DocLengthAndCount {
+				total_docs_length: (avg_len * 100) as i128,
+				doc_count: 100,
+			};
+			let bm25 = super::Bm25Params {
+				k1: 1.2,
+				b: 0.75,
+			};
+
+			let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+			let accurate = super::AccurateScorer::new(dlc, bm25);
+
+			// Test at average length (should have minimal error)
+			let encoded = SmallFloat::encode(avg_len);
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, avg_len as f64);
+
+			let error = if accurate_score > 0.001 {
+				((fast_score - accurate_score).abs() / accurate_score) * 100.0
+			} else {
+				0.0
+			};
+
+			assert!(error < 15.0, "Avg length {}: error {:.1}% at avg doc length", avg_len, error);
+		}
+	}
+
+	// Ranking Preservation Tests
+
+	#[test]
+	fn test_ranking_preserved_by_term_frequency() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded_100 = SmallFloat::encode(100);
+
+		// Higher TF should always rank higher
+		let tfs = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0];
+
+		let mut prev_fast = 0.0;
+		let mut prev_accurate = 0.0;
+
+		for &tf in &tfs {
+			let fast_score = fast.compute_score(tf, 10.0, encoded_100);
+			let accurate_score = accurate.compute_bm25_score(tf, 10.0, 100.0);
+
+			assert!(
+				fast_score > prev_fast,
+				"FastScorer: tf={} should score higher than prev (got {} <= {})",
+				tf,
+				fast_score,
+				prev_fast
+			);
+			assert!(
+				accurate_score > prev_accurate,
+				"AccurateScorer: tf={} should score higher than prev (got {} <= {})",
+				tf,
+				accurate_score,
+				prev_accurate
+			);
+
+			prev_fast = fast_score;
+			prev_accurate = accurate_score;
+		}
+	}
+
+	#[test]
+	fn test_ranking_preserved_by_idf() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 100000,
+			doc_count: 1000,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded_100 = SmallFloat::encode(100);
+
+		// Rarer terms (lower doc count) should rank higher
+		let term_doc_counts = [1.0, 10.0, 50.0, 100.0, 500.0, 900.0];
+
+		let mut prev_fast = f64::MAX;
+		let mut prev_accurate = f64::MAX;
+
+		for &n in &term_doc_counts {
+			let fast_score = fast.compute_score(1.0, n, encoded_100);
+			let accurate_score = accurate.compute_bm25_score(1.0, n, 100.0);
+
+			assert!(
+				fast_score < prev_fast,
+				"FastScorer: n={} should score lower than prev (got {} >= {})",
+				n,
+				fast_score,
+				prev_fast
+			);
+			assert!(
+				accurate_score < prev_accurate,
+				"AccurateScorer: n={} should score lower than prev (got {} >= {})",
+				n,
+				accurate_score,
+				prev_accurate
+			);
+
+			prev_fast = fast_score;
+			prev_accurate = accurate_score;
+		}
+	}
+
+	#[test]
+	fn test_ranking_preserved_by_doc_length() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Shorter docs should rank higher (same tf means higher term density)
+		let doc_lengths: Vec<u32> = vec![20, 50, 100, 200, 500, 1000];
+
+		let mut prev_fast = f64::MAX;
+		let mut prev_accurate = f64::MAX;
+
+		for &len in &doc_lengths {
+			let encoded = SmallFloat::encode(len);
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, len as f64);
+
+			assert!(
+				fast_score < prev_fast,
+				"FastScorer: len={} should score lower than prev (got {} >= {})",
+				len,
+				fast_score,
+				prev_fast
+			);
+			assert!(
+				accurate_score < prev_accurate,
+				"AccurateScorer: len={} should score lower than prev (got {} >= {})",
+				len,
+				accurate_score,
+				prev_accurate
+			);
+
+			prev_fast = fast_score;
+			prev_accurate = accurate_score;
+		}
+	}
+
+	#[test]
+	fn test_ranking_correlation_kendall_tau() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Generate random-ish document scenarios and verify ranking correlation
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 50000,
+			doc_count: 500,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Create documents with varying tf and length
+		let docs: Vec<(f64, u32)> = vec![
+			(1.0, 50),
+			(2.0, 100),
+			(1.0, 200),
+			(5.0, 80),
+			(3.0, 150),
+			(1.0, 300),
+			(10.0, 100),
+			(2.0, 50),
+			(4.0, 120),
+			(1.0, 80),
+		];
+
+		// Score each document with both scorers
+		let mut fast_scores: Vec<(usize, f64)> = docs
+			.iter()
+			.enumerate()
+			.map(|(i, (tf, len))| {
+				let encoded = SmallFloat::encode(*len);
+				(i, fast.compute_score(*tf, 50.0, encoded))
+			})
+			.collect();
+
+		let mut accurate_scores: Vec<(usize, f64)> = docs
+			.iter()
+			.enumerate()
+			.map(|(i, (tf, len))| (i, accurate.compute_bm25_score(*tf, 50.0, *len as f64)))
+			.collect();
+
+		// Sort by score descending
+		fast_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+		accurate_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+		// Extract rankings
+		let fast_ranking: Vec<usize> = fast_scores.iter().map(|(i, _)| *i).collect();
+		let accurate_ranking: Vec<usize> = accurate_scores.iter().map(|(i, _)| *i).collect();
+
+		// Count concordant and discordant pairs (Kendall's tau)
+		let n = docs.len();
+		let mut concordant = 0;
+		let mut discordant = 0;
+
+		for i in 0..n {
+			for j in (i + 1)..n {
+				let fast_i = fast_ranking.iter().position(|&x| x == i).unwrap();
+				let fast_j = fast_ranking.iter().position(|&x| x == j).unwrap();
+				let accurate_i = accurate_ranking.iter().position(|&x| x == i).unwrap();
+				let accurate_j = accurate_ranking.iter().position(|&x| x == j).unwrap();
+
+				let fast_order = fast_i < fast_j;
+				let accurate_order = accurate_i < accurate_j;
+
+				if fast_order == accurate_order {
+					concordant += 1;
+				} else {
+					discordant += 1;
+				}
+			}
+		}
+
+		let total_pairs = concordant + discordant;
+		let tau = (concordant as f64 - discordant as f64) / total_pairs as f64;
+
+		// Kendall's tau should be high (> 0.8 for good correlation)
+		assert!(
+			tau > 0.8,
+			"Kendall's tau {:.3} is too low (concordant={}, discordant={})",
+			tau,
+			concordant,
+			discordant
 		);
+	}
+
+	#[test]
+	fn test_top_k_ranking_preservation() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 100000,
+			doc_count: 1000,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Simulate 20 documents with clear ranking differences
+		let docs: Vec<(f64, u32, f64)> = vec![
+			// (tf, doc_length, term_doc_count)
+			(10.0, 50, 5.0),   // High tf, short doc, rare term - should rank high
+			(8.0, 60, 10.0),   // High tf, short doc
+			(5.0, 100, 20.0),  // Medium tf, avg doc
+			(3.0, 80, 50.0),   // Lower tf, short doc
+			(2.0, 150, 100.0), // Low tf, long doc
+			(1.0, 200, 200.0), // Lowest tf, longest doc
+		];
+
+		let mut fast_ranked: Vec<(usize, f64)> = docs
+			.iter()
+			.enumerate()
+			.map(|(i, (tf, len, n))| {
+				let encoded = SmallFloat::encode(*len);
+				(i, fast.compute_score(*tf, *n, encoded))
+			})
+			.collect();
+
+		let mut accurate_ranked: Vec<(usize, f64)> = docs
+			.iter()
+			.enumerate()
+			.map(|(i, (tf, len, n))| (i, accurate.compute_bm25_score(*tf, *n, *len as f64)))
+			.collect();
+
+		fast_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+		accurate_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+		// Top-3 documents should be the same
+		let fast_top3: Vec<usize> = fast_ranked.iter().take(3).map(|(i, _)| *i).collect();
+		let accurate_top3: Vec<usize> = accurate_ranked.iter().take(3).map(|(i, _)| *i).collect();
+
+		assert_eq!(
+			fast_top3, accurate_top3,
+			"Top-3 ranking should be preserved: fast={:?}, accurate={:?}",
+			fast_top3, accurate_top3
+		);
+	}
+
+	// Edge Case Tests
+
+	#[test]
+	fn test_edge_very_short_documents() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Very short documents (1-10 terms)
+		for len in 1..=10u32 {
+			let encoded = SmallFloat::encode(len);
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, len as f64);
+
+			assert!(fast_score > 0.0, "Short doc {} should have positive fast score", len);
+			assert!(accurate_score > 0.0, "Short doc {} should have positive accurate score", len);
+			assert!(!fast_score.is_nan(), "Short doc {} fast score is NaN", len);
+			assert!(!accurate_score.is_nan(), "Short doc {} accurate score is NaN", len);
+		}
+	}
+
+	#[test]
+	fn test_edge_very_long_documents() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 1000000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Very long documents
+		let long_lengths = [10000u32, 50000, 100000, 500000, 1000000];
+
+		for &len in &long_lengths {
+			let encoded = SmallFloat::encode(len);
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, len as f64);
+
+			assert!(fast_score > 0.0, "Long doc {} should have positive fast score", len);
+			assert!(accurate_score > 0.0, "Long doc {} should have positive accurate score", len);
+			assert!(!fast_score.is_nan(), "Long doc {} fast score is NaN", len);
+			assert!(!accurate_score.is_nan(), "Long doc {} accurate score is NaN", len);
+
+			// Long docs should score lower than average-length docs
+			let avg_encoded = SmallFloat::encode(10000); // avg = 1M/100 = 10K
+			let avg_fast = fast.compute_score(1.0, 10.0, avg_encoded);
+			if len > 10000 {
+				assert!(fast_score < avg_fast, "Long doc {} should score lower than avg", len);
+			}
+		}
+	}
+
+	#[test]
+	fn test_edge_high_term_frequency() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded_100 = SmallFloat::encode(100);
+
+		// Very high term frequencies
+		let high_tfs = [100.0, 500.0, 1000.0, 5000.0];
+
+		for &tf in &high_tfs {
+			let fast_score = fast.compute_score(tf, 10.0, encoded_100);
+			let accurate_score = accurate.compute_bm25_score(tf, 10.0, 100.0);
+
+			assert!(fast_score > 0.0, "High tf {} should have positive fast score", tf);
+			assert!(accurate_score > 0.0, "High tf {} should have positive accurate score", tf);
+			assert!(!fast_score.is_nan(), "High tf {} fast score is NaN", tf);
+			assert!(!accurate_score.is_nan(), "High tf {} accurate score is NaN", tf);
+
+			// BM25 should saturate - very high tf shouldn't give proportionally higher scores
+			let tf10_fast = fast.compute_score(10.0, 10.0, encoded_100);
+			let ratio = fast_score / tf10_fast;
+			assert!(
+				ratio < 3.0,
+				"High tf {} shouldn't give proportionally higher score (ratio={})",
+				tf,
+				ratio
+			);
+		}
+	}
+
+	#[test]
+	fn test_edge_extreme_bm25_params() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+
+		let encoded_100 = SmallFloat::encode(100);
+
+		// Extreme k1 values
+		let extreme_k1s = [0.0, 0.1, 5.0, 10.0, 100.0];
+		for &k1 in &extreme_k1s {
+			let bm25 = super::Bm25Params {
+				k1,
+				b: 0.75,
+			};
+			let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+			let accurate = super::AccurateScorer::new(dlc.clone(), bm25);
+
+			let fast_score = fast.compute_score(1.0, 10.0, encoded_100);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, 100.0);
+
+			assert!(!fast_score.is_nan(), "k1={} fast score is NaN", k1);
+			assert!(!accurate_score.is_nan(), "k1={} accurate score is NaN", k1);
+			assert!(fast_score >= 0.0, "k1={} fast score is negative", k1);
+			assert!(accurate_score >= 0.0, "k1={} accurate score is negative", k1);
+		}
+
+		// Extreme b values
+		let extreme_bs = [0.0, 0.01, 0.99, 1.0];
+		for &b in &extreme_bs {
+			let bm25 = super::Bm25Params {
+				k1: 1.2,
+				b,
+			};
+			let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+			let accurate = super::AccurateScorer::new(dlc.clone(), bm25);
+
+			let fast_score = fast.compute_score(1.0, 10.0, encoded_100);
+			let accurate_score = accurate.compute_bm25_score(1.0, 10.0, 100.0);
+
+			assert!(!fast_score.is_nan(), "b={} fast score is NaN", b);
+			assert!(!accurate_score.is_nan(), "b={} accurate score is NaN", b);
+			assert!(fast_score >= 0.0, "b={} fast score is negative", b);
+			assert!(accurate_score >= 0.0, "b={} accurate score is negative", b);
+		}
+	}
+
+	#[test]
+	fn test_edge_single_document_index() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Edge case: index with only 1 document
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 100,
+			doc_count: 1,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded = SmallFloat::encode(100);
+		let fast_score = fast.compute_score(1.0, 1.0, encoded);
+		let accurate_score = accurate.compute_bm25_score(1.0, 1.0, 100.0);
+
+		// With N=1 and n=1, IDF = ln(1 + (1-1+0.5)/(1+0.5)) = ln(1 + 0.333) ≈ 0.288
+		assert!(fast_score > 0.0, "Single doc index should have positive score");
+		assert!(accurate_score > 0.0, "Single doc index should have positive score");
+	}
+
+	#[test]
+	fn test_edge_empty_index() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Edge case: empty index (doc_count = 0)
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 0,
+			doc_count: 0,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded = SmallFloat::encode(100);
+		let fast_score = fast.compute_score(1.0, 1.0, encoded);
+		let accurate_score = accurate.compute_bm25_score(1.0, 1.0, 100.0);
+
+		// Should handle gracefully without NaN or panic
+		assert!(!fast_score.is_nan(), "Empty index fast score is NaN");
+		assert!(!accurate_score.is_nan(), "Empty index accurate score is NaN");
+	}
+
+	#[test]
+	fn test_edge_term_in_all_documents() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded = SmallFloat::encode(100);
+
+		// Term appears in all documents (stopword-like)
+		let fast_score = fast.compute_score(1.0, 100.0, encoded);
+		let accurate_score = accurate.compute_bm25_score(1.0, 100.0, 100.0);
+
+		// IDF = ln(1 + (100-100+0.5)/(100+0.5)) = ln(1 + 0.5/100.5) ≈ 0.00498
+		// Score should be small but positive
+		assert!(fast_score > 0.0, "Stopword should have positive score");
+		assert!(accurate_score > 0.0, "Stopword should have positive score");
+		assert!(fast_score < 0.1, "Stopword should have small score");
+		assert!(accurate_score < 0.1, "Stopword should have small score");
+	}
+
+	#[test]
+	fn test_edge_term_more_frequent_than_documents() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Edge case: term_doc_count > doc_count (stale data)
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 1000,
+			doc_count: 10,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded = SmallFloat::encode(100);
+
+		// Term in 20 docs but only 10 docs total
+		let fast_score = fast.compute_score(1.0, 20.0, encoded);
+		let accurate_score = accurate.compute_bm25_score(1.0, 20.0, 100.0);
+
+		// Should handle gracefully
+		assert!(!fast_score.is_nan(), "Stale data fast score is NaN");
+		assert!(!accurate_score.is_nan(), "Stale data accurate score is NaN");
+		assert!(fast_score >= 0.0, "Stale data fast score is negative");
+		assert!(accurate_score >= 0.0, "Stale data accurate score is negative");
+	}
+
+	#[test]
+	fn test_edge_zero_and_negative_inputs() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded_100 = SmallFloat::encode(100);
+		let encoded_0 = SmallFloat::encode(0);
+
+		// Zero term frequency
+		assert_eq!(fast.compute_score(0.0, 10.0, encoded_100), 0.0);
+		assert_eq!(accurate.compute_bm25_score(0.0, 10.0, 100.0), 0.0);
+
+		// Negative term frequency
+		assert_eq!(fast.compute_score(-1.0, 10.0, encoded_100), 0.0);
+		assert_eq!(accurate.compute_bm25_score(-1.0, 10.0, 100.0), 0.0);
+
+		// Zero document length
+		let fast_score = fast.compute_score(1.0, 10.0, encoded_0);
+		let accurate_score = accurate.compute_bm25_score(1.0, 10.0, 0.0);
+		assert!(!fast_score.is_nan(), "Zero doc length fast score is NaN");
+		assert!(!accurate_score.is_nan(), "Zero doc length accurate score is NaN");
+	}
+
+	#[test]
+	fn test_edge_large_corpus_statistics() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Very large corpus (billions of docs)
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 100_000_000_000i128, // 100 billion total length
+			doc_count: 1_000_000_000,               // 1 billion docs
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		let encoded = SmallFloat::encode(100);
+
+		// Rare term in large corpus
+		let fast_rare = fast.compute_score(1.0, 1000.0, encoded);
+		let accurate_rare = accurate.compute_bm25_score(1.0, 1000.0, 100.0);
+
+		assert!(!fast_rare.is_nan(), "Large corpus rare term fast score is NaN");
+		assert!(!accurate_rare.is_nan(), "Large corpus rare term accurate score is NaN");
+		assert!(fast_rare > 0.0, "Large corpus rare term should have positive score");
+
+		// Common term in large corpus
+		let fast_common = fast.compute_score(1.0, 500_000_000.0, encoded);
+		let accurate_common = accurate.compute_bm25_score(1.0, 500_000_000.0, 100.0);
+
+		assert!(!fast_common.is_nan(), "Large corpus common term fast score is NaN");
+		assert!(!accurate_common.is_nan(), "Large corpus common term accurate score is NaN");
+
+		// Rare term should score higher than common
+		assert!(fast_rare > fast_common, "Rare term should score higher");
+		assert!(accurate_rare > accurate_common, "Rare term should score higher");
 	}
 }
