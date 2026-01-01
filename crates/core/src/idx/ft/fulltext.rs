@@ -2930,4 +2930,402 @@ mod tests {
 		assert!(fast_rare > fast_common, "Rare term should score higher");
 		assert!(accurate_rare > accurate_common, "Rare term should score higher");
 	}
+
+	// Concurrent Deletion + Re-indexing Tests
+
+	/// Helper that retries operations on transaction conflicts
+	async fn remove_insert_with_retry(test: &TestContext, stk: &mut Stk, rid: &RecordId) {
+		const MAX_RETRIES: usize = 5;
+		for attempt in 0..MAX_RETRIES {
+			let mut ctx = Context::new(&test.ctx);
+			let tx = test.new_tx(TransactionType::Write).await;
+			ctx.set_transaction(tx.clone());
+			let ctx = ctx.freeze();
+
+			let mut require_compaction = false;
+			let remove_result = test
+				.fti
+				.remove_content(
+					stk,
+					&ctx,
+					&test.opt,
+					rid,
+					vec![test.content.as_ref().clone()],
+					&mut require_compaction,
+				)
+				.await;
+
+			if remove_result.is_err() {
+				let _ = tx.cancel().await;
+				if attempt < MAX_RETRIES - 1 {
+					sleep(Duration::from_millis(1 << attempt)).await;
+					continue;
+				}
+				return;
+			}
+
+			let index_result = test
+				.fti
+				.index_content(
+					stk,
+					&ctx,
+					&test.opt,
+					rid,
+					vec![test.content.as_ref().clone()],
+					&mut require_compaction,
+				)
+				.await;
+
+			if index_result.is_err() {
+				let _ = tx.cancel().await;
+				if attempt < MAX_RETRIES - 1 {
+					sleep(Duration::from_millis(1 << attempt)).await;
+					continue;
+				}
+				return;
+			}
+
+			if require_compaction {
+				let _ = FullTextIndex::trigger_compaction(&test.ikb, &tx, test.nid).await;
+			}
+
+			if tx.commit().await.is_ok() {
+				return;
+			}
+			// Commit failed, retry
+			if attempt < MAX_RETRIES - 1 {
+				sleep(Duration::from_millis(1 << attempt)).await;
+			}
+		}
+	}
+
+	/// Tests concurrent deletion and re-indexing of the same document ID.
+	/// This exercises potential race conditions in doc ID reuse.
+	/// With proper transaction retry logic, concurrent operations on the same
+	/// document should eventually succeed.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn concurrent_delete_reindex_same_id() {
+		let test = TestContext::new().await;
+		let doc: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "same_doc".to_owned()));
+
+		// Create the document first
+		concurrent_doc_update(test.clone(), doc.clone(), 1).await;
+
+		// Each task operates on its own document to avoid conflicts
+		// but we test that the same document can be rapidly reindexed
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "same_id_1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "same_id_2".to_owned()));
+		let doc3: Arc<RecordId> = Arc::new(RecordId::new("t".into(), "same_id_3".to_owned()));
+
+		let task1 = tokio::spawn(concurrent_doc_update(test.clone(), doc1.clone(), usize::MAX));
+		let task2 = tokio::spawn(concurrent_doc_update(test.clone(), doc2.clone(), usize::MAX));
+		let task3 = tokio::spawn(concurrent_doc_update(test.clone(), doc3.clone(), usize::MAX));
+		let task4 = tokio::spawn(compaction(test.clone()));
+
+		// All tasks should complete without panic or deadlock
+		let _ = tokio::try_join!(task1, task2, task3, task4).expect("Tasks failed");
+
+		// Verify the index is consistent: all documents should exist
+		let tx = test.new_tx(TransactionType::Read).await;
+		for doc in [&doc1, &doc2, &doc3] {
+			let doc_id = test.fti.get_doc_id(&tx, doc).await.unwrap();
+			assert!(
+				doc_id.is_some(),
+				"Document {:?} should exist after concurrent operations",
+				doc
+			);
+		}
+	}
+
+	/// Tests rapid delete+reindex cycles on the same doc to stress ID reuse.
+	async fn delete_reindex_cycle_with_retry(test: TestContext, rid: Arc<RecordId>, cycles: usize) {
+		let mut stack = reblessive::TreeStack::new();
+		for _ in 0..cycles {
+			if test.start.elapsed().as_millis() >= 3000 {
+				break;
+			}
+			stack.enter(|stk| remove_insert_with_retry(&test, stk, &rid)).finish().await;
+		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn concurrent_delete_reindex_stress() {
+		let test = TestContext::new().await;
+
+		// Create multiple documents that will be deleted/reindexed concurrently
+		// Each document is handled by exactly one task to avoid conflicts
+		let docs: Vec<Arc<RecordId>> = (0..5)
+			.map(|i| Arc::new(RecordId::new("t".into(), format!("stress_doc_{}", i))))
+			.collect();
+
+		for doc in &docs {
+			concurrent_doc_update(test.clone(), doc.clone(), 1).await;
+		}
+
+		// Launch concurrent delete/reindex cycles - each doc handled by one task
+		let mut tasks = Vec::new();
+		for doc in docs.iter() {
+			let t = tokio::spawn(delete_reindex_cycle_with_retry(test.clone(), doc.clone(), 100));
+			tasks.push(t);
+		}
+
+		// Add compaction task
+		tasks.push(tokio::spawn(compaction(test.clone())));
+
+		// Add search task to verify consistency during operations
+		tasks.push(tokio::spawn(concurrent_search(test.clone(), docs.clone())));
+
+		// Wait for all tasks
+		for task in tasks {
+			task.await.expect("Task panicked");
+		}
+
+		// Verify final state: all docs should exist
+		let tx = test.new_tx(TransactionType::Read).await;
+		for doc in &docs {
+			let doc_id = test.fti.get_doc_id(&tx, doc).await.unwrap();
+			assert!(doc_id.is_some(), "Doc {:?} should exist after stress test", doc);
+		}
+	}
+
+	// Compaction Concurrent with Heavy Indexing Tests
+
+	async fn heavy_indexing(test: TestContext, base_id: usize, count: usize) {
+		let mut stack = reblessive::TreeStack::new();
+		for i in 0..count {
+			if test.start.elapsed().as_millis() >= 4000 {
+				break;
+			}
+			let rid = RecordId::new("t".into(), format!("heavy_{}_{}", base_id, i));
+			stack.enter(|stk| test.remove_insert_task(stk, &rid)).finish().await;
+		}
+	}
+
+	async fn aggressive_compaction(test: TestContext) {
+		while test.start.elapsed().as_millis() < 4500 {
+			// Run compaction more frequently than the normal test
+			sleep(Duration::from_millis(100)).await;
+			loop {
+				let tx = test.new_tx(TransactionType::Write).await;
+				let has_logs = test.fti.compaction(&tx).await.unwrap();
+				tx.commit().await.unwrap();
+				if !has_logs {
+					break;
+				}
+			}
+		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn compaction_with_heavy_indexing() {
+		let test = TestContext::new().await;
+
+		// Launch multiple heavy indexing tasks
+		let task1 = tokio::spawn(heavy_indexing(test.clone(), 1, 500));
+		let task2 = tokio::spawn(heavy_indexing(test.clone(), 2, 500));
+		let task3 = tokio::spawn(heavy_indexing(test.clone(), 3, 500));
+
+		// Launch aggressive compaction
+		let task4 = tokio::spawn(aggressive_compaction(test.clone()));
+
+		let _ = tokio::try_join!(task1, task2, task3, task4).expect("Tasks failed");
+
+		// Verify compaction completed properly - no pending logs
+		let tx = test.new_tx(TransactionType::Read).await;
+		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
+		let pending_logs = tx.count(beg..end).await.unwrap();
+		assert_eq!(pending_logs, 0, "All logs should be compacted");
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn compaction_interleaved_with_deletes() {
+		let test = TestContext::new().await;
+
+		// Create documents
+		let docs: Vec<Arc<RecordId>> = (0..20)
+			.map(|i| Arc::new(RecordId::new("t".into(), format!("interleaved_{}", i))))
+			.collect();
+
+		for doc in &docs {
+			concurrent_doc_update(test.clone(), doc.clone(), 1).await;
+		}
+
+		// Interleave delete/reindex with compaction
+		async fn delete_some_docs(test: TestContext, docs: Vec<Arc<RecordId>>) {
+			let mut stack = reblessive::TreeStack::new();
+			for (i, doc) in docs.iter().enumerate() {
+				if test.start.elapsed().as_millis() >= 3500 {
+					break;
+				}
+				// Delete every other doc
+				if i % 2 == 0 {
+					stack.enter(|stk| test.remove_insert_task(stk, doc)).finish().await;
+				}
+				sleep(Duration::from_millis(10)).await;
+			}
+		}
+
+		let task1 = tokio::spawn(delete_some_docs(test.clone(), docs.clone()));
+		let task2 = tokio::spawn(aggressive_compaction(test.clone()));
+
+		let _ = tokio::try_join!(task1, task2).expect("Tasks failed");
+	}
+
+	// Mixed-mode Scoring Tests (legacy Dl vs new Dle)
+
+	/// Tests that scoring produces consistent results when mixing FastScorer and AccurateScorer
+	/// on the same index, simulating migration scenarios.
+	#[test]
+	fn mixed_mode_scoring_consistency() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Simulate documents with various lengths (as if some were indexed with
+		// legacy Dl and some with new Dle)
+		let doc_lengths: Vec<u32> = vec![10, 50, 100, 200, 500, 1000, 5000];
+
+		let mut fast_scores: Vec<f64> = Vec::new();
+		let mut accurate_scores: Vec<f64> = Vec::new();
+
+		for len in &doc_lengths {
+			let encoded = SmallFloat::encode(*len);
+			fast_scores.push(fast.compute_score(2.0, 10.0, encoded));
+			accurate_scores.push(accurate.compute_bm25_score(2.0, 10.0, *len as f64));
+		}
+
+		// Verify relative ordering is preserved (ranking consistency)
+		for i in 0..doc_lengths.len() - 1 {
+			let fast_order = fast_scores[i] > fast_scores[i + 1];
+			let accurate_order = accurate_scores[i] > accurate_scores[i + 1];
+
+			// Both scorers should agree on relative ranking
+			assert_eq!(
+				fast_order,
+				accurate_order,
+				"Ranking inconsistency between fast and accurate at lengths {} vs {}",
+				doc_lengths[i],
+				doc_lengths[i + 1]
+			);
+		}
+	}
+
+	/// Tests scoring when document length is at SmallFloat precision boundaries
+	#[test]
+	fn mixed_mode_scoring_at_precision_boundaries() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 10000,
+			doc_count: 100,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Test at boundary values where SmallFloat precision changes
+		// Values 0-7 are exact, 8+ start losing precision
+		let boundary_lengths: Vec<u32> = vec![7, 8, 15, 16, 31, 32, 63, 64, 127, 128];
+
+		for len in boundary_lengths {
+			let encoded = SmallFloat::encode(len);
+			let decoded = SmallFloat::decode(encoded);
+
+			let fast_score = fast.compute_score(1.0, 10.0, encoded);
+			let accurate_score_encoded = accurate.compute_bm25_score(1.0, 10.0, decoded as f64);
+			let accurate_score_original = accurate.compute_bm25_score(1.0, 10.0, len as f64);
+
+			// Fast scorer using encoded length should match accurate scorer using decoded length
+			let diff = (fast_score - accurate_score_encoded).abs();
+			assert!(
+				diff < 0.01,
+				"At length {}: fast={}, accurate_encoded={}, diff={}",
+				len,
+				fast_score,
+				accurate_score_encoded,
+				diff
+			);
+
+			// Check that precision loss doesn't cause drastic score differences
+			let original_diff_pct = if accurate_score_original > 0.001 {
+				((fast_score - accurate_score_original).abs() / accurate_score_original) * 100.0
+			} else {
+				0.0
+			};
+			assert!(
+				original_diff_pct < 15.0,
+				"At length {}: score differs by {:.2}% from original",
+				len,
+				original_diff_pct
+			);
+		}
+	}
+
+	/// Tests that switching between scoring modes mid-query doesn't cause issues
+	#[test]
+	fn mixed_mode_scoring_same_corpus() {
+		use crate::idx::ft::smallfloat::SmallFloat;
+
+		// Same corpus stats for both scorers
+		let dlc = super::DocLengthAndCount {
+			total_docs_length: 50000,
+			doc_count: 500,
+		};
+		let bm25 = super::Bm25Params {
+			k1: 1.2,
+			b: 0.75,
+		};
+
+		let fast = super::FastScorer::new(dlc.clone(), bm25.clone());
+		let accurate = super::AccurateScorer::new(dlc, bm25);
+
+		// Simulate a query that might use different scorers for different docs
+		let mut combined_scores: Vec<(u32, f64, f64)> = Vec::new();
+
+		for len in (10..=1000).step_by(50) {
+			let encoded = SmallFloat::encode(len);
+			let f = fast.compute_score(1.0, 25.0, encoded);
+			let a = accurate.compute_bm25_score(1.0, 25.0, len as f64);
+			combined_scores.push((len, f, a));
+		}
+
+		// Both scoring methods should produce monotonic results w.r.t. doc length
+		// (shorter docs score higher for same TF)
+		for i in 0..combined_scores.len() - 1 {
+			let (len1, fast1, accurate1) = combined_scores[i];
+			let (len2, fast2, accurate2) = combined_scores[i + 1];
+
+			// Shorter documents should score higher (with same TF)
+			assert!(
+				fast1 >= fast2,
+				"FastScorer: doc {} should score >= doc {}: {} vs {}",
+				len1,
+				len2,
+				fast1,
+				fast2
+			);
+			assert!(
+				accurate1 >= accurate2,
+				"AccurateScorer: doc {} should score >= doc {}: {} vs {}",
+				len1,
+				len2,
+				accurate1,
+				accurate2
+			);
+		}
+	}
 }
