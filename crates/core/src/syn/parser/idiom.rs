@@ -17,7 +17,22 @@ impl Parser<'_> {
 		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...")) {
 			return true;
 		}
-		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("~") | t!("->"))
+		if peek == t!("<") {
+			match self.peek_whitespace1().kind {
+				t!("~") | t!("->") => return true,
+				t!("-") => {
+					// If negate operator is followed by a number, treat it as non-idiom
+					return !matches!(
+						self.peek_whitespace2().kind,
+						TokenKind::Digits
+							| TokenKind::Infinity | TokenKind::NaN
+							| TokenKind::Glued(Glued::Number)
+					);
+				}
+				_ => {}
+			}
+		}
+		false
 	}
 
 	/// Parse fields of a selecting query: `foo, bar` in `SELECT foo, bar FROM
