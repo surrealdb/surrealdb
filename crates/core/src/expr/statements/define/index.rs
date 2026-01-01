@@ -160,7 +160,16 @@ impl DefineIndexStatement {
 		txn.commit().await?;
 
 		// Process the index (uses its own transactions internally)
-		run_indexing(ctx, opt, tb.namespace_id, tb.database_id, tb.table_id, index_def.into(), !self.concurrently).await?;
+		run_indexing(
+			ctx,
+			opt,
+			tb.namespace_id,
+			tb.database_id,
+			tb.table_id,
+			index_def.into(),
+			!self.concurrently,
+		)
+		.await?;
 
 		// Ok all good
 		Ok(Value::None)

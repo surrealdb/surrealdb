@@ -62,13 +62,7 @@ async fn prepare_data() -> Input {
 
 	// Create namespace and database first
 	dbs.execute("DEFINE NAMESPACE bench", &Session::owner(), None).await.unwrap();
-	dbs.execute(
-		"DEFINE DATABASE bench",
-		&Session::owner().with_ns("bench"),
-		None,
-	)
-	.await
-	.unwrap();
+	dbs.execute("DEFINE DATABASE bench", &Session::owner().with_ns("bench"), None).await.unwrap();
 
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = r"DEFINE INDEX number ON item FIELDS number;

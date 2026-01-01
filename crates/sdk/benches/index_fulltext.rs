@@ -24,8 +24,10 @@ fn get_datastore_path() -> String {
 	#[cfg(feature = "kv-rocksdb")]
 	{
 		if let Ok(base_path) = std::env::var("BENCH_DB_PATH") {
-			let ts =
-				std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+			let ts = std::time::SystemTime::now()
+				.duration_since(std::time::UNIX_EPOCH)
+				.unwrap()
+				.as_millis();
 			format!("rocksdb://{}/bench-ft-{}.db", base_path, ts)
 		} else {
 			"memory".to_string()
@@ -436,7 +438,8 @@ async fn prepare_million_scale_corpus(doc_count: usize) -> BenchInput {
 	// NOW create index (uses parallel batch processing internally)
 	eprintln!("  Creating fulltext index with BM25...");
 	let idx_start = std::time::Instant::now();
-	let sql = "DEFINE INDEX ft_idx ON TABLE doc FIELDS content FULLTEXT ANALYZER bench_analyzer BM25;";
+	let sql =
+		"DEFINE INDEX ft_idx ON TABLE doc FIELDS content FULLTEXT ANALYZER bench_analyzer BM25;";
 	dbs.execute(sql, &ses, None).await.unwrap().remove(0).result.unwrap();
 	eprintln!("  Index created in {:.1}s", idx_start.elapsed().as_secs_f64());
 

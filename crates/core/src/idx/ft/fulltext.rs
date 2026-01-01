@@ -896,9 +896,10 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	}
 }
 
+use parking_lot::RwLock;
+
 use crate::idx::ft::smallfloat::{NormCache, SmallFloat};
 use crate::key::index::dle::{CHUNK_SIZE, Dle};
-use parking_lot::RwLock;
 
 /// Fast BM25 scorer using SmallFloat-encoded lengths and precomputed norms.
 ///

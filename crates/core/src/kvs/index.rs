@@ -193,6 +193,7 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn build(
 		&self,
 		ctx: &FrozenContext,
