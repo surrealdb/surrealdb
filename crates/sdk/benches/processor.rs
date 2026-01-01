@@ -6,49 +6,47 @@ use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_mai
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::Value;
-use tokio::runtime::Runtime;
+use tokio::runtime::Builder;
 
 fn bench_processor(c: &mut Criterion) {
-	let rt = Runtime::new().unwrap();
-	let i = rt.block_on(prepare_data());
-
 	let mut group = c.benchmark_group("processor");
 	group.throughput(Throughput::Elements(1));
 	group.sample_size(10);
 	group.measurement_time(Duration::from_secs(15));
 
+	let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+
+	let i = runtime.block_on(prepare_data());
+
 	group.bench_function("table-iterator", |b| {
-		b.to_async(Runtime::new().unwrap()).iter(|| run(&i, "SELECT * FROM item", i.count * 5))
+		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item", i.count * 5))
 	});
 
 	group.bench_function("table-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
-			.iter(|| run(&i, "SELECT * FROM item PARALLEL", i.count * 5))
+		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item PARALLEL", i.count * 5))
 	});
 
 	group.bench_function("non-uniq-index-iterator", |b| {
-		b.to_async(Runtime::new().unwrap())
-			.iter(|| run(&i, "SELECT * FROM item WHERE number=4", i.count))
+		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item WHERE number=4", i.count))
 	});
 
 	group.bench_function("non-uniq-index-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
-			.iter(|| run(&i, "SELECT * FROM item WHERE number=4 PARALLEL", i.count))
+		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item WHERE number=4 PARALLEL", i.count))
 	});
 
 	group.bench_function("full-text-index-iterator", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(&runtime)
 			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie'", i.count))
 	});
 
 	group.bench_function("full-text-index-iterator-parallel", |b| {
-		b.to_async(Runtime::new().unwrap())
+		b.to_async(&runtime)
 			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie' PARALLEL", i.count))
 	});
 
 	group.finish();
 
-	rt.block_on(async { drop(i) });
+	runtime.block_on(async { drop(i) });
 }
 
 struct Input {
