@@ -62,7 +62,7 @@ fn bench_hash_trie_btree_value(c: &mut Criterion) {
 	let mut samples = Vec::with_capacity(N);
 	for i in 0..N {
 		let key = syn::value(&format!(
-			"{{ test: {{ something: [1, 'two', null, test:{i}, {{ trueee: false, noneee: nulll }}] }} }}"
+			"{{ test: {{ something: [1, 'two', null, test:{i}, {{ trueee: false, noneee: null }}] }} }}"
 		))
 		.unwrap();
 		samples.push((key, i));

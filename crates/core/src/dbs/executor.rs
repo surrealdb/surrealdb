@@ -27,7 +27,7 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
-use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::kvs::{Datastore, Error as KvsError, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::types::PublicNotification;
 use crate::val::{Value, convert_value_to_public_value};
@@ -364,10 +364,19 @@ impl Executor {
 					return Ok(value);
 				}
 
+				// Try to commit. If the transaction was already committed (e.g., by
+				// DEFINE INDEX which commits early to avoid holding a stale snapshot
+				// during bulk index building), ignore the TransactionFinished error.
 				if let Err(e) = txn.commit().await {
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
+					let is_already_committed = e
+						.downcast_ref::<err::Error>()
+						.map(|err| matches!(err, err::Error::Kvs(KvsError::TransactionFinished)))
+						.unwrap_or(false);
+					if !is_already_committed {
+						bail!(Error::QueryNotExecuted {
+							message: e.to_string(),
+						});
+					}
 				}
 
 				// flush notifications.

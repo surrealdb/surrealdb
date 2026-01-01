@@ -147,6 +147,8 @@ pub enum Category {
 	IndexFullTextDocCountAndLength,
 	/// crate::key::index::dl                /*{ns}*{db}*{tb}+{ix}!dl{id}
 	IndexDocLength,
+	/// crate::key::index::dle               /*{ns}*{db}*{tb}+{ix}!dle{chunk_id}
+	IndexDocLengthEncoded,
 	/// crate::key::index::td                /*{ns}*{db}*{tb}+{ix}!td{term}{id}
 	IndexTermDocument,
 	/// crate::key::index::tt
@@ -254,6 +256,7 @@ impl Display for Category {
 			Self::IndexTermDocFrequency => "IndexTermDocFrequency",
 			Self::IndexDocKeys => "IndexDocKeys",
 			Self::IndexDocLength => "IndexDocLength",
+			Self::IndexDocLengthEncoded => "IndexDocLengthEncoded",
 			Self::IndexTermDocument => "IndexTermDocument",
 			Self::IndexTermList => "IndexTermList",
 			Self::IndexOffset => "IndexOffset",
