@@ -1,3 +1,4 @@
+mod broadcast;
 mod create;
 mod delete;
 mod filter;
@@ -7,6 +8,7 @@ mod scan;
 mod union;
 mod update;
 
+pub use broadcast::BroadcastSource;
 pub use create::{ContentSource, Create};
 pub use delete::Delete;
 pub use filter::Filter;
