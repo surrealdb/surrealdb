@@ -2,17 +2,27 @@ use std::sync::Arc;
 
 use futures::stream;
 
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+use crate::catalog::Permission;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::err::Error;
+use crate::exec::permission::{
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	should_check_perms,
+};
 use crate::exec::{
 	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatchStream,
 };
+use crate::iam::Action;
 use crate::val::{TableName, Value};
 
 /// Full table scan - iterates over all records in a table.
 ///
 /// Requires database-level context since it reads from a specific table
 /// in the selected namespace and database.
+///
+/// Permission checking is performed at execution time by resolving the table
+/// definition from the current transaction's schema view and filtering records
+/// based on the SELECT permission.
 #[derive(Debug, Clone)]
 pub struct Scan {
 	pub(crate) table: Arc<dyn PhysicalExpr>,
@@ -30,12 +40,17 @@ impl ExecutionPlan for Scan {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?;
 
+		// Check if we need to enforce permissions
+		let check_perms = should_check_perms(db_ctx, Action::View)?;
+
 		// Clone the context for the async block (all fields are Arc/String so cheap to clone)
 		let table_expr = self.table.clone();
 		let ns_name = db_ctx.ns_ctx.ns.name.clone();
 		let db_name = db_ctx.db.name.clone();
 		let txn = db_ctx.ns_ctx.txn.clone();
 		let params = db_ctx.ns_ctx.root.params.clone();
+		let auth = db_ctx.ns_ctx.root.auth.clone();
+		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
 
 		// Create state for the scan
 		#[derive(Clone)]
@@ -45,6 +60,7 @@ impl ExecutionPlan for Scan {
 			table_name: TableName,
 			ns_id: crate::catalog::NamespaceId,
 			db_id: crate::catalog::DatabaseId,
+			select_permission: PhysicalPermission,
 		}
 
 		// Create an async stream using try_unfold
@@ -54,6 +70,7 @@ impl ExecutionPlan for Scan {
 			let db_name = db_name.clone();
 			let txn = txn.clone();
 			let params = params.clone();
+			let auth = auth.clone();
 
 			async move {
 				use crate::expr::ControlFlow;
@@ -96,6 +113,27 @@ impl ExecutionPlan for Scan {
 						ControlFlow::Err(anyhow::anyhow!("Failed to get database: {}", e))
 					})?;
 
+					// Resolve table definition and SELECT permission at execution time
+					let select_permission = if check_perms {
+						let table_def =
+							txn.get_tb_by_name(&ns_name, &db_name, &table_name).await.map_err(
+								|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {}", e)),
+							)?;
+
+						let catalog_perm = match table_def {
+							Some(def) => def.permissions.select.clone(),
+							// Schemaless table: deny access for record users
+							None => Permission::None,
+						};
+						// Convert to physical permission
+						convert_permission_to_physical(&catalog_perm).map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {}", e))
+						})?
+					} else {
+						// Permissions bypassed - allow all
+						PhysicalPermission::Allow
+					};
+
 					// Create key range for all records in the table
 					let beg = crate::key::record::prefix(
 						ns_id.namespace_id,
@@ -120,8 +158,14 @@ impl ExecutionPlan for Scan {
 						table_name,
 						ns_id: ns_id.namespace_id,
 						db_id: db_id.database_id,
+						select_permission,
 					}
 				};
+
+				// Check if permission is Deny - return empty result immediately
+				if matches!(&state.select_permission, PhysicalPermission::Deny) {
+					return Ok(None);
+				}
 
 				// Check if we're done
 				let Some(next_key) = state.next_key else {
@@ -143,14 +187,88 @@ impl ExecutionPlan for Scan {
 				let records_len = records.len();
 				let last_key = records.last().map(|(k, _)| k.clone());
 
-				// Deserialize and collect values
+				// Deserialize and collect values, filtering by permission
 				let mut values = Vec::with_capacity(records_len);
-				for (_key, val) in records {
+				for (key, val) in records {
 					use crate::kvs::KVValue;
-					let record = crate::catalog::Record::kv_decode_value(val).map_err(|e| {
+
+					// Decode the record key to get the RecordId
+					let decoded_key =
+						crate::key::record::RecordKey::decode_key(&key).map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!("Failed to decode record key: {}", e))
+						})?;
+
+					let rid = crate::val::RecordId {
+						table: decoded_key.tb.into_owned(),
+						key: decoded_key.id,
+					};
+
+					let mut record = crate::catalog::Record::kv_decode_value(val).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to deserialize record: {}", e))
 					})?;
-					values.push(record.data.as_ref().clone());
+
+					// Inject the id field into the document
+					record.data.to_mut().def(&rid);
+
+					let value = record.data.as_ref().clone();
+
+					// Check permission for this record
+					match &state.select_permission {
+						PhysicalPermission::Allow => {
+							// No filtering needed
+							values.push(value);
+						}
+						PhysicalPermission::Deny => {
+							// Should have been handled above, but skip just in case
+							continue;
+						}
+						PhysicalPermission::Conditional(_) => {
+							// Create a temporary database context for permission evaluation
+							let db_ctx = crate::exec::DatabaseContext {
+								ns_ctx: crate::exec::NamespaceContext {
+									root: crate::exec::RootContext {
+										datastore: None,
+										params: params.clone(),
+										cancellation: tokio_util::sync::CancellationToken::new(),
+										auth: auth.clone(),
+										auth_enabled,
+									},
+									ns: Arc::new(crate::catalog::NamespaceDefinition {
+										namespace_id: state.ns_id,
+										name: ns_name.clone(),
+										comment: None,
+									}),
+									txn: txn.clone(),
+								},
+								db: Arc::new(crate::catalog::DatabaseDefinition {
+									namespace_id: state.ns_id,
+									database_id: state.db_id,
+									name: db_name.clone(),
+									comment: None,
+									changefeed: None,
+									strict: false,
+								}),
+							};
+
+							// Check permission for this specific value
+							let allowed = check_permission_for_value(
+								&state.select_permission,
+								&value,
+								&db_ctx,
+							)
+							.await
+							.map_err(|e| {
+								ControlFlow::Err(anyhow::anyhow!(
+									"Failed to check permission: {}",
+									e
+								))
+							})?;
+
+							if allowed {
+								values.push(value);
+							}
+						}
+					}
 				}
 
 				// Determine next state
@@ -176,15 +294,34 @@ impl ExecutionPlan for Scan {
 					}
 				};
 
-				Ok(Some((
-					ValueBatch {
-						values,
-					},
-					Some(next_state),
-				)))
+				// Only emit non-empty batches
+				if values.is_empty() {
+					// Continue scanning but skip this batch
+					Ok(Some((
+						ValueBatch {
+							values: vec![],
+						},
+						Some(next_state),
+					)))
+				} else {
+					Ok(Some((
+						ValueBatch {
+							values,
+						},
+						Some(next_state),
+					)))
+				}
 			}
 		});
 
-		Ok(Box::pin(stream))
+		// Filter out empty batches from the stream
+		let filtered_stream = futures::StreamExt::filter_map(stream, |result| async move {
+			match result {
+				Ok(batch) if batch.values.is_empty() => None,
+				other => Some(other),
+			}
+		});
+
+		Ok(Box::pin(filtered_stream))
 	}
 }

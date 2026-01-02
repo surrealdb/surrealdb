@@ -1,0 +1,159 @@
+use std::sync::Arc;
+
+use futures::stream;
+
+use crate::catalog::Permission;
+use crate::catalog::providers::TableProvider;
+use crate::err::Error;
+use crate::exec::permission::{
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	should_check_perms,
+};
+use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::iam::Action;
+use crate::val::RecordId;
+
+/// Direct lookup of a record by its ID.
+///
+/// Requires database-level context since it looks up a record
+/// in a specific table within the selected namespace and database.
+///
+/// Permission checking is performed at execution time by resolving the table
+/// definition from the current transaction's schema view and checking the
+/// SELECT permission for the returned record.
+#[derive(Debug, Clone)]
+pub struct RecordIdLookup {
+	pub(crate) record_id: RecordId,
+	// fields: Vec<Field>,
+}
+
+impl ExecutionPlan for RecordIdLookup {
+	fn required_context(&self) -> ContextLevel {
+		ContextLevel::Database
+	}
+
+	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+		// Get database context - we declared Database level, so this should succeed
+		let db_ctx = ctx.database()?;
+
+		// Check if we need to enforce permissions
+		let check_perms = should_check_perms(db_ctx, Action::View)?;
+
+		// Clone what we need for the async block
+		let record_id = self.record_id.clone();
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let ns_name = db_ctx.ns_ctx.ns.name.clone();
+		let db_id = db_ctx.db.database_id;
+		let db_name = db_ctx.db.name.clone();
+		let txn = db_ctx.ns_ctx.txn.clone();
+		let params = db_ctx.ns_ctx.root.params.clone();
+		let auth = db_ctx.ns_ctx.root.auth.clone();
+		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
+
+		// Create an async stream that looks up the record
+		let stream = stream::once(async move {
+			use crate::expr::ControlFlow;
+
+			// Resolve table definition and SELECT permission at execution time
+			let select_permission = if check_perms {
+				let table_def = txn
+					.get_tb_by_name(&ns_name, &db_name, &record_id.table)
+					.await
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {}", e)))?;
+
+				let catalog_perm = match table_def {
+					Some(def) => def.permissions.select.clone(),
+					// Schemaless table: deny access for record users
+					None => Permission::None,
+				};
+				// Convert to physical permission
+				convert_permission_to_physical(&catalog_perm).map_err(|e| {
+					ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {}", e))
+				})?
+			} else {
+				// Permissions bypassed - allow all
+				PhysicalPermission::Allow
+			};
+
+			// Check if permission is Deny - return empty result immediately
+			if matches!(&select_permission, PhysicalPermission::Deny) {
+				return Ok(ValueBatch {
+					values: vec![],
+				});
+			}
+
+			// Look up the record
+			let record = txn
+				.get_record(ns_id, db_id, &record_id.table, &record_id.key, None)
+				.await
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {}", e)))?;
+
+			// Extract the value and inject the id field
+			let mut value = record.data.as_ref().clone();
+			value.def(&record_id);
+
+			// Check permission for this record
+			match &select_permission {
+				PhysicalPermission::Allow => {
+					// No filtering needed
+					Ok(ValueBatch {
+						values: vec![value],
+					})
+				}
+				PhysicalPermission::Deny => {
+					// Should have been handled above, but return empty just in case
+					Ok(ValueBatch {
+						values: vec![],
+					})
+				}
+				PhysicalPermission::Conditional(_) => {
+					// Create a temporary database context for permission evaluation
+					let db_ctx = crate::exec::DatabaseContext {
+						ns_ctx: crate::exec::NamespaceContext {
+							root: crate::exec::RootContext {
+								datastore: None,
+								params: params.clone(),
+								cancellation: tokio_util::sync::CancellationToken::new(),
+								auth: auth.clone(),
+								auth_enabled,
+							},
+							ns: Arc::new(crate::catalog::NamespaceDefinition {
+								namespace_id: ns_id,
+								name: ns_name.clone(),
+								comment: None,
+							}),
+							txn: txn.clone(),
+						},
+						db: Arc::new(crate::catalog::DatabaseDefinition {
+							namespace_id: ns_id,
+							database_id: db_id,
+							name: db_name.clone(),
+							comment: None,
+							changefeed: None,
+							strict: false,
+						}),
+					};
+
+					// Check permission for this specific value
+					let allowed = check_permission_for_value(&select_permission, &value, &db_ctx)
+						.await
+						.map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {}", e))
+						})?;
+
+					if allowed {
+						Ok(ValueBatch {
+							values: vec![value],
+						})
+					} else {
+						Ok(ValueBatch {
+							values: vec![],
+						})
+					}
+				}
+			}
+		});
+
+		Ok(Box::pin(stream))
+	}
+}

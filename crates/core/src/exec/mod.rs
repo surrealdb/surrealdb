@@ -10,12 +10,12 @@ use crate::expr::{FlowResult, Idiom};
 use crate::kvs::Transaction;
 use crate::val::Value;
 
+pub(crate) mod operators;
 pub(crate) mod context;
-pub(crate) mod filter;
-pub(crate) mod lookup;
+pub(crate) mod permission;
 pub(crate) mod planner;
-pub(crate) mod scan;
-pub(crate) mod union;
+pub(crate) mod physical_expr;
+pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
 // Re-export context types
 pub(crate) use context::{
@@ -108,317 +108,6 @@ pub(crate) enum SessionCommand {
 // 	}
 // }
 
-/// Evaluation context - what's available during expression evaluation.
-///
-/// This is a borrowed view into the execution context for expression evaluation.
-/// It provides access to parameters, namespace/database names, and the current row
-/// (for per-row expressions like filters and projections).
-// Clone is implemented manually because #[derive(Clone)] doesn't work well
-// with lifetime parameters when we just have references.
-#[derive(Clone)]
-pub struct EvalContext<'a> {
-	pub params: &'a Parameters,
-	pub ns: Option<&'a str>,
-	pub db: Option<&'a str>,
-	pub txn: Option<&'a Transaction>,
-
-	/// Current row for per-row expressions (projections, filters).
-	/// None when evaluating in "scalar context" (USE, LIMIT, TIMEOUT, etc.)
-	pub current_value: Option<&'a Value>,
-}
-
-impl<'a> EvalContext<'a> {
-	/// Convert from ExecutionContext enum for expression evaluation.
-	///
-	/// This extracts the appropriate fields based on the context level:
-	/// - Root: params only, no ns/db/txn
-	/// - Namespace: params, ns, txn
-	/// - Database: params, ns, db, txn
-	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
-		match exec_ctx {
-			ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
-			ExecutionContext::Namespace(n) => {
-				Self::scalar(&n.root.params, Some(&n.ns.name), None, Some(&n.txn))
-			}
-			ExecutionContext::Database(d) => Self::scalar(
-				&d.ns_ctx.root.params,
-				Some(&d.ns_ctx.ns.name),
-				Some(&d.db.name),
-				Some(&d.ns_ctx.txn),
-			),
-		}
-	}
-
-	/// For session-level scalar evaluation (USE, LIMIT, etc.)
-	pub fn scalar(
-		params: &'a Parameters,
-		ns: Option<&'a str>,
-		db: Option<&'a str>,
-		txn: Option<&'a Transaction>,
-	) -> Self {
-		Self {
-			params,
-			ns,
-			db,
-			txn,
-			current_value: None,
-		}
-	}
-
-	/// For per-row evaluation (projections, filters)
-	pub fn with_value(&self, value: &'a Value) -> Self {
-		Self {
-			current_value: Some(value),
-			..*self
-		}
-	}
-}
-
-#[async_trait]
-pub trait PhysicalExpr: Send + Sync + Debug {
-	/// Evaluate this expression to a value.
-	///
-	/// May execute subqueries internally, hence async.
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value>;
-
-	/// Does this expression reference the current row?
-	/// If false, can be evaluated in scalar context.
-	fn references_current_value(&self) -> bool;
-}
-
-/// Literal value - "foo", 42, true
-#[derive(Debug, Clone)]
-pub struct Literal(pub(crate) Value);
-
-#[async_trait]
-impl PhysicalExpr for Literal {
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		Ok(self.0.clone())
-	}
-
-	fn references_current_value(&self) -> bool {
-		false
-	}
-}
-
-/// Parameter reference - $foo
-#[derive(Debug, Clone)]
-pub struct Param(pub(crate) String);
-
-#[async_trait]
-impl PhysicalExpr for Param {
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		ctx.params
-			.get(self.0.as_str())
-			.map(|v| (**v).clone())
-			.ok_or_else(|| anyhow::anyhow!("Parameter not found: ${}", self.0))
-	}
-
-	fn references_current_value(&self) -> bool {
-		false
-	}
-}
-
-/// Field access - foo.bar.baz or just `age`
-#[derive(Debug, Clone)]
-pub struct Field(pub(crate) Idiom);
-
-#[async_trait]
-impl PhysicalExpr for Field {
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		let current = ctx
-			.current_value
-			.ok_or_else(|| anyhow::anyhow!("Field access requires current value"))?;
-
-		// Simple synchronous field access - handles basic idioms
-		// This does NOT use the old compute() system
-		Ok(get_field_simple(current, &self.0.0))
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
-	}
-}
-
-/// Simple field access without async/compute machinery
-/// Handles basic field paths like foo.bar.baz
-fn get_field_simple(value: &Value, path: &[crate::expr::part::Part]) -> Value {
-	use crate::expr::part::Part;
-
-	if path.is_empty() {
-		return value.clone();
-	}
-
-	match (value, &path[0]) {
-		// Field access on object
-		(Value::Object(obj), Part::Field(field_name)) => match obj.get(field_name.as_str()) {
-			Some(v) => get_field_simple(v, &path[1..]),
-			None => Value::None,
-		},
-		// Index access on array
-		(Value::Array(arr), part) => {
-			if let Some(idx) = part.as_old_index() {
-				match arr.0.get(idx) {
-					Some(v) => get_field_simple(v, &path[1..]),
-					None => Value::None,
-				}
-			} else {
-				// For other array operations, return None for now
-				Value::None
-			}
-		}
-		// Start part - evaluate the expression (simplified)
-		(_, Part::Start(_expr)) => {
-			// For simple cases, we can't evaluate expressions here
-			// This would require the full compute machinery
-			// For now, return None - this will need to be extended later
-			Value::None
-		}
-		// For any other combination, return None
-		_ => Value::None,
-	}
-}
-
-/// Binary operation - left op right (e.g., age > 10)
-#[derive(Debug, Clone)]
-pub struct BinaryOp {
-	pub(crate) left: Arc<dyn PhysicalExpr>,
-	pub(crate) op: crate::expr::operator::BinaryOperator,
-	pub(crate) right: Arc<dyn PhysicalExpr>,
-}
-
-#[async_trait]
-impl PhysicalExpr for BinaryOp {
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		use crate::expr::operator::BinaryOperator;
-		use crate::fnc::operate;
-
-		// Evaluate both sides (could parallelize if both are independent)
-		let left = self.left.evaluate(ctx.clone()).await?;
-		let right = self.right.evaluate(ctx).await?;
-
-		// Apply the operator
-		match &self.op {
-			BinaryOperator::Add => operate::add(left, right),
-			BinaryOperator::Subtract => operate::sub(left, right),
-			BinaryOperator::Multiply => operate::mul(left, right),
-			BinaryOperator::Divide => operate::div(left, right),
-			BinaryOperator::Remainder => operate::rem(left, right),
-			BinaryOperator::Power => operate::pow(left, right),
-
-			BinaryOperator::Equal => operate::equal(&left, &right),
-			BinaryOperator::ExactEqual => operate::exact(&left, &right),
-			BinaryOperator::NotEqual => operate::not_equal(&left, &right),
-			BinaryOperator::AllEqual => operate::all_equal(&left, &right),
-			BinaryOperator::AnyEqual => operate::any_equal(&left, &right),
-
-			BinaryOperator::LessThan => operate::less_than(&left, &right),
-			BinaryOperator::LessThanEqual => operate::less_than_or_equal(&left, &right),
-			BinaryOperator::MoreThan => operate::more_than(&left, &right),
-			BinaryOperator::MoreThanEqual => operate::more_than_or_equal(&left, &right),
-
-			BinaryOperator::And => {
-				// Short-circuit AND
-				if !left.is_truthy() {
-					Ok(left)
-				} else {
-					Ok(right)
-				}
-			}
-			BinaryOperator::Or => {
-				// Short-circuit OR
-				if left.is_truthy() {
-					Ok(left)
-				} else {
-					Ok(right)
-				}
-			}
-
-			BinaryOperator::Contain => operate::contain(&left, &right),
-			BinaryOperator::NotContain => operate::not_contain(&left, &right),
-			BinaryOperator::ContainAll => operate::contain_all(&left, &right),
-			BinaryOperator::ContainAny => operate::contain_any(&left, &right),
-			BinaryOperator::ContainNone => operate::contain_none(&left, &right),
-			BinaryOperator::Inside => operate::inside(&left, &right),
-			BinaryOperator::NotInside => operate::not_inside(&left, &right),
-			BinaryOperator::AllInside => operate::inside_all(&left, &right),
-			BinaryOperator::AnyInside => operate::inside_any(&left, &right),
-			BinaryOperator::NoneInside => operate::inside_none(&left, &right),
-
-			BinaryOperator::Outside => operate::outside(&left, &right),
-			BinaryOperator::Intersects => operate::intersects(&left, &right),
-
-			BinaryOperator::NullCoalescing => {
-				if !left.is_nullish() {
-					Ok(left)
-				} else {
-					Ok(right)
-				}
-			}
-			BinaryOperator::TenaryCondition => {
-				// Same as OR for this context
-				if left.is_truthy() {
-					Ok(left)
-				} else {
-					Ok(right)
-				}
-			}
-
-			// Range operators not typically used in WHERE clauses
-			BinaryOperator::Range
-			| BinaryOperator::RangeInclusive
-			| BinaryOperator::RangeSkip
-			| BinaryOperator::RangeSkipInclusive => {
-				Err(anyhow::anyhow!("Range operators not yet supported in physical expressions"))
-			}
-
-			// Match operators require full-text search context
-			BinaryOperator::Matches(_) => {
-				Err(anyhow::anyhow!("MATCHES operator not yet supported in physical expressions"))
-			}
-
-			// Nearest neighbor requires vector index context
-			BinaryOperator::NearestNeighbor(_) => {
-				Err(anyhow::anyhow!("KNN operator not yet supported in physical expressions"))
-			}
-		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		self.left.references_current_value() || self.right.references_current_value()
-	}
-}
-
-/// Scalar subquery - (SELECT ... LIMIT 1)
-#[derive(Debug, Clone)]
-pub struct ScalarSubquery {
-	pub(crate) plan: Arc<dyn ExecutionPlan>,
-}
-
-#[async_trait]
-impl PhysicalExpr for ScalarSubquery {
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// TODO: Implement scalar subquery evaluation
-		// This requires bridging EvalContext (which has borrowed &Transaction)
-		// with ExecutionContext (which needs Arc<Transaction>).
-		// Options:
-		// 1. Store Arc<Transaction> in EvalContext
-		// 2. Add a method to create ExecutionContext from borrowed context
-		// 3. Make ExecutionContext work with borrowed Transaction (but this conflicts with 'static
-		//    stream requirement)
-
-		Err(anyhow::anyhow!(
-			"ScalarSubquery evaluation not yet fully implemented - need Arc<Transaction> in EvalContext"
-		))
-	}
-
-	fn references_current_value(&self) -> bool {
-		// For now, assume subqueries don't reference current value
-		// TODO: Track if plan references outer scope for correlated subqueries
-		false
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -460,7 +149,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_select_all_from_table() {
 		let ds = setup_test_data().await;
-		let ses = Session::owner().with_ns("test").with_db("test");
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
 
 		// Create SELECT * FROM users
 		let select_stmt = SelectStatement {
@@ -495,7 +184,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_select_from_record_id() {
 		let ds = setup_test_data().await;
-		let ses = Session::owner().with_ns("test").with_db("test");
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
 
 		// Create SELECT * FROM users:1
 		let record_id_lit = crate::expr::RecordIdLit {
@@ -545,7 +234,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_select_with_where_clause() {
 		let ds = setup_test_data().await;
-		let ses = Session::owner().with_ns("test").with_db("test");
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
 
 		// Create SELECT * FROM users WHERE age > 28
 		// The condition: age > 28
@@ -590,7 +279,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_select_from_multiple_tables() {
 		let ds = setup_test_data().await;
-		let ses = Session::owner().with_ns("test").with_db("test");
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
 
 		// Create SELECT * FROM users, posts
 		let select_stmt = SelectStatement {
@@ -695,5 +384,245 @@ mod tests {
 		} else {
 			panic!("Expected PlannedStatement::Query");
 		}
+	}
+
+	// =========================================================================
+	// Permission Tests
+	// =========================================================================
+
+	/// Helper to set up test data with table permissions
+	async fn setup_test_data_with_permissions() -> Datastore {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().with_ns("test").with_db("test");
+
+		// Create test namespace, database, and tables with permissions
+		let sql = r#"
+			DEFINE NAMESPACE test;
+			USE NS test;
+			DEFINE DATABASE test;
+			USE DB test;
+			
+			-- Table with FULL permissions (explicit)
+			DEFINE TABLE public_data PERMISSIONS FULL;
+			INSERT INTO public_data [
+				{ id: public_data:1, value: "public1" },
+				{ id: public_data:2, value: "public2" }
+			];
+			
+			-- Table with NONE permissions for select
+			DEFINE TABLE private_data PERMISSIONS FOR select NONE;
+			INSERT INTO private_data [
+				{ id: private_data:1, secret: "classified" }
+			];
+			
+			-- Table with conditional SELECT permission (WHERE id = $auth.id)
+			DEFINE TABLE user_data PERMISSIONS FOR select WHERE id = $auth;
+			INSERT INTO user_data [
+				{ id: user_data:alice, owner: "alice", data: "alice's data" },
+				{ id: user_data:bob, owner: "bob", data: "bob's data" }
+			];
+		"#;
+
+		ds.execute(sql, &ses, None).await.expect("Failed to set up test data with permissions");
+		ds
+	}
+
+	/// Test that owner role bypasses all table permissions
+	#[tokio::test]
+	async fn test_select_owner_bypasses_permissions() {
+		let ds = setup_test_data_with_permissions().await;
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+
+		// Create SELECT * FROM private_data (which has PERMISSIONS NONE)
+		let select_stmt = SelectStatement {
+			what: vec![crate::expr::Expr::Table(TableName::from("private_data".to_string()))],
+			expr: Fields::all(),
+			..Default::default()
+		};
+
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
+		};
+
+		// Execute as owner - should bypass permissions and see all data
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		// Owner should see the private data (1 record)
+		if let Ok(value) = &result.result {
+			let value: Value = value.clone().into();
+			if let Value::Array(arr) = value {
+				assert_eq!(arr.len(), 1, "Owner should see 1 private record, got {}", arr.len());
+			} else {
+				panic!("Expected Array result, got {:?}", value);
+			}
+		}
+	}
+
+	/// Test that PERMISSIONS NONE returns empty results for non-owner users
+	#[tokio::test]
+	async fn test_select_permission_none_returns_empty() {
+		let ds = setup_test_data_with_permissions().await;
+
+		// Create a record user session
+		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+			"id".to_string(),
+			crate::types::PublicValue::String("user:test".to_string()),
+		)]));
+		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+
+		// Create SELECT * FROM private_data (which has PERMISSIONS NONE)
+		let select_stmt = SelectStatement {
+			what: vec![crate::expr::Expr::Table(TableName::from("private_data".to_string()))],
+			expr: Fields::all(),
+			..Default::default()
+		};
+
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
+		};
+
+		// Execute as record user - should get empty results due to PERMISSIONS NONE
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		// Record user should see no private data
+		if let Ok(value) = &result.result {
+			let value: Value = value.clone().into();
+			if let Value::Array(arr) = value {
+				assert_eq!(
+					arr.len(),
+					0,
+					"Record user should see 0 records with PERMISSIONS NONE, got {}",
+					arr.len()
+				);
+			} else {
+				panic!("Expected Array result, got {:?}", value);
+			}
+		}
+	}
+
+	/// Test that public table (FULL permissions) is accessible to record users
+	#[tokio::test]
+	async fn test_select_permission_full_allows_access() {
+		let ds = setup_test_data_with_permissions().await;
+
+		// Create a record user session
+		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+			"id".to_string(),
+			crate::types::PublicValue::String("user:test".to_string()),
+		)]));
+		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+
+		// Create SELECT * FROM public_data (which has default FULL permissions)
+		let select_stmt = SelectStatement {
+			what: vec![crate::expr::Expr::Table(TableName::from("public_data".to_string()))],
+			expr: Fields::all(),
+			..Default::default()
+		};
+
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
+		};
+
+		// Execute as record user - should see all public data
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		// Record user should see all public data (2 records)
+		if let Ok(value) = &result.result {
+			let value: Value = value.clone().into();
+			if let Value::Array(arr) = value {
+				assert_eq!(
+					arr.len(),
+					2,
+					"Record user should see 2 public records, got {}",
+					arr.len()
+				);
+			} else {
+				panic!("Expected Array result, got {:?}", value);
+			}
+		}
+	}
+
+	/// Test that schemaless (undefined) tables are denied for record users
+	#[tokio::test]
+	async fn test_select_schemaless_table_denied_for_record_user() {
+		let ds = setup_test_data_with_permissions().await;
+
+		// Create a record user session
+		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+			"id".to_string(),
+			crate::types::PublicValue::String("user:test".to_string()),
+		)]));
+		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+
+		// Create SELECT * FROM undefined_table (table doesn't exist - schemaless)
+		let select_stmt = SelectStatement {
+			what: vec![crate::expr::Expr::Table(TableName::from("undefined_table".to_string()))],
+			expr: Fields::all(),
+			..Default::default()
+		};
+
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
+		};
+
+		// Execute as record user - should get empty results (undefined table = NONE permission)
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		// Record user should see no data from undefined table
+		if let Ok(value) = &result.result {
+			let value: Value = value.clone().into();
+			if let Value::Array(arr) = value {
+				assert_eq!(
+					arr.len(),
+					0,
+					"Record user should see 0 records from undefined table, got {}",
+					arr.len()
+				);
+			} else {
+				panic!("Expected Array result, got {:?}", value);
+			}
+		}
+	}
+
+	/// Test that owner can access schemaless (undefined) tables
+	#[tokio::test]
+	async fn test_select_schemaless_table_allowed_for_owner() {
+		let ds = setup_test_data_with_permissions().await;
+		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+
+		// Create SELECT * FROM undefined_table (table doesn't exist - schemaless)
+		let select_stmt = SelectStatement {
+			what: vec![crate::expr::Expr::Table(TableName::from("undefined_table".to_string()))],
+			expr: Fields::all(),
+			..Default::default()
+		};
+
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
+		};
+
+		// Execute as owner - should succeed (even though table is empty/undefined)
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		// Owner bypasses permissions, so query should succeed (empty result is fine)
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
 	}
 }

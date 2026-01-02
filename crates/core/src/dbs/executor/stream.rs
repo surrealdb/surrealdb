@@ -36,6 +36,7 @@ use crate::exec::{
 	Parameters, PlannedStatement, RootContext, SessionCommand, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, FlowResult};
+use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::val::convert_value_to_public_value;
 
@@ -101,11 +102,15 @@ impl StreamExecutor {
 	/// - `ds`: The datastore to execute against
 	/// - `initial_ns`: Optional namespace name to initialize the session with
 	/// - `initial_db`: Optional database name to initialize the session with
+	/// - `auth`: The authentication context for this session
+	/// - `auth_enabled`: Whether authentication is enabled on the datastore
 	pub(crate) async fn execute_collected(
 		self,
 		ds: &Datastore,
 		initial_ns: Option<&str>,
 		initial_db: Option<&str>,
+		auth: Arc<Auth>,
+		auth_enabled: bool,
 	) -> Result<Vec<QueryResult>, anyhow::Error> {
 		let txn = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
 		let mut outputs = Vec::with_capacity(self.outputs.len());
@@ -120,6 +125,8 @@ impl StreamExecutor {
 			datastore: None,
 			params: params.clone(),
 			cancellation: CancellationToken::new(),
+			auth,
+			auth_enabled,
 		};
 
 		// Initialize session state from provided ns/db names
@@ -272,16 +279,13 @@ async fn handle_session_command(
 			Ok(Value::None)
 		}
 		SessionCommand::Begin => {
-			// TODO: Implement transaction begin
-			Ok(Value::None)
+			Err(Error::InvalidStatement("BEGIN not yet supported in new executor".to_string()))
 		}
 		SessionCommand::Commit => {
-			// TODO: Implement transaction commit
-			Ok(Value::None)
+			Err(Error::InvalidStatement("Cannot COMMIT without starting a transaction".to_string()))
 		}
 		SessionCommand::Cancel => {
-			// TODO: Implement transaction cancel
-			Ok(Value::None)
+			Err(Error::InvalidStatement("Cannot CANCEL without starting a transaction".to_string()))
 		}
 	}
 }

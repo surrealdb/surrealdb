@@ -35,6 +35,10 @@ pub struct Session {
 	pub exp: Option<i64>,
 	/// The variables set
 	pub variables: PublicVariables,
+	/// Whether to require the new planner without fallback to compute executor.
+	///
+	/// This is useful for testing to ensure queries use the new execution path.
+	pub require_new_planner: bool,
 }
 
 impl Session {
@@ -59,6 +63,13 @@ impl Session {
 	// Set the realtime functionality of the session
 	pub fn with_rt(mut self, rt: bool) -> Session {
 		self.rt = rt;
+		self
+	}
+
+	/// Require the new planner without fallback to compute executor
+	/// This is useful for testing to ensure queries use the new execution path
+	pub fn require_new_planner(mut self) -> Session {
+		self.require_new_planner = true;
 		self
 	}
 
@@ -145,6 +156,7 @@ impl Session {
 			rd: Some(rid),
 			exp: None,
 			variables: Default::default(),
+			require_new_planner: false,
 		}
 	}
 

@@ -16,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::err::Error;
+use crate::iam::{Action, Auth};
 use crate::kvs::{Datastore, Transaction};
 use crate::val::Value;
 
@@ -43,6 +44,7 @@ pub enum ContextLevel {
 /// - Datastore access (optional, for root-level operations)
 /// - Query parameters
 /// - Cancellation token
+/// - Authentication context
 #[derive(Clone)]
 pub struct RootContext {
 	/// The underlying datastore (optional - only needed for root-level operations
@@ -55,6 +57,10 @@ pub struct RootContext {
 	pub params: Arc<Parameters>,
 	/// Cancellation token for cooperative cancellation
 	pub cancellation: CancellationToken,
+	/// Authentication context for the current session
+	pub auth: Arc<Auth>,
+	/// Whether authentication is enabled on the datastore
+	pub auth_enabled: bool,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -63,6 +69,8 @@ impl std::fmt::Debug for RootContext {
 			.field("datastore", &self.datastore.as_ref().map(|_| "<Datastore>"))
 			.field("params", &self.params)
 			.field("cancellation", &self.cancellation)
+			.field("auth", &self.auth)
+			.field("auth_enabled", &self.auth_enabled)
 			.finish()
 	}
 }
@@ -255,5 +263,61 @@ impl ExecutionContext {
 	/// Root-level operations that need direct datastore access should handle this case.
 	pub fn datastore(&self) -> Option<&Datastore> {
 		self.root().datastore.as_deref()
+	}
+
+	/// Get the authentication context.
+	pub fn auth(&self) -> &Auth {
+		&self.root().auth
+	}
+
+	/// Check if authentication is enabled.
+	pub fn auth_enabled(&self) -> bool {
+		self.root().auth_enabled
+	}
+
+	/// Check if permissions should be checked for the given action.
+	///
+	/// This mirrors the logic in `Options::check_perms()` but adapted for
+	/// the execution context. Returns `true` if permission checks should
+	/// be performed, `false` if they should be bypassed.
+	///
+	/// Permission checks are bypassed when:
+	/// - Auth is disabled and user is anonymous
+	/// - User has sufficient role (Editor for Edit, Viewer for View) AND the target database is
+	///   within the user's auth level
+	pub fn should_check_perms(&self, action: Action) -> Result<bool, Error> {
+		let root = self.root();
+
+		// Check if server auth is disabled
+		if !root.auth_enabled && root.auth.is_anon() {
+			return Ok(false);
+		}
+
+		// For database-level operations, check if we can bypass based on role and level
+		if let Ok(db_ctx) = self.database() {
+			let ns = db_ctx.ns_name();
+			let db = db_ctx.db_name();
+
+			match action {
+				Action::Edit => {
+					let allowed = root.auth.has_editor_role();
+					let db_in_actor_level = root.auth.is_root()
+						|| root.auth.is_ns_check(ns)
+						|| root.auth.is_db_check(ns, db);
+					Ok(!allowed || !db_in_actor_level)
+				}
+				Action::View => {
+					let allowed = root.auth.has_viewer_role();
+					let db_in_actor_level = root.auth.is_root()
+						|| root.auth.is_ns_check(ns)
+						|| root.auth.is_db_check(ns, db);
+					Ok(!allowed || !db_in_actor_level)
+				}
+			}
+		} else {
+			// Without database context, we can't do the full check
+			// Default to requiring permission checks
+			Ok(true)
+		}
 	}
 }

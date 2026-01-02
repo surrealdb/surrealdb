@@ -1796,12 +1796,24 @@ impl Datastore {
 			Ok(execution_plan) => {
 				let stream_executor = StreamExecutor::new(execution_plan);
 
-				// Pass session's ns/db to initialize the stream executor's context
+				// Pass session's ns/db and auth to initialize the stream executor's context
 				stream_executor
-					.execute_collected(self, sess.ns.as_deref(), sess.db.as_deref())
+					.execute_collected(
+						self,
+						sess.ns.as_deref(),
+						sess.db.as_deref(),
+						sess.au.clone(),
+						self.auth_enabled,
+					)
 					.await
 			}
 			Err((plan, err)) => {
+				if sess.require_new_planner {
+					return Err(DbResultError::InternalError(format!(
+						"New planner required but planning failed: {}",
+						err
+					)));
+				}
 				tracing::debug!(
 					"Unable to convert logical plan to execution plan, falling back to compute executor: {err}"
 				);
