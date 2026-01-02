@@ -61,6 +61,8 @@ pub struct RootContext {
 	pub auth: Arc<Auth>,
 	/// Whether authentication is enabled on the datastore
 	pub auth_enabled: bool,
+	/// The transaction for this execution
+	pub txn: Arc<Transaction>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -71,6 +73,7 @@ impl std::fmt::Debug for RootContext {
 			.field("cancellation", &self.cancellation)
 			.field("auth", &self.auth)
 			.field("auth_enabled", &self.auth_enabled)
+			.field("txn", &"<Transaction>")
 			.finish()
 	}
 }
@@ -86,17 +89,11 @@ pub struct NamespaceContext {
 	pub root: RootContext,
 	/// The selected namespace definition
 	pub ns: Arc<NamespaceDefinition>,
-	/// The transaction for this execution
-	pub txn: Arc<Transaction>,
 }
 
 impl std::fmt::Debug for NamespaceContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("NamespaceContext")
-			.field("root", &self.root)
-			.field("ns", &self.ns)
-			.field("txn", &"<Transaction>")
-			.finish()
+		f.debug_struct("NamespaceContext").field("root", &self.root).field("ns", &self.ns).finish()
 	}
 }
 
@@ -107,8 +104,8 @@ impl NamespaceContext {
 	}
 
 	/// Get the transaction
-	pub fn txn(&self) -> &Transaction {
-		&self.txn
+	pub fn txn(&self) -> &Arc<Transaction> {
+		&self.root.txn
 	}
 
 	/// Get the parameters
@@ -128,7 +125,7 @@ impl NamespaceContext {
 /// - Database definition
 #[derive(Clone)]
 pub struct DatabaseContext {
-	/// Namespace context (root + ns + txn)
+	/// Namespace context (root + ns)
 	pub ns_ctx: NamespaceContext,
 	/// The selected database definition
 	pub db: Arc<DatabaseDefinition>,
@@ -243,12 +240,12 @@ impl ExecutionContext {
 		}
 	}
 
-	/// Get the transaction if available (namespace or database level).
-	pub fn txn(&self) -> Result<&Arc<Transaction>, Error> {
+	/// Get the transaction.
+	pub fn txn(&self) -> &Arc<Transaction> {
 		match self {
-			Self::Root(_) => Err(Error::NsEmpty),
-			Self::Namespace(n) => Ok(&n.txn),
-			Self::Database(d) => Ok(&d.ns_ctx.txn),
+			Self::Root(r) => &r.txn,
+			Self::Namespace(n) => &n.root.txn,
+			Self::Database(d) => &d.ns_ctx.root.txn,
 		}
 	}
 

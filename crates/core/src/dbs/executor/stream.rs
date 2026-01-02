@@ -127,6 +127,7 @@ impl StreamExecutor {
 			cancellation: CancellationToken::new(),
 			auth,
 			auth_enabled,
+			txn: txn.clone(),
 		};
 
 		// Initialize session state from provided ns/db names
@@ -157,8 +158,9 @@ impl StreamExecutor {
 			match statement {
 				PlannedStatement::SessionCommand(cmd) => {
 					// Handle session commands (USE, BEGIN, COMMIT, CANCEL)
-					let result =
-						handle_session_command(cmd, &mut session, &root_ctx, &txn, &params).await;
+					// Build execution context for session command evaluation
+					let exec_ctx = build_execution_context(&session, &root_ctx)?;
+					let result = handle_session_command(cmd, &mut session, &exec_ctx).await;
 
 					match result {
 						Ok(value) => {
@@ -184,7 +186,7 @@ impl StreamExecutor {
 					}
 
 					// Build the execution context based on current session state
-					let exec_ctx = build_execution_context(&session, &root_ctx, &txn)?;
+					let exec_ctx = build_execution_context(&session, &root_ctx)?;
 
 					// Execute the plan
 					let output_stream = plan.execute(&exec_ctx)?;
@@ -218,10 +220,10 @@ impl StreamExecutor {
 async fn handle_session_command(
 	cmd: SessionCommand,
 	session: &mut SessionState,
-	_root_ctx: &RootContext,
-	txn: &Arc<Transaction>,
-	params: &Arc<Parameters>,
+	exec_ctx: &ExecutionContext,
 ) -> Result<Value, Error> {
+	// Extract txn from exec_ctx
+	let txn = exec_ctx.txn();
 	match cmd {
 		SessionCommand::Use {
 			ns,
@@ -229,12 +231,7 @@ async fn handle_session_command(
 		} => {
 			// Evaluate NS expression if provided
 			if let Some(ns_expr) = ns {
-				let eval_ctx = EvalContext::scalar(
-					params,
-					session.ns.as_ref().map(|n| n.name.as_str()),
-					session.db.as_ref().map(|d| d.name.as_str()),
-					Some(txn.as_ref()),
-				);
+				let eval_ctx = EvalContext::from_exec_ctx(exec_ctx);
 				let ns_value = ns_expr
 					.evaluate(eval_ctx)
 					.await
@@ -246,6 +243,7 @@ async fn handle_session_command(
 					.get_or_add_ns(None, &ns_name)
 					.await
 					.map_err(|e| Error::Thrown(format!("Failed to get namespace: {}", e)))?;
+
 				session.ns = Some(ns_def);
 				// Clear DB when NS changes
 				session.db = None;
@@ -256,12 +254,14 @@ async fn handle_session_command(
 				// DB requires NS to be set
 				let ns_def = session.ns.as_ref().ok_or(Error::NsEmpty)?;
 
-				let eval_ctx = EvalContext::scalar(
-					params,
-					Some(&ns_def.name),
-					session.db.as_ref().map(|d| d.name.as_str()),
-					Some(txn.as_ref()),
-				);
+				// Build a namespace context for DB expression evaluation
+				let ns_ctx = NamespaceContext {
+					root: exec_ctx.root().clone(),
+					ns: ns_def.clone(),
+				};
+				let ns_exec_ctx = ExecutionContext::Namespace(ns_ctx);
+				let eval_ctx = EvalContext::from_exec_ctx(&ns_exec_ctx);
+
 				let db_value = db_expr
 					.evaluate(eval_ctx)
 					.await
@@ -294,7 +294,6 @@ async fn handle_session_command(
 fn build_execution_context(
 	session: &SessionState,
 	root_ctx: &RootContext,
-	txn: &Arc<Transaction>,
 ) -> Result<ExecutionContext, Error> {
 	match (&session.ns, &session.db) {
 		(None, _) => {
@@ -306,7 +305,6 @@ fn build_execution_context(
 			Ok(ExecutionContext::Namespace(NamespaceContext {
 				root: root_ctx.clone(),
 				ns: ns.clone(),
-				txn: txn.clone(),
 			}))
 		}
 		(Some(ns), Some(db)) => {
@@ -315,7 +313,6 @@ fn build_execution_context(
 				ns_ctx: NamespaceContext {
 					root: root_ctx.clone(),
 					ns: ns.clone(),
-					txn: txn.clone(),
 				},
 				db: db.clone(),
 			}))

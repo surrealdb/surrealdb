@@ -69,11 +69,9 @@ impl ExecutionPlan for Project {
 		let input_stream = self.input.execute(ctx)?;
 		let table = self.table.clone();
 		let fields = self.fields.clone();
-		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-		let db_name = db_ctx.db.name.clone();
-		let db_id = db_ctx.db.database_id;
-		let txn = db_ctx.ns_ctx.txn.clone();
+		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+		let db = Arc::clone(&db_ctx.db);
+		let txn = db_ctx.ns_ctx.root.txn.clone();
 		let params = db_ctx.ns_ctx.root.params.clone();
 		let auth = db_ctx.ns_ctx.root.auth.clone();
 		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
@@ -86,8 +84,8 @@ impl ExecutionPlan for Project {
 		let projected = input_stream.filter_map(move |batch_result| {
 			let table = table.clone();
 			let fields = fields.clone();
-			let ns_name = ns_name.clone();
-			let db_name = db_name.clone();
+			let ns = ns.clone();
+			let db = db.clone();
 			let txn = txn.clone();
 			let params = params.clone();
 			let auth = auth.clone();
@@ -107,7 +105,10 @@ impl ExecutionPlan for Project {
 					let mut perms_guard = field_permissions.lock().await;
 					if perms_guard.is_none() && check_perms {
 						// Get all field definitions for this table
-						let field_defs = match txn.all_tb_fields(ns_id, db_id, &table, None).await {
+						let field_defs = match txn
+							.all_tb_fields(ns.namespace_id, db.database_id, &table, None)
+							.await
+						{
 							Ok(defs) => defs,
 							Err(e) => {
 								return Some(Err(ControlFlow::Err(anyhow::anyhow!(
@@ -144,14 +145,22 @@ impl ExecutionPlan for Project {
 				let mut projected_values = Vec::with_capacity(batch.values.len());
 
 				for value in batch.values {
-					// Create evaluation context for this value
-					let eval_ctx = EvalContext::scalar(
-						&params,
-						Some(&ns_name),
-						Some(&db_name),
-						Some(txn.as_ref()),
-					)
-					.with_value(&value);
+					// Build execution context for expression evaluation and permission checks
+					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
+						ns_ctx: crate::exec::NamespaceContext {
+							root: crate::exec::RootContext {
+								datastore: None,
+								params: params.clone(),
+								cancellation: tokio_util::sync::CancellationToken::new(),
+								auth: auth.clone(),
+								auth_enabled,
+								txn: txn.clone(),
+							},
+							ns: ns.clone(),
+						},
+						db: db.clone(),
+					});
+					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx).with_value(&value);
 
 					// Build the projected object
 					let mut obj = Object::default();
@@ -164,39 +173,12 @@ impl ExecutionPlan for Project {
 									Some(PhysicalPermission::Deny) => false,
 									Some(PhysicalPermission::Allow) => true,
 									Some(PhysicalPermission::Conditional(_perm)) => {
-										// Create a temporary database context for permission
+										// Use the execution context we already built for permission
 										// evaluation
-										let db_ctx = crate::exec::DatabaseContext {
-											ns_ctx: crate::exec::NamespaceContext {
-												root: crate::exec::RootContext {
-													datastore: None,
-													params: params.clone(),
-													cancellation:
-														tokio_util::sync::CancellationToken::new(),
-													auth: auth.clone(),
-													auth_enabled,
-												},
-												ns: Arc::new(crate::catalog::NamespaceDefinition {
-													namespace_id: ns_id,
-													name: ns_name.clone(),
-													comment: None,
-												}),
-												txn: txn.clone(),
-											},
-											db: Arc::new(crate::catalog::DatabaseDefinition {
-												namespace_id: ns_id,
-												database_id: db_id,
-												name: db_name.clone(),
-												comment: None,
-												changefeed: None,
-												strict: false,
-											}),
-										};
-
 										match check_permission_for_value(
 											perms_map.and_then(|m| m.get(field_name)).unwrap(),
 											&value,
-											&db_ctx,
+											&exec_ctx,
 										)
 										.await
 										{

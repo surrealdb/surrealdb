@@ -10,8 +10,10 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatchStream,
+	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ValueBatchStream,
 };
+use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::val::{TableName, Value};
 
@@ -35,57 +37,35 @@ impl ExecutionPlan for Scan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		use crate::exec::ValueBatch;
-
 		// Get database context - we declared Database level, so this should succeed
-		let db_ctx = ctx.database()?;
+		let db_ctx = ctx.database()?.clone();
 
 		// Check if we need to enforce permissions
-		let check_perms = should_check_perms(db_ctx, Action::View)?;
+		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		// Clone the context for the async block (all fields are Arc/String so cheap to clone)
 		let table_expr = self.table.clone();
-		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let db_name = db_ctx.db.name.clone();
-		let txn = db_ctx.ns_ctx.txn.clone();
-		let params = db_ctx.ns_ctx.root.params.clone();
-		let auth = db_ctx.ns_ctx.root.auth.clone();
-		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
-
-		// Create state for the scan
-		#[derive(Clone)]
-		struct ScanState {
-			next_key: Option<Vec<u8>>,
-			end: Vec<u8>,
-			table_name: TableName,
-			ns_id: crate::catalog::NamespaceId,
-			db_id: crate::catalog::DatabaseId,
-			select_permission: PhysicalPermission,
-		}
+		let ctx = ctx.clone();
 
 		// Create an async stream using try_unfold
 		let stream = stream::try_unfold(None::<ScanState>, move |state| {
 			let table_expr = table_expr.clone();
-			let ns_name = ns_name.clone();
-			let db_name = db_name.clone();
-			let txn = txn.clone();
-			let params = params.clone();
-			let auth = auth.clone();
+			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+			let db = Arc::clone(&db_ctx.db);
+			let ctx = ctx.clone();
 
 			async move {
-				use crate::expr::ControlFlow;
+				let txn = ctx.txn().clone();
 
 				// Initialize state on first call
 				let state = if let Some(s) = state {
 					s
 				} else {
+					// Build execution context for table expression evaluation
+					let exec_ctx = ctx.clone();
+
 					// Evaluate the table expression to get the table name
-					let eval_ctx = EvalContext::scalar(
-						&params,
-						Some(&ns_name),
-						Some(&db_name),
-						Some(txn.as_ref()),
-					);
+					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx);
 					let table_value = table_expr.evaluate(eval_ctx).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!(
 							"Failed to evaluate table expression: {}",
@@ -106,17 +86,11 @@ impl ExecutionPlan for Scan {
 					};
 
 					// Get namespace and database IDs
-					let ns_id = txn.expect_ns_by_name(&ns_name).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to get namespace: {}", e))
-					})?;
-					let db_id = txn.expect_db_by_name(&ns_name, &db_name).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to get database: {}", e))
-					})?;
 
 					// Resolve table definition and SELECT permission at execution time
 					let select_permission = if check_perms {
 						let table_def =
-							txn.get_tb_by_name(&ns_name, &db_name, &table_name).await.map_err(
+							txn.get_tb_by_name(&ns.name, &db.name, &table_name).await.map_err(
 								|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {}", e)),
 							)?;
 
@@ -135,29 +109,29 @@ impl ExecutionPlan for Scan {
 					};
 
 					// Create key range for all records in the table
-					let beg = crate::key::record::prefix(
-						ns_id.namespace_id,
-						db_id.database_id,
-						&table_name,
-					)
-					.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {}", e))
-					})?;
-					let end = crate::key::record::suffix(
-						ns_id.namespace_id,
-						db_id.database_id,
-						&table_name,
-					)
-					.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {}", e))
-					})?;
+					let beg =
+						crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
+							.map_err(|e| {
+								ControlFlow::Err(anyhow::anyhow!(
+									"Failed to create prefix key: {}",
+									e
+								))
+							})?;
+					let end =
+						crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
+							.map_err(|e| {
+								ControlFlow::Err(anyhow::anyhow!(
+									"Failed to create suffix key: {}",
+									e
+								))
+							})?;
 
 					ScanState {
 						next_key: Some(beg),
 						end,
 						table_name,
-						ns_id: ns_id.namespace_id,
-						db_id: db_id.database_id,
+						ns_id: ns.namespace_id,
+						db_id: db.database_id,
 						select_permission,
 					}
 				};
@@ -213,49 +187,8 @@ impl ExecutionPlan for Scan {
 					let value = record.data.as_ref().clone();
 
 					// Check permission for this record
-					match &state.select_permission {
-						PhysicalPermission::Allow => {
-							// No filtering needed
-							values.push(value);
-						}
-						PhysicalPermission::Deny => {
-							// Should have been handled above, but skip just in case
-							continue;
-						}
-						PhysicalPermission::Conditional(_) => {
-							// Create a temporary database context for permission evaluation
-							let db_ctx = crate::exec::DatabaseContext {
-								ns_ctx: crate::exec::NamespaceContext {
-									root: crate::exec::RootContext {
-										datastore: None,
-										params: params.clone(),
-										cancellation: tokio_util::sync::CancellationToken::new(),
-										auth: auth.clone(),
-										auth_enabled,
-									},
-									ns: Arc::new(crate::catalog::NamespaceDefinition {
-										namespace_id: state.ns_id,
-										name: ns_name.clone(),
-										comment: None,
-									}),
-									txn: txn.clone(),
-								},
-								db: Arc::new(crate::catalog::DatabaseDefinition {
-									namespace_id: state.ns_id,
-									database_id: state.db_id,
-									name: db_name.clone(),
-									comment: None,
-									changefeed: None,
-									strict: false,
-								}),
-							};
-
-							// Check permission for this specific value
-							let allowed = check_permission_for_value(
-								&state.select_permission,
-								&value,
-								&db_ctx,
-							)
+					let allowed =
+						check_permission_for_value(&state.select_permission, &value, &ctx)
 							.await
 							.map_err(|e| {
 								ControlFlow::Err(anyhow::anyhow!(
@@ -264,10 +197,8 @@ impl ExecutionPlan for Scan {
 								))
 							})?;
 
-							if allowed {
-								values.push(value);
-							}
-						}
+					if allowed {
+						values.push(value);
 					}
 				}
 
@@ -294,23 +225,12 @@ impl ExecutionPlan for Scan {
 					}
 				};
 
-				// Only emit non-empty batches
-				if values.is_empty() {
-					// Continue scanning but skip this batch
-					Ok(Some((
-						ValueBatch {
-							values: vec![],
-						},
-						Some(next_state),
-					)))
-				} else {
-					Ok(Some((
-						ValueBatch {
-							values,
-						},
-						Some(next_state),
-					)))
-				}
+				Ok(Some((
+					ValueBatch {
+						values,
+					},
+					Some(next_state),
+				)))
 			}
 		});
 
@@ -324,4 +244,15 @@ impl ExecutionPlan for Scan {
 
 		Ok(Box::pin(filtered_stream))
 	}
+}
+
+// Create state for the scan
+#[derive(Clone)]
+struct ScanState {
+	next_key: Option<Vec<u8>>,
+	end: Vec<u8>,
+	table_name: TableName,
+	ns_id: crate::catalog::NamespaceId,
+	db_id: crate::catalog::DatabaseId,
+	select_permission: PhysicalPermission,
 }

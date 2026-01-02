@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::catalog::{Permission, TableDefinition};
 use crate::err::Error;
-use crate::exec::{DatabaseContext, EvalContext, PhysicalExpr};
+use crate::exec::{DatabaseContext, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::iam::Action;
 use crate::val::Value;
 
@@ -111,20 +111,14 @@ pub fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Result<bo
 pub async fn check_permission_for_value(
 	permission: &PhysicalPermission,
 	value: &Value,
-	db_ctx: &DatabaseContext,
+	ctx: &ExecutionContext,
 ) -> Result<bool, Error> {
 	match permission {
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
 		PhysicalPermission::Conditional(physical_expr) => {
 			// Evaluate physical expression directly (no spawn_blocking needed)
-			let eval_ctx = EvalContext::scalar(
-				&db_ctx.ns_ctx.root.params,
-				Some(db_ctx.ns_name()),
-				Some(db_ctx.db_name()),
-				Some(db_ctx.txn()),
-			)
-			.with_value(value);
+			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
 
 			let result = physical_expr
 				.evaluate(eval_ctx)

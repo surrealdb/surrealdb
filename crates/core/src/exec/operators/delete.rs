@@ -49,11 +49,11 @@ impl ExecutionPlan for Delete {
 		// Clone what we need for the async block
 		let input_stream = self.input.execute(ctx)?;
 		let table = self.table.clone();
+		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+		let db = Arc::clone(&db_ctx.db);
 		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 		let db_name = db_ctx.db.name.clone();
-		let db_id = db_ctx.db.database_id;
-		let txn = db_ctx.ns_ctx.txn.clone();
+		let txn = db_ctx.ns_ctx.root.txn.clone();
 		let params = db_ctx.ns_ctx.root.params.clone();
 		let auth = db_ctx.ns_ctx.root.auth.clone();
 		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
@@ -65,6 +65,8 @@ impl ExecutionPlan for Delete {
 		// Create a stream that performs the delete operation
 		let deleted = input_stream.filter_map(move |batch_result| {
 			let table = table.clone();
+			let ns = ns.clone();
+			let db = db.clone();
 			let ns_name = ns_name.clone();
 			let db_name = db_name.clone();
 			let txn = txn.clone();
@@ -129,38 +131,28 @@ impl ExecutionPlan for Delete {
 				let mut deleted_values = Vec::with_capacity(batch.values.len());
 
 				for value in batch.values {
+					// Build execution context for permission checks
+					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
+						ns_ctx: crate::exec::NamespaceContext {
+							root: crate::exec::RootContext {
+								datastore: None,
+								params: params.clone(),
+								cancellation: tokio_util::sync::CancellationToken::new(),
+								auth: auth.clone(),
+								auth_enabled,
+								txn: txn.clone(),
+							},
+							ns: ns.clone(),
+						},
+						db: db.clone(),
+					});
+
 					// Check permission for this value if it's a Conditional permission
 					let allowed = match &perm {
 						PhysicalPermission::Allow => true,
 						PhysicalPermission::Deny => false,
 						PhysicalPermission::Conditional(_) => {
-							let db_ctx = crate::exec::DatabaseContext {
-								ns_ctx: crate::exec::NamespaceContext {
-									root: crate::exec::RootContext {
-										datastore: None,
-										params: params.clone(),
-										cancellation: tokio_util::sync::CancellationToken::new(),
-										auth: auth.clone(),
-										auth_enabled,
-									},
-									ns: Arc::new(crate::catalog::NamespaceDefinition {
-										namespace_id: ns_id,
-										name: ns_name.clone(),
-										comment: None,
-									}),
-									txn: txn.clone(),
-								},
-								db: Arc::new(crate::catalog::DatabaseDefinition {
-									namespace_id: ns_id,
-									database_id: db_id,
-									name: db_name.clone(),
-									comment: None,
-									changefeed: None,
-									strict: false,
-								}),
-							};
-
-							match check_permission_for_value(&perm, &value, &db_ctx).await {
+							match check_permission_for_value(&perm, &value, &exec_ctx).await {
 								Ok(allowed) => allowed,
 								Err(e) => {
 									return Some(Err(ControlFlow::Err(anyhow::anyhow!(

@@ -10,17 +10,16 @@ use crate::expr::{FlowResult, Idiom};
 use crate::kvs::Transaction;
 use crate::val::Value;
 
-pub(crate) mod operators;
 pub(crate) mod context;
+pub(crate) mod operators;
 pub(crate) mod permission;
-pub(crate) mod planner;
 pub(crate) mod physical_expr;
-pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
-
+pub(crate) mod planner;
 // Re-export context types
 pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
 };
+pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
 /// A batch of values returned by an execution plan.
 ///

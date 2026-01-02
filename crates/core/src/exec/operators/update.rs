@@ -64,11 +64,9 @@ impl ExecutionPlan for Update {
 		let input_stream = self.input.execute(ctx)?;
 		let table = self.table.clone();
 		let changes = self.changes.clone();
-		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-		let db_name = db_ctx.db.name.clone();
-		let db_id = db_ctx.db.database_id;
-		let txn = db_ctx.ns_ctx.txn.clone();
+		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+		let db = Arc::clone(&db_ctx.db);
+		let txn = db_ctx.ns_ctx.root.txn.clone();
 		let params = db_ctx.ns_ctx.root.params.clone();
 		let auth = db_ctx.ns_ctx.root.auth.clone();
 		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
@@ -81,8 +79,8 @@ impl ExecutionPlan for Update {
 		let updated = input_stream.filter_map(move |batch_result| {
 			let table = table.clone();
 			let changes = changes.clone();
-			let ns_name = ns_name.clone();
-			let db_name = db_name.clone();
+			let ns = ns.clone();
+			let db = db.clone();
 			let txn = txn.clone();
 			let params = params.clone();
 			let auth = auth.clone();
@@ -103,7 +101,7 @@ impl ExecutionPlan for Update {
 					if perm_guard.is_none() {
 						let resolved = if check_perms {
 							let table_def =
-								match txn.get_tb_by_name(&ns_name, &db_name, &table).await {
+								match txn.get_tb_by_name(&ns.name, &db.name, &table).await {
 									Ok(def) => def,
 									Err(e) => {
 										return Some(Err(ControlFlow::Err(anyhow::anyhow!(
@@ -145,46 +143,30 @@ impl ExecutionPlan for Update {
 				let mut updated_values = Vec::with_capacity(batch.values.len());
 
 				for mut value in batch.values {
-					// Check permission for this value if it's a Conditional permission
-					let allowed = match &perm {
-						PhysicalPermission::Allow => true,
-						PhysicalPermission::Deny => false,
-						PhysicalPermission::Conditional(_) => {
-							let db_ctx = crate::exec::DatabaseContext {
-								ns_ctx: crate::exec::NamespaceContext {
-									root: crate::exec::RootContext {
-										datastore: None,
-										params: params.clone(),
-										cancellation: tokio_util::sync::CancellationToken::new(),
-										auth: auth.clone(),
-										auth_enabled,
-									},
-									ns: Arc::new(crate::catalog::NamespaceDefinition {
-										namespace_id: ns_id,
-										name: ns_name.clone(),
-										comment: None,
-									}),
-									txn: txn.clone(),
-								},
-								db: Arc::new(crate::catalog::DatabaseDefinition {
-									namespace_id: ns_id,
-									database_id: db_id,
-									name: db_name.clone(),
-									comment: None,
-									changefeed: None,
-									strict: false,
-								}),
-							};
+					// Build execution context for permission checks and expression evaluation
+					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
+						ns_ctx: crate::exec::NamespaceContext {
+							root: crate::exec::RootContext {
+								datastore: None,
+								params: params.clone(),
+								cancellation: tokio_util::sync::CancellationToken::new(),
+								auth: auth.clone(),
+								auth_enabled,
+								txn: txn.clone(),
+							},
+							ns: ns.clone(),
+						},
+						db: db.clone(),
+					});
 
-							match check_permission_for_value(&perm, &value, &db_ctx).await {
-								Ok(allowed) => allowed,
-								Err(e) => {
-									return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-										"Failed to check permission: {}",
-										e
-									))));
-								}
-							}
+					// Check permission for this value if it's a Conditional permission
+					let allowed = match check_permission_for_value(&perm, &value, &exec_ctx).await {
+						Ok(allowed) => allowed,
+						Err(e) => {
+							return Some(Err(ControlFlow::Err(anyhow::anyhow!(
+								"Failed to check permission: {}",
+								e
+							))));
 						}
 					};
 
@@ -196,13 +178,7 @@ impl ExecutionPlan for Update {
 					// First, evaluate all change expressions
 					let mut evaluated_changes = Vec::with_capacity(changes.len());
 					{
-						let eval_ctx = EvalContext::scalar(
-							&params,
-							Some(&ns_name),
-							Some(&db_name),
-							Some(txn.as_ref()),
-						)
-						.with_value(&value);
+						let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx).with_value(&value);
 
 						for change in &changes {
 							let new_value = match change.value.evaluate(eval_ctx.clone()).await {

@@ -1,24 +1,22 @@
-
+use std::fmt::Debug;
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use std::{fmt::Debug, sync::Arc};
 
-use crate::{exec::{ExecutionContext, ExecutionPlan, Parameters}, expr::Idiom, kvs::Transaction, val::Value};
-
+use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
+use crate::exec::{ExecutionContext, ExecutionPlan, Parameters};
+use crate::expr::Idiom;
+use crate::kvs::Transaction;
+use crate::val::Value;
 
 /// Evaluation context - what's available during expression evaluation.
 ///
 /// This is a borrowed view into the execution context for expression evaluation.
 /// It provides access to parameters, namespace/database names, and the current row
 /// (for per-row expressions like filters and projections).
-// Clone is implemented manually because #[derive(Clone)] doesn't work well
-// with lifetime parameters when we just have references.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct EvalContext<'a> {
-	pub params: &'a Parameters,
-	pub ns: Option<&'a str>,
-	pub db: Option<&'a str>,
-	pub txn: Option<&'a Transaction>,
+	pub exec_ctx: &'a ExecutionContext,
 
 	/// Current row for per-row expressions (projections, filters).
 	/// None when evaluating in "scalar context" (USE, LIMIT, TIMEOUT, etc.)
@@ -32,33 +30,25 @@ impl<'a> EvalContext<'a> {
 	/// - Root: params only, no ns/db/txn
 	/// - Namespace: params, ns, txn
 	/// - Database: params, ns, db, txn
-	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
-		match exec_ctx {
-			ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
-			ExecutionContext::Namespace(n) => {
-				Self::scalar(&n.root.params, Some(&n.ns.name), None, Some(&n.txn))
-			}
-			ExecutionContext::Database(d) => Self::scalar(
-				&d.ns_ctx.root.params,
-				Some(&d.ns_ctx.ns.name),
-				Some(&d.db.name),
-				Some(&d.ns_ctx.txn),
-			),
-		}
-	}
+	// pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
+	// 	match exec_ctx {
+	// 		ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
+	// 		ExecutionContext::Namespace(n) => {
+	// 			Self::scalar(&n.root.params, Some(&n.ns), None, Some(&n.txn))
+	// 		}
+	// 		ExecutionContext::Database(d) => Self::scalar(
+	// 			&d.ns_ctx.root.params,
+	// 			Some(&d.ns_ctx.ns),
+	// 			Some(&d.db),
+	// 			Some(&d.ns_ctx.txn),
+	// 		),
+	// 	}
+	// }
 
 	/// For session-level scalar evaluation (USE, LIMIT, etc.)
-	pub fn scalar(
-		params: &'a Parameters,
-		ns: Option<&'a str>,
-		db: Option<&'a str>,
-		txn: Option<&'a Transaction>,
-	) -> Self {
+	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
 		Self {
-			params,
-			ns,
-			db,
-			txn,
+			exec_ctx,
 			current_value: None,
 		}
 	}
@@ -71,7 +61,6 @@ impl<'a> EvalContext<'a> {
 		}
 	}
 }
-
 
 #[async_trait]
 pub trait PhysicalExpr: Send + Sync + Debug {
@@ -107,7 +96,8 @@ pub struct Param(pub(crate) String);
 #[async_trait]
 impl PhysicalExpr for Param {
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		ctx.params
+		ctx.exec_ctx
+			.params()
 			.get(self.0.as_str())
 			.map(|v| (**v).clone())
 			.ok_or_else(|| anyhow::anyhow!("Parameter not found: ${}", self.0))

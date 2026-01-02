@@ -35,17 +35,22 @@ impl ExecutionPlan for Filter {
 
 		let input_stream = self.input.execute(ctx)?;
 		let predicate = self.predicate.clone();
+
+		// Clone all necessary data for the async move closure
 		let params = db_ctx.ns_ctx.root.params.clone();
-		let ns_name = db_ctx.ns_ctx.ns.name.clone();
-		let db_name = db_ctx.db.name.clone();
-		let txn = db_ctx.ns_ctx.txn.clone();
+		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+		let db = Arc::clone(&db_ctx.db);
+		let txn = db_ctx.ns_ctx.root.txn.clone();
+		let auth = db_ctx.ns_ctx.root.auth.clone();
+		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
 
 		let filtered = input_stream.filter_map(move |batch_result| {
 			let predicate = predicate.clone();
 			let params = params.clone();
-			let ns_name = ns_name.clone();
-			let db_name = db_name.clone();
 			let txn = txn.clone();
+			let ns = ns.clone();
+			let db = db.clone();
+			let auth = auth.clone();
 
 			async move {
 				// Handle errors in the input batch
@@ -56,14 +61,22 @@ impl ExecutionPlan for Filter {
 
 				let mut kept = Vec::new();
 				for value in batch.values {
-					// Create per-row evaluation context
-					let eval_ctx = EvalContext::scalar(
-						&params,
-						Some(&ns_name),
-						Some(&db_name),
-						Some(txn.as_ref()),
-					)
-					.with_value(&value);
+					// Build execution context for expression evaluation
+					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
+						ns_ctx: crate::exec::NamespaceContext {
+							root: crate::exec::RootContext {
+								datastore: None,
+								params: params.clone(),
+								cancellation: tokio_util::sync::CancellationToken::new(),
+								auth: auth.clone(),
+								auth_enabled,
+								txn: txn.clone(),
+							},
+							ns: ns.clone(),
+						},
+						db: db.clone(),
+					});
+					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx).with_value(&value);
 
 					// Evaluate predicate
 					match predicate.evaluate(eval_ctx).await {
