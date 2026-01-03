@@ -375,4 +375,57 @@ impl ExecutionContext {
 			}),
 		}
 	}
+
+	/// Create a new context at namespace level with the given namespace definition.
+	///
+	/// This is used by USE NS statements to switch namespace context.
+	pub fn with_namespace(&self, ns: Arc<NamespaceDefinition>) -> Self {
+		Self::Namespace(NamespaceContext {
+			root: self.root().clone(),
+			ns,
+		})
+	}
+
+	/// Create a new context at database level with the given namespace and database definitions.
+	///
+	/// This is used by USE DB statements to switch database context.
+	pub fn with_database(&self, ns: Arc<NamespaceDefinition>, db: Arc<DatabaseDefinition>) -> Self {
+		Self::Database(DatabaseContext {
+			ns_ctx: NamespaceContext {
+				root: self.root().clone(),
+				ns,
+			},
+			db,
+		})
+	}
+
+	/// Create a new context with a different transaction.
+	///
+	/// This is used by BEGIN statements to create a write transaction.
+	/// The new transaction replaces the existing one in the context.
+	pub fn with_transaction(&self, txn: Arc<Transaction>) -> Result<Self, Error> {
+		let new_root = RootContext {
+			txn,
+			datastore: self.root().datastore.clone(),
+			params: self.root().params.clone(),
+			cancellation: self.root().cancellation.clone(),
+			auth: self.root().auth.clone(),
+			auth_enabled: self.root().auth_enabled,
+		};
+
+		Ok(match self {
+			Self::Root(_) => Self::Root(new_root),
+			Self::Namespace(n) => Self::Namespace(NamespaceContext {
+				root: new_root,
+				ns: n.ns.clone(),
+			}),
+			Self::Database(d) => Self::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
+					root: new_root,
+					ns: d.ns_ctx.ns.clone(),
+				},
+				db: d.db.clone(),
+			}),
+		})
+	}
 }

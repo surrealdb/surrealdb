@@ -32,8 +32,8 @@ use crate::dbs::response::QueryResult;
 use crate::dbs::{QueryResultBuilder, QueryType};
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, DatabaseContext, EvalContext, ExecutionContext, OperatorPlan, LetValue,
-	NamespaceContext, Parameters, PlannedStatement, RootContext, SessionCommand, ValueBatchStream,
+	ContextLevel, DatabaseContext, EvalContext, ExecutionContext, LetValue, NamespaceContext,
+	OperatorPlan, Parameters, PlannedStatement, RootContext, SessionCommand, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, FlowResult};
 use crate::iam::Auth;

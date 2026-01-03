@@ -2,6 +2,10 @@
 //!
 //! The executor runs all statements concurrently, respecting the DAG ordering
 //! defined by `context_source` and `wait_for` dependencies.
+//!
+//! Context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL) implement
+//! `mutates_context() = true` and provide `output_context()` to compute
+//! the modified context after execution.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,9 +14,7 @@ use futures::StreamExt;
 use tokio::task::JoinSet;
 
 use crate::exec::completion_map::{CompletionError, CompletionMap};
-use crate::exec::statement::{
-	ScriptPlan, StatementContent, StatementId, StatementLetValue, StatementOutput,
-};
+use crate::exec::statement::{ScriptPlan, StatementContent, StatementId, StatementOutput};
 use crate::exec::{EvalContext, ExecutionContext};
 use crate::val::Value;
 
@@ -190,8 +192,7 @@ async fn execute_statement(
 	};
 
 	// 3. Execute the statement content
-	let (results, output_ctx) =
-		execute_content(&content, &input_ctx, mutates_ctx).await?;
+	let (results, output_ctx) = execute_content(&content, &input_ctx, mutates_ctx).await?;
 
 	let duration = start.elapsed();
 
@@ -203,19 +204,31 @@ async fn execute_statement(
 }
 
 /// Execute statement content and return results and output context.
+///
+/// For context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL),
+/// this calls `output_context()` to get the modified context.
 async fn execute_content(
 	content: &StatementContent,
 	ctx: &ExecutionContext,
-	mutates_ctx: bool,
+	_mutates_ctx: bool,
 ) -> Result<(Vec<Value>, ExecutionContext), anyhow::Error> {
 	match content {
 		StatementContent::Query(plan) => {
-			let stream = plan
-				.execute(ctx)
-				.map_err(|e| anyhow::anyhow!("Query execution error: {}", e))?;
+			// Execute the operator
+			let stream =
+				plan.execute(ctx).map_err(|e| anyhow::anyhow!("Query execution error: {}", e))?;
 
 			let results = collect_stream(stream).await?;
-			Ok((results, ctx.clone()))
+
+			// Compute output context if this operator mutates it
+			let output_ctx = if plan.mutates_context() {
+				plan.output_context(ctx)
+					.map_err(|e| anyhow::anyhow!("Context mutation error: {}", e))?
+			} else {
+				ctx.clone()
+			};
+
+			Ok((results, output_ctx))
 		}
 
 		StatementContent::Scalar(expr) => {
@@ -224,66 +237,8 @@ async fn execute_content(
 				.evaluate(eval_ctx)
 				.await
 				.map_err(|e| anyhow::anyhow!("Scalar evaluation error: {}", e))?;
+			// Scalar expressions don't mutate context
 			Ok((vec![value], ctx.clone()))
-		}
-
-		StatementContent::Let {
-			name,
-			value,
-		} => {
-			let computed_value = match value {
-				StatementLetValue::Scalar(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx);
-					expr.evaluate(eval_ctx)
-						.await
-						.map_err(|e| anyhow::anyhow!("LET expression error: {}", e))?
-				}
-				StatementLetValue::Query(plan) => {
-					let stream = plan
-						.execute(ctx)
-						.map_err(|e| anyhow::anyhow!("LET query error: {}", e))?;
-					let results = collect_stream(stream).await?;
-					Value::Array(crate::val::Array(results))
-				}
-			};
-
-			// Create new context with the parameter
-			let new_ctx = ctx.with_param(name.clone(), computed_value);
-			Ok((vec![Value::None], new_ctx))
-		}
-
-		StatementContent::Use {
-			ns: _ns,
-			db: _db,
-		} => {
-			// USE NS/DB - this would need to resolve namespace/database definitions
-			// For now, return an error as this requires transaction access
-			// The actual implementation would look up the namespace/database from the transaction
-			Err(anyhow::anyhow!(
-				"USE statement execution not yet implemented in ScriptExecutor"
-			))
-		}
-
-		StatementContent::Begin => {
-			// BEGIN - transaction control
-			// This would need to start a new transaction
-			Err(anyhow::anyhow!(
-				"BEGIN statement execution not yet implemented in ScriptExecutor"
-			))
-		}
-
-		StatementContent::Commit => {
-			// COMMIT - transaction control
-			Err(anyhow::anyhow!(
-				"COMMIT statement execution not yet implemented in ScriptExecutor"
-			))
-		}
-
-		StatementContent::Cancel => {
-			// CANCEL - transaction control
-			Err(anyhow::anyhow!(
-				"CANCEL statement execution not yet implemented in ScriptExecutor"
-			))
 		}
 	}
 }
@@ -319,11 +274,13 @@ async fn collect_stream(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use std::sync::Arc;
 
-	// Note: These tests would require setting up proper execution contexts
-	// with datastores and transactions. For now, we'll just test the basic
-	// structure compiles.
+	use super::*;
+	use crate::exec::OperatorPlan;
+	use crate::exec::operators::{BeginPlan, CancelPlan, CommitPlan, LetPlan, LetValue, UsePlan};
+	use crate::exec::physical_expr::Literal;
+	use crate::exec::statement::{StatementContent, StatementKind, StatementPlan};
 
 	#[test]
 	fn test_script_plan_creation() {
@@ -331,5 +288,149 @@ mod tests {
 		assert!(plan.is_empty());
 		assert_eq!(plan.len(), 0);
 	}
-}
 
+	#[test]
+	fn test_use_plan_mutates_context() {
+		let use_plan = UsePlan {
+			ns: Some(Arc::new(Literal(crate::val::Value::String("test".to_string())))),
+			db: None,
+		};
+		assert!(use_plan.mutates_context());
+		assert_eq!(use_plan.name(), "Use");
+	}
+
+	#[test]
+	fn test_let_plan_mutates_context() {
+		let let_plan = LetPlan {
+			name: "x".to_string(),
+			value: LetValue::Scalar(Arc::new(Literal(crate::val::Value::Number(
+				crate::val::Number::Int(42),
+			)))),
+		};
+		assert!(let_plan.mutates_context());
+		assert_eq!(let_plan.name(), "Let");
+	}
+
+	#[test]
+	fn test_begin_plan_mutates_context() {
+		let begin_plan = BeginPlan;
+		assert!(begin_plan.mutates_context());
+		assert_eq!(begin_plan.name(), "Begin");
+	}
+
+	#[test]
+	fn test_commit_plan_mutates_context() {
+		let commit_plan = CommitPlan;
+		assert!(commit_plan.mutates_context());
+		assert_eq!(commit_plan.name(), "Commit");
+	}
+
+	#[test]
+	fn test_cancel_plan_mutates_context() {
+		let cancel_plan = CancelPlan;
+		assert!(cancel_plan.mutates_context());
+		assert_eq!(cancel_plan.name(), "Cancel");
+	}
+
+	#[test]
+	fn test_statement_kind_full_barrier() {
+		assert!(!StatementKind::ContextMutation.is_full_barrier());
+		assert!(!StatementKind::PureRead.is_full_barrier());
+		assert!(StatementKind::DataMutation.is_full_barrier());
+		assert!(StatementKind::Transaction.is_full_barrier());
+		assert!(StatementKind::Schema.is_full_barrier());
+	}
+
+	#[test]
+	fn test_statement_kind_mutates_context() {
+		assert!(StatementKind::ContextMutation.mutates_context());
+		assert!(StatementKind::Transaction.mutates_context());
+		assert!(!StatementKind::PureRead.mutates_context());
+		assert!(!StatementKind::DataMutation.mutates_context());
+		assert!(!StatementKind::Schema.mutates_context());
+	}
+
+	#[test]
+	fn test_statement_plan_with_use_operator() {
+		let use_plan = Arc::new(UsePlan {
+			ns: Some(Arc::new(Literal(crate::val::Value::String("test".to_string())))),
+			db: None,
+		}) as Arc<dyn OperatorPlan>;
+
+		let stmt = StatementPlan {
+			id: StatementId(0),
+			context_source: None,
+			wait_for: vec![],
+			content: StatementContent::Query(use_plan),
+			kind: StatementKind::ContextMutation,
+		};
+
+		assert!(stmt.mutates_context());
+		assert!(!stmt.is_full_barrier());
+	}
+
+	#[test]
+	fn test_statement_plan_with_transaction_operator() {
+		let begin_plan = Arc::new(BeginPlan) as Arc<dyn OperatorPlan>;
+
+		let stmt = StatementPlan {
+			id: StatementId(0),
+			context_source: None,
+			wait_for: vec![],
+			content: StatementContent::Query(begin_plan),
+			kind: StatementKind::Transaction,
+		};
+
+		assert!(stmt.mutates_context());
+		assert!(stmt.is_full_barrier());
+	}
+
+	#[test]
+	fn test_script_plan_dag_structure() {
+		// Create a simple DAG: USE NS test; LET $x = 1; SELECT ...
+		let use_plan = Arc::new(UsePlan {
+			ns: Some(Arc::new(Literal(crate::val::Value::String("test".to_string())))),
+			db: None,
+		}) as Arc<dyn OperatorPlan>;
+
+		let let_plan = Arc::new(LetPlan {
+			name: "x".to_string(),
+			value: LetValue::Scalar(Arc::new(Literal(crate::val::Value::Number(
+				crate::val::Number::Int(1),
+			)))),
+		}) as Arc<dyn OperatorPlan>;
+
+		let stmt0 = StatementPlan {
+			id: StatementId(0),
+			context_source: None, // Uses initial context
+			wait_for: vec![],
+			content: StatementContent::Query(use_plan),
+			kind: StatementKind::ContextMutation,
+		};
+
+		let stmt1 = StatementPlan {
+			id: StatementId(1),
+			context_source: Some(StatementId(0)), // Gets context from USE
+			wait_for: vec![],                     // No ordering dependency
+			content: StatementContent::Query(let_plan),
+			kind: StatementKind::ContextMutation,
+		};
+
+		let plan = ScriptPlan {
+			statements: vec![stmt0, stmt1],
+		};
+
+		assert_eq!(plan.len(), 2);
+		assert!(!plan.is_empty());
+		assert!(plan.get(StatementId(0)).is_some());
+		assert!(plan.get(StatementId(1)).is_some());
+		assert!(plan.get(StatementId(2)).is_none());
+
+		// Verify DAG structure
+		let stmt0_ref = plan.get(StatementId(0)).unwrap();
+		assert!(stmt0_ref.context_source.is_none());
+
+		let stmt1_ref = plan.get(StatementId(1)).unwrap();
+		assert_eq!(stmt1_ref.context_source, Some(StatementId(0)));
+	}
+}

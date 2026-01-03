@@ -8,6 +8,9 @@
 //! - `context_source` tracks where execution context comes from (USE, LET)
 //! - `wait_for` encodes ordering constraints
 //! - Parallelism emerges naturally from the DAG structure
+//!
+//! Context-mutating statements (USE, LET, BEGIN, COMMIT, CANCEL) are all
+//! implemented as operators with `mutates_context() = true` and `output_context()`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -79,44 +82,24 @@ impl StatementKind {
 
 	/// Returns true if this statement mutates the execution context.
 	pub fn mutates_context(&self) -> bool {
-		matches!(self, Self::ContextMutation)
+		matches!(self, Self::ContextMutation | Self::Transaction)
 	}
 }
 
-/// The value bound by a LET statement in the statement layer
-#[derive(Debug, Clone)]
-pub enum StatementLetValue {
-	/// Scalar expression - evaluates to exactly one Value
-	Scalar(Arc<dyn PhysicalExpr>),
-	/// Query - stream is collected into Value::Array
-	Query(Arc<dyn OperatorPlan>),
-}
-
 /// Content of a statement - what actually gets executed.
+///
+/// All context-mutating statements (USE, LET, BEGIN, COMMIT, CANCEL) are now
+/// represented as Query operators that implement `mutates_context() = true`.
 #[derive(Debug, Clone)]
 pub enum StatementContent {
-	/// A query plan (SELECT, etc.)
+	/// An operator plan (SELECT, USE, LET, BEGIN, COMMIT, CANCEL, etc.)
+	///
+	/// For context-mutating operators, the executor calls `output_context()`
+	/// after execution to get the modified context.
 	Query(Arc<dyn OperatorPlan>),
 
-	/// A session command (USE NS/DB)
-	Use {
-		ns: Option<Arc<dyn PhysicalExpr>>,
-		db: Option<Arc<dyn PhysicalExpr>>,
-	},
-
-	/// A LET statement binding
-	Let {
-		name: String,
-		value: StatementLetValue,
-	},
-
-	/// A scalar expression evaluated as a top-level statement
+	/// A scalar expression evaluated as a top-level statement (e.g., `1 + 1;`, `$param;`)
 	Scalar(Arc<dyn PhysicalExpr>),
-
-	/// Transaction control
-	Begin,
-	Commit,
-	Cancel,
 }
 
 /// A planned statement with DAG dependencies.
@@ -234,4 +217,3 @@ impl Default for ScriptPlan {
 		Self::new()
 	}
 }
-

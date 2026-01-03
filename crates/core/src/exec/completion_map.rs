@@ -139,7 +139,10 @@ impl std::fmt::Debug for CompletionMap {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("CompletionMap")
 			.field("size", &self.size)
-			.field("completed", &(0..self.size).filter(|&i| self.is_complete(StatementId(i))).count())
+			.field(
+				"completed",
+				&(0..self.size).filter(|&i| self.is_complete(StatementId(i))).count(),
+			)
 			.finish()
 	}
 }
@@ -190,4 +193,3 @@ mod tests {
 		assert!(debug_str.contains("size"));
 	}
 }
-

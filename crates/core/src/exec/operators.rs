@@ -1,5 +1,6 @@
 mod broadcast;
 mod compute_fields;
+mod context_mutating;
 mod create;
 mod delete;
 mod filter;
@@ -13,6 +14,7 @@ mod update;
 
 pub use broadcast::BroadcastSource;
 pub use compute_fields::ComputeFields;
+pub use context_mutating::{BeginPlan, CancelPlan, CommitPlan, LetPlan, LetValue, UsePlan};
 pub use create::{ContentSource, Create};
 pub use delete::Delete;
 pub use filter::Filter;

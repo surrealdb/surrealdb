@@ -19,17 +19,17 @@ pub(crate) mod script_executor;
 pub(crate) mod statement;
 
 // Re-export context types
+// Re-export statement types
+pub(crate) use completion_map::{CompletionError, CompletionMap};
 pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
 };
+// Re-export operator types
+pub(crate) use operators::{BeginPlan, CancelPlan, CommitPlan, LetPlan, LetValue, UsePlan};
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
-
-// Re-export statement types
-pub(crate) use completion_map::{CompletionError, CompletionMap};
 pub(crate) use script_executor::{ScriptExecutionError, ScriptExecutor};
 pub(crate) use statement::{
-	ScriptPlan, StatementContent, StatementId, StatementKind, StatementLetValue, StatementOutput,
-	StatementPlan,
+	ScriptPlan, StatementContent, StatementId, StatementKind, StatementOutput, StatementPlan,
 };
 
 /// A batch of values returned by an execution plan.
@@ -81,15 +81,24 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![]
 	}
-}
 
-/// The value bound by a LET statement
-#[derive(Debug, Clone)]
-pub(crate) enum LetValue {
-	/// Scalar expression - evaluates to exactly one Value
-	Scalar(Arc<dyn PhysicalExpr>),
-	/// Query - stream is collected into Value::Array
-	Query(Arc<dyn OperatorPlan>),
+	/// Does this operator modify the execution context?
+	///
+	/// True for USE, LET, BEGIN, COMMIT, CANCEL operators.
+	/// When true, the executor will call `output_context()` after execution
+	/// to get the modified context for downstream statements.
+	fn mutates_context(&self) -> bool {
+		false
+	}
+
+	/// Compute the output context after execution.
+	///
+	/// Only called if `mutates_context()` returns true.
+	/// This method may perform blocking operations (like looking up namespace/database
+	/// definitions or creating transactions).
+	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+		Ok(input.clone())
+	}
 }
 
 #[derive(Debug, Clone)]

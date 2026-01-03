@@ -51,7 +51,7 @@ use crate::dbs::{
 	Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session,
 };
 use crate::err::Error;
-use crate::exec::planner::logical_plan_to_execution_plan;
+use crate::exec::planner::{logical_plan_to_execution_plan, logical_plan_to_script_plan};
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};

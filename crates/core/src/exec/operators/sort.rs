@@ -170,13 +170,12 @@ impl OperatorPlan for Sort {
 		});
 
 		// Filter out empty batches
-		let filtered =
-			sorted_stream.filter_map(|result| async move {
-				match result {
-					Ok(batch) if batch.values.is_empty() => None,
-					other => Some(other),
-				}
-			});
+		let filtered = sorted_stream.filter_map(|result| async move {
+			match result {
+				Ok(batch) if batch.values.is_empty() => None,
+				other => Some(other),
+			}
+		});
 
 		Ok(Box::pin(filtered))
 	}
@@ -200,4 +199,3 @@ fn compare_values(a: &Value, b: &Value, nulls: NullsOrder) -> Ordering {
 		(false, false) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
 	}
 }
-

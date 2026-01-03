@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use crate::err::Error;
-use crate::exec::operators::{ComputeFields, Filter, Limit, RecordIdLookup, Scan, Sort, Union};
-use crate::exec::statement::{
-	ScriptPlan, StatementContent, StatementId, StatementKind, StatementLetValue, StatementPlan,
+use crate::exec::operators::{
+	BeginPlan, CancelPlan, CommitPlan, ComputeFields, Filter, LetPlan, LetValue, Limit,
+	RecordIdLookup, Scan, Sort, Union, UsePlan,
 };
-use crate::exec::{LetValue, OperatorPlan, PlannedStatement, SessionCommand};
+use crate::exec::statement::{
+	ScriptPlan, StatementContent, StatementId, StatementKind, StatementPlan,
+};
+use crate::exec::{OperatorPlan, PlannedStatement, SessionCommand};
 use crate::expr::{Expr, Literal, TopLevelExpr};
 
 /// Attempts to convert a logical plan to an execution plan.
@@ -700,19 +703,28 @@ impl ScriptPlanner {
 		let id = self.next_statement_id();
 
 		let (content, kind) = match expr {
-			TopLevelExpr::Begin => (StatementContent::Begin, StatementKind::Transaction),
-			TopLevelExpr::Cancel => (StatementContent::Cancel, StatementKind::Transaction),
-			TopLevelExpr::Commit => (StatementContent::Commit, StatementKind::Transaction),
+			// Transaction control - create operator plans
+			TopLevelExpr::Begin => {
+				let op = Arc::new(BeginPlan) as Arc<dyn OperatorPlan>;
+				(StatementContent::Query(op), StatementKind::Transaction)
+			}
+			TopLevelExpr::Cancel => {
+				let op = Arc::new(CancelPlan) as Arc<dyn OperatorPlan>;
+				(StatementContent::Query(op), StatementKind::Transaction)
+			}
+			TopLevelExpr::Commit => {
+				let op = Arc::new(CommitPlan) as Arc<dyn OperatorPlan>;
+				(StatementContent::Query(op), StatementKind::Transaction)
+			}
 
+			// USE - create UsePlan operator
 			TopLevelExpr::Use(use_stmt) => {
 				let (ns, db) = self.convert_use_to_content(use_stmt)?;
-				(
-					StatementContent::Use {
-						ns,
-						db,
-					},
-					StatementKind::ContextMutation,
-				)
+				let op = Arc::new(UsePlan {
+					ns,
+					db,
+				}) as Arc<dyn OperatorPlan>;
+				(StatementContent::Query(op), StatementKind::ContextMutation)
 			}
 
 			TopLevelExpr::Explain {
@@ -797,7 +809,10 @@ impl ScriptPlanner {
 	fn convert_use_to_content(
 		&self,
 		use_stmt: &crate::expr::statements::UseStatement,
-	) -> Result<(Option<Arc<dyn crate::exec::PhysicalExpr>>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
+	) -> Result<
+		(Option<Arc<dyn crate::exec::PhysicalExpr>>, Option<Arc<dyn crate::exec::PhysicalExpr>>),
+		Error,
+	> {
 		use crate::expr::statements::UseStatement;
 
 		match use_stmt {
@@ -845,16 +860,14 @@ impl ScriptPlanner {
 				Ok((StatementContent::Query(plan), StatementKind::PureRead))
 			}
 
-			// LET - context mutation
+			// LET - create LetPlan operator
 			Expr::Let(let_stmt) => {
 				let (name, value) = self.convert_let_to_content(let_stmt)?;
-				Ok((
-					StatementContent::Let {
-						name,
-						value,
-					},
-					StatementKind::ContextMutation,
-				))
+				let op = Arc::new(LetPlan {
+					name,
+					value,
+				}) as Arc<dyn OperatorPlan>;
+				Ok((StatementContent::Query(op), StatementKind::ContextMutation))
 			}
 
 			// DML statements - data mutations
@@ -933,9 +946,15 @@ impl ScriptPlanner {
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Constant(_)
-			| Expr::Prefix { .. }
-			| Expr::Binary { .. }
-			| Expr::Postfix { .. }
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
 			| Expr::Table(_) => {
 				let phys_expr = expr_to_physical_expr(expr.clone())?;
 				if phys_expr.references_current_value() {
@@ -950,7 +969,8 @@ impl ScriptPlanner {
 				let phys_expr = expr_to_physical_expr(expr.clone())?;
 				if phys_expr.references_current_value() {
 					return Err(Error::Unimplemented(
-						"Field expressions require a FROM clause to provide row context".to_string(),
+						"Field expressions require a FROM clause to provide row context"
+							.to_string(),
 					));
 				}
 				Ok((StatementContent::Scalar(phys_expr), StatementKind::PureRead))
@@ -962,13 +982,13 @@ impl ScriptPlanner {
 	fn convert_let_to_content(
 		&self,
 		let_stmt: &crate::expr::statements::SetStatement,
-	) -> Result<(String, StatementLetValue), Error> {
+	) -> Result<(String, LetValue), Error> {
 		let name = let_stmt.name.clone();
 
 		let value = match &let_stmt.what {
 			Expr::Select(select) => {
 				let plan = self.plan_select_internal(select)?;
-				StatementLetValue::Query(plan)
+				LetValue::Query(plan)
 			}
 
 			// DML in LET not yet supported
@@ -990,7 +1010,7 @@ impl ScriptPlanner {
 						"LET expression cannot reference current row context".to_string(),
 					));
 				}
-				StatementLetValue::Scalar(expr)
+				LetValue::Scalar(expr)
 			}
 		};
 
@@ -1113,4 +1133,197 @@ pub(crate) fn logical_plan_to_script_plan(
 ) -> Result<ScriptPlan, Error> {
 	let mut planner = ScriptPlanner::new();
 	planner.plan_script(&plan.expressions)
+}
+
+#[cfg(test)]
+mod script_planner_tests {
+	use super::*;
+	use crate::exec::OperatorPlan;
+	use crate::expr::statements::UseStatement;
+	use crate::expr::{LogicalPlan, TopLevelExpr};
+
+	#[test]
+	fn test_planner_creates_begin_operator() {
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Begin],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 1);
+		let stmt = &script.statements[0];
+		assert_eq!(stmt.kind, StatementKind::Transaction);
+		assert!(stmt.kind.is_full_barrier());
+
+		// Verify it's a BeginPlan operator
+		if let StatementContent::Query(op) = &stmt.content {
+			assert_eq!(op.name(), "Begin");
+			assert!(op.mutates_context());
+		} else {
+			panic!("Expected Query content with BeginPlan operator");
+		}
+	}
+
+	#[test]
+	fn test_planner_creates_commit_operator() {
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Commit],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 1);
+		let stmt = &script.statements[0];
+		assert_eq!(stmt.kind, StatementKind::Transaction);
+
+		if let StatementContent::Query(op) = &stmt.content {
+			assert_eq!(op.name(), "Commit");
+			assert!(op.mutates_context());
+		} else {
+			panic!("Expected Query content with CommitPlan operator");
+		}
+	}
+
+	#[test]
+	fn test_planner_creates_cancel_operator() {
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Cancel],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 1);
+		let stmt = &script.statements[0];
+		assert_eq!(stmt.kind, StatementKind::Transaction);
+
+		if let StatementContent::Query(op) = &stmt.content {
+			assert_eq!(op.name(), "Cancel");
+			assert!(op.mutates_context());
+		} else {
+			panic!("Expected Query content with CancelPlan operator");
+		}
+	}
+
+	#[test]
+	fn test_planner_creates_use_operator() {
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Use(UseStatement::Ns(Expr::Literal(
+				crate::expr::literal::Literal::String("test_ns".to_string()),
+			)))],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 1);
+		let stmt = &script.statements[0];
+		assert_eq!(stmt.kind, StatementKind::ContextMutation);
+		assert!(!stmt.kind.is_full_barrier());
+
+		if let StatementContent::Query(op) = &stmt.content {
+			assert_eq!(op.name(), "Use");
+			assert!(op.mutates_context());
+		} else {
+			panic!("Expected Query content with UsePlan operator");
+		}
+	}
+
+	#[test]
+	fn test_planner_creates_let_operator() {
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Let(Box::new(
+				crate::expr::statements::SetStatement {
+					name: "x".to_string(),
+					what: Expr::Literal(crate::expr::literal::Literal::Integer(42)),
+					kind: None,
+				},
+			)))],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 1);
+		let stmt = &script.statements[0];
+		assert_eq!(stmt.kind, StatementKind::ContextMutation);
+
+		if let StatementContent::Query(op) = &stmt.content {
+			assert_eq!(op.name(), "Let");
+			assert!(op.mutates_context());
+		} else {
+			panic!("Expected Query content with LetPlan operator");
+		}
+	}
+
+	#[test]
+	fn test_planner_context_source_chain() {
+		// Test: USE NS test; LET $x = 1; LET $y = 2
+		// Each subsequent statement should get context from the previous one
+		let plan = LogicalPlan {
+			expressions: vec![
+				TopLevelExpr::Use(UseStatement::Ns(Expr::Literal(
+					crate::expr::literal::Literal::String("test".to_string()),
+				))),
+				TopLevelExpr::Expr(Expr::Let(Box::new(crate::expr::statements::SetStatement {
+					name: "x".to_string(),
+					what: Expr::Literal(crate::expr::literal::Literal::Integer(1)),
+					kind: None,
+				}))),
+				TopLevelExpr::Expr(Expr::Let(Box::new(crate::expr::statements::SetStatement {
+					name: "y".to_string(),
+					what: Expr::Literal(crate::expr::literal::Literal::Integer(2)),
+					kind: None,
+				}))),
+			],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 3);
+
+		// Statement 0 (USE): no context source
+		assert!(script.statements[0].context_source.is_none());
+		assert_eq!(script.statements[0].kind, StatementKind::ContextMutation);
+
+		// Statement 1 (LET $x): gets context from statement 0
+		assert_eq!(script.statements[1].context_source, Some(StatementId(0)));
+		assert_eq!(script.statements[1].kind, StatementKind::ContextMutation);
+
+		// Statement 2 (LET $y): gets context from statement 1
+		assert_eq!(script.statements[2].context_source, Some(StatementId(1)));
+		assert_eq!(script.statements[2].kind, StatementKind::ContextMutation);
+	}
+
+	#[test]
+	fn test_planner_transaction_barrier() {
+		// Test: LET $x = 1; BEGIN; LET $y = 2
+		// BEGIN creates a full barrier - must wait for all prior statements
+		let plan = LogicalPlan {
+			expressions: vec![
+				TopLevelExpr::Expr(Expr::Let(Box::new(crate::expr::statements::SetStatement {
+					name: "x".to_string(),
+					what: Expr::Literal(crate::expr::literal::Literal::Integer(1)),
+					kind: None,
+				}))),
+				TopLevelExpr::Begin,
+				TopLevelExpr::Expr(Expr::Let(Box::new(crate::expr::statements::SetStatement {
+					name: "y".to_string(),
+					what: Expr::Literal(crate::expr::literal::Literal::Integer(2)),
+					kind: None,
+				}))),
+			],
+		};
+
+		let script = logical_plan_to_script_plan(&plan).expect("Planning failed");
+
+		assert_eq!(script.len(), 3);
+
+		// Statement 0 (LET $x): no wait_for
+		assert!(script.statements[0].wait_for.is_empty());
+
+		// Statement 1 (BEGIN): must wait for statement 0 (full barrier)
+		assert!(script.statements[1].wait_for.contains(&StatementId(0)));
+		assert!(script.statements[1].kind.is_full_barrier());
+
+		// Statement 2 (LET $y): must wait for the barrier (statement 1)
+		assert!(script.statements[2].wait_for.contains(&StatementId(1)));
+	}
 }
