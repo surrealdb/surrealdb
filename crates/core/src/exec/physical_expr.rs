@@ -235,7 +235,7 @@ impl PhysicalExpr for BinaryOp {
 			BinaryOperator::Multiply => operate::mul(left, eval!(self.right)),
 			BinaryOperator::Divide => operate::div(left, eval!(self.right)),
 			BinaryOperator::Remainder => operate::rem(left, eval!(self.right)),
-			BinaryOperator::Power => operate::pow(left, eval!(self.right)	),
+			BinaryOperator::Power => operate::pow(left, eval!(self.right)),
 
 			BinaryOperator::Equal => operate::equal(&left, &eval!(self.right)),
 			BinaryOperator::ExactEqual => operate::exact(&left, &eval!(self.right)),

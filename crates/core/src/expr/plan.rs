@@ -47,7 +47,10 @@ impl TopLevelExpr {
 			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Access(_) => false,
 			// EXPLAIN is read-only if the inner statement is read-only
-			TopLevelExpr::Explain { statement, .. } => statement.read_only(),
+			TopLevelExpr::Explain {
+				statement,
+				..
+			} => statement.read_only(),
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}
 	}

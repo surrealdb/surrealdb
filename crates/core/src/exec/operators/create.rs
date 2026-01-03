@@ -15,9 +15,9 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::val::{TableName, Value};
-use crate::expr::ControlFlow;
 
 /// Source of content for a CREATE operation.
 #[derive(Debug, Clone)]
@@ -66,7 +66,6 @@ impl ExecutionPlan for Create {
 
 		// Create a stream that performs the create operation
 		let stream = stream::once(async move {
-
 			// Resolve table definition and CREATE permission at execution time
 			let create_permission = if check_perms {
 				let table_def = txn
@@ -109,10 +108,7 @@ impl ExecutionPlan for Create {
 				let allowed = check_permission_for_value(&create_permission, &value, &exec_ctx)
 					.await
 					.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!(
-							"Failed to check permission: {}",
-							e
-						))
+						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {}", e))
 					})?;
 
 				if !allowed {

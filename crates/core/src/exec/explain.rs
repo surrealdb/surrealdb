@@ -31,7 +31,10 @@ fn format_planned_statement_impl(
 		PlannedStatement::SessionCommand(cmd) => {
 			writeln!(output, "{}{}{:?}", prefix, connector, cmd).unwrap();
 		}
-		PlannedStatement::Let { name, value } => {
+		PlannedStatement::Let {
+			name,
+			value,
+		} => {
 			writeln!(output, "{}{}Let [name: ${}]", prefix, connector, name).unwrap();
 
 			match value {
@@ -50,7 +53,10 @@ fn format_planned_statement_impl(
 			write!(output, "{}{}Scalar => ", prefix, connector).unwrap();
 			format_physical_expr(expr.as_ref(), output);
 		}
-		PlannedStatement::Explain { format: _, statement } => {
+		PlannedStatement::Explain {
+			format: _,
+			statement,
+		} => {
 			// For nested EXPLAIN (unlikely but handle it)
 			format_planned_statement_impl(statement, output, prefix, is_last);
 		}
@@ -92,9 +98,14 @@ fn format_execution_plan(
 		for (i, child) in children.iter().enumerate() {
 			let is_last_child = i == children.len() - 1;
 			// Use proper tree connector with arrow
-			let child_connector = if is_last_child { "└────> " } else { "├────> " };
+			let child_connector = if is_last_child {
+				"└────> "
+			} else {
+				"├────> "
+			};
 			write!(output, "{}{}", prefix, child_connector).unwrap();
-			// Calculate next prefix: align under the operator name, with continuation bar if not last
+			// Calculate next prefix: align under the operator name, with continuation bar if not
+			// last
 			let next_prefix = if is_last_child {
 				format!("{}       ", prefix)
 			} else {
@@ -104,7 +115,6 @@ fn format_execution_plan(
 		}
 	}
 }
-
 
 /// Format a physical expression
 fn format_physical_expr(expr: &dyn PhysicalExpr, output: &mut String) {

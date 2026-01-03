@@ -1,9 +1,7 @@
 use reblessive::Stk;
 
 use super::mac::expected;
-use super::ParseResult;
-use super::Parser;
-use crate::syn::error::{MessageKind, SyntaxError};
+use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
@@ -17,6 +15,7 @@ use crate::sql::statements::{
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
 use crate::sql::{AssignOperator, ExplainFormat, Expr, Literal, Param, TopLevelExpr};
+use crate::syn::error::{MessageKind, SyntaxError};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -333,8 +332,10 @@ impl Parser<'_> {
 							ExplainFormat::Text
 						} else if format_str.eq_ignore_ascii_case("JSON") {
 							self.pop_peek();
-							return Err(SyntaxError::new("EXPLAIN FORMAT JSON is not yet supported")
-								.with_span(format_peek.span, MessageKind::Error));
+							return Err(SyntaxError::new(
+								"EXPLAIN FORMAT JSON is not yet supported",
+							)
+							.with_span(format_peek.span, MessageKind::Error));
 						} else {
 							unexpected!(self, format_peek, "TEXT or JSON")
 						}

@@ -42,7 +42,6 @@ pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + 
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
 pub(crate) trait ExecutionPlan: Debug + Send + Sync {
-
 	fn name(&self) -> &'static str;
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -117,8 +116,8 @@ mod tests {
 	use crate::expr::statements::SelectStatement;
 	use crate::expr::{Fields, LogicalPlan, TopLevelExpr};
 	use crate::kvs::Datastore;
-	use crate::val::TableName;
 	use crate::types::{PublicNumber, PublicObject, PublicValue};
+	use crate::val::TableName;
 
 	/// Helper to set up test data in an in-memory datastore
 	async fn setup_test_data() -> Datastore {
@@ -683,9 +682,9 @@ mod tests {
 		// Expression: 1 + 2
 		let plan = LogicalPlan {
 			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Binary {
-				left: Box::new(crate::expr::Expr::Literal(
-					crate::expr::literal::Literal::Integer(1),
-				)),
+				left: Box::new(crate::expr::Expr::Literal(crate::expr::literal::Literal::Integer(
+					1,
+				))),
 				op: crate::expr::operator::BinaryOperator::Add,
 				right: Box::new(crate::expr::Expr::Literal(
 					crate::expr::literal::Literal::Integer(2),
@@ -714,9 +713,9 @@ mod tests {
 		let plan = LogicalPlan {
 			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Prefix {
 				op: crate::expr::operator::PrefixOperator::Negate,
-				expr: Box::new(crate::expr::Expr::Literal(
-					crate::expr::literal::Literal::Integer(5),
-				)),
+				expr: Box::new(crate::expr::Expr::Literal(crate::expr::literal::Literal::Integer(
+					5,
+				))),
 			})],
 		};
 
@@ -793,9 +792,9 @@ mod tests {
 
 		// Expression: field_name (idiom without table)
 		let plan = LogicalPlan {
-			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Idiom(
-				crate::expr::Idiom(vec![crate::expr::part::Part::Field("field_name".to_string())]),
-			))],
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Idiom(crate::expr::Idiom(
+				vec![crate::expr::part::Part::Field("field_name".to_string())],
+			)))],
 		};
 
 		// This should fail because idioms require row context

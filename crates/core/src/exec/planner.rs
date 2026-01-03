@@ -24,7 +24,10 @@ fn top_level_expr_to_execution_plan(expr: &TopLevelExpr) -> Result<PlannedStatem
 		TopLevelExpr::Cancel => Ok(PlannedStatement::SessionCommand(SessionCommand::Cancel)),
 		TopLevelExpr::Commit => Ok(PlannedStatement::SessionCommand(SessionCommand::Commit)),
 		TopLevelExpr::Use(use_stmt) => convert_use_statement(use_stmt),
-		TopLevelExpr::Explain { format, statement } => {
+		TopLevelExpr::Explain {
+			format,
+			statement,
+		} => {
 			// Convert the inner statement to an execution plan
 			let inner_plan = top_level_expr_to_execution_plan(statement)?;
 			Ok(PlannedStatement::Explain {

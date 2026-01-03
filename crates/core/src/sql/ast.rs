@@ -139,12 +139,13 @@ impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 			TopLevelExpr::Show(show_statement) => {
 				crate::expr::TopLevelExpr::Show(show_statement.into())
 			}
-			TopLevelExpr::Explain { format, statement } => {
-				crate::expr::TopLevelExpr::Explain {
-					format: format.into(),
-					statement: Box::new((*statement).into()),
-				}
-			}
+			TopLevelExpr::Explain {
+				format,
+				statement,
+			} => crate::expr::TopLevelExpr::Explain {
+				format: format.into(),
+				statement: Box::new((*statement).into()),
+			},
 			TopLevelExpr::Expr(expr) => crate::expr::TopLevelExpr::Expr(expr.into()),
 		}
 	}
@@ -174,12 +175,13 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 			crate::expr::TopLevelExpr::Show(show_statement) => {
 				TopLevelExpr::Show(show_statement.into())
 			}
-			crate::expr::TopLevelExpr::Explain { format, statement } => {
-				TopLevelExpr::Explain {
-					format: format.into(),
-					statement: Box::new((*statement).into()),
-				}
-			}
+			crate::expr::TopLevelExpr::Explain {
+				format,
+				statement,
+			} => TopLevelExpr::Explain {
+				format: format.into(),
+				statement: Box::new((*statement).into()),
+			},
 			crate::expr::TopLevelExpr::Expr(expr) => TopLevelExpr::Expr(expr.into()),
 		}
 	}
@@ -207,7 +209,10 @@ impl ToSql for TopLevelExpr {
 			TopLevelExpr::Option(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Use(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
-			TopLevelExpr::Explain { format: explain_format, statement } => {
+			TopLevelExpr::Explain {
+				format: explain_format,
+				statement,
+			} => {
 				f.push_str("EXPLAIN");
 				match explain_format {
 					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
