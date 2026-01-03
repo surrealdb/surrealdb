@@ -31,6 +31,10 @@ pub struct Delete {
 }
 
 impl ExecutionPlan for Delete {
+	fn name(&self) -> &'static str {
+		"Delete"
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database.max(self.input.required_context())
 	}

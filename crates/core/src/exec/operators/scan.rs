@@ -33,6 +33,14 @@ pub struct Scan {
 }
 
 impl ExecutionPlan for Scan {
+	fn name(&self) -> &'static str {
+		"Scan"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![("table".to_string(), self.table.to_sql())]
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
 	}

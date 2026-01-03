@@ -16,7 +16,7 @@ value = "NONE"
 value = "1"
 
 [[test.results]]
-error = "Specify a namespace to use"
+error = "Parameter not found: $does_not_exist"
 */
 let $does_exit = 1;
 

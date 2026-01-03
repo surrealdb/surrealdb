@@ -19,6 +19,14 @@ pub struct Filter {
 }
 
 impl ExecutionPlan for Filter {
+	fn name(&self) -> &'static str {
+		"Filter"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![("predicate".to_string(), self.predicate.to_sql())]
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		// Filter needs Database for expression evaluation, but also
 		// inherits child requirements (take the maximum)

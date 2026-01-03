@@ -29,6 +29,10 @@ pub struct RecordIdLookup {
 }
 
 impl ExecutionPlan for RecordIdLookup {
+	fn name(&self) -> &'static str {
+		"RecordIdLookup"
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
 	}

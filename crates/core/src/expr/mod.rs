@@ -70,6 +70,7 @@ pub(crate) use self::data::Data;
 pub(crate) use self::dir::Dir;
 pub(crate) use self::explain::Explain;
 pub(crate) use self::expression::Expr;
+pub(crate) use self::plan::{ExplainFormat, LogicalPlan, TopLevelExpr};
 pub(crate) use self::fetch::{Fetch, Fetchs};
 pub(crate) use self::field::{Field, Fields};
 pub(crate) use self::filter::Filter;
@@ -89,7 +90,6 @@ pub(crate) use self::order::Order;
 pub(crate) use self::output::Output;
 pub(crate) use self::param::Param;
 pub(crate) use self::part::Part;
-pub(crate) use self::plan::{LogicalPlan, TopLevelExpr};
 pub(crate) use self::record_id::{
 	RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
 };

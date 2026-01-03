@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::exec::{ExecutionContext, ExecutionPlan, Parameters};
@@ -63,7 +64,9 @@ impl<'a> EvalContext<'a> {
 }
 
 #[async_trait]
-pub trait PhysicalExpr: Send + Sync + Debug {
+pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
+	fn name(&self) -> &'static str;
+
 	/// Evaluate this expression to a value.
 	///
 	/// May execute subqueries internally, hence async.
@@ -80,6 +83,10 @@ pub struct Literal(pub(crate) Value);
 
 #[async_trait]
 impl PhysicalExpr for Literal {
+	fn name(&self) -> &'static str {
+		"Literal"
+	}
+
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		Ok(self.0.clone())
 	}
@@ -89,12 +96,22 @@ impl PhysicalExpr for Literal {
 	}
 }
 
+impl ToSql for Literal {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
+	}
+}
+
 /// Parameter reference - $foo
 #[derive(Debug, Clone)]
 pub struct Param(pub(crate) String);
 
 #[async_trait]
 impl PhysicalExpr for Param {
+	fn name(&self) -> &'static str {
+		"Param"
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		ctx.exec_ctx
 			.params()
@@ -108,12 +125,22 @@ impl PhysicalExpr for Param {
 	}
 }
 
+impl ToSql for Param {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "${}", self.0)
+	}
+}
+
 /// Field access - foo.bar.baz or just `age`
 #[derive(Debug, Clone)]
 pub struct Field(pub(crate) Idiom);
 
 #[async_trait]
 impl PhysicalExpr for Field {
+	fn name(&self) -> &'static str {
+		"Field"
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let current = ctx
 			.current_value
@@ -126,6 +153,12 @@ impl PhysicalExpr for Field {
 
 	fn references_current_value(&self) -> bool {
 		true
+	}
+}
+
+impl ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", self.0)
 	}
 }
 
@@ -178,6 +211,10 @@ pub struct BinaryOp {
 
 #[async_trait]
 impl PhysicalExpr for BinaryOp {
+	fn name(&self) -> &'static str {
+		"BinaryOp"
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		use crate::expr::operator::BinaryOperator;
 		use crate::fnc::operate;
@@ -305,6 +342,12 @@ impl PhysicalExpr for BinaryOp {
 	}
 }
 
+impl ToSql for BinaryOp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{} {} {}", self.left, self.op, self.right)
+	}
+}
+
 /// Unary/Prefix operation - op expr (e.g., -5, !true, +x)
 #[derive(Debug, Clone)]
 pub struct UnaryOp {
@@ -314,6 +357,10 @@ pub struct UnaryOp {
 
 #[async_trait]
 impl PhysicalExpr for UnaryOp {
+	fn name(&self) -> &'static str {
+		"UnaryOp"
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		use crate::expr::operator::PrefixOperator;
 		use crate::fnc::operate;
@@ -353,6 +400,12 @@ impl PhysicalExpr for UnaryOp {
 	}
 }
 
+impl ToSql for UnaryOp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{} {}", self.op, self.expr)
+	}
+}
+
 /// Postfix operation - expr op (e.g., value.., value>..)
 #[derive(Debug, Clone)]
 pub struct PostfixOp {
@@ -362,6 +415,10 @@ pub struct PostfixOp {
 
 #[async_trait]
 impl PhysicalExpr for PostfixOp {
+	fn name(&self) -> &'static str {
+		"PostfixOp"
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		use crate::expr::operator::PostfixOperator;
 
@@ -396,6 +453,12 @@ impl PhysicalExpr for PostfixOp {
 	}
 }
 
+impl ToSql for PostfixOp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{} {}", self.expr, self.op)
+	}
+}
+
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {
@@ -404,6 +467,10 @@ pub struct ScalarSubquery {
 
 #[async_trait]
 impl PhysicalExpr for ScalarSubquery {
+	fn name(&self) -> &'static str {
+		"ScalarSubquery"
+	}
+
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// TODO: Implement scalar subquery evaluation
 		// This requires bridging EvalContext (which has borrowed &Transaction)
@@ -423,5 +490,11 @@ impl PhysicalExpr for ScalarSubquery {
 		// For now, assume subqueries don't reference current value
 		// TODO: Track if plan references outer scope for correlated subqueries
 		false
+	}
+}
+
+impl ToSql for ScalarSubquery {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "TODO: Not implemented")
 	}
 }

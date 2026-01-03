@@ -48,6 +48,10 @@ pub struct Project {
 }
 
 impl ExecutionPlan for Project {
+	fn name(&self) -> &'static str {
+		"Project"
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		// Project needs Database for field permission lookup, but also
 		// inherits child requirements (take the maximum)

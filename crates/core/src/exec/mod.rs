@@ -9,6 +9,7 @@ use crate::expr::FlowResult;
 use crate::val::Value;
 
 pub(crate) mod context;
+pub(crate) mod explain;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
@@ -41,6 +42,13 @@ pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + 
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
 pub(crate) trait ExecutionPlan: Debug + Send + Sync {
+
+	fn name(&self) -> &'static str;
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![]
+	}
+
 	/// The minimum context level required to execute this plan.
 	///
 	/// Used for pre-flight validation: the executor checks that the current session
@@ -84,6 +92,11 @@ pub(crate) enum PlannedStatement {
 	},
 	/// A scalar expression evaluated as a top-level statement (e.g., `1 + 1;`, `$param;`)
 	Scalar(Arc<dyn PhysicalExpr>),
+	/// EXPLAIN statement - shows execution plan instead of executing
+	Explain {
+		format: crate::expr::ExplainFormat,
+		statement: Box<PlannedStatement>,
+	},
 }
 
 #[derive(Debug, Clone)]

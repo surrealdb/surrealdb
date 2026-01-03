@@ -60,6 +60,14 @@ struct ComputedFieldDef {
 }
 
 impl ExecutionPlan for ComputeFields {
+	fn name(&self) -> &'static str {
+		"ComputeFields"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![("table".to_string(), self.table.to_sql())]
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		// ComputeFields needs Database for field definition lookup
 		// Also inherits child requirements

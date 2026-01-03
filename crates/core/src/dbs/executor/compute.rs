@@ -292,21 +292,27 @@ impl ComputeExecutor {
 			TopLevelExpr::Access(s) => {
 				ctx_mut!().set_transaction(txn);
 				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
-			}
-			// Process all other normal statements
-			TopLevelExpr::Expr(e) => {
-				// The transaction began successfully
-				ctx_mut!().set_transaction(txn);
-				// Process the statement
-				let res = self
-					.stack
-					.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
-					.finish()
-					.await;
-				self.check_slow_log(start, &e);
-				res
-			}
-		};
+		}
+		// EXPLAIN should use the new execution model
+		TopLevelExpr::Explain { .. } => {
+			return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				"EXPLAIN is only supported with the new execution model".to_string(),
+			))));
+		}
+		// Process all other normal statements
+		TopLevelExpr::Expr(e) => {
+			// The transaction began successfully
+			ctx_mut!().set_transaction(txn);
+			// Process the statement
+			let res = self
+				.stack
+				.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+				.finish()
+				.await;
+			self.check_slow_log(start, &e);
+			res
+		}
+	};
 
 		// Catch cancellation during running.
 		match self.ctx.done(true)? {

@@ -103,6 +103,10 @@ impl BroadcastSource {
 }
 
 impl ExecutionPlan for BroadcastSource {
+	fn name(&self) -> &'static str {
+		"BroadcastSource"
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		// Forward the context requirement from the input plan
 		self.input.required_context()
@@ -263,6 +267,10 @@ mod tests {
 	}
 
 	impl ExecutionPlan for MockPlan {
+		fn name(&self) -> &'static str {
+			"MockPlan"
+		}
+
 		fn required_context(&self) -> ContextLevel {
 			ContextLevel::Root
 		}
@@ -292,6 +300,10 @@ mod tests {
 	}
 
 	impl ExecutionPlan for ErrorPlan {
+		fn name(&self) -> &'static str {
+			"ErrorPlan"
+		}
+
 		fn required_context(&self) -> ContextLevel {
 			ContextLevel::Root
 		}

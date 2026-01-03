@@ -137,6 +137,7 @@ implement_visitor! {
 			TopLevelExpr::Option(s) =>{ this.visit_option(s)?; },
 			TopLevelExpr::Use(s) => {this.visit_use(s)?; },
 			TopLevelExpr::Show(s) => {this.visit_show(s)?; },
+			TopLevelExpr::Explain { statement, .. } => {this.visit_top_level_expr(statement)?; },
 			TopLevelExpr::Expr(e) => {this.visit_expr(e)?; },
 		}
 		Ok(())
@@ -1548,6 +1549,7 @@ implement_visitor_mut! {
 			TopLevelExpr::Option(s) =>{ this.visit_mut_option(s)?; },
 			TopLevelExpr::Use(s) => {this.visit_mut_use(s)?; },
 			TopLevelExpr::Show(s) => {this.visit_mut_show(s)?; },
+			TopLevelExpr::Explain { statement, .. } => {this.visit_mut_top_level_expr(statement)?; },
 			TopLevelExpr::Expr(e) => {this.visit_mut_expr(e)?; },
 		}
 		Ok(())

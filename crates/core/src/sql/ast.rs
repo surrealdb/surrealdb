@@ -9,6 +9,30 @@ use crate::sql::statements::{
 };
 use crate::sql::{Expr, Param};
 
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Default)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) enum ExplainFormat {
+	#[default]
+	Text,
+	// Json, // Future
+}
+
+impl From<ExplainFormat> for crate::expr::ExplainFormat {
+	fn from(value: ExplainFormat) -> Self {
+		match value {
+			ExplainFormat::Text => crate::expr::ExplainFormat::Text,
+		}
+	}
+}
+
+impl From<crate::expr::ExplainFormat> for ExplainFormat {
+	fn from(value: crate::expr::ExplainFormat) -> Self {
+		match value {
+			crate::expr::ExplainFormat::Text => ExplainFormat::Text,
+		}
+	}
+}
+
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ast {
@@ -84,6 +108,10 @@ pub(crate) enum TopLevelExpr {
 	Option(OptionStatement),
 	Use(UseStatement),
 	Show(ShowStatement),
+	Explain {
+		format: ExplainFormat,
+		statement: Box<TopLevelExpr>,
+	},
 	Expr(Expr),
 }
 
@@ -110,6 +138,12 @@ impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 			}
 			TopLevelExpr::Show(show_statement) => {
 				crate::expr::TopLevelExpr::Show(show_statement.into())
+			}
+			TopLevelExpr::Explain { format, statement } => {
+				crate::expr::TopLevelExpr::Explain {
+					format: format.into(),
+					statement: Box::new((*statement).into()),
+				}
 			}
 			TopLevelExpr::Expr(expr) => crate::expr::TopLevelExpr::Expr(expr.into()),
 		}
@@ -140,6 +174,12 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 			crate::expr::TopLevelExpr::Show(show_statement) => {
 				TopLevelExpr::Show(show_statement.into())
 			}
+			crate::expr::TopLevelExpr::Explain { format, statement } => {
+				TopLevelExpr::Explain {
+					format: format.into(),
+					statement: Box::new((*statement).into()),
+				}
+			}
 			crate::expr::TopLevelExpr::Expr(expr) => TopLevelExpr::Expr(expr.into()),
 		}
 	}
@@ -167,6 +207,14 @@ impl ToSql for TopLevelExpr {
 			TopLevelExpr::Option(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Use(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Explain { format: explain_format, statement } => {
+				f.push_str("EXPLAIN");
+				match explain_format {
+					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
+				}
+				f.push(' ');
+				statement.fmt_sql(f, fmt);
+			}
 			TopLevelExpr::Expr(e) => e.fmt_sql(f, fmt),
 		}
 	}

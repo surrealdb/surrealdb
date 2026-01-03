@@ -38,6 +38,16 @@ pub enum ContextLevel {
 	Database = 2,
 }
 
+impl ContextLevel {
+	pub fn short_name(&self) -> &'static str {
+		match self {
+			Self::Root => "Rt",
+			Self::Namespace => "Ns",
+			Self::Database => "Db",
+		}
+	}
+}
+
 /// Root-level context - always available.
 ///
 /// Contains resources that don't require a namespace or database selection:

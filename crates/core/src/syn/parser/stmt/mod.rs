@@ -1,7 +1,9 @@
 use reblessive::Stk;
 
 use super::mac::expected;
-use super::{ParseResult, Parser};
+use super::ParseResult;
+use super::Parser;
+use crate::syn::error::{MessageKind, SyntaxError};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
@@ -14,7 +16,7 @@ use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, ExplainFormat, Expr, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -88,6 +90,10 @@ impl Parser<'_> {
 			t!("COMMIT") => {
 				self.pop_peek();
 				self.parse_commit()
+			}
+			t!("EXPLAIN") => {
+				self.pop_peek();
+				self.parse_explain_stmt(stk).await
 			}
 			t!("KILL") => {
 				self.pop_peek();
@@ -292,6 +298,64 @@ impl Parser<'_> {
 	fn parse_commit(&mut self) -> ParseResult<TopLevelExpr> {
 		self.eat(t!("TRANSACTION"));
 		Ok(TopLevelExpr::Commit)
+	}
+
+	/// Parsers an EXPLAIN statement.
+	///
+	/// # Parser State
+	/// Expects `EXPLAIN` to already be consumed.
+	async fn parse_explain_stmt(&mut self, stk: &mut Stk) -> ParseResult<TopLevelExpr> {
+		// Check for optional ANALYZE keyword (not yet supported)
+		// ANALYZE is not a reserved keyword, so we need to check if it's an identifier
+		let peek = self.peek();
+		if matches!(peek.kind, TokenKind::Identifier) {
+			let ident_str = self.lexer.span_str(peek.span);
+			if ident_str.eq_ignore_ascii_case("ANALYZE") {
+				self.pop_peek();
+				return Err(SyntaxError::new("EXPLAIN ANALYZE is not yet supported")
+					.with_span(peek.span, MessageKind::Error));
+			}
+		}
+
+		// Check for optional FORMAT keyword
+		let format = {
+			let peek = self.peek();
+			if matches!(peek.kind, TokenKind::Identifier) {
+				let ident_str = self.lexer.span_str(peek.span);
+				if ident_str.eq_ignore_ascii_case("FORMAT") {
+					self.pop_peek();
+					// Now expect TEXT or JSON
+					let format_peek = self.peek();
+					if matches!(format_peek.kind, TokenKind::Identifier) {
+						let format_str = self.lexer.span_str(format_peek.span);
+						if format_str.eq_ignore_ascii_case("TEXT") {
+							self.pop_peek();
+							ExplainFormat::Text
+						} else if format_str.eq_ignore_ascii_case("JSON") {
+							self.pop_peek();
+							return Err(SyntaxError::new("EXPLAIN FORMAT JSON is not yet supported")
+								.with_span(format_peek.span, MessageKind::Error));
+						} else {
+							unexpected!(self, format_peek, "TEXT or JSON")
+						}
+					} else {
+						unexpected!(self, format_peek, "TEXT or JSON")
+					}
+				} else {
+					ExplainFormat::Text // Default to TEXT
+				}
+			} else {
+				ExplainFormat::Text // Default to TEXT
+			}
+		};
+
+		// Parse the inner statement
+		let statement = stk.run(|stk| self.parse_top_level_expr(stk)).await?;
+
+		Ok(TopLevelExpr::Explain {
+			format,
+			statement: Box::new(statement),
+		})
 	}
 
 	/// Parsers a USE statement.

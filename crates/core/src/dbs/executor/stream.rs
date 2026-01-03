@@ -40,6 +40,7 @@ use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::val::convert_value_to_public_value;
+use crate::types::PublicValue;
 
 /// Session state tracked across statement execution.
 ///
@@ -311,6 +312,13 @@ impl StreamExecutor {
 						Err(e) => Err(DbResultError::InternalError(e.to_string())),
 					};
 					outputs.push(query_result_builder.finish_with_result(result));
+				}
+				PlannedStatement::Explain { format: _, statement } => {
+					// Format the execution plan as text instead of executing it
+					let plan_text = crate::exec::explain::format_planned_statement(statement.as_ref());
+					
+					// Return the formatted plan as a string value
+					outputs.push(query_result_builder.finish_with_result(Ok(PublicValue::String(plan_text))));
 				}
 			}
 		}

@@ -18,6 +18,10 @@ pub struct Union {
 }
 
 impl ExecutionPlan for Union {
+	fn name(&self) -> &'static str {
+		"Union"
+	}
+
 	fn required_context(&self) -> ContextLevel {
 		// Union requires the maximum context level of all its inputs
 		self.inputs.iter().map(|input| input.required_context()).max().unwrap_or(ContextLevel::Root)
