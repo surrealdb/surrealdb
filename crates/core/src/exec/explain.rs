@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::exec::{ExecutionPlan, PhysicalExpr, PlannedStatement};
+use crate::exec::{OperatorPlan, PhysicalExpr, PlannedStatement};
 
 /// Format an execution plan as a text tree for display
 pub(crate) fn format_planned_statement(stmt: &PlannedStatement) -> String {
@@ -65,7 +65,7 @@ fn format_planned_statement_impl(
 
 /// Format an execution plan node as a text tree
 fn format_execution_plan(
-	plan: &dyn ExecutionPlan,
+	plan: &dyn OperatorPlan,
 	output: &mut String,
 	prefix: &str,
 	_is_last: bool,

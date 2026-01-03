@@ -16,7 +16,7 @@ use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
 	ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -32,7 +32,7 @@ use crate::val::{TableName, Value};
 #[derive(Debug, Clone)]
 pub struct ComputeFields {
 	/// The input plan to compute fields for
-	pub(crate) input: Arc<dyn ExecutionPlan>,
+	pub(crate) input: Arc<dyn OperatorPlan>,
 	/// Table name expression (evaluated at runtime for lazy resolution)
 	pub(crate) table: Arc<dyn PhysicalExpr>,
 }
@@ -59,7 +59,7 @@ struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
-impl ExecutionPlan for ComputeFields {
+impl OperatorPlan for ComputeFields {
 	fn name(&self) -> &'static str {
 		"ComputeFields"
 	}
@@ -74,7 +74,7 @@ impl ExecutionPlan for ComputeFields {
 		ContextLevel::Database.max(self.input.required_context())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 

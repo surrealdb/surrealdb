@@ -32,7 +32,7 @@ use crate::dbs::response::QueryResult;
 use crate::dbs::{QueryResultBuilder, QueryType};
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, DatabaseContext, EvalContext, ExecutionContext, ExecutionPlan, LetValue,
+	ContextLevel, DatabaseContext, EvalContext, ExecutionContext, OperatorPlan, LetValue,
 	NamespaceContext, Parameters, PlannedStatement, RootContext, SessionCommand, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, FlowResult};
@@ -225,7 +225,7 @@ impl<'a> StatementExecutor<'a> {
 	}
 
 	/// Execute a query plan.
-	async fn execute_query(&mut self, plan: &dyn ExecutionPlan) -> StatementOutcome {
+	async fn execute_query(&mut self, plan: &dyn OperatorPlan) -> StatementOutcome {
 		// Pre-flight validation: check context requirements
 		// These are fatal errors that should propagate
 		let required = max_required_context(plan);
@@ -715,7 +715,7 @@ fn build_execution_context_with_txn(
 }
 
 /// Recursively find the maximum required context level in a plan tree.
-fn max_required_context(plan: &dyn ExecutionPlan) -> ContextLevel {
+fn max_required_context(plan: &dyn OperatorPlan) -> ContextLevel {
 	let mut max = plan.required_context();
 	for child in plan.children() {
 		max = max.max(max_required_context(child.as_ref()));
@@ -726,7 +726,7 @@ fn max_required_context(plan: &dyn ExecutionPlan) -> ContextLevel {
 /// Validate that the current context level meets the plan's requirements.
 #[allow(dead_code)]
 fn validate_context_requirements(
-	plan: &dyn ExecutionPlan,
+	plan: &dyn OperatorPlan,
 	available: ContextLevel,
 ) -> Result<(), Error> {
 	let required = max_required_context(plan);

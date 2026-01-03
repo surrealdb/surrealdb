@@ -16,7 +16,7 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
 	ValueBatchStream,
 };
 use crate::iam::Action;
@@ -40,14 +40,14 @@ pub struct FieldSelection {
 #[derive(Debug, Clone)]
 pub struct Project {
 	/// The input plan to project from
-	pub input: Arc<dyn ExecutionPlan>,
+	pub input: Arc<dyn OperatorPlan>,
 	/// The table name (for field permission lookup)
 	pub table: TableName,
 	/// The fields to select/project
 	pub fields: Vec<FieldSelection>,
 }
 
-impl ExecutionPlan for Project {
+impl OperatorPlan for Project {
 	fn name(&self) -> &'static str {
 		"Project"
 	}
@@ -58,7 +58,7 @@ impl ExecutionPlan for Project {
 		ContextLevel::Database.max(self.input.required_context())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 

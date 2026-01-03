@@ -8,17 +8,29 @@ use crate::err::Error;
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+pub(crate) mod completion_map;
 pub(crate) mod context;
 pub(crate) mod explain;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
 pub(crate) mod planner;
+pub(crate) mod script_executor;
+pub(crate) mod statement;
+
 // Re-export context types
 pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
 };
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
+
+// Re-export statement types
+pub(crate) use completion_map::{CompletionError, CompletionMap};
+pub(crate) use script_executor::{ScriptExecutionError, ScriptExecutor};
+pub(crate) use statement::{
+	ScriptPlan, StatementContent, StatementId, StatementKind, StatementLetValue, StatementOutput,
+	StatementPlan,
+};
 
 /// A batch of values returned by an execution plan.
 ///
@@ -41,7 +53,7 @@ pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + 
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
-pub(crate) trait ExecutionPlan: Debug + Send + Sync {
+pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	fn name(&self) -> &'static str;
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -66,7 +78,7 @@ pub(crate) trait ExecutionPlan: Debug + Send + Sync {
 	/// - Pre-flight validation (recursive context requirement checking)
 	/// - Query optimization
 	/// - EXPLAIN output
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![]
 	}
 }
@@ -77,12 +89,12 @@ pub(crate) enum LetValue {
 	/// Scalar expression - evaluates to exactly one Value
 	Scalar(Arc<dyn PhysicalExpr>),
 	/// Query - stream is collected into Value::Array
-	Query(Arc<dyn ExecutionPlan>),
+	Query(Arc<dyn OperatorPlan>),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum PlannedStatement {
-	Query(Arc<dyn ExecutionPlan>),
+	Query(Arc<dyn OperatorPlan>),
 	SessionCommand(SessionCommand),
 	/// Bind expression result to a parameter
 	Let {

@@ -4,7 +4,7 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
 	ValueBatchStream,
 };
 
@@ -14,11 +14,11 @@ use crate::exec::{
 /// inherits the context requirements of its input plan.
 #[derive(Debug, Clone)]
 pub struct Filter {
-	pub(crate) input: Arc<dyn ExecutionPlan>,
+	pub(crate) input: Arc<dyn OperatorPlan>,
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
 }
 
-impl ExecutionPlan for Filter {
+impl OperatorPlan for Filter {
 	fn name(&self) -> &'static str {
 		"Filter"
 	}
@@ -33,7 +33,7 @@ impl ExecutionPlan for Filter {
 		ContextLevel::Database.max(self.input.required_context())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 

@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::exec::{ExecutionContext, ExecutionPlan, Parameters};
+use crate::exec::{ExecutionContext, OperatorPlan, Parameters};
 use crate::expr::Idiom;
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -462,7 +462,7 @@ impl ToSql for PostfixOp {
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {
-	pub(crate) plan: Arc<dyn ExecutionPlan>,
+	pub(crate) plan: Arc<dyn OperatorPlan>,
 }
 
 #[async_trait]

@@ -9,7 +9,7 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
-use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::iam::Action;
 use crate::val::RecordId;
 
@@ -28,7 +28,7 @@ pub struct RecordIdLookup {
 	pub(crate) version: Option<u64>,
 }
 
-impl ExecutionPlan for RecordIdLookup {
+impl OperatorPlan for RecordIdLookup {
 	fn name(&self) -> &'static str {
 		"RecordIdLookup"
 	}

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, watch};
 
 use crate::err::Error;
-use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
 
 /// A source that executes once, caches incrementally, and allows multiple
 /// consumers to read at their own pace—getting cached data immediately
@@ -24,7 +24,7 @@ use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, Val
 /// it executes once and both consumers read from the shared cache.
 #[derive(Debug, Clone)]
 pub struct BroadcastSource {
-	input: Arc<dyn ExecutionPlan>,
+	input: Arc<dyn OperatorPlan>,
 	state: Arc<BroadcastState>,
 }
 
@@ -51,7 +51,7 @@ impl std::fmt::Debug for BroadcastState {
 }
 
 impl BroadcastSource {
-	pub fn new(input: Arc<dyn ExecutionPlan>) -> Self {
+	pub fn new(input: Arc<dyn OperatorPlan>) -> Self {
 		let (tx, _rx) = watch::channel(0);
 		Self {
 			input,
@@ -66,7 +66,7 @@ impl BroadcastSource {
 	}
 
 	async fn run_producer(
-		input: Arc<dyn ExecutionPlan>,
+		input: Arc<dyn OperatorPlan>,
 		ctx: &ExecutionContext,
 		state: &BroadcastState,
 	) -> Result<(), anyhow::Error> {
@@ -102,7 +102,7 @@ impl BroadcastSource {
 	}
 }
 
-impl ExecutionPlan for BroadcastSource {
+impl OperatorPlan for BroadcastSource {
 	fn name(&self) -> &'static str {
 		"BroadcastSource"
 	}
@@ -129,7 +129,7 @@ impl ExecutionPlan for BroadcastSource {
 		))
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 }
@@ -147,7 +147,7 @@ fn make_cursor_stream(
 	changed_rx: watch::Receiver<usize>,
 	needs_spawn: bool,
 	ctx: ExecutionContext,
-	input: Option<Arc<dyn ExecutionPlan>>,
+	input: Option<Arc<dyn OperatorPlan>>,
 ) -> ValueBatchStream {
 	let cursor_state = CursorState {
 		state: state.clone(),
@@ -266,7 +266,7 @@ mod tests {
 		}
 	}
 
-	impl ExecutionPlan for MockPlan {
+	impl OperatorPlan for MockPlan {
 		fn name(&self) -> &'static str {
 			"MockPlan"
 		}
@@ -299,7 +299,7 @@ mod tests {
 		error_msg: String,
 	}
 
-	impl ExecutionPlan for ErrorPlan {
+	impl OperatorPlan for ErrorPlan {
 		fn name(&self) -> &'static str {
 			"ErrorPlan"
 		}

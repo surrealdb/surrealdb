@@ -14,7 +14,7 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
-use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::val::{TableName, Value};
@@ -40,7 +40,7 @@ pub struct Create {
 	pub content: ContentSource,
 }
 
-impl ExecutionPlan for Create {
+impl OperatorPlan for Create {
 	fn name(&self) -> &'static str {
 		"Create"
 	}

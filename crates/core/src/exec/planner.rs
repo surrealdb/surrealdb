@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use crate::err::Error;
-use crate::exec::operators::{ComputeFields, Filter, RecordIdLookup, Scan, Union};
-use crate::exec::{ExecutionPlan, LetValue, PlannedStatement, SessionCommand};
+use crate::exec::operators::{ComputeFields, Filter, Limit, RecordIdLookup, Scan, Sort, Union};
+use crate::exec::statement::{
+	ScriptPlan, StatementContent, StatementId, StatementKind, StatementLetValue, StatementPlan,
+};
+use crate::exec::{LetValue, OperatorPlan, PlannedStatement, SessionCommand};
 use crate::expr::{Expr, Literal, TopLevelExpr};
 
 /// Attempts to convert a logical plan to an execution plan.
@@ -356,20 +359,52 @@ fn plan_select(
 	let source = plan_select_sources(&select.what, version)?;
 
 	// Apply WHERE clause if present
-	let plan = if let Some(cond) = &select.cond {
+	let filtered = if let Some(cond) = &select.cond {
 		let predicate = expr_to_physical_expr(cond.0.clone())?;
 		Arc::new(Filter {
 			input: source,
 			predicate,
-		}) as Arc<dyn ExecutionPlan>
+		}) as Arc<dyn OperatorPlan>
 	} else {
 		source
 	};
 
-	// TODO: Handle projections (select.expr), GROUP BY, ORDER BY, LIMIT, etc.
+	// Apply ORDER BY if present
+	let sorted = if let Some(order) = &select.order {
+		let order_by = plan_order_by(order)?;
+		Arc::new(Sort {
+			input: filtered,
+			order_by,
+		}) as Arc<dyn OperatorPlan>
+	} else {
+		filtered
+	};
+
+	// Apply LIMIT/START if present
+	let limited = if select.limit.is_some() || select.start.is_some() {
+		let limit_expr = if let Some(limit) = &select.limit {
+			Some(expr_to_physical_expr(limit.0.clone())?)
+		} else {
+			None
+		};
+		let offset_expr = if let Some(start) = &select.start {
+			Some(expr_to_physical_expr(start.0.clone())?)
+		} else {
+			None
+		};
+		Arc::new(Limit {
+			input: sorted,
+			limit: limit_expr,
+			offset: offset_expr,
+		}) as Arc<dyn OperatorPlan>
+	} else {
+		sorted
+	};
+
+	// TODO: Handle projections (select.expr), GROUP BY
 	// For now, we only support SELECT * (all fields)
 
-	Ok(PlannedStatement::Query(plan))
+	Ok(PlannedStatement::Query(limited))
 }
 
 /// Extract version timestamp from VERSION clause expression.
@@ -395,7 +430,7 @@ fn extract_version(version_expr: &Expr) -> Result<Option<u64>, Error> {
 fn plan_select_sources(
 	what: &[Expr],
 	version: Option<u64>,
-) -> Result<Arc<dyn ExecutionPlan>, Error> {
+) -> Result<Arc<dyn OperatorPlan>, Error> {
 	if what.is_empty() {
 		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
 	}
@@ -421,7 +456,7 @@ fn plan_select_sources(
 /// Always wraps source operators (Scan, RecordIdLookup) with ComputeFields
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
-fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn ExecutionPlan>, Error> {
+fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match expr {
 		// Table name: SELECT * FROM users
 		Expr::Table(table_name) => {
@@ -432,7 +467,7 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Execu
 			let scan = Arc::new(Scan {
 				table: table_expr.clone(),
 				version,
-			}) as Arc<dyn ExecutionPlan>;
+			}) as Arc<dyn OperatorPlan>;
 			// Wrap with ComputeFields to evaluate computed fields
 			Ok(Arc::new(ComputeFields {
 				input: scan,
@@ -453,7 +488,7 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Execu
 			let lookup = Arc::new(RecordIdLookup {
 				record_id,
 				version,
-			}) as Arc<dyn ExecutionPlan>;
+			}) as Arc<dyn OperatorPlan>;
 			// Wrap with ComputeFields to evaluate computed fields
 			Ok(Arc::new(ComputeFields {
 				input: lookup,
@@ -469,7 +504,7 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Execu
 			let scan = Arc::new(Scan {
 				table: table_expr.clone(),
 				version,
-			}) as Arc<dyn ExecutionPlan>;
+			}) as Arc<dyn OperatorPlan>;
 			// Wrap with ComputeFields to evaluate computed fields
 			Ok(Arc::new(ComputeFields {
 				input: scan,
@@ -485,7 +520,7 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Execu
 			let scan = Arc::new(Scan {
 				table: table_expr.clone(),
 				version,
-			}) as Arc<dyn ExecutionPlan>;
+			}) as Arc<dyn OperatorPlan>;
 			// Wrap with ComputeFields to evaluate computed fields
 			Ok(Arc::new(ComputeFields {
 				input: scan,
@@ -608,4 +643,474 @@ fn convert_let_statement(
 		name,
 		value,
 	})
+}
+
+// ============================================================================
+// Script Planner - DAG Construction
+// ============================================================================
+
+/// Planner state for building the statement DAG.
+struct ScriptPlanner {
+	/// Counter for generating statement IDs
+	next_id: usize,
+
+	/// The most recent context-mutating statement (USE/LET)
+	last_context_source: Option<StatementId>,
+
+	/// The most recent full barrier (mutation/schema/transaction)
+	last_barrier: Option<StatementId>,
+
+	/// All statements since the last barrier (for mutation wait_for)
+	statements_since_barrier: Vec<StatementId>,
+}
+
+impl ScriptPlanner {
+	fn new() -> Self {
+		Self {
+			next_id: 0,
+			last_context_source: None,
+			last_barrier: None,
+			statements_since_barrier: Vec::new(),
+		}
+	}
+
+	/// Allocate a new statement ID
+	fn next_statement_id(&mut self) -> StatementId {
+		let id = StatementId(self.next_id);
+		self.next_id += 1;
+		id
+	}
+
+	/// Plan a script into a DAG
+	fn plan_script(&mut self, expressions: &[TopLevelExpr]) -> Result<ScriptPlan, Error> {
+		let mut statements = Vec::with_capacity(expressions.len());
+
+		for expr in expressions {
+			let stmt = self.plan_top_level_expr(expr)?;
+			statements.push(stmt);
+		}
+
+		Ok(ScriptPlan {
+			statements,
+		})
+	}
+
+	/// Plan a single top-level expression into a statement plan
+	fn plan_top_level_expr(&mut self, expr: &TopLevelExpr) -> Result<StatementPlan, Error> {
+		let id = self.next_statement_id();
+
+		let (content, kind) = match expr {
+			TopLevelExpr::Begin => (StatementContent::Begin, StatementKind::Transaction),
+			TopLevelExpr::Cancel => (StatementContent::Cancel, StatementKind::Transaction),
+			TopLevelExpr::Commit => (StatementContent::Commit, StatementKind::Transaction),
+
+			TopLevelExpr::Use(use_stmt) => {
+				let (ns, db) = self.convert_use_to_content(use_stmt)?;
+				(
+					StatementContent::Use {
+						ns,
+						db,
+					},
+					StatementKind::ContextMutation,
+				)
+			}
+
+			TopLevelExpr::Explain {
+				format: _,
+				statement,
+			} => {
+				// For EXPLAIN, we plan the inner statement but mark it as PureRead
+				// since EXPLAIN doesn't actually execute the statement
+				let inner = self.plan_top_level_expr(statement)?;
+				// Return the inner statement's content but keep it as a read
+				(inner.content, StatementKind::PureRead)
+			}
+
+			TopLevelExpr::Expr(inner_expr) => self.plan_expr_to_content(inner_expr)?,
+
+			// Unsupported statements - return error
+			TopLevelExpr::Access(_) => {
+				return Err(Error::Unimplemented(
+					"ACCESS statements not yet supported in script plans".to_string(),
+				));
+			}
+			TopLevelExpr::Kill(_) => {
+				return Err(Error::Unimplemented(
+					"KILL statements not yet supported in script plans".to_string(),
+				));
+			}
+			TopLevelExpr::Live(_) => {
+				return Err(Error::Unimplemented(
+					"LIVE statements not yet supported in script plans".to_string(),
+				));
+			}
+			TopLevelExpr::Show(_) => {
+				return Err(Error::Unimplemented(
+					"SHOW statements not yet supported in script plans".to_string(),
+				));
+			}
+			TopLevelExpr::Option(_) => {
+				return Err(Error::Unimplemented(
+					"OPTION statements not yet supported in script plans".to_string(),
+				));
+			}
+		};
+
+		// Build wait_for list based on statement kind
+		let wait_for = if kind.is_full_barrier() {
+			// Full barriers wait for ALL prior statements since last barrier
+			// Plus the barrier itself if there was one
+			let mut deps = self.statements_since_barrier.clone();
+			if let Some(barrier_id) = self.last_barrier {
+				deps.push(barrier_id);
+			}
+			deps
+		} else {
+			// Non-barriers just wait for the last barrier (if any)
+			self.last_barrier.into_iter().collect()
+		};
+
+		let stmt = StatementPlan {
+			id,
+			context_source: self.last_context_source,
+			wait_for,
+			content,
+			kind,
+		};
+
+		// Update tracking state
+		if kind.is_full_barrier() {
+			self.last_barrier = Some(id);
+			self.statements_since_barrier.clear();
+		} else {
+			self.statements_since_barrier.push(id);
+		}
+
+		if kind.mutates_context() {
+			self.last_context_source = Some(id);
+		}
+
+		Ok(stmt)
+	}
+
+	/// Convert USE statement to content
+	fn convert_use_to_content(
+		&self,
+		use_stmt: &crate::expr::statements::UseStatement,
+	) -> Result<(Option<Arc<dyn crate::exec::PhysicalExpr>>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
+		use crate::expr::statements::UseStatement;
+
+		match use_stmt {
+			UseStatement::Ns(ns_expr) => {
+				let ns = expr_to_physical_expr(ns_expr.clone())?;
+				if ns.references_current_value() {
+					return Err(Error::Unimplemented(
+						"USE NS expression cannot reference current row".to_string(),
+					));
+				}
+				Ok((Some(ns), None))
+			}
+			UseStatement::Db(db_expr) => {
+				let db = expr_to_physical_expr(db_expr.clone())?;
+				if db.references_current_value() {
+					return Err(Error::Unimplemented(
+						"USE DB expression cannot reference current row".to_string(),
+					));
+				}
+				Ok((None, Some(db)))
+			}
+			UseStatement::NsDb(ns_expr, db_expr) => {
+				let ns = expr_to_physical_expr(ns_expr.clone())?;
+				let db = expr_to_physical_expr(db_expr.clone())?;
+				if ns.references_current_value() || db.references_current_value() {
+					return Err(Error::Unimplemented(
+						"USE expression cannot reference current row".to_string(),
+					));
+				}
+				Ok((Some(ns), Some(db)))
+			}
+			UseStatement::Default => Ok((None, None)),
+		}
+	}
+
+	/// Plan an expression to statement content and kind
+	fn plan_expr_to_content(
+		&self,
+		expr: &Expr,
+	) -> Result<(StatementContent, StatementKind), Error> {
+		match expr {
+			// SELECT - pure read
+			Expr::Select(select) => {
+				let plan = self.plan_select_internal(select)?;
+				Ok((StatementContent::Query(plan), StatementKind::PureRead))
+			}
+
+			// LET - context mutation
+			Expr::Let(let_stmt) => {
+				let (name, value) = self.convert_let_to_content(let_stmt)?;
+				Ok((
+					StatementContent::Let {
+						name,
+						value,
+					},
+					StatementKind::ContextMutation,
+				))
+			}
+
+			// DML statements - data mutations
+			Expr::Create(_) => Err(Error::Unimplemented(
+				"CREATE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Update(_) => Err(Error::Unimplemented(
+				"UPDATE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Upsert(_) => Err(Error::Unimplemented(
+				"UPSERT statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Delete(_) => Err(Error::Unimplemented(
+				"DELETE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Insert(_) => Err(Error::Unimplemented(
+				"INSERT statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Relate(_) => Err(Error::Unimplemented(
+				"RELATE statements not yet supported in script plans".to_string(),
+			)),
+
+			// DDL statements - schema changes
+			Expr::Define(_) => Err(Error::Unimplemented(
+				"DEFINE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Remove(_) => Err(Error::Unimplemented(
+				"REMOVE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Rebuild(_) => Err(Error::Unimplemented(
+				"REBUILD statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Alter(_) => Err(Error::Unimplemented(
+				"ALTER statements not yet supported in script plans".to_string(),
+			)),
+
+			// Other statements
+			Expr::Info(_) => Err(Error::Unimplemented(
+				"INFO statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Foreach(_) => Err(Error::Unimplemented(
+				"FOR statements not yet supported in script plans".to_string(),
+			)),
+			Expr::IfElse(_) => Err(Error::Unimplemented(
+				"IF statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Block(_) => Err(Error::Unimplemented(
+				"Block expressions not yet supported in script plans".to_string(),
+			)),
+			Expr::FunctionCall(_) => Err(Error::Unimplemented(
+				"Function call expressions not yet supported in script plans".to_string(),
+			)),
+			Expr::Closure(_) => Err(Error::Unimplemented(
+				"Closure expressions not yet supported in script plans".to_string(),
+			)),
+			Expr::Return(_) => Err(Error::Unimplemented(
+				"RETURN statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Throw(_) => Err(Error::Unimplemented(
+				"THROW statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Break => Err(Error::Unimplemented(
+				"BREAK statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Continue => Err(Error::Unimplemented(
+				"CONTINUE statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Sleep(_) => Err(Error::Unimplemented(
+				"SLEEP statements not yet supported in script plans".to_string(),
+			)),
+			Expr::Mock(_) => Err(Error::Unimplemented(
+				"Mock expressions not yet supported in script plans".to_string(),
+			)),
+
+			// Value expressions - scalar evaluation as pure read
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Constant(_)
+			| Expr::Prefix { .. }
+			| Expr::Binary { .. }
+			| Expr::Postfix { .. }
+			| Expr::Table(_) => {
+				let phys_expr = expr_to_physical_expr(expr.clone())?;
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Expression references row context but no table specified".to_string(),
+					));
+				}
+				Ok((StatementContent::Scalar(phys_expr), StatementKind::PureRead))
+			}
+
+			Expr::Idiom(_) => {
+				let phys_expr = expr_to_physical_expr(expr.clone())?;
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Field expressions require a FROM clause to provide row context".to_string(),
+					));
+				}
+				Ok((StatementContent::Scalar(phys_expr), StatementKind::PureRead))
+			}
+		}
+	}
+
+	/// Convert LET statement to content
+	fn convert_let_to_content(
+		&self,
+		let_stmt: &crate::expr::statements::SetStatement,
+	) -> Result<(String, StatementLetValue), Error> {
+		let name = let_stmt.name.clone();
+
+		let value = match &let_stmt.what {
+			Expr::Select(select) => {
+				let plan = self.plan_select_internal(select)?;
+				StatementLetValue::Query(plan)
+			}
+
+			// DML in LET not yet supported
+			Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Insert(_)
+			| Expr::Relate(_) => {
+				return Err(Error::Unimplemented(
+					"DML statements in LET not yet supported in script plans".to_string(),
+				));
+			}
+
+			other => {
+				let expr = expr_to_physical_expr(other.clone())?;
+				if expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"LET expression cannot reference current row context".to_string(),
+					));
+				}
+				StatementLetValue::Scalar(expr)
+			}
+		};
+
+		Ok((name, value))
+	}
+
+	/// Plan a SELECT statement into an operator plan (internal version)
+	fn plan_select_internal(
+		&self,
+		select: &crate::expr::statements::SelectStatement,
+	) -> Result<Arc<dyn OperatorPlan>, Error> {
+		// Extract VERSION timestamp if present
+		let version = extract_version(&select.version)?;
+
+		// Build the source plan from `what` (FROM clause)
+		let source = plan_select_sources(&select.what, version)?;
+
+		// Apply WHERE clause if present
+		let filtered = if let Some(cond) = &select.cond {
+			let predicate = expr_to_physical_expr(cond.0.clone())?;
+			Arc::new(Filter {
+				input: source,
+				predicate,
+			}) as Arc<dyn OperatorPlan>
+		} else {
+			source
+		};
+
+		// Apply ORDER BY if present
+		let sorted = if let Some(order) = &select.order {
+			let order_by = plan_order_by(order)?;
+			Arc::new(Sort {
+				input: filtered,
+				order_by,
+			}) as Arc<dyn OperatorPlan>
+		} else {
+			filtered
+		};
+
+		// Apply LIMIT/START if present
+		let limited = if select.limit.is_some() || select.start.is_some() {
+			let limit_expr = if let Some(limit) = &select.limit {
+				Some(expr_to_physical_expr(limit.0.clone())?)
+			} else {
+				None
+			};
+			let offset_expr = if let Some(start) = &select.start {
+				Some(expr_to_physical_expr(start.0.clone())?)
+			} else {
+				None
+			};
+			Arc::new(Limit {
+				input: sorted,
+				limit: limit_expr,
+				offset: offset_expr,
+			}) as Arc<dyn OperatorPlan>
+		} else {
+			sorted
+		};
+
+		// TODO: Handle projections (select.expr), GROUP BY
+		Ok(limited)
+	}
+}
+
+/// Plan ORDER BY clause into OrderByField list
+fn plan_order_by(
+	order: &crate::expr::order::Ordering,
+) -> Result<Vec<crate::exec::operators::OrderByField>, Error> {
+	use crate::exec::operators::{NullsOrder, OrderByField, SortDirection};
+	use crate::exec::physical_expr::Field;
+	use crate::expr::order::Ordering;
+
+	match order {
+		Ordering::Random => {
+			// ORDER BY RAND() - not yet supported in the new executor
+			Err(Error::Unimplemented(
+				"ORDER BY RAND() not yet supported in execution plans".to_string(),
+			))
+		}
+		Ordering::Order(order_list) => {
+			let mut fields = Vec::with_capacity(order_list.len());
+			for order_field in order_list.iter() {
+				// Convert idiom to field expression
+				let expr: Arc<dyn crate::exec::PhysicalExpr> =
+					Arc::new(Field(order_field.value.clone()));
+
+				let direction = if order_field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+
+				// Default nulls order based on direction
+				// ASC -> nulls last, DESC -> nulls first
+				let nulls = if order_field.direction {
+					NullsOrder::Last
+				} else {
+					NullsOrder::First
+				};
+
+				fields.push(OrderByField {
+					expr,
+					direction,
+					nulls,
+				});
+			}
+
+			Ok(fields)
+		}
+	}
+}
+
+/// Convert a logical plan to a script plan with DAG dependencies.
+///
+/// This is the new entry point that builds a ScriptPlan with proper
+/// context_source and wait_for dependencies for parallel execution.
+pub(crate) fn logical_plan_to_script_plan(
+	plan: &crate::expr::LogicalPlan,
+) -> Result<ScriptPlan, Error> {
+	let mut planner = ScriptPlanner::new();
+	planner.plan_script(&plan.expressions)
 }

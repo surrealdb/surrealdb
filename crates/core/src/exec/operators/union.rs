@@ -3,7 +3,7 @@ use std::sync::Arc;
 use futures::stream::{self, StreamExt};
 
 use crate::err::Error;
-use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatchStream};
+use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatchStream};
 
 /// Union operator - combines results from multiple execution plans.
 ///
@@ -14,10 +14,10 @@ use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatchStrea
 /// in parallel, but return results in order a → b → c.
 #[derive(Debug, Clone)]
 pub struct Union {
-	pub(crate) inputs: Vec<Arc<dyn ExecutionPlan>>,
+	pub(crate) inputs: Vec<Arc<dyn OperatorPlan>>,
 }
 
-impl ExecutionPlan for Union {
+impl OperatorPlan for Union {
 	fn name(&self) -> &'static str {
 		"Union"
 	}
@@ -27,7 +27,7 @@ impl ExecutionPlan for Union {
 		self.inputs.iter().map(|input| input.required_context()).max().unwrap_or(ContextLevel::Root)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		self.inputs.iter().collect()
 	}
 

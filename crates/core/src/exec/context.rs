@@ -327,4 +327,52 @@ impl ExecutionContext {
 			Ok(true)
 		}
 	}
+
+	/// Create a new context with an additional parameter.
+	///
+	/// This is used by LET statements to add variables to the execution context.
+	/// The new parameter is added to the existing parameters map.
+	pub fn with_param(&self, name: impl Into<Cow<'static, str>>, value: Value) -> Self {
+		// Clone the current params and insert the new one
+		let mut new_params = (*self.root().params).clone();
+		new_params.insert(name.into(), Arc::new(value));
+		let new_params = Arc::new(new_params);
+
+		// Rebuild context with updated params
+		match self {
+			Self::Root(r) => Self::Root(RootContext {
+				params: new_params,
+				datastore: r.datastore.clone(),
+				cancellation: r.cancellation.clone(),
+				auth: r.auth.clone(),
+				auth_enabled: r.auth_enabled,
+				txn: r.txn.clone(),
+			}),
+			Self::Namespace(n) => Self::Namespace(NamespaceContext {
+				root: RootContext {
+					params: new_params,
+					datastore: n.root.datastore.clone(),
+					cancellation: n.root.cancellation.clone(),
+					auth: n.root.auth.clone(),
+					auth_enabled: n.root.auth_enabled,
+					txn: n.root.txn.clone(),
+				},
+				ns: n.ns.clone(),
+			}),
+			Self::Database(d) => Self::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
+					root: RootContext {
+						params: new_params,
+						datastore: d.ns_ctx.root.datastore.clone(),
+						cancellation: d.ns_ctx.root.cancellation.clone(),
+						auth: d.ns_ctx.root.auth.clone(),
+						auth_enabled: d.ns_ctx.root.auth_enabled,
+						txn: d.ns_ctx.root.txn.clone(),
+					},
+					ns: d.ns_ctx.ns.clone(),
+				},
+				db: d.db.clone(),
+			}),
+		}
+	}
 }

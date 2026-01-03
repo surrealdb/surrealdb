@@ -15,7 +15,7 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
 	ValueBatchStream,
 };
 use crate::iam::Action;
@@ -39,12 +39,12 @@ pub struct Update {
 	/// The table to update records in
 	pub table: TableName,
 	/// The input plan providing records to update
-	pub input: Arc<dyn ExecutionPlan>,
+	pub input: Arc<dyn OperatorPlan>,
 	/// The fields to set
 	pub changes: Vec<SetField>,
 }
 
-impl ExecutionPlan for Update {
+impl OperatorPlan for Update {
 	fn name(&self) -> &'static str {
 		"Update"
 	}
@@ -53,7 +53,7 @@ impl ExecutionPlan for Update {
 		ContextLevel::Database.max(self.input.required_context())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 

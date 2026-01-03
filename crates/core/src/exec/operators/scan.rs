@@ -10,7 +10,7 @@ use crate::exec::permission::{
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
+	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
 	ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -32,7 +32,7 @@ pub struct Scan {
 	pub(crate) version: Option<u64>,
 }
 
-impl ExecutionPlan for Scan {
+impl OperatorPlan for Scan {
 	fn name(&self) -> &'static str {
 		"Scan"
 	}

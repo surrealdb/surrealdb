@@ -14,7 +14,7 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
-use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::iam::Action;
 use crate::val::TableName;
 
@@ -27,10 +27,10 @@ pub struct Delete {
 	/// The table to delete records from
 	pub table: TableName,
 	/// The input plan providing records to delete
-	pub input: Arc<dyn ExecutionPlan>,
+	pub input: Arc<dyn OperatorPlan>,
 }
 
-impl ExecutionPlan for Delete {
+impl OperatorPlan for Delete {
 	fn name(&self) -> &'static str {
 		"Delete"
 	}
@@ -39,7 +39,7 @@ impl ExecutionPlan for Delete {
 		ContextLevel::Database.max(self.input.required_context())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
 		vec![&self.input]
 	}
 
