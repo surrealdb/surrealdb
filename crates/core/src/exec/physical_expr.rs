@@ -278,6 +278,52 @@ impl PhysicalExpr for BinaryOp {
 	}
 }
 
+/// Unary/Prefix operation - op expr (e.g., -5, !true, +x)
+#[derive(Debug, Clone)]
+pub struct UnaryOp {
+	pub(crate) op: crate::expr::operator::PrefixOperator,
+	pub(crate) expr: Arc<dyn PhysicalExpr>,
+}
+
+#[async_trait]
+impl PhysicalExpr for UnaryOp {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use crate::expr::operator::PrefixOperator;
+		use crate::fnc::operate;
+
+		let value = self.expr.evaluate(ctx).await?;
+
+		match &self.op {
+			PrefixOperator::Not => operate::not(value),
+			PrefixOperator::Negate => operate::neg(value),
+			PrefixOperator::Positive => {
+				// Positive is essentially a no-op for numbers
+				Ok(value)
+			}
+			PrefixOperator::Range => {
+				// ..value creates an unbounded start range
+				Err(anyhow::anyhow!(
+					"Range prefix operator not yet supported in physical expressions"
+				))
+			}
+			PrefixOperator::RangeInclusive => {
+				// ..=value creates an unbounded start inclusive range
+				Err(anyhow::anyhow!(
+					"RangeInclusive prefix operator not yet supported in physical expressions"
+				))
+			}
+			PrefixOperator::Cast(kind) => {
+				// Type casting
+				value.cast_to_kind(kind).map_err(|e| anyhow::anyhow!("{}", e))
+			}
+		}
+	}
+
+	fn references_current_value(&self) -> bool {
+		self.expr.references_current_value()
+	}
+}
+
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {

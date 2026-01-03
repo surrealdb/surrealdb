@@ -274,6 +274,16 @@ impl StreamExecutor {
 							.finish_with_result(Ok(convert_value_to_public_value(result)?)),
 					);
 				}
+				PlannedStatement::Scalar(expr) => {
+					// Evaluate scalar expression as a top-level statement
+					let exec_ctx = build_execution_context(&session, &root_ctx)?;
+					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&exec_ctx);
+					let result = expr.evaluate(eval_ctx).await?;
+					outputs.push(
+						query_result_builder
+							.finish_with_result(Ok(convert_value_to_public_value(result)?)),
+					);
+				}
 			}
 		}
 		Ok(outputs)

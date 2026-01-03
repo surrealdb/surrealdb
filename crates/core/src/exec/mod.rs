@@ -82,6 +82,8 @@ pub(crate) enum PlannedStatement {
 		name: String,
 		value: LetValue,
 	},
+	/// A scalar expression evaluated as a top-level statement (e.g., `1 + 1;`, `$param;`)
+	Scalar(Arc<dyn PhysicalExpr>),
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +105,7 @@ mod tests {
 	use crate::expr::{Fields, LogicalPlan, TopLevelExpr};
 	use crate::kvs::Datastore;
 	use crate::val::TableName;
+	use crate::types::{PublicNumber, PublicObject, PublicValue};
 
 	/// Helper to set up test data in an in-memory datastore
 	async fn setup_test_data() -> Datastore {
@@ -158,8 +161,7 @@ mod tests {
 
 		// Check we got 3 users
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(arr.len(), 3, "Expected 3 users, got {}", arr.len());
 			} else {
 				panic!("Expected Array result, got {:?}", value);
@@ -200,14 +202,13 @@ mod tests {
 
 		// Check we got exactly 1 user (Alice)
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(arr.len(), 1, "Expected 1 user, got {}", arr.len());
 				// Verify it's Alice
-				if let Value::Object(obj) = &arr[0] {
+				if let PublicValue::Object(obj) = &arr[0] {
 					assert_eq!(
 						obj.get("name"),
-						Some(&Value::String("Alice".to_string())),
+						Some(&PublicValue::String("Alice".to_string())),
 						"Expected Alice"
 					);
 				}
@@ -253,8 +254,7 @@ mod tests {
 
 		// Check we got 2 users (Alice age 30, Charlie age 35)
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(arr.len(), 2, "Expected 2 users with age > 28, got {}", arr.len());
 			} else {
 				panic!("Expected Array result, got {:?}", value);
@@ -291,8 +291,7 @@ mod tests {
 
 		// Check we got 5 records total (3 users + 2 posts)
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(
 					arr.len(),
 					5,
@@ -441,8 +440,7 @@ mod tests {
 
 		// Owner should see the private data (1 record)
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(arr.len(), 1, "Owner should see 1 private record, got {}", arr.len());
 			} else {
 				panic!("Expected Array result, got {:?}", value);
@@ -456,9 +454,9 @@ mod tests {
 		let ds = setup_test_data_with_permissions().await;
 
 		// Create a record user session
-		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+		let rid = PublicValue::Object(PublicObject::from_iter([(
 			"id".to_string(),
-			crate::types::PublicValue::String("user:test".to_string()),
+			PublicValue::String("user:test".to_string()),
 		)]));
 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
 
@@ -482,8 +480,7 @@ mod tests {
 
 		// Record user should see no private data
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(
 					arr.len(),
 					0,
@@ -502,9 +499,9 @@ mod tests {
 		let ds = setup_test_data_with_permissions().await;
 
 		// Create a record user session
-		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+		let rid = PublicValue::Object(PublicObject::from_iter([(
 			"id".to_string(),
-			crate::types::PublicValue::String("user:test".to_string()),
+			PublicValue::String("user:test".to_string()),
 		)]));
 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
 
@@ -528,8 +525,7 @@ mod tests {
 
 		// Record user should see all public data (2 records)
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(
 					arr.len(),
 					2,
@@ -548,9 +544,9 @@ mod tests {
 		let ds = setup_test_data_with_permissions().await;
 
 		// Create a record user session
-		let rid = crate::types::PublicValue::Object(crate::types::PublicObject::from_iter([(
+		let rid = PublicValue::Object(PublicObject::from_iter([(
 			"id".to_string(),
-			crate::types::PublicValue::String("user:test".to_string()),
+			PublicValue::String("user:test".to_string()),
 		)]));
 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
 
@@ -574,8 +570,7 @@ mod tests {
 
 		// Record user should see no data from undefined table
 		if let Ok(value) = &result.result {
-			let value: Value = value.clone().into();
-			if let Value::Array(arr) = value {
+			if let PublicValue::Array(arr) = value {
 				assert_eq!(
 					arr.len(),
 					0,
@@ -612,5 +607,186 @@ mod tests {
 		let result = &results[0];
 		// Owner bypasses permissions, so query should succeed (empty result is fine)
 		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+	}
+
+	// =========================================================================
+	// Scalar Expression Tests
+	// =========================================================================
+
+	/// Test executing a literal integer as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_literal_integer() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: 42
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Literal(
+				crate::expr::literal::Literal::Integer(42),
+			))],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			assert_eq!(value, &PublicValue::Number(PublicNumber::Int(42)));
+		}
+	}
+
+	/// Test executing a literal string as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_literal_string() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: "hello"
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Literal(
+				crate::expr::literal::Literal::String("hello".to_string()),
+			))],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			assert_eq!(value, PublicValue::String("hello".to_string()));
+		}
+	}
+
+	/// Test executing a binary expression (1 + 2) as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_binary_expression() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: 1 + 2
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Binary {
+				left: Box::new(crate::expr::Expr::Literal(
+					crate::expr::literal::Literal::Integer(1),
+				)),
+				op: crate::expr::operator::BinaryOperator::Add,
+				right: Box::new(crate::expr::Expr::Literal(
+					crate::expr::literal::Literal::Integer(2),
+				)),
+			})],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			assert_eq!(value, &PublicValue::Number(PublicNumber::Int(3)));
+		}
+	}
+
+	/// Test executing a prefix/unary expression (-5) as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_prefix_negate() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: -5
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Prefix {
+				op: crate::expr::operator::PrefixOperator::Negate,
+				expr: Box::new(crate::expr::Expr::Literal(
+					crate::expr::literal::Literal::Integer(5),
+				)),
+			})],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			assert_eq!(value, &PublicValue::Number(PublicNumber::Int(-5)));
+		}
+	}
+
+	/// Test executing a prefix/unary NOT expression (!true) as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_prefix_not() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: !true
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Prefix {
+				op: crate::expr::operator::PrefixOperator::Not,
+				expr: Box::new(crate::expr::Expr::Literal(crate::expr::literal::Literal::Bool(
+					true,
+				))),
+			})],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			assert_eq!(value, &PublicValue::Bool(false));
+		}
+	}
+
+	/// Test executing a constant expression (MATH::PI) as a top-level statement
+	#[tokio::test]
+	async fn test_scalar_constant_math_pi() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let ses = Session::owner().require_new_planner();
+
+		// Expression: MATH::PI
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Constant(
+				crate::expr::Constant::MathPi,
+			))],
+		};
+
+		let results = ds.process_plan(plan, &ses, None).await.expect("Query failed");
+
+		assert_eq!(results.len(), 1);
+		let result = &results[0];
+		assert!(result.result.is_ok(), "Query failed: {:?}", result.result);
+
+		if let Ok(value) = &result.result {
+			if let PublicValue::Number(PublicNumber::Float(f)) = value {
+				assert!((f - std::f64::consts::PI).abs() < 0.0001, "Expected PI, got {}", f);
+			} else {
+				panic!("Expected Float result, got {:?}", value);
+			}
+		}
+	}
+
+	/// Test that idiom expressions (field access) fail without a FROM clause
+	#[test]
+	fn test_scalar_idiom_requires_table() {
+		use crate::exec::planner::logical_plan_to_execution_plan;
+
+		// Expression: field_name (idiom without table)
+		let plan = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Idiom(
+				crate::expr::Idiom(vec![crate::expr::part::Part::Field("field_name".to_string())]),
+			))],
+		};
+
+		// This should fail because idioms require row context
+		let result = logical_plan_to_execution_plan(&plan);
+		assert!(result.is_err(), "Expected error for idiom without table context");
 	}
 }

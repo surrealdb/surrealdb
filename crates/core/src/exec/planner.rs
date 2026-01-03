@@ -102,7 +102,9 @@ fn convert_use_statement(
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	use crate::exec::physical_expr::{BinaryOp, Field, Literal as PhysicalLiteral, Param};
+	use crate::exec::physical_expr::{
+		BinaryOp, Field, Literal as PhysicalLiteral, Param, UnaryOp,
+	};
 
 	match expr {
 		Expr::Literal(lit) => {
@@ -124,6 +126,29 @@ pub(crate) fn expr_to_physical_expr(
 				op,
 				right: right_phys,
 			}))
+		}
+		Expr::Constant(constant) => {
+			// Convert constant to its computed value
+			let value = constant
+				.compute()
+				.map_err(|e| Error::Unimplemented(format!("Failed to compute constant: {}", e)))?;
+			Ok(Arc::new(PhysicalLiteral(value)))
+		}
+		Expr::Prefix {
+			op,
+			expr,
+		} => {
+			let inner = expr_to_physical_expr(*expr)?;
+			Ok(Arc::new(UnaryOp {
+				op,
+				expr: inner,
+			}))
+		}
+		Expr::Table(table_name) => {
+			// Table name as a string value
+			Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(
+				table_name.as_str().to_string(),
+			))))
 		}
 		_ => Err(Error::Unimplemented(format!(
 			"Expression type not yet supported in execution plans: {:?}",
@@ -245,46 +270,49 @@ fn expr_to_execution_plan(expr: &Expr) -> Result<PlannedStatement, Error> {
 			"SLEEP statements not yet supported in execution plans".to_string(),
 		)),
 
-		// Value expressions - not valid as top-level statements
-		Expr::Literal(_) => Err(Error::Unimplemented(
-			"Literal expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
-		Expr::Param(_) => Err(Error::Unimplemented(
-			"Parameter expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
-		Expr::Idiom(_) => Err(Error::Unimplemented(
-			"Idiom expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
-		Expr::Table(_) => Err(Error::Unimplemented(
-			"Table expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
+		// Value expressions - evaluate in scalar context and return result
+		Expr::Literal(_)
+		| Expr::Param(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::Table(_) => {
+			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			// Validate that the expression doesn't require row context
+			if phys_expr.references_current_value() {
+				return Err(Error::Unimplemented(
+					"Expression references row context but no table specified".to_string(),
+				));
+			}
+			Ok(PlannedStatement::Scalar(phys_expr))
+		}
+
+		// Idiom expressions require row context, so they need special handling
+		Expr::Idiom(_) => {
+			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			// Idioms always reference current_value, so this will be an error for top-level
+			if phys_expr.references_current_value() {
+				return Err(Error::Unimplemented(
+					"Field expressions require a FROM clause to provide row context".to_string(),
+				));
+			}
+			Ok(PlannedStatement::Scalar(phys_expr))
+		}
+
+		// Mock expressions generate test data - defer for now
 		Expr::Mock(_) => Err(Error::Unimplemented(
 			"Mock expressions not yet supported in execution plans".to_string(),
 		)),
-		Expr::Constant(_) => Err(Error::Unimplemented(
-			"Constant expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
-		Expr::Prefix {
-			..
-		} => Err(Error::Unimplemented(
-			"Prefix expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
+
+		// Postfix expressions (ranges, method calls) - defer for now
 		Expr::Postfix {
 			..
 		} => Err(Error::Unimplemented(
 			"Postfix expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
-		Expr::Binary {
-			..
-		} => Err(Error::Unimplemented(
-			"Binary expressions not yet supported as top-level statements in execution plans"
 				.to_string(),
 		)),
 	}
