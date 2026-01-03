@@ -103,7 +103,7 @@ pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		BinaryOp, Field, Literal as PhysicalLiteral, Param, UnaryOp,
+		BinaryOp, Field, Literal as PhysicalLiteral, Param, PostfixOp, UnaryOp,
 	};
 
 	match expr {
@@ -140,6 +140,16 @@ pub(crate) fn expr_to_physical_expr(
 		} => {
 			let inner = expr_to_physical_expr(*expr)?;
 			Ok(Arc::new(UnaryOp {
+				op,
+				expr: inner,
+			}))
+		}
+		Expr::Postfix {
+			op,
+			expr,
+		} => {
+			let inner = expr_to_physical_expr(*expr)?;
+			Ok(Arc::new(PostfixOp {
 				op,
 				expr: inner,
 			}))
@@ -308,13 +318,19 @@ fn expr_to_execution_plan(expr: &Expr) -> Result<PlannedStatement, Error> {
 			"Mock expressions not yet supported in execution plans".to_string(),
 		)),
 
-		// Postfix expressions (ranges, method calls) - defer for now
+		// Postfix expressions (ranges, method calls)
 		Expr::Postfix {
 			..
-		} => Err(Error::Unimplemented(
-			"Postfix expressions not yet supported as top-level statements in execution plans"
-				.to_string(),
-		)),
+		} => {
+			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			// Validate that the expression doesn't require row context
+			if phys_expr.references_current_value() {
+				return Err(Error::Unimplemented(
+					"Postfix expression references row context but no table specified".to_string(),
+				));
+			}
+			Ok(PlannedStatement::Scalar(phys_expr))
+		}
 	}
 }
 

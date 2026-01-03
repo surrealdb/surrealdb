@@ -235,54 +235,82 @@ impl StreamExecutor {
 				} => {
 					// Handle LET statement - evaluate expression and store in session parameters
 					let exec_ctx = build_execution_context(&session, &root_ctx)?;
-					let result = match value {
+					
+					// Evaluate the expression, catching errors
+					let eval_result = match value {
 						crate::exec::LetValue::Scalar(expr) => {
 							// Evaluate scalar expression
 							let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&exec_ctx);
-							expr.evaluate(eval_ctx).await?
+							expr.evaluate(eval_ctx).await
 						}
 						crate::exec::LetValue::Query(plan) => {
 							// Execute query and collect results into an array
-							let output_stream = plan.execute(&exec_ctx)?;
-							let mut results = Vec::new();
-							futures::pin_mut!(output_stream);
-							while let Some(batch_result) = output_stream.next().await {
-								match batch_result {
-									Ok(batch) => {
-										results.extend(batch.values);
-									}
-									Err(ctrl) => match ctrl {
-										ControlFlow::Break | ControlFlow::Continue => continue,
-										ControlFlow::Return(v) => {
-											results.push(v);
-											break;
+							match plan.execute(&exec_ctx) {
+								Ok(output_stream) => {
+									let mut results = Vec::new();
+									futures::pin_mut!(output_stream);
+									let mut error = None;
+									while let Some(batch_result) = output_stream.next().await {
+										match batch_result {
+											Ok(batch) => {
+												results.extend(batch.values);
+											}
+											Err(ctrl) => match ctrl {
+												ControlFlow::Break | ControlFlow::Continue => continue,
+												ControlFlow::Return(v) => {
+													results.push(v);
+													break;
+												}
+												ControlFlow::Err(e) => {
+													error = Some(e);
+													break;
+												}
+											},
 										}
-										ControlFlow::Err(e) => return Err(e),
-									},
+									}
+									if let Some(e) = error {
+										Err(e.into())
+									} else {
+										Ok(crate::val::Value::Array(crate::val::Array(results)))
+									}
 								}
+								Err(e) => Err(e.into()),
 							}
-							crate::val::Value::Array(crate::val::Array(results))
 						}
 					};
 
-					// Store the parameter in session state
-					session.set_param(name, result.clone());
-
-					// LET statements return the value they bound
-					outputs.push(
-						query_result_builder
-							.finish_with_result(Ok(convert_value_to_public_value(result)?)),
-					);
+					// Convert evaluation result to output
+					let result = match eval_result {
+						Ok(value) => {
+							// Store the parameter in session state on success
+							session.set_param(name, value);
+							// LET statements return NONE (not the bound value)
+							match convert_value_to_public_value(crate::val::Value::None) {
+								Ok(v) => Ok(v),
+								Err(e) => Err(DbResultError::InternalError(e.to_string())),
+							}
+						}
+						Err(e) => {
+							// On error, still return an error result
+							Err(DbResultError::InternalError(e.to_string()))
+						}
+					};
+					outputs.push(query_result_builder.finish_with_result(result));
 				}
 				PlannedStatement::Scalar(expr) => {
 					// Evaluate scalar expression as a top-level statement
 					let exec_ctx = build_execution_context(&session, &root_ctx)?;
 					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&exec_ctx);
-					let result = expr.evaluate(eval_ctx).await?;
-					outputs.push(
-						query_result_builder
-							.finish_with_result(Ok(convert_value_to_public_value(result)?)),
-					);
+					
+					// Catch evaluation errors and convert to error results
+					let result = match expr.evaluate(eval_ctx).await {
+						Ok(value) => match convert_value_to_public_value(value) {
+							Ok(v) => Ok(v),
+							Err(e) => Err(DbResultError::InternalError(e.to_string())),
+						},
+						Err(e) => Err(DbResultError::InternalError(e.to_string())),
+					};
+					outputs.push(query_result_builder.finish_with_result(result));
 				}
 			}
 		}
