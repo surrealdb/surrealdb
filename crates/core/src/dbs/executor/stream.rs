@@ -22,7 +22,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use surrealdb_types::{Array, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -38,24 +38,28 @@ use crate::exec::{
 use crate::expr::{ControlFlow, FlowResult};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::rpc::DbResultError;
 use crate::val::convert_value_to_public_value;
 
 /// Session state tracked across statement execution.
 ///
 /// This holds the current namespace and database selection, which can be
-/// modified by USE statements.
+/// modified by USE statements, as well as parameters set by LET statements.
 struct SessionState {
 	/// The selected namespace (None = root level only)
 	ns: Option<Arc<NamespaceDefinition>>,
 	/// The selected database (None = namespace level only)
 	db: Option<Arc<DatabaseDefinition>>,
+	/// Parameters set by LET statements
+	params: Parameters,
 }
 
 impl SessionState {
-	fn new() -> Self {
+	fn new(initial_params: Parameters) -> Self {
 		Self {
 			ns: None,
 			db: None,
+			params: initial_params,
 		}
 	}
 
@@ -63,10 +67,12 @@ impl SessionState {
 	fn with_ns_db(
 		ns: Option<Arc<NamespaceDefinition>>,
 		db: Option<Arc<DatabaseDefinition>>,
+		initial_params: Parameters,
 	) -> Self {
 		Self {
 			ns,
 			db,
+			params: initial_params,
 		}
 	}
 
@@ -77,6 +83,16 @@ impl SessionState {
 			(Some(_), None) => ContextLevel::Namespace,
 			(Some(_), Some(_)) => ContextLevel::Database,
 		}
+	}
+
+	/// Set a parameter value (from LET statements).
+	fn set_param(&mut self, name: String, value: crate::val::Value) {
+		self.params.insert(std::borrow::Cow::Owned(name), Arc::new(value));
+	}
+
+	/// Get the current parameters.
+	fn params(&self) -> &Parameters {
+		&self.params
 	}
 }
 
@@ -104,6 +120,7 @@ impl StreamExecutor {
 	/// - `initial_db`: Optional database name to initialize the session with
 	/// - `auth`: The authentication context for this session
 	/// - `auth_enabled`: Whether authentication is enabled on the datastore
+	/// - `session_values`: Session-based parameters ($auth, $access, $token, $session)
 	pub(crate) async fn execute_collected(
 		self,
 		ds: &Datastore,
@@ -111,12 +128,17 @@ impl StreamExecutor {
 		initial_db: Option<&str>,
 		auth: Arc<Auth>,
 		auth_enabled: bool,
+		session_values: Vec<(&'static str, crate::val::Value)>,
 	) -> Result<Vec<QueryResult>, anyhow::Error> {
 		let txn = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
 		let mut outputs = Vec::with_capacity(self.outputs.len());
 
-		// Create empty parameters for now
-		let params = Arc::new(Parameters::new());
+		// Initialize parameters with session values ($auth, $access, $token, $session)
+		let mut initial_params = Parameters::new();
+		for (name, value) in session_values {
+			initial_params.insert(std::borrow::Cow::Borrowed(name), Arc::new(value));
+		}
+		let params = Arc::new(initial_params.clone());
 
 		// Create root context (always available)
 		// Note: datastore is None because we only have a borrowed reference.
@@ -147,9 +169,9 @@ impl StreamExecutor {
 				None
 			};
 
-			SessionState::with_ns_db(Some(ns), db)
+			SessionState::with_ns_db(Some(ns), db, initial_params)
 		} else {
-			SessionState::new()
+			SessionState::new(initial_params)
 		};
 
 		for statement in self.outputs {
@@ -162,14 +184,11 @@ impl StreamExecutor {
 					let exec_ctx = build_execution_context(&session, &root_ctx)?;
 					let result = handle_session_command(cmd, &mut session, &exec_ctx).await;
 
-					match result {
-						Ok(value) => {
-							outputs.push(query_result_builder.finish_with_result(Ok(value)));
-						}
-						Err(e) => {
-							return Err(anyhow::anyhow!("Session command failed: {}", e));
-						}
-					}
+					let result = match result {
+						Ok(value) => Ok(value),
+						Err(e) => Err(DbResultError::InternalError(e.to_string())),
+					};
+					outputs.push(query_result_builder.finish_with_result(result));
 				}
 				PlannedStatement::Query(plan) => {
 					// Pre-flight validation: check context requirements
@@ -209,6 +228,51 @@ impl StreamExecutor {
 					};
 
 					outputs.push(query_result);
+				}
+				PlannedStatement::Let {
+					name,
+					value,
+				} => {
+					// Handle LET statement - evaluate expression and store in session parameters
+					let exec_ctx = build_execution_context(&session, &root_ctx)?;
+					let result = match value {
+						crate::exec::LetValue::Scalar(expr) => {
+							// Evaluate scalar expression
+							let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&exec_ctx);
+							expr.evaluate(eval_ctx).await?
+						}
+						crate::exec::LetValue::Query(plan) => {
+							// Execute query and collect results into an array
+							let output_stream = plan.execute(&exec_ctx)?;
+							let mut results = Vec::new();
+							futures::pin_mut!(output_stream);
+							while let Some(batch_result) = output_stream.next().await {
+								match batch_result {
+									Ok(batch) => {
+										results.extend(batch.values);
+									}
+									Err(ctrl) => match ctrl {
+										ControlFlow::Break | ControlFlow::Continue => continue,
+										ControlFlow::Return(v) => {
+											results.push(v);
+											break;
+										}
+										ControlFlow::Err(e) => return Err(e),
+									},
+								}
+							}
+							crate::val::Value::Array(crate::val::Array(results))
+						}
+					};
+
+					// Store the parameter in session state
+					session.set_param(name, result.clone());
+
+					// LET statements return the value they bound
+					outputs.push(
+						query_result_builder
+							.finish_with_result(Ok(convert_value_to_public_value(result)?)),
+					);
 				}
 			}
 		}
@@ -291,19 +355,32 @@ async fn handle_session_command(
 }
 
 /// Build an ExecutionContext from the current session state.
+///
+/// This creates a new root context with the session's current parameters,
+/// allowing LET statements to add parameters that are visible to subsequent statements.
 fn build_execution_context(
 	session: &SessionState,
 	root_ctx: &RootContext,
 ) -> Result<ExecutionContext, Error> {
+	// Create a root context with the session's current parameters
+	let root_with_params = RootContext {
+		datastore: root_ctx.datastore.clone(),
+		params: Arc::new(session.params.clone()),
+		cancellation: root_ctx.cancellation.clone(),
+		auth: root_ctx.auth.clone(),
+		auth_enabled: root_ctx.auth_enabled,
+		txn: root_ctx.txn.clone(),
+	};
+
 	match (&session.ns, &session.db) {
 		(None, _) => {
 			// Root level only
-			Ok(ExecutionContext::Root(root_ctx.clone()))
+			Ok(ExecutionContext::Root(root_with_params))
 		}
 		(Some(ns), None) => {
 			// Namespace level
 			Ok(ExecutionContext::Namespace(NamespaceContext {
-				root: root_ctx.clone(),
+				root: root_with_params,
 				ns: ns.clone(),
 			}))
 		}
@@ -311,7 +388,7 @@ fn build_execution_context(
 			// Database level
 			Ok(ExecutionContext::Database(DatabaseContext {
 				ns_ctx: NamespaceContext {
-					root: root_ctx.clone(),
+					root: root_with_params,
 					ns: ns.clone(),
 				},
 				db: db.clone(),

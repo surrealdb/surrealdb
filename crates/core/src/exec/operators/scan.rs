@@ -7,7 +7,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
-	should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	ContextLevel, EvalContext, ExecutionContext, ExecutionPlan, PhysicalExpr, ValueBatch,
@@ -28,7 +28,8 @@ use crate::val::{TableName, Value};
 #[derive(Debug, Clone)]
 pub struct Scan {
 	pub(crate) table: Arc<dyn PhysicalExpr>,
-	// fields: Vec<Field>,
+	/// Optional version timestamp for time-travel queries (VERSION clause)
+	pub(crate) version: Option<u64>,
 }
 
 impl ExecutionPlan for Scan {
@@ -40,11 +41,15 @@ impl ExecutionPlan for Scan {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?.clone();
 
+		// Validate record user has access to this namespace/database
+		validate_record_user_access(&db_ctx)?;
+
 		// Check if we need to enforce permissions
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		// Clone the context for the async block (all fields are Arc/String so cheap to clone)
 		let table_expr = self.table.clone();
+		let version = self.version;
 		let ctx = ctx.clone();
 
 		// Create an async stream using try_unfold
@@ -133,6 +138,7 @@ impl ExecutionPlan for Scan {
 						ns_id: ns.namespace_id,
 						db_id: db.database_id,
 						select_permission,
+						version,
 					}
 				};
 
@@ -146,12 +152,14 @@ impl ExecutionPlan for Scan {
 					return Ok(None);
 				};
 
-				// Scan a batch
+				// Scan a batch (with optional version for time-travel)
 				const BATCH_SIZE: u32 = 1000;
-				let records =
-					txn.scan(next_key.clone()..state.end.clone(), BATCH_SIZE, None).await.map_err(
-						|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan records: {}", e)),
-					)?;
+				let records = txn
+					.scan(next_key.clone()..state.end.clone(), BATCH_SIZE, state.version)
+					.await
+					.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to scan records: {}", e))
+					})?;
 
 				if records.is_empty() {
 					return Ok(None);
@@ -255,4 +263,6 @@ struct ScanState {
 	ns_id: crate::catalog::NamespaceId,
 	db_id: crate::catalog::DatabaseId,
 	select_permission: PhysicalPermission,
+	/// Optional version timestamp for time-travel queries
+	version: Option<u64>,
 }

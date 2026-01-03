@@ -2,12 +2,10 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
-use crate::expr::{FlowResult, Idiom};
-use crate::kvs::Transaction;
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 pub(crate) mod context;
@@ -66,10 +64,24 @@ pub(crate) trait ExecutionPlan: Debug + Send + Sync {
 	}
 }
 
+/// The value bound by a LET statement
+#[derive(Debug, Clone)]
+pub(crate) enum LetValue {
+	/// Scalar expression - evaluates to exactly one Value
+	Scalar(Arc<dyn PhysicalExpr>),
+	/// Query - stream is collected into Value::Array
+	Query(Arc<dyn ExecutionPlan>),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum PlannedStatement {
 	Query(Arc<dyn ExecutionPlan>),
 	SessionCommand(SessionCommand),
+	/// Bind expression result to a parameter
+	Let {
+		name: String,
+		value: LetValue,
+	},
 }
 
 #[derive(Debug, Clone)]
@@ -82,30 +94,6 @@ pub(crate) enum SessionCommand {
 	Commit,
 	Cancel,
 }
-
-// pub(crate) struct Ident(String);
-
-// pub(crate) trait IdentProvider: ExecutionPlan {
-// 	fn evaluate(&self) -> Result<Pin<Box<Ident>>, Error> {
-// 		todo!("STU")
-// 	}
-// }
-
-// pub(crate) trait ContextResolver: Debug + Send + Sync {
-// 	fn resolve(&self, ctx: &Context) -> Result<Pin<Box<Context>>, Error>;
-// }
-
-// #[derive(Debug, Clone)]
-// struct UseResolver {
-// 	ns: Option<Arc<dyn IdentProvider>>,
-// 	db: Option<Arc<dyn IdentProvider>>,
-// }
-
-// impl ContextResolver for UseResolver {
-// 	fn resolve(&self, ctx: &Context) -> Result<Pin<Box<Context>>, Error> {
-// 		todo!("STU")
-// 	}
-// }
 
 #[cfg(test)]
 mod tests {
@@ -336,7 +324,7 @@ mod tests {
 			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
 		};
 
-		let result = logical_plan_to_execution_plan(plan);
+		let result = logical_plan_to_execution_plan(&plan);
 		assert!(result.is_ok(), "Planning failed: {:?}", result.err());
 
 		let planned = result.unwrap();
@@ -366,19 +354,20 @@ mod tests {
 			expressions: vec![TopLevelExpr::Expr(crate::expr::Expr::Select(Box::new(select_stmt)))],
 		};
 
-		let result = logical_plan_to_execution_plan(plan);
+		let result = logical_plan_to_execution_plan(&plan);
 		assert!(result.is_ok(), "Planning failed: {:?}", result.err());
 
 		let planned = result.unwrap();
 		assert_eq!(planned.len(), 1);
 
-		// Verify the first statement is a Query with a Scan (not Union)
+		// Verify the first statement is a Query with ComputeFields->Scan (not Union)
 		if let PlannedStatement::Query(exec_plan) = &planned[0] {
-			// A single source should not have children (it's a Scan, not Union)
-			assert_eq!(
-				exec_plan.children().len(),
-				0,
-				"Single source should produce Scan, not Union"
+			// A single source should have 1 child (ComputeFields wraps Scan),
+			// not 3+ children which would indicate a Union
+			assert!(
+				exec_plan.children().len() <= 1,
+				"Single source should not produce Union (expected <= 1 child, got {})",
+				exec_plan.children().len()
 			);
 		} else {
 			panic!("Expected PlannedStatement::Query");

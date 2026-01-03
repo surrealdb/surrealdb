@@ -1,4 +1,5 @@
 mod broadcast;
+mod compute_fields;
 mod create;
 mod delete;
 mod filter;
@@ -9,6 +10,7 @@ mod union;
 mod update;
 
 pub use broadcast::BroadcastSource;
+pub use compute_fields::ComputeFields;
 pub use create::{ContentSource, Create};
 pub use delete::Delete;
 pub use filter::Filter;

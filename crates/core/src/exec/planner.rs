@@ -1,41 +1,28 @@
 use std::sync::Arc;
 
 use crate::err::Error;
-use crate::exec::operators::{
-	ContentSource, Create, Delete, Filter, Project, RecordIdLookup, Scan, SetField, Union, Update,
-};
-use crate::exec::{ExecutionPlan, PlannedStatement, SessionCommand};
-use crate::expr::{Expr, TopLevelExpr};
+use crate::exec::operators::{ComputeFields, Filter, RecordIdLookup, Scan, Union};
+use crate::exec::{ExecutionPlan, LetValue, PlannedStatement, SessionCommand};
+use crate::expr::{Expr, Literal, TopLevelExpr};
 
 /// Attempts to convert a logical plan to an execution plan.
-///
-/// If the conversion is not possible, the original plan and the error are returned.
-#[allow(clippy::result_large_err)]
 pub(crate) fn logical_plan_to_execution_plan(
-	plan: crate::expr::LogicalPlan,
-) -> Result<Vec<PlannedStatement>, (crate::expr::LogicalPlan, Error)> {
+	plan: &crate::expr::LogicalPlan,
+) -> Result<Vec<PlannedStatement>, Error> {
 	let mut execution_plans = Vec::with_capacity(plan.expressions.len());
-	for expr in plan.expressions.clone() {
-		match top_level_expr_to_execution_plan(expr) {
-			Ok(plan) => execution_plans.push(plan),
-			Err(e) => return Err((plan, e)),
-		}
+	for expr in &plan.expressions {
+		let planned = top_level_expr_to_execution_plan(expr)?;
+		execution_plans.push(planned);
 	}
 
 	Ok(execution_plans)
 }
 
-fn top_level_expr_to_execution_plan(expr: TopLevelExpr) -> Result<PlannedStatement, Error> {
+fn top_level_expr_to_execution_plan(expr: &TopLevelExpr) -> Result<PlannedStatement, Error> {
 	match expr {
-		TopLevelExpr::Begin => Err(Error::Unimplemented(
-			"BEGIN transactions not yet supported in execution plans".to_string(),
-		)),
-		TopLevelExpr::Cancel => {
-			Err(Error::Unimplemented("CANCEL not yet supported in execution plans".to_string()))
-		}
-		TopLevelExpr::Commit => {
-			Err(Error::Unimplemented("COMMIT not yet supported in execution plans".to_string()))
-		}
+		TopLevelExpr::Begin => Ok(PlannedStatement::SessionCommand(SessionCommand::Begin)),
+		TopLevelExpr::Cancel => Ok(PlannedStatement::SessionCommand(SessionCommand::Cancel)),
+		TopLevelExpr::Commit => Ok(PlannedStatement::SessionCommand(SessionCommand::Commit)),
 		TopLevelExpr::Use(use_stmt) => convert_use_statement(use_stmt),
 		TopLevelExpr::Access(_) => Err(Error::Unimplemented(
 			"ACCESS statements not yet supported in execution plans".to_string(),
@@ -57,13 +44,13 @@ fn top_level_expr_to_execution_plan(expr: TopLevelExpr) -> Result<PlannedStateme
 }
 
 fn convert_use_statement(
-	use_stmt: crate::expr::statements::UseStatement,
+	use_stmt: &crate::expr::statements::UseStatement,
 ) -> Result<PlannedStatement, Error> {
 	use crate::expr::statements::UseStatement;
 
 	match use_stmt {
 		UseStatement::Ns(ns_expr) => {
-			let ns = expr_to_physical_expr(ns_expr)?;
+			let ns = expr_to_physical_expr(ns_expr.clone())?;
 			// Validate that it doesn't reference current_value
 			if ns.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -76,7 +63,7 @@ fn convert_use_statement(
 			}))
 		}
 		UseStatement::Db(db_expr) => {
-			let db = expr_to_physical_expr(db_expr)?;
+			let db = expr_to_physical_expr(db_expr.clone())?;
 			// Validate that it doesn't reference current_value
 			if db.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -89,8 +76,8 @@ fn convert_use_statement(
 			}))
 		}
 		UseStatement::NsDb(ns_expr, db_expr) => {
-			let ns = expr_to_physical_expr(ns_expr)?;
-			let db = expr_to_physical_expr(db_expr)?;
+			let ns = expr_to_physical_expr(ns_expr.clone())?;
+			let db = expr_to_physical_expr(db_expr.clone())?;
 			// Validate that they don't reference current_value
 			if ns.references_current_value() || db.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -183,29 +170,139 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 	}
 }
 
-fn expr_to_execution_plan(expr: Expr) -> Result<PlannedStatement, Error> {
+fn expr_to_execution_plan(expr: &Expr) -> Result<PlannedStatement, Error> {
 	match expr {
-		Expr::Select(select) => plan_select(*select),
-		Expr::Create(create) => plan_create(*create),
-		Expr::Update(update) => plan_update(*update),
-		Expr::Delete(delete) => plan_delete(*delete),
-		_ => Err(Error::Unimplemented(format!(
-			"Expression type not yet supported in execution plans: {:?}",
-			std::mem::discriminant(&expr)
-		))),
+		// Supported statements
+		Expr::Select(select) => plan_select(select),
+		Expr::Let(let_stmt) => convert_let_statement(let_stmt),
+
+		// DML statements - not yet supported
+		Expr::Create(_) => Err(Error::Unimplemented(
+			"CREATE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Update(_) => Err(Error::Unimplemented(
+			"UPDATE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Upsert(_) => Err(Error::Unimplemented(
+			"UPSERT statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Delete(_) => Err(Error::Unimplemented(
+			"DELETE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Insert(_) => Err(Error::Unimplemented(
+			"INSERT statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Relate(_) => Err(Error::Unimplemented(
+			"RELATE statements not yet supported in execution plans".to_string(),
+		)),
+
+		// DDL statements - not yet supported
+		Expr::Define(_) => Err(Error::Unimplemented(
+			"DEFINE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Remove(_) => Err(Error::Unimplemented(
+			"REMOVE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Rebuild(_) => Err(Error::Unimplemented(
+			"REBUILD statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Alter(_) => Err(Error::Unimplemented(
+			"ALTER statements not yet supported in execution plans".to_string(),
+		)),
+
+		// Other statements - not yet supported
+		Expr::Info(_) => Err(Error::Unimplemented(
+			"INFO statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Foreach(_) => Err(Error::Unimplemented(
+			"FOR statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::IfElse(_) => Err(Error::Unimplemented(
+			"IF statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Block(_) => Err(Error::Unimplemented(
+			"Block expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::FunctionCall(_) => Err(Error::Unimplemented(
+			"Function call expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::Closure(_) => Err(Error::Unimplemented(
+			"Closure expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::Return(_) => Err(Error::Unimplemented(
+			"RETURN statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Throw(_) => Err(Error::Unimplemented(
+			"THROW statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Break => Err(Error::Unimplemented(
+			"BREAK statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Continue => Err(Error::Unimplemented(
+			"CONTINUE statements not yet supported in execution plans".to_string(),
+		)),
+		Expr::Sleep(_) => Err(Error::Unimplemented(
+			"SLEEP statements not yet supported in execution plans".to_string(),
+		)),
+
+		// Value expressions - not valid as top-level statements
+		Expr::Literal(_) => Err(Error::Unimplemented(
+			"Literal expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Param(_) => Err(Error::Unimplemented(
+			"Parameter expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Idiom(_) => Err(Error::Unimplemented(
+			"Idiom expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Table(_) => Err(Error::Unimplemented(
+			"Table expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Mock(_) => Err(Error::Unimplemented(
+			"Mock expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::Constant(_) => Err(Error::Unimplemented(
+			"Constant expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Prefix {
+			..
+		} => Err(Error::Unimplemented(
+			"Prefix expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Postfix {
+			..
+		} => Err(Error::Unimplemented(
+			"Postfix expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
+		Expr::Binary {
+			..
+		} => Err(Error::Unimplemented(
+			"Binary expressions not yet supported as top-level statements in execution plans"
+				.to_string(),
+		)),
 	}
 }
 
 /// Plan a SELECT statement
 fn plan_select(
-	select: crate::expr::statements::SelectStatement,
+	select: &crate::expr::statements::SelectStatement,
 ) -> Result<PlannedStatement, Error> {
+	// Extract VERSION timestamp if present (for time-travel queries)
+	let version = extract_version(&select.version)?;
+
 	// Build the source plan from `what` (FROM clause)
-	let source = plan_select_sources(&select.what)?;
+	let source = plan_select_sources(&select.what, version)?;
 
 	// Apply WHERE clause if present
-	let plan = if let Some(cond) = select.cond {
-		let predicate = expr_to_physical_expr(cond.0)?;
+	let plan = if let Some(cond) = &select.cond {
+		let predicate = expr_to_physical_expr(cond.0.clone())?;
 		Arc::new(Filter {
 			input: source,
 			predicate,
@@ -220,8 +317,30 @@ fn plan_select(
 	Ok(PlannedStatement::Query(plan))
 }
 
+/// Extract version timestamp from VERSION clause expression.
+/// Currently only supports literal Datetime values.
+fn extract_version(version_expr: &Expr) -> Result<Option<u64>, Error> {
+	match version_expr {
+		Expr::Literal(Literal::None) => Ok(None),
+		Expr::Literal(Literal::Datetime(dt)) => {
+			let stamp = dt
+				.to_version_stamp()
+				.map_err(|e| Error::Unimplemented(format!("Invalid VERSION timestamp: {}", e)))?;
+			Ok(Some(stamp))
+		}
+		_ => Err(Error::Unimplemented(
+			"VERSION clause only supports literal datetime values in execution plans".to_string(),
+		)),
+	}
+}
+
 /// Plan the FROM sources - handles multiple targets with Union
-fn plan_select_sources(what: &[Expr]) -> Result<Arc<dyn ExecutionPlan>, Error> {
+///
+/// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
+fn plan_select_sources(
+	what: &[Expr],
+	version: Option<u64>,
+) -> Result<Arc<dyn ExecutionPlan>, Error> {
 	if what.is_empty() {
 		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
 	}
@@ -229,7 +348,7 @@ fn plan_select_sources(what: &[Expr]) -> Result<Arc<dyn ExecutionPlan>, Error> {
 	// Convert each source to a plan
 	let mut source_plans = Vec::with_capacity(what.len());
 	for expr in what {
-		let plan = plan_single_source(expr)?;
+		let plan = plan_single_source(expr, version)?;
 		source_plans.push(plan);
 	}
 
@@ -244,7 +363,10 @@ fn plan_select_sources(what: &[Expr]) -> Result<Arc<dyn ExecutionPlan>, Error> {
 }
 
 /// Plan a single FROM source (table or record ID)
-fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
+/// Always wraps source operators (Scan, RecordIdLookup) with ComputeFields
+///
+/// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
+fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn ExecutionPlan>, Error> {
 	match expr {
 		// Table name: SELECT * FROM users
 		Expr::Table(table_name) => {
@@ -252,7 +374,13 @@ fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
 			let table_expr = expr_to_physical_expr(Expr::Literal(
 				crate::expr::literal::Literal::String(table_name.as_str().to_string()),
 			))?;
-			Ok(Arc::new(Scan {
+			let scan = Arc::new(Scan {
+				table: table_expr.clone(),
+				version,
+			}) as Arc<dyn ExecutionPlan>;
+			// Wrap with ComputeFields to evaluate computed fields
+			Ok(Arc::new(ComputeFields {
+				input: scan,
 				table: table_expr,
 			}))
 		}
@@ -263,8 +391,18 @@ fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
 			// For now, we only support static record IDs (table:key)
 			// More complex expressions would need async evaluation
 			let record_id = record_id_lit_to_record_id(record_id_lit)?;
-			Ok(Arc::new(RecordIdLookup {
+			// Get table name for ComputeFields
+			let table_expr = expr_to_physical_expr(Expr::Literal(
+				crate::expr::literal::Literal::String(record_id.table.as_str().to_string()),
+			))?;
+			let lookup = Arc::new(RecordIdLookup {
 				record_id,
+				version,
+			}) as Arc<dyn ExecutionPlan>;
+			// Wrap with ComputeFields to evaluate computed fields
+			Ok(Arc::new(ComputeFields {
+				input: lookup,
+				table: table_expr,
 			}))
 		}
 
@@ -273,7 +411,13 @@ fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
 			// Simple idiom (just a name) is a table reference
 			// Convert to a table scan using the idiom as a physical expression
 			let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
-			Ok(Arc::new(Scan {
+			let scan = Arc::new(Scan {
+				table: table_expr.clone(),
+				version,
+			}) as Arc<dyn ExecutionPlan>;
+			// Wrap with ComputeFields to evaluate computed fields
+			Ok(Arc::new(ComputeFields {
+				input: scan,
 				table: table_expr,
 			}))
 		}
@@ -283,7 +427,13 @@ fn plan_single_source(expr: &Expr) -> Result<Arc<dyn ExecutionPlan>, Error> {
 			// Parameters could be record IDs or table names
 			// We'll treat them as table references - Scan evaluates at runtime
 			let table_expr = expr_to_physical_expr(Expr::Param(param.clone()))?;
-			Ok(Arc::new(Scan {
+			let scan = Arc::new(Scan {
+				table: table_expr.clone(),
+				version,
+			}) as Arc<dyn ExecutionPlan>;
+			// Wrap with ComputeFields to evaluate computed fields
+			Ok(Arc::new(ComputeFields {
+				input: scan,
 				table: table_expr,
 			}))
 		}
@@ -331,195 +481,76 @@ fn record_id_lit_to_record_id(
 	})
 }
 
-/// Plan a CREATE statement
-fn plan_create(
-	create: crate::expr::statements::CreateStatement,
+/// Convert a LET statement to an execution plan
+fn convert_let_statement(
+	let_stmt: &crate::expr::statements::SetStatement,
 ) -> Result<PlannedStatement, Error> {
-	// Get the table name from the first target
-	let table = match create.what.first() {
-		Some(Expr::Table(table_name)) => table_name.clone(),
-		Some(Expr::Literal(crate::expr::literal::Literal::RecordId(rid))) => rid.table.clone(),
-		_ => {
-			return Err(Error::Unimplemented(
-				"CREATE target must be a table or record ID".to_string(),
-			));
-		}
-	};
+	let name = let_stmt.name.clone();
 
-	// Convert content to ContentSource
-	let content = if let Some(data) = create.data {
-		use crate::expr::Data;
-		match data {
-			Data::EmptyExpression => {
-				ContentSource::Value(crate::val::Value::Object(crate::val::Object::default()))
-			}
-			Data::SetExpression(_sets) => {
-				// Convert set expressions to a value
-				// For now, we need the old compute system to fully evaluate these
-				return Err(Error::Unimplemented(
-					"CREATE with SET expressions not yet supported in execution plans".to_string(),
-				));
-			}
-			Data::SingleExpression(expr) => {
-				// Convert expression to value
-				if let Expr::Literal(lit) = expr {
-					match literal_to_value(lit) {
-						Ok(val) => ContentSource::Value(val),
-						Err(_) => {
-							return Err(Error::Unimplemented(
-								"Complex literals in CREATE not yet supported".to_string(),
-							));
-						}
-					}
-				} else {
+	// Determine if the expression is a query or scalar
+	let value = match &let_stmt.what {
+		// SELECT produces a stream that gets collected into an array
+		Expr::Select(select) => {
+			let plan = plan_select(select)?;
+			match plan {
+				PlannedStatement::Query(exec_plan) => LetValue::Query(exec_plan),
+				_ => {
 					return Err(Error::Unimplemented(
-						"Complex expressions in CREATE content not yet supported".to_string(),
+						"Unexpected plan type from SELECT in LET".to_string(),
 					));
 				}
 			}
-			Data::ValuesExpression(_) => {
-				return Err(Error::Unimplemented(
-					"CREATE with VALUES not yet supported in execution plans".to_string(),
-				));
-			}
-			Data::ReplaceExpression(_) => {
-				return Err(Error::Unimplemented("CREATE with REPLACE not supported".to_string()));
-			}
-			Data::UpdateExpression(_) => {
-				return Err(Error::Unimplemented(
-					"CREATE with UPDATE expression not supported".to_string(),
-				));
-			}
-			Data::ContentExpression(expr) => {
-				if let Expr::Literal(lit) = expr {
-					match literal_to_value(lit) {
-						Ok(val) => ContentSource::Value(val),
-						Err(_) => {
-							return Err(Error::Unimplemented(
-								"Complex literals in CREATE not yet supported".to_string(),
-							));
-						}
-					}
-				} else {
-					return Err(Error::Unimplemented(
-						"Complex expressions in CREATE CONTENT not yet supported".to_string(),
-					));
-				}
-			}
-			Data::MergeExpression(_) => {
-				return Err(Error::Unimplemented("CREATE with MERGE not supported".to_string()));
-			}
-			Data::UnsetExpression(_) => {
-				return Err(Error::Unimplemented("CREATE with UNSET not supported".to_string()));
-			}
-			Data::PatchExpression(_) => {
-				return Err(Error::Unimplemented("CREATE with PATCH not supported".to_string()));
-			}
 		}
-	} else {
-		// No data - create empty record
-		ContentSource::Value(crate::val::Value::Object(crate::val::Object::default()))
-	};
 
-	Ok(PlannedStatement::Query(Arc::new(Create {
-		table,
-		content,
-	})))
-}
-
-/// Plan an UPDATE statement
-fn plan_update(
-	update: crate::expr::statements::UpdateStatement,
-) -> Result<PlannedStatement, Error> {
-	// Get the table name from the first target
-	let table = match update.what.first() {
-		Some(Expr::Table(table_name)) => table_name.clone(),
-		Some(Expr::Literal(crate::expr::literal::Literal::RecordId(rid))) => rid.table.clone(),
-		_ => {
+		// DML statements in LET are not yet supported
+		Expr::Create(_) => {
 			return Err(Error::Unimplemented(
-				"UPDATE target must be a table or record ID".to_string(),
+				"CREATE statements in LET not yet supported in execution plans".to_string(),
 			));
 		}
-	};
-
-	// Build the input source plan (what to update)
-	let input = plan_select_sources(&update.what)?;
-
-	// Apply WHERE clause if present
-	let input = if let Some(cond) = update.cond {
-		let predicate = expr_to_physical_expr(cond.0)?;
-		Arc::new(Filter {
-			input,
-			predicate,
-		}) as Arc<dyn ExecutionPlan>
-	} else {
-		input
-	};
-
-	// Convert data to changes
-	let changes = if let Some(data) = update.data {
-		use crate::expr::Data;
-		match data {
-			Data::SetExpression(sets) => {
-				let mut changes = Vec::new();
-				for set in sets {
-					let field = set.place.to_raw_string();
-					let value = expr_to_physical_expr(set.value)?;
-					changes.push(SetField {
-						field,
-						value,
-					});
-				}
-				changes
-			}
-			_ => {
-				return Err(Error::Unimplemented(
-					"Only SET expressions supported in UPDATE execution plans".to_string(),
-				));
-			}
-		}
-	} else {
-		Vec::new()
-	};
-
-	Ok(PlannedStatement::Query(Arc::new(Update {
-		table,
-		input,
-		changes,
-	})))
-}
-
-/// Plan a DELETE statement
-fn plan_delete(
-	delete: crate::expr::statements::DeleteStatement,
-) -> Result<PlannedStatement, Error> {
-	// Get the table name from the first target
-	let table = match delete.what.first() {
-		Some(Expr::Table(table_name)) => table_name.clone(),
-		Some(Expr::Literal(crate::expr::literal::Literal::RecordId(rid))) => rid.table.clone(),
-		_ => {
+		Expr::Update(_) => {
 			return Err(Error::Unimplemented(
-				"DELETE target must be a table or record ID".to_string(),
+				"UPDATE statements in LET not yet supported in execution plans".to_string(),
 			));
 		}
+		Expr::Upsert(_) => {
+			return Err(Error::Unimplemented(
+				"UPSERT statements in LET not yet supported in execution plans".to_string(),
+			));
+		}
+		Expr::Delete(_) => {
+			return Err(Error::Unimplemented(
+				"DELETE statements in LET not yet supported in execution plans".to_string(),
+			));
+		}
+		Expr::Insert(_) => {
+			return Err(Error::Unimplemented(
+				"INSERT statements in LET not yet supported in execution plans".to_string(),
+			));
+		}
+		Expr::Relate(_) => {
+			return Err(Error::Unimplemented(
+				"RELATE statements in LET not yet supported in execution plans".to_string(),
+			));
+		}
+
+		// Everything else is a scalar expression
+		other => {
+			let expr = expr_to_physical_expr(other.clone())?;
+
+			// Validate: LET expressions can't reference current row
+			if expr.references_current_value() {
+				return Err(Error::Unimplemented(
+					"LET expression cannot reference current row context".to_string(),
+				));
+			}
+
+			LetValue::Scalar(expr)
+		}
 	};
 
-	// Build the input source plan (what to delete)
-	let input = plan_select_sources(&delete.what)?;
-
-	// Apply WHERE clause if present
-	let input = if let Some(cond) = delete.cond {
-		let predicate = expr_to_physical_expr(cond.0)?;
-		Arc::new(Filter {
-			input,
-			predicate,
-		}) as Arc<dyn ExecutionPlan>
-	} else {
-		input
-	};
-
-	Ok(PlannedStatement::Query(Arc::new(Delete {
-		table,
-		input,
-	})))
+	Ok(PlannedStatement::Let {
+		name,
+		value,
+	})
 }

@@ -54,14 +54,10 @@ impl ExecutionPlan for Create {
 		// Clone what we need for the async block
 		let table = self.table.clone();
 		let content = self.content.clone();
-		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-		let db = Arc::clone(&db_ctx.db);
+		let exec_ctx = ctx.clone();
 		let ns_name = db_ctx.ns_ctx.ns.name.clone();
 		let db_name = db_ctx.db.name.clone();
 		let txn = db_ctx.ns_ctx.root.txn.clone();
-		let params = db_ctx.ns_ctx.root.params.clone();
-		let auth = db_ctx.ns_ctx.root.auth.clone();
-		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
 
 		// Create a stream that performs the create operation
 		let stream = stream::once(async move {
@@ -105,37 +101,12 @@ impl ExecutionPlan for Create {
 			let mut created_values = Vec::with_capacity(values.len());
 
 			for value in values {
-				// Build execution context for permission checks
-				let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
-					ns_ctx: crate::exec::NamespaceContext {
-						root: crate::exec::RootContext {
-							datastore: None,
-							params: params.clone(),
-							cancellation: tokio_util::sync::CancellationToken::new(),
-							auth: auth.clone(),
-							auth_enabled,
-							txn: txn.clone(),
-						},
-						ns: ns.clone(),
-					},
-					db: db.clone(),
-				});
-
 				// Check permission for this value if it's a Conditional permission
-				let allowed = match &create_permission {
-					PhysicalPermission::Allow => true,
-					PhysicalPermission::Deny => false, // Already handled above
-					PhysicalPermission::Conditional(_) => {
-						check_permission_for_value(&create_permission, &value, &exec_ctx)
-							.await
-							.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!(
-									"Failed to check permission: {}",
-									e
-								))
-							})?
-					}
-				};
+				let allowed = check_permission_for_value(&create_permission, &value, &exec_ctx)
+					.await
+					.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {}", e))
+					})?;
 
 				if !allowed {
 					return Err(ControlFlow::Err(anyhow::anyhow!(

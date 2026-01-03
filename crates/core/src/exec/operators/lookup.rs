@@ -7,7 +7,7 @@ use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
-	should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{ContextLevel, ExecutionContext, ExecutionPlan, ValueBatch, ValueBatchStream};
 use crate::iam::Action;
@@ -24,7 +24,8 @@ use crate::val::RecordId;
 #[derive(Debug, Clone)]
 pub struct RecordIdLookup {
 	pub(crate) record_id: RecordId,
-	// fields: Vec<Field>,
+	/// Optional version timestamp for time-travel queries (VERSION clause)
+	pub(crate) version: Option<u64>,
 }
 
 impl ExecutionPlan for RecordIdLookup {
@@ -36,11 +37,15 @@ impl ExecutionPlan for RecordIdLookup {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?;
 
+		// Validate record user has access to this namespace/database
+		validate_record_user_access(db_ctx)?;
+
 		// Check if we need to enforce permissions
 		let check_perms = should_check_perms(db_ctx, Action::View)?;
 
 		// Clone what we need for the async block
 		let record_id = self.record_id.clone();
+		let version = self.version;
 		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 		let db = Arc::clone(&db_ctx.db);
 		let ns_name = db_ctx.ns_ctx.ns.name.clone();
@@ -82,14 +87,30 @@ impl ExecutionPlan for RecordIdLookup {
 				});
 			}
 
-			// Look up the record
+			// Look up the record (with optional version for time-travel)
 			let record = txn
-				.get_record(ns.namespace_id, db.database_id, &record_id.table, &record_id.key, None)
+				.get_record(
+					ns.namespace_id,
+					db.database_id,
+					&record_id.table,
+					&record_id.key,
+					version,
+				)
 				.await
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {}", e)))?;
 
-			// Extract the value and inject the id field
-			let mut value = record.data.as_ref().clone();
+			// Extract the value - if None, the record doesn't exist
+			let value = record.data.as_ref();
+
+			// Check if the record exists - return empty batch if not
+			if value.is_none() {
+				return Ok(ValueBatch {
+					values: vec![],
+				});
+			}
+
+			// Inject the id field into the document
+			let mut value = value.clone();
 			value.def(&record_id);
 
 			// Check permission for this record

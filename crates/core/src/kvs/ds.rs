@@ -1792,11 +1792,12 @@ impl Datastore {
 
 		// Process all statements
 
-		let results = match logical_plan_to_execution_plan(plan) {
+		let results = match logical_plan_to_execution_plan(&plan) {
 			Ok(execution_plan) => {
 				let stream_executor = StreamExecutor::new(execution_plan);
 
-				// Pass session's ns/db and auth to initialize the stream executor's context
+				// Pass session's ns/db, auth, and session values to initialize the stream
+				// executor's context
 				stream_executor
 					.execute_collected(
 						self,
@@ -1804,10 +1805,11 @@ impl Datastore {
 						sess.db.as_deref(),
 						sess.au.clone(),
 						self.auth_enabled,
+						sess.values(),
 					)
 					.await
 			}
-			Err((plan, err)) => {
+			Err(err) => {
 				if sess.require_new_planner {
 					return Err(DbResultError::InternalError(format!(
 						"New planner required but planning failed: {}",

@@ -105,6 +105,41 @@ pub fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Result<bo
 	}
 }
 
+/// Validate that a record user has access to the current namespace and database.
+///
+/// Record users (tokens scoped to a specific record) should only be able to access
+/// data within their authenticated namespace and database. This check ensures that
+/// a record user cannot access data in other namespaces or databases.
+///
+/// Returns `Ok(())` if access is allowed, `Err` with an appropriate error if denied.
+pub fn validate_record_user_access(db_ctx: &DatabaseContext) -> Result<(), Error> {
+	let root = &db_ctx.ns_ctx.root;
+
+	// Only check for record users
+	if !root.auth.is_record() {
+		return Ok(());
+	}
+
+	let ns = db_ctx.ns_name();
+	let db = db_ctx.db_name();
+
+	// Verify namespace matches
+	if root.auth.level().ns() != Some(ns) {
+		return Err(Error::NsNotAllowed {
+			ns: ns.into(),
+		});
+	}
+
+	// Verify database matches
+	if root.auth.level().db() != Some(db) {
+		return Err(Error::DbNotAllowed {
+			db: db.into(),
+		});
+	}
+
+	Ok(())
+}
+
 /// Check a physical permission against a specific record value.
 ///
 /// Returns `true` if access is allowed, `false` if denied.
