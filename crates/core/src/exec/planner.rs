@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use crate::err::Error;
+use crate::exec::block::{
+	BlockOutputMode, BlockPlan, ForPlan, IfBranch, IfPlan, LetValueSource,
+	PlannedStatement as BlockStatement, StatementOperation,
+};
 use crate::exec::operators::{
 	BeginPlan, CancelPlan, CommitPlan, ComputeFields, Filter, LetPlan, LetValue, Limit,
 	RecordIdLookup, Scan, Sort, Union, UsePlan,
@@ -904,43 +908,59 @@ impl ScriptPlanner {
 				"ALTER statements not yet supported in script plans".to_string(),
 			)),
 
-			// Other statements
-			Expr::Info(_) => Err(Error::Unimplemented(
-				"INFO statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Foreach(_) => Err(Error::Unimplemented(
-				"FOR statements not yet supported in script plans".to_string(),
-			)),
-			Expr::IfElse(_) => Err(Error::Unimplemented(
-				"IF statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Block(_) => Err(Error::Unimplemented(
-				"Block expressions not yet supported in script plans".to_string(),
-			)),
-			Expr::FunctionCall(_) => Err(Error::Unimplemented(
-				"Function call expressions not yet supported in script plans".to_string(),
-			)),
-			Expr::Closure(_) => Err(Error::Unimplemented(
-				"Closure expressions not yet supported in script plans".to_string(),
-			)),
-			Expr::Return(_) => Err(Error::Unimplemented(
-				"RETURN statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Throw(_) => Err(Error::Unimplemented(
-				"THROW statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Break => Err(Error::Unimplemented(
-				"BREAK statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Continue => Err(Error::Unimplemented(
-				"CONTINUE statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Sleep(_) => Err(Error::Unimplemented(
-				"SLEEP statements not yet supported in script plans".to_string(),
-			)),
-			Expr::Mock(_) => Err(Error::Unimplemented(
-				"Mock expressions not yet supported in script plans".to_string(),
-			)),
+		// Other statements
+		Expr::Info(_) => Err(Error::Unimplemented(
+			"INFO statements not yet supported in script plans".to_string(),
+		)),
+		Expr::Foreach(foreach_stmt) => {
+			// Plan FOR loop as a block operation
+			let for_plan = self.plan_foreach(foreach_stmt)?;
+			// Return the ForPlan wrapped in a PlannedStatement
+			// Note: This requires converting to an operation, which we'll handle specially
+			Err(Error::Unimplemented(
+				"FOR statements require BlockPlan infrastructure - use plan_block_expr instead"
+					.to_string(),
+			))
+		}
+		Expr::IfElse(if_stmt) => {
+			// Plan IF/ELSE as a block operation
+			Err(Error::Unimplemented(
+				"IF statements require BlockPlan infrastructure - use plan_block_expr instead"
+					.to_string(),
+			))
+		}
+		Expr::Block(_) => Err(Error::Unimplemented(
+			"Block expressions not yet supported in script plans".to_string(),
+		)),
+		Expr::FunctionCall(_) => Err(Error::Unimplemented(
+			"Function call expressions not yet supported in script plans".to_string(),
+		)),
+		Expr::Closure(_) => Err(Error::Unimplemented(
+			"Closure expressions not yet supported in script plans".to_string(),
+		)),
+		Expr::Return(_) => Err(Error::Unimplemented(
+			"RETURN statements require BlockPlan infrastructure - use plan_block_expr instead"
+				.to_string(),
+		)),
+		Expr::Throw(_) => Err(Error::Unimplemented(
+			"THROW statements require BlockPlan infrastructure - use plan_block_expr instead"
+				.to_string(),
+		)),
+		Expr::Break => Err(Error::Unimplemented(
+			"BREAK statements require BlockPlan infrastructure - use plan_block_expr instead"
+				.to_string(),
+		)),
+		Expr::Continue => Err(Error::Unimplemented(
+			"CONTINUE statements require BlockPlan infrastructure - use plan_block_expr instead"
+				.to_string(),
+		)),
+		Expr::Sleep(_) => Err(Error::Unimplemented(
+			"SLEEP statements require BlockPlan infrastructure - use plan_block_expr instead"
+				.to_string(),
+		)),
+		Expr::Mock(_) => Err(Error::Unimplemented(
+			"Mock expressions not yet supported in script plans".to_string(),
+		)),
 
 			// Value expressions - scalar evaluation as pure read
 			Expr::Literal(_)
@@ -1073,6 +1093,186 @@ impl ScriptPlanner {
 
 		// TODO: Handle projections (select.expr), GROUP BY
 		Ok(limited)
+	}
+
+	/// Plan a FOR loop statement.
+	fn plan_foreach(
+		&self,
+		foreach_stmt: &crate::expr::statements::ForeachStatement,
+	) -> Result<ForPlan, Error> {
+		// Convert the range expression
+		let iterable = expr_to_physical_expr(foreach_stmt.range.clone())?;
+
+		// Plan the body block
+		let body = self.plan_block(&foreach_stmt.block, BlockOutputMode::Discard)?;
+
+		Ok(ForPlan {
+			variable: foreach_stmt.param.as_str().to_string(),
+			iterable,
+			body,
+		})
+	}
+
+	/// Plan an IF/ELSE statement.
+	fn plan_ifelse(
+		&self,
+		if_stmt: &crate::expr::statements::IfelseStatement,
+	) -> Result<IfPlan, Error> {
+		let mut branches = Vec::new();
+
+		for (condition, body) in &if_stmt.exprs {
+			let condition_expr = expr_to_physical_expr(condition.clone())?;
+			let body_block = self.plan_block_from_expr(body, BlockOutputMode::Discard)?;
+
+			branches.push(IfBranch {
+				condition: condition_expr,
+				body: body_block,
+			});
+		}
+
+		let else_branch = if let Some(else_expr) = &if_stmt.close {
+			Some(self.plan_block_from_expr(else_expr, BlockOutputMode::Discard)?)
+		} else {
+			None
+		};
+
+		Ok(IfPlan {
+			branches,
+			else_branch,
+		})
+	}
+
+	/// Plan a Block into a BlockPlan.
+	fn plan_block(
+		&self,
+		block: &crate::expr::Block,
+		output_mode: BlockOutputMode,
+	) -> Result<BlockPlan, Error> {
+		let mut plan = BlockPlan::new(output_mode);
+
+		for (i, expr) in block.0.iter().enumerate() {
+			let operation = self.plan_block_operation(expr)?;
+			plan.push(BlockStatement {
+				id: StatementId(i),
+				context_source: None, // Will be calculated later
+				wait_for: vec![],     // Will be calculated later
+				operation,
+			});
+		}
+
+		// Calculate dependencies
+		plan.calculate_dependencies();
+
+		Ok(plan)
+	}
+
+	/// Plan a single expression into a BlockPlan (for IF bodies that are single expressions).
+	fn plan_block_from_expr(
+		&self,
+		expr: &Expr,
+		output_mode: BlockOutputMode,
+	) -> Result<BlockPlan, Error> {
+		// For single expression bodies, wrap in a one-statement block
+		let mut plan = BlockPlan::new(output_mode);
+
+		let operation = self.plan_block_operation(expr)?;
+		plan.push(BlockStatement {
+			id: StatementId(0),
+			context_source: None,
+			wait_for: vec![],
+			operation,
+		});
+
+		Ok(plan)
+	}
+
+	/// Plan a single expression into a StatementOperation.
+	fn plan_block_operation(&self, expr: &Expr) -> Result<StatementOperation, Error> {
+		match expr {
+			// SELECT - wrap in operator
+			Expr::Select(select) => {
+				let plan = self.plan_select_internal(select)?;
+				Ok(StatementOperation::Operator(plan))
+			}
+
+			// LET - context mutation
+			Expr::Let(let_stmt) => {
+				let value = match &let_stmt.what {
+					Expr::Select(select) => {
+						let plan = self.plan_select_internal(select)?;
+						LetValueSource::Query(plan)
+					}
+					other => {
+						let expr = expr_to_physical_expr(other.clone())?;
+						LetValueSource::Scalar(expr)
+					}
+				};
+				Ok(StatementOperation::Let {
+					name: let_stmt.name.clone(),
+					value,
+				})
+			}
+
+			// FOR loop
+			Expr::Foreach(foreach_stmt) => {
+				let for_plan = self.plan_foreach(foreach_stmt)?;
+				Ok(StatementOperation::For(Box::new(for_plan)))
+			}
+
+			// IF/ELSE
+			Expr::IfElse(if_stmt) => {
+				let if_plan = self.plan_ifelse(if_stmt)?;
+				Ok(StatementOperation::If(Box::new(if_plan)))
+			}
+
+			// Control flow
+			Expr::Break => Ok(StatementOperation::Break),
+			Expr::Continue => Ok(StatementOperation::Continue),
+
+			Expr::Return(return_stmt) => {
+				let value = expr_to_physical_expr(return_stmt.what.clone())?;
+				Ok(StatementOperation::Return(value))
+			}
+
+			Expr::Throw(throw_expr) => {
+				let value = expr_to_physical_expr((**throw_expr).clone())?;
+				Ok(StatementOperation::Throw(value))
+			}
+
+			Expr::Sleep(sleep_stmt) => {
+				// Use the duration directly from the SleepStatement
+				let duration = sleep_stmt.duration.0;
+				Ok(StatementOperation::Sleep(duration))
+			}
+
+			// Scalar expressions - evaluate and return
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Idiom(_)
+			| Expr::Table(_) => {
+				// Wrap scalar expression in a simple evaluation operator
+				// This would require a ScalarEval operator, but for now return error
+				Err(Error::Unimplemented(
+					"Scalar expressions in blocks require ScalarEval operator".to_string(),
+				))
+			}
+
+			// Unsupported
+			_ => Err(Error::Unimplemented(format!(
+				"Expression type not yet supported in block planning: {:?}",
+				std::mem::discriminant(expr)
+			))),
+		}
 	}
 }
 

@@ -3,12 +3,13 @@
 //! COMMIT is a context-mutating operator that commits all changes
 //! made in the current transaction.
 
+use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
 
 /// COMMIT operator - commits the current transaction.
 ///
@@ -17,6 +18,7 @@ use crate::exec::{OperatorPlan, ValueBatchStream};
 #[derive(Debug)]
 pub struct CommitPlan;
 
+#[async_trait]
 impl OperatorPlan for CommitPlan {
 	fn name(&self) -> &'static str {
 		"Commit"
@@ -25,6 +27,11 @@ impl OperatorPlan for CommitPlan {
 	fn required_context(&self) -> ContextLevel {
 		// COMMIT requires a transaction, which is at root level
 		ContextLevel::Root
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// COMMIT only mutates context (transaction state), not data
+		AccessMode::ReadOnly
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
@@ -36,7 +43,7 @@ impl OperatorPlan for CommitPlan {
 		true
 	}
 
-	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		// Get the current transaction
 		let txn = input.txn();
 
@@ -48,7 +55,8 @@ impl OperatorPlan for CommitPlan {
 		}
 
 		// Commit the transaction
-		futures::executor::block_on(txn.commit())
+		txn.commit()
+			.await
 			.map_err(|e| Error::Thrown(format!("Failed to commit transaction: {}", e)))?;
 
 		// Return the same context (transaction is now committed)

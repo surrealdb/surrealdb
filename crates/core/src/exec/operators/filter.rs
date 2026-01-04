@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
 };
 
 /// Filters a stream of values based on a predicate.
@@ -18,6 +19,7 @@ pub struct Filter {
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
 }
 
+#[async_trait]
 impl OperatorPlan for Filter {
 	fn name(&self) -> &'static str {
 		"Filter"
@@ -31,6 +33,12 @@ impl OperatorPlan for Filter {
 		// Filter needs Database for expression evaluation, but also
 		// inherits child requirements (take the maximum)
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine input's access mode with predicate's access mode
+		// Predicate could contain a mutation subquery!
+		self.input.access_mode().combine(self.predicate.access_mode())
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

@@ -5,13 +5,14 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::{StreamExt, stream};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
 use crate::val::{Array, Value};
 
 /// The value to bind in a LET statement.
@@ -39,6 +40,7 @@ pub struct LetPlan {
 	pub value: LetValue,
 }
 
+#[async_trait]
 impl OperatorPlan for LetPlan {
 	fn name(&self) -> &'static str {
 		"Let"
@@ -63,6 +65,14 @@ impl OperatorPlan for LetPlan {
 		}
 	}
 
+	fn access_mode(&self) -> AccessMode {
+		// LET's access mode depends on its value expression
+		match &self.value {
+			LetValue::Scalar(expr) => expr.access_mode(),
+			LetValue::Query(plan) => plan.access_mode(),
+		}
+	}
+
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
 		// LET produces no data output - it only mutates context
 		Ok(Box::pin(stream::empty()))
@@ -72,17 +82,18 @@ impl OperatorPlan for LetPlan {
 		true
 	}
 
-	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		let eval_ctx = EvalContext::from_exec_ctx(input);
 
 		let computed_value = match &self.value {
-			LetValue::Scalar(expr) => futures::executor::block_on(expr.evaluate(eval_ctx))
-				.map_err(|e| Error::Thrown(e.to_string()))?,
+			LetValue::Scalar(expr) => {
+				expr.evaluate(eval_ctx).await.map_err(|e| Error::Thrown(e.to_string()))?
+			}
 			LetValue::Query(plan) => {
 				// Execute the query and collect results into an array
 				let stream = plan.execute(input)?;
-				let results = futures::executor::block_on(collect_stream(stream))
-					.map_err(|e| Error::Thrown(e.to_string()))?;
+				let results =
+					collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
 				Value::Array(Array(results))
 			}
 		};

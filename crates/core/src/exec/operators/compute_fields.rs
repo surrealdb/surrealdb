@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::sync::OnceCell;
 
@@ -16,8 +17,8 @@ use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{TableName, Value};
@@ -59,6 +60,7 @@ struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
+#[async_trait]
 impl OperatorPlan for ComputeFields {
 	fn name(&self) -> &'static str {
 		"ComputeFields"
@@ -72,6 +74,14 @@ impl OperatorPlan for ComputeFields {
 		// ComputeFields needs Database for field definition lookup
 		// Also inherits child requirements
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// ComputeFields derives values from schema; the computed field expressions
+		// are resolved at runtime from table definitions. For now, assume input mode.
+		// NOTE: Computed field expressions could theoretically contain subqueries,
+		// but those would be defined in schema, not in the query itself.
+		self.input.access_mode().combine(self.table.access_mode())
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

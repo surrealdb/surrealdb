@@ -3,12 +3,13 @@
 //! CANCEL is a context-mutating operator that rolls back all changes
 //! made in the current transaction.
 
+use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
 
 /// CANCEL operator - cancels/rolls back the current transaction.
 ///
@@ -17,6 +18,7 @@ use crate::exec::{OperatorPlan, ValueBatchStream};
 #[derive(Debug)]
 pub struct CancelPlan;
 
+#[async_trait]
 impl OperatorPlan for CancelPlan {
 	fn name(&self) -> &'static str {
 		"Cancel"
@@ -25,6 +27,11 @@ impl OperatorPlan for CancelPlan {
 	fn required_context(&self) -> ContextLevel {
 		// CANCEL requires a transaction, which is at root level
 		ContextLevel::Root
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// CANCEL only mutates context (transaction state), not data
+		AccessMode::ReadOnly
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
@@ -36,7 +43,7 @@ impl OperatorPlan for CancelPlan {
 		true
 	}
 
-	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		// Get the current transaction
 		let txn = input.txn();
 
@@ -48,7 +55,8 @@ impl OperatorPlan for CancelPlan {
 		}
 
 		// Cancel/rollback the transaction
-		futures::executor::block_on(txn.cancel())
+		txn.cancel()
+			.await
 			.map_err(|e| Error::Thrown(format!("Failed to cancel transaction: {}", e)))?;
 
 		// Return the same context (transaction is now cancelled)

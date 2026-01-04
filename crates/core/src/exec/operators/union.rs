@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 
 use crate::err::Error;
-use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatchStream};
+use crate::exec::{
+	AccessMode, CombineAccessModes, ContextLevel, ExecutionContext, OperatorPlan, ValueBatchStream,
+};
 
 /// Union operator - combines results from multiple execution plans.
 ///
@@ -17,6 +20,7 @@ pub struct Union {
 	pub(crate) inputs: Vec<Arc<dyn OperatorPlan>>,
 }
 
+#[async_trait]
 impl OperatorPlan for Union {
 	fn name(&self) -> &'static str {
 		"Union"
@@ -25,6 +29,11 @@ impl OperatorPlan for Union {
 	fn required_context(&self) -> ContextLevel {
 		// Union requires the maximum context level of all its inputs
 		self.inputs.iter().map(|input| input.required_context()).max().unwrap_or(ContextLevel::Root)
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine all inputs' access modes
+		self.inputs.iter().map(|input| input.access_mode()).combine_all()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

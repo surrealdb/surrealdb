@@ -2,12 +2,15 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+pub(crate) mod access_mode;
+pub(crate) mod block;
 pub(crate) mod completion_map;
 pub(crate) mod context;
 pub(crate) mod explain;
@@ -18,6 +21,13 @@ pub(crate) mod planner;
 pub(crate) mod script_executor;
 pub(crate) mod statement;
 
+// Re-export access mode types
+pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+// Re-export block types
+pub(crate) use block::{
+	BlockOutputMode, BlockPlan, BlockResult, ForPlan, IfBranch, IfPlan, LetValueSource,
+	PlannedStatement as BlockPlannedStatement, StatementClass, StatementOperation,
+};
 // Re-export context types
 // Re-export statement types
 pub(crate) use completion_map::{CompletionError, CompletionMap};
@@ -53,6 +63,7 @@ pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + 
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
+#[async_trait]
 pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	fn name(&self) -> &'static str;
 
@@ -70,6 +81,9 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	///
 	/// The context is guaranteed to meet the requirements declared by `required_context()`
 	/// if the executor performs proper validation.
+	///
+	/// NOTE: This is intentionally not async to ensure that the executiion graph is constructed
+	/// fully before any execution begins.
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error>;
 
 	/// Returns references to child execution plans for tree traversal.
@@ -94,10 +108,26 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	/// Compute the output context after execution.
 	///
 	/// Only called if `mutates_context()` returns true.
-	/// This method may perform blocking operations (like looking up namespace/database
+	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
-	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		Ok(input.clone())
+	}
+
+	/// Returns the access mode for this plan (and all its children).
+	///
+	/// This determines whether the plan performs mutations:
+	/// - `AccessMode::ReadOnly`: Only reads data, can run in parallel with other reads
+	/// - `AccessMode::ReadWrite`: May write data, acts as a barrier
+	///
+	/// **Critical**: This must recursively check all children and expressions.
+	/// A `SELECT` with a mutation subquery (e.g., `SELECT *, (UPSERT person) FROM person`)
+	/// must return `ReadWrite` even though it's syntactically a SELECT.
+	fn access_mode(&self) -> AccessMode;
+
+	/// Convenience method: returns true if this plan is read-only.
+	fn is_read_only(&self) -> bool {
+		self.access_mode() == AccessMode::ReadOnly
 	}
 }
 

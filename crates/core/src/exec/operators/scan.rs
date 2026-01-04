@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream;
 
 use crate::catalog::Permission;
@@ -10,8 +11,8 @@ use crate::exec::permission::{
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
@@ -32,6 +33,7 @@ pub struct Scan {
 	pub(crate) version: Option<u64>,
 }
 
+#[async_trait]
 impl OperatorPlan for Scan {
 	fn name(&self) -> &'static str {
 		"Scan"
@@ -43,6 +45,11 @@ impl OperatorPlan for Scan {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Scan is read-only, but the table expression could theoretically contain a subquery
+		self.table.access_mode()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {

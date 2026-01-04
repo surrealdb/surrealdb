@@ -4,10 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::exec::{ExecutionContext, OperatorPlan, Parameters};
+use crate::exec::{AccessMode, ExecutionContext, OperatorPlan};
 use crate::expr::Idiom;
-use crate::kvs::Transaction;
 use crate::val::Value;
 
 /// Evaluation context - what's available during expression evaluation.
@@ -75,6 +73,13 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 	/// Does this expression reference the current row?
 	/// If false, can be evaluated in scalar context.
 	fn references_current_value(&self) -> bool;
+
+	/// Returns the access mode for this expression.
+	///
+	/// This is critical for plan-based mutability analysis:
+	/// - If an expression contains a mutation subquery, it must return `ReadWrite`
+	/// - Example: `(UPSERT person)` in a SELECT must propagate `ReadWrite` upward
+	fn access_mode(&self) -> AccessMode;
 }
 
 /// Literal value - "foo", 42, true
@@ -93,6 +98,11 @@ impl PhysicalExpr for Literal {
 
 	fn references_current_value(&self) -> bool {
 		false
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Literals are always read-only
+		AccessMode::ReadOnly
 	}
 }
 
@@ -122,6 +132,11 @@ impl PhysicalExpr for Param {
 
 	fn references_current_value(&self) -> bool {
 		false
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Parameter references are read-only
+		AccessMode::ReadOnly
 	}
 }
 
@@ -153,6 +168,11 @@ impl PhysicalExpr for Field {
 
 	fn references_current_value(&self) -> bool {
 		true
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Field access is read-only
+		AccessMode::ReadOnly
 	}
 }
 
@@ -340,6 +360,11 @@ impl PhysicalExpr for BinaryOp {
 	fn references_current_value(&self) -> bool {
 		self.left.references_current_value() || self.right.references_current_value()
 	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine both sides' access modes
+		self.left.access_mode().combine(self.right.access_mode())
+	}
 }
 
 impl ToSql for BinaryOp {
@@ -398,6 +423,11 @@ impl PhysicalExpr for UnaryOp {
 	fn references_current_value(&self) -> bool {
 		self.expr.references_current_value()
 	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Propagate inner expression's access mode
+		self.expr.access_mode()
+	}
 }
 
 impl ToSql for UnaryOp {
@@ -451,6 +481,11 @@ impl PhysicalExpr for PostfixOp {
 	fn references_current_value(&self) -> bool {
 		self.expr.references_current_value()
 	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Propagate inner expression's access mode
+		self.expr.access_mode()
+	}
 }
 
 impl ToSql for PostfixOp {
@@ -490,6 +525,12 @@ impl PhysicalExpr for ScalarSubquery {
 		// For now, assume subqueries don't reference current value
 		// TODO: Track if plan references outer scope for correlated subqueries
 		false
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// CRITICAL: Propagate the subquery's access mode!
+		// This is why `SELECT *, (UPSERT person) FROM person` is ReadWrite
+		self.plan.access_mode()
 	}
 }
 

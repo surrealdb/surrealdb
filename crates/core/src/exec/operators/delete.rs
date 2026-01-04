@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::Permission;
@@ -14,7 +15,9 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
-use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+};
 use crate::iam::Action;
 use crate::val::TableName;
 
@@ -30,6 +33,7 @@ pub struct Delete {
 	pub input: Arc<dyn OperatorPlan>,
 }
 
+#[async_trait]
 impl OperatorPlan for Delete {
 	fn name(&self) -> &'static str {
 		"Delete"
@@ -37,6 +41,11 @@ impl OperatorPlan for Delete {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// DELETE always mutates data
+		AccessMode::ReadWrite
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

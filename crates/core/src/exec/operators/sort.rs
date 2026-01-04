@@ -3,12 +3,13 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -65,6 +66,7 @@ pub struct Sort {
 	pub(crate) order_by: Vec<OrderByField>,
 }
 
+#[async_trait]
 impl OperatorPlan for Sort {
 	fn name(&self) -> &'static str {
 		"Sort"
@@ -93,6 +95,12 @@ impl OperatorPlan for Sort {
 	fn required_context(&self) -> ContextLevel {
 		// Sort needs Database for expression evaluation
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine input's access mode with all ORDER BY expressions
+		let expr_mode = self.order_by.iter().map(|f| f.expr.access_mode()).combine_all();
+		self.input.access_mode().combine(expr_mode)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

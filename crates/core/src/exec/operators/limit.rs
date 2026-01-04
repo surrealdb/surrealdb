@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use crate::err::Error;
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 
@@ -22,6 +24,7 @@ pub struct Limit {
 	pub(crate) offset: Option<Arc<dyn PhysicalExpr>>,
 }
 
+#[async_trait]
 impl OperatorPlan for Limit {
 	fn name(&self) -> &'static str {
 		"Limit"
@@ -41,6 +44,18 @@ impl OperatorPlan for Limit {
 	fn required_context(&self) -> ContextLevel {
 		// Inherit child requirements
 		self.input.required_context()
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine input's mode with limit/offset expressions
+		let mut mode = self.input.access_mode();
+		if let Some(limit) = &self.limit {
+			mode = mode.combine(limit.access_mode());
+		}
+		if let Some(offset) = &self.offset {
+			mode = mode.combine(offset.access_mode());
+		}
+		mode
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::exec::{ExecutionContext, OperatorPlan, PhysicalExpr};
+use crate::exec::{AccessMode, ExecutionContext, OperatorPlan, PhysicalExpr};
 use crate::val::Value;
 
 /// Unique identifier for statements within a script.
@@ -154,6 +154,26 @@ impl StatementPlan {
 	/// Does this statement modify the execution context?
 	pub fn mutates_context(&self) -> bool {
 		self.kind.mutates_context()
+	}
+
+	/// Get the access mode for this statement based on its content.
+	///
+	/// This is the plan-based access mode analysis that correctly handles
+	/// cases like `SELECT *, (UPSERT person) FROM person` which are
+	/// syntactically SELECT but actually perform mutations.
+	pub fn access_mode(&self) -> AccessMode {
+		match &self.content {
+			StatementContent::Query(plan) => plan.access_mode(),
+			StatementContent::Scalar(expr) => expr.access_mode(),
+		}
+	}
+
+	/// Check if this statement is read-only based on plan analysis.
+	///
+	/// This should be used instead of checking `kind` for dependency
+	/// calculation, as it correctly handles subqueries with mutations.
+	pub fn is_read_only(&self) -> bool {
+		self.access_mode() == AccessMode::ReadOnly
 	}
 }
 

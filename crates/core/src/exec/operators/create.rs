@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream;
 
 use crate::catalog::Permission;
@@ -14,7 +15,9 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
-use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+};
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::val::{TableName, Value};
@@ -40,6 +43,7 @@ pub struct Create {
 	pub content: ContentSource,
 }
 
+#[async_trait]
 impl OperatorPlan for Create {
 	fn name(&self) -> &'static str {
 		"Create"
@@ -47,6 +51,11 @@ impl OperatorPlan for Create {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// CREATE always mutates data
+		AccessMode::ReadWrite
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {

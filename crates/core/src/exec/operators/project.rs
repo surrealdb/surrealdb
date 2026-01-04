@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::sync::Mutex;
 
@@ -16,8 +17,8 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::iam::Action;
 use crate::val::{Object, TableName, Value};
@@ -47,6 +48,7 @@ pub struct Project {
 	pub fields: Vec<FieldSelection>,
 }
 
+#[async_trait]
 impl OperatorPlan for Project {
 	fn name(&self) -> &'static str {
 		"Project"
@@ -56,6 +58,14 @@ impl OperatorPlan for Project {
 		// Project needs Database for field permission lookup, but also
 		// inherits child requirements (take the maximum)
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine input's mode with all field expressions
+		// This is critical: a projection like `SELECT *, (UPSERT person) FROM person`
+		// must return ReadWrite because the subquery mutates!
+		let expr_mode = self.fields.iter().map(|f| f.expr.access_mode()).combine_all();
+		self.input.access_mode().combine(expr_mode)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {

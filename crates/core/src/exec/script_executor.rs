@@ -6,6 +6,14 @@
 //! Context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL) implement
 //! `mutates_context() = true` and provide `output_context()` to compute
 //! the modified context after execution.
+//!
+//! ## Block Execution Model
+//!
+//! The executor supports the unified block execution model:
+//! - Top-level scripts (Collect mode)
+//! - FOR loop bodies (Discard mode)
+//! - IF/ELSE branches (Discard mode)
+//! - Control flow signals (BREAK, CONTINUE, RETURN, THROW)
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,10 +21,14 @@ use std::time::Instant;
 use futures::StreamExt;
 use tokio::task::JoinSet;
 
+use crate::exec::block::{
+	BlockOutputMode, BlockPlan, BlockResult, ForPlan, IfPlan, LetValueSource, PlannedStatement,
+	StatementOperation,
+};
 use crate::exec::completion_map::{CompletionError, CompletionMap};
 use crate::exec::statement::{ScriptPlan, StatementContent, StatementId, StatementOutput};
 use crate::exec::{EvalContext, ExecutionContext};
-use crate::val::Value;
+use crate::val::{Array, Value};
 
 /// Error during script execution
 #[derive(Debug)]
@@ -223,6 +235,7 @@ async fn execute_content(
 			// Compute output context if this operator mutates it
 			let output_ctx = if plan.mutates_context() {
 				plan.output_context(ctx)
+					.await
 					.map_err(|e| anyhow::anyhow!("Context mutation error: {}", e))?
 			} else {
 				ctx.clone()
@@ -270,6 +283,303 @@ async fn collect_stream(
 	}
 
 	Ok(results)
+}
+
+// ============================================================================
+// Block Execution Model
+// ============================================================================
+
+/// Execute a block plan with the given initial context.
+///
+/// The block executes statements sequentially, handling:
+/// - Context propagation (LET, USE)
+/// - Dependency ordering (wait_for)
+/// - Control flow signals (BREAK, CONTINUE, RETURN, THROW)
+/// - Output mode (Collect vs Discard)
+///
+/// Note: This function returns a boxed future to allow recursive calls
+/// (FOR loops and IF statements can nest blocks).
+pub fn execute_block(
+	block: &BlockPlan,
+	ctx: ExecutionContext,
+) -> std::pin::Pin<
+	Box<dyn std::future::Future<Output = Result<BlockResult, anyhow::Error>> + Send + '_>,
+> {
+	Box::pin(execute_block_inner(block, ctx))
+}
+
+async fn execute_block_inner(
+	block: &BlockPlan,
+	ctx: ExecutionContext,
+) -> Result<BlockResult, anyhow::Error> {
+	let mut current_ctx = ctx;
+	let mut results: Vec<Value> = Vec::new();
+	let mut last_value = Value::None;
+
+	for stmt in &block.statements {
+		// Execute the statement
+		let (stmt_results, new_ctx, signal) = execute_block_statement(stmt, &current_ctx).await?;
+
+		// Handle control flow signals
+		if let Some(signal) = signal {
+			return Ok(signal);
+		}
+
+		// Update context
+		current_ctx = new_ctx;
+
+		// Handle results based on output mode
+		match block.output_mode {
+			BlockOutputMode::Collect => {
+				// Collect all results
+				if stmt_results.len() == 1 {
+					results.push(stmt_results.into_iter().next().unwrap());
+				} else if !stmt_results.is_empty() {
+					results.push(Value::Array(Array(stmt_results)));
+				} else {
+					results.push(Value::None);
+				}
+			}
+			BlockOutputMode::Discard => {
+				// Only keep last value
+				if let Some(v) = stmt_results.into_iter().last() {
+					last_value = v;
+				}
+			}
+		}
+	}
+
+	// Return results based on output mode
+	match block.output_mode {
+		BlockOutputMode::Collect => Ok(BlockResult::Completed(results)),
+		BlockOutputMode::Discard => Ok(BlockResult::Completed(vec![last_value])),
+	}
+}
+
+/// Execute a single block statement and return results, new context, and optional control signal.
+async fn execute_block_statement(
+	stmt: &PlannedStatement,
+	ctx: &ExecutionContext,
+) -> Result<(Vec<Value>, ExecutionContext, Option<BlockResult>), anyhow::Error> {
+	match &stmt.operation {
+		StatementOperation::Operator(plan) => {
+			// Execute the operator
+			let stream =
+				plan.execute(ctx).map_err(|e| anyhow::anyhow!("Query execution error: {}", e))?;
+			let results = collect_stream(stream).await?;
+
+			// Compute output context if this operator mutates it
+			let output_ctx = if plan.mutates_context() {
+				plan.output_context(ctx)
+					.await
+					.map_err(|e| anyhow::anyhow!("Context mutation error: {}", e))?
+			} else {
+				ctx.clone()
+			};
+
+			Ok((results, output_ctx, None))
+		}
+
+		StatementOperation::Let {
+			name,
+			value,
+		} => {
+			// Evaluate the value
+			let computed_value = match value {
+				LetValueSource::Scalar(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(ctx);
+					expr.evaluate(eval_ctx).await.map_err(|e| anyhow::anyhow!("{}", e))?
+				}
+				LetValueSource::Query(plan) => {
+					let stream = plan
+						.execute(ctx)
+						.map_err(|e| anyhow::anyhow!("LET query execution error: {}", e))?;
+					let results = collect_stream(stream).await?;
+					Value::Array(Array(results))
+				}
+			};
+
+			// Add the parameter to the context
+			let output_ctx = ctx.with_param(name.clone(), computed_value);
+			Ok((vec![], output_ctx, None))
+		}
+
+		StatementOperation::Use {
+			ns,
+			db,
+		} => {
+			// Build a UsePlan and execute it for context mutation
+			let use_plan = crate::exec::operators::UsePlan {
+				ns: ns.clone(),
+				db: db.clone(),
+			};
+			// Cast to trait to call output_context
+			let op: &dyn crate::exec::OperatorPlan = &use_plan;
+			let output_ctx =
+				op.output_context(ctx).await.map_err(|e| anyhow::anyhow!("USE error: {}", e))?;
+			Ok((vec![], output_ctx, None))
+		}
+
+		StatementOperation::For(for_plan) => {
+			let (results, signal) = execute_for(for_plan, ctx).await?;
+			Ok((results, ctx.clone(), signal))
+		}
+
+		StatementOperation::If(if_plan) => {
+			let (results, signal) = execute_if(if_plan, ctx).await?;
+			Ok((results, ctx.clone(), signal))
+		}
+
+		StatementOperation::Break => Ok((vec![], ctx.clone(), Some(BlockResult::Break))),
+
+		StatementOperation::Continue => Ok((vec![], ctx.clone(), Some(BlockResult::Continue))),
+
+		StatementOperation::Return(expr) => {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			let value = expr.evaluate(eval_ctx).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+			Ok((vec![], ctx.clone(), Some(BlockResult::Return(value))))
+		}
+
+		StatementOperation::Throw(expr) => {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			let value = expr.evaluate(eval_ctx).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+			Ok((vec![], ctx.clone(), Some(BlockResult::Throw(value))))
+		}
+
+		StatementOperation::Sleep(duration) => {
+			tokio::time::sleep(*duration).await;
+			Ok((vec![], ctx.clone(), None))
+		}
+	}
+}
+
+/// Execute a FOR loop.
+async fn execute_for(
+	for_plan: &ForPlan,
+	ctx: &ExecutionContext,
+) -> Result<(Vec<Value>, Option<BlockResult>), anyhow::Error> {
+	// Evaluate the iterable
+	let eval_ctx = EvalContext::from_exec_ctx(ctx);
+	let iterable_value =
+		for_plan.iterable.evaluate(eval_ctx).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+	// Convert to iterable
+	let items: Vec<Value> = match iterable_value {
+		Value::Array(arr) => arr.0,
+		Value::Range(range) => {
+			// Convert range to array of values
+			range_to_values(&range)?
+		}
+		other => {
+			// Single value iteration
+			vec![other]
+		}
+	};
+
+	let mut results = Vec::new();
+
+	for item in items {
+		// Create context with loop variable
+		let loop_ctx = ctx.with_param(for_plan.variable.clone(), item);
+
+		// Execute the body
+		match execute_block(&for_plan.body, loop_ctx).await? {
+			BlockResult::Completed(body_results) => {
+				results.extend(body_results);
+			}
+			BlockResult::Break => {
+				// BREAK exits the loop
+				break;
+			}
+			BlockResult::Continue => {
+				// CONTINUE skips to next iteration
+				continue;
+			}
+			BlockResult::Return(v) => {
+				// RETURN propagates up
+				return Ok((vec![], Some(BlockResult::Return(v))));
+			}
+			BlockResult::Throw(v) => {
+				// THROW propagates up
+				return Ok((vec![], Some(BlockResult::Throw(v))));
+			}
+		}
+	}
+
+	Ok((results, None))
+}
+
+/// Execute an IF/ELSE statement.
+async fn execute_if(
+	if_plan: &IfPlan,
+	ctx: &ExecutionContext,
+) -> Result<(Vec<Value>, Option<BlockResult>), anyhow::Error> {
+	// Evaluate branches in order
+	for branch in &if_plan.branches {
+		let eval_ctx = EvalContext::from_exec_ctx(ctx);
+		let condition_value =
+			branch.condition.evaluate(eval_ctx).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+		if condition_value.is_truthy() {
+			// Execute this branch
+			return match execute_block(&branch.body, ctx.clone()).await? {
+				BlockResult::Completed(results) => {
+					// Return last value from branch
+					let value = results.into_iter().last().unwrap_or(Value::None);
+					Ok((vec![value], None))
+				}
+				signal => Ok((vec![], Some(signal))),
+			};
+		}
+	}
+
+	// No branch matched - execute else branch if present
+	if let Some(else_branch) = &if_plan.else_branch {
+		return match execute_block(else_branch, ctx.clone()).await? {
+			BlockResult::Completed(results) => {
+				let value = results.into_iter().last().unwrap_or(Value::None);
+				Ok((vec![value], None))
+			}
+			signal => Ok((vec![], Some(signal))),
+		};
+	}
+
+	// No branch executed, return NONE
+	Ok((vec![Value::None], None))
+}
+
+/// Convert a Range to a vector of values.
+fn range_to_values(range: &crate::val::Range) -> Result<Vec<Value>, anyhow::Error> {
+	use std::ops::Bound;
+
+	// Extract numeric bounds
+	let start = match &range.start {
+		Bound::Included(v) => value_to_i64(v)?,
+		Bound::Excluded(v) => value_to_i64(v)? + 1,
+		Bound::Unbounded => return Err(anyhow::anyhow!("FOR loop range must have a start bound")),
+	};
+
+	let end = match &range.end {
+		Bound::Included(v) => value_to_i64(v)? + 1,
+		Bound::Excluded(v) => value_to_i64(v)?,
+		Bound::Unbounded => return Err(anyhow::anyhow!("FOR loop range must have an end bound")),
+	};
+
+	// Check for reasonable range size
+	let size = (end - start).max(0) as usize;
+	if size > 1_000_000 {
+		return Err(anyhow::anyhow!("FOR loop range too large: {} elements", size));
+	}
+
+	Ok((start..end).map(|i| Value::Number(crate::val::Number::Int(i))).collect())
+}
+
+/// Convert a Value to i64 for range bounds.
+fn value_to_i64(v: &Value) -> Result<i64, anyhow::Error> {
+	match v {
+		Value::Number(n) => Ok(n.clone().to_int()),
+		_ => Err(anyhow::anyhow!("Range bound must be a number, got {:?}", v)),
+	}
 }
 
 #[cfg(test)]

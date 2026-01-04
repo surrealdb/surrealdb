@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream;
 
 use crate::catalog::Permission;
@@ -9,7 +10,9 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
-use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+};
 use crate::iam::Action;
 use crate::val::RecordId;
 
@@ -28,6 +31,7 @@ pub struct RecordIdLookup {
 	pub(crate) version: Option<u64>,
 }
 
+#[async_trait]
 impl OperatorPlan for RecordIdLookup {
 	fn name(&self) -> &'static str {
 		"RecordIdLookup"
@@ -35,6 +39,11 @@ impl OperatorPlan for RecordIdLookup {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Record lookup is always read-only
+		AccessMode::ReadOnly
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {

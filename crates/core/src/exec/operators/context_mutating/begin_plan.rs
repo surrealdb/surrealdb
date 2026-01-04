@@ -5,12 +5,13 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
 use crate::kvs::{LockType, TransactionType};
 
 /// BEGIN operator - starts a write transaction.
@@ -21,6 +22,7 @@ use crate::kvs::{LockType, TransactionType};
 #[derive(Debug)]
 pub struct BeginPlan;
 
+#[async_trait]
 impl OperatorPlan for BeginPlan {
 	fn name(&self) -> &'static str {
 		"Begin"
@@ -29,6 +31,11 @@ impl OperatorPlan for BeginPlan {
 	fn required_context(&self) -> ContextLevel {
 		// BEGIN can run at any level, but requires datastore access
 		ContextLevel::Root
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// BEGIN only mutates context (transaction state), not data
+		AccessMode::ReadOnly
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
@@ -40,17 +47,17 @@ impl OperatorPlan for BeginPlan {
 		true
 	}
 
-	fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
+	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		// Get the datastore to create a new write transaction
 		let ds = input
 			.datastore()
 			.ok_or_else(|| Error::Thrown("BEGIN requires datastore access".to_string()))?;
 
 		// Create a new write transaction with optimistic locking
-		let write_txn = futures::executor::block_on(
-			ds.transaction(TransactionType::Write, LockType::Optimistic),
-		)
-		.map_err(|e| Error::Thrown(format!("Failed to create write transaction: {}", e)))?;
+		let write_txn = ds
+			.transaction(TransactionType::Write, LockType::Optimistic)
+			.await
+			.map_err(|e| Error::Thrown(format!("Failed to create write transaction: {}", e)))?;
 
 		// Return context with the new write transaction
 		input.with_transaction(Arc::new(write_txn))

@@ -1,10 +1,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use async_trait::async_trait;
 use tokio::sync::{RwLock, watch};
 
 use crate::err::Error;
-use crate::exec::{ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+};
 
 /// A source that executes once, caches incrementally, and allows multiple
 /// consumers to read at their own pace—getting cached data immediately
@@ -102,6 +105,7 @@ impl BroadcastSource {
 	}
 }
 
+#[async_trait]
 impl OperatorPlan for BroadcastSource {
 	fn name(&self) -> &'static str {
 		"BroadcastSource"
@@ -110,6 +114,11 @@ impl OperatorPlan for BroadcastSource {
 	fn required_context(&self) -> ContextLevel {
 		// Forward the context requirement from the input plan
 		self.input.required_context()
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Forward the access mode from the input plan
+		self.input.access_mode()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
@@ -275,6 +284,10 @@ mod tests {
 			ContextLevel::Root
 		}
 
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
+		}
+
 		fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
 			use futures::StreamExt;
 			let batches = (*self.batches).clone();
@@ -306,6 +319,10 @@ mod tests {
 
 		fn required_context(&self) -> ContextLevel {
 			ContextLevel::Root
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			AccessMode::ReadOnly
 		}
 
 		fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {

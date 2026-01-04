@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::Permission;
@@ -15,8 +16,8 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
 };
 use crate::iam::Action;
 use crate::val::{TableName, Value};
@@ -44,6 +45,7 @@ pub struct Update {
 	pub changes: Vec<SetField>,
 }
 
+#[async_trait]
 impl OperatorPlan for Update {
 	fn name(&self) -> &'static str {
 		"Update"
@@ -51,6 +53,11 @@ impl OperatorPlan for Update {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database.max(self.input.required_context())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// UPDATE always mutates data
+		AccessMode::ReadWrite
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
