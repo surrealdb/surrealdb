@@ -45,13 +45,13 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
-use crate::dbs::executor::StreamExecutor;
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
 	Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session,
 };
 use crate::err::Error;
-use crate::exec::planner::{logical_plan_to_execution_plan, logical_plan_to_script_plan};
+use crate::exec::planner::logical_plan_to_execution_plan;
+use crate::exec::{ExecutionContext, StreamExecutor};
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
@@ -1703,7 +1703,7 @@ impl Datastore {
 			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
 		}
 
-		// Create a new query options
+		// Create a new query options (currently unused but may be needed for future enhancements)
 		let opt = self.setup_options(sess);
 
 		// Create a default context
@@ -1794,20 +1794,18 @@ impl Datastore {
 
 		let results = match logical_plan_to_execution_plan(&plan) {
 			Ok(execution_plan) => {
-				let stream_executor = StreamExecutor::new(execution_plan);
-
 				// Pass session's ns/db, auth, and session values to initialize the stream
 				// executor's context
-				stream_executor
-					.execute_collected(
-						self,
-						sess.ns.as_deref(),
-						sess.db.as_deref(),
-						sess.au.clone(),
-						self.auth_enabled,
-						sess.values(),
-					)
-					.await
+				StreamExecutor::execute_collected(
+					self,
+					execution_plan,
+					sess.ns.as_deref(),
+					sess.db.as_deref(),
+					sess.au.clone(),
+					self.auth_enabled,
+					sess.values(),
+				)
+				.await
 			}
 			Err(err) => {
 				if sess.require_new_planner {

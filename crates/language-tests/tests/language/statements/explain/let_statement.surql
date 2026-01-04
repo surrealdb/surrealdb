@@ -3,10 +3,11 @@
 reason = "Test EXPLAIN with LET statement"
 
 [[test.results]]
-value = """
-'Let [name: $x]
-=> Literal
-'"""
+value = """[
+'Let [ctx: Rt] [name: $x]
+└────> Expr [ctx: Rt] [expr: 5]
+'
+]"""
 
 */
 

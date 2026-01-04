@@ -18,5 +18,5 @@ mod use_plan;
 pub use begin_plan::BeginPlan;
 pub use cancel_plan::CancelPlan;
 pub use commit_plan::CommitPlan;
-pub use let_plan::{LetPlan, LetValue};
+pub use let_plan::LetPlan;
 pub use use_plan::UsePlan;

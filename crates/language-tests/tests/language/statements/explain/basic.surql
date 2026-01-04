@@ -2,10 +2,11 @@
 [test]
 
 [[test.results]]
-value = """
+value = """[
 "ComputeFields [ctx: Db] [table: 'person']
 └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 */
 

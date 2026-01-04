@@ -11,33 +11,24 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
 use crate::val::{Array, Value};
-
-/// The value to bind in a LET statement.
-#[derive(Debug, Clone)]
-pub enum LetValue {
-	/// Scalar expression - evaluates to exactly one Value
-	/// Example: LET $x = 1 + 2
-	Scalar(Arc<dyn PhysicalExpr>),
-
-	/// Query - stream is collected into Value::Array
-	/// Example: LET $users = SELECT * FROM user
-	Query(Arc<dyn OperatorPlan>),
-}
 
 /// LET operator - binds a value to a parameter.
 ///
 /// Implements `OperatorPlan` with `mutates_context() = true`.
-/// The `output_context()` method evaluates the value (scalar or query)
-/// and adds it to the context parameters.
+/// The `output_context()` method evaluates the value and adds it to the
+/// context parameters.
+///
+/// The value can be:
+/// - A scalar expression (wrapped in `ExprPlan`) - evaluates to a single value
+/// - A query - results are collected into an array
 #[derive(Debug)]
 pub struct LetPlan {
 	/// Parameter name to bind (without $)
 	pub name: String,
-	/// Value to bind
-	pub value: LetValue,
+	/// Value to bind - either an ExprPlan for scalars or a query plan
+	pub value: Arc<dyn OperatorPlan>,
 }
 
 #[async_trait]
@@ -51,31 +42,20 @@ impl OperatorPlan for LetPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		match &self.value {
-			LetValue::Scalar(expr) => {
-				if expr.references_current_value() {
-					// This would be an error - LET can't reference row context
-					// But we return Database as a safe fallback
-					ContextLevel::Database
-				} else {
-					ContextLevel::Root
-				}
-			}
-			LetValue::Query(plan) => plan.required_context(),
-		}
+		self.value.required_context()
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// LET's access mode depends on its value expression
-		match &self.value {
-			LetValue::Scalar(expr) => expr.access_mode(),
-			LetValue::Query(plan) => plan.access_mode(),
-		}
+		self.value.access_mode()
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		// LET produces no data output - it only mutates context
-		Ok(Box::pin(stream::empty()))
+		// LET returns NONE as its result (the binding happens in output_context)
+		Ok(Box::pin(stream::once(async {
+			Ok(crate::exec::ValueBatch {
+				values: vec![Value::None],
+			})
+		})))
 	}
 
 	fn mutates_context(&self) -> bool {
@@ -83,19 +63,18 @@ impl OperatorPlan for LetPlan {
 	}
 
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
-		let eval_ctx = EvalContext::from_exec_ctx(input);
+		// Execute the value plan and collect results
+		let stream = self.value.execute(input)?;
+		let results = collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
 
-		let computed_value = match &self.value {
-			LetValue::Scalar(expr) => {
-				expr.evaluate(eval_ctx).await.map_err(|e| Error::Thrown(e.to_string()))?
-			}
-			LetValue::Query(plan) => {
-				// Execute the query and collect results into an array
-				let stream = plan.execute(input)?;
-				let results =
-					collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
-				Value::Array(Array(results))
-			}
+		// If the value is a scalar expression, use the single result directly
+		// Otherwise, wrap the results in an array
+		let computed_value = if self.value.is_scalar() {
+			// Scalar expressions return exactly one value
+			results.into_iter().next().unwrap_or(Value::None)
+		} else {
+			// Queries return results as an array
+			Value::Array(Array(results))
 		};
 
 		// Add the parameter to the context
@@ -103,10 +82,7 @@ impl OperatorPlan for LetPlan {
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
-		match &self.value {
-			LetValue::Scalar(_) => vec![],
-			LetValue::Query(plan) => vec![plan],
-		}
+		vec![&self.value]
 	}
 }
 
@@ -142,18 +118,10 @@ impl ToSql for LetPlan {
 		f.push_str("LET $");
 		f.push_str(&self.name);
 		f.push_str(" = ");
-		match &self.value {
-			LetValue::Scalar(_) => f.push_str("<expr>"),
-			LetValue::Query(_) => f.push_str("(<query>)"),
-		}
-	}
-}
-
-impl ToSql for LetValue {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		match self {
-			Self::Scalar(_) => f.push_str("<expr>"),
-			Self::Query(_) => f.push_str("(<query>)"),
+		if self.value.is_scalar() {
+			f.push_str("<expr>");
+		} else {
+			f.push_str("(<query>)");
 		}
 	}
 }

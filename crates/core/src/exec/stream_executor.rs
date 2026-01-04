@@ -15,20 +15,31 @@
 //! - IF/ELSE branches (Discard mode)
 //! - Control flow signals (BREAK, CONTINUE, RETURN, THROW)
 
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
 
 use futures::StreamExt;
 use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+use crate::dbs::{QueryResult, QueryType};
+use crate::err::Error;
 use crate::exec::block::{
 	BlockOutputMode, BlockPlan, BlockResult, ForPlan, IfPlan, LetValueSource, PlannedStatement,
 	StatementOperation,
 };
 use crate::exec::completion_map::{CompletionError, CompletionMap};
-use crate::exec::statement::{ScriptPlan, StatementContent, StatementId, StatementOutput};
-use crate::exec::{EvalContext, ExecutionContext};
-use crate::val::{Array, Value};
+use crate::exec::context::{DatabaseContext, NamespaceContext, Parameters, RootContext};
+use crate::exec::planner::logical_plan_to_execution_plan;
+use crate::exec::statement::{ExecutionPlan, StatementId, StatementOutput, StatementResult};
+use crate::exec::{EvalContext, ExecutionContext, OperatorPlan};
+use crate::expr::LogicalPlan;
+use crate::iam::Auth;
+use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::rpc::DbResultError;
+use crate::val::{Array, Value, convert_value_to_public_value};
 
 /// Error during script execution
 #[derive(Debug)]
@@ -68,17 +79,59 @@ impl From<CompletionError> for ScriptExecutionError {
 	}
 }
 
+impl From<Error> for ScriptExecutionError {
+	fn from(e: Error) -> Self {
+		Self::Internal(e.to_string())
+	}
+}
+
+/// Convert a StatementOutput to a QueryResult.
+///
+/// This handles the conversion from internal Value types to PublicValue.
+/// Scalar expressions return their value directly; queries wrap results in an array.
+/// Statement errors are converted to QueryResult with error result.
+fn statement_output_to_query_result(output: StatementOutput) -> Result<QueryResult, anyhow::Error> {
+	let result = match output.result {
+		StatementResult::Err(msg) => {
+			// Statement-level error - convert to QueryResult error
+			Err(DbResultError::InternalError(msg))
+		}
+		StatementResult::Ok(results) => {
+			// Convert Vec<Value> to PublicValue
+			let public_value = if output.is_scalar && results.len() == 1 {
+				// Scalar expressions return single value directly
+				convert_value_to_public_value(results.into_iter().next().unwrap())?
+			} else if results.len() == 1 && matches!(results[0], Value::None) {
+				// Context-mutating operators (LET, USE, BEGIN, etc.) return NONE directly
+				convert_value_to_public_value(results.into_iter().next().unwrap())?
+			} else {
+				// Queries wrap results in an array
+				let converted: Result<Vec<_>, _> =
+					results.into_iter().map(convert_value_to_public_value).collect();
+				surrealdb_types::Value::Array(surrealdb_types::Array::from(converted?))
+			};
+			Ok(public_value)
+		}
+	};
+
+	Ok(QueryResult {
+		time: output.duration,
+		result,
+		query_type: QueryType::Other,
+	})
+}
+
 /// Executes script plans with parallel statement execution.
 ///
 /// The executor spawns all statements concurrently and uses the DAG structure
 /// to ensure correct ordering. Statements wait for their dependencies before
 /// executing, and signal completion to unblock dependent statements.
-pub struct ScriptExecutor {
+pub struct StreamExecutor {
 	/// The initial execution context for the script
 	initial_context: ExecutionContext,
 }
 
-impl ScriptExecutor {
+impl StreamExecutor {
 	/// Create a new executor with the given initial context.
 	pub fn new(initial_context: ExecutionContext) -> Self {
 		Self {
@@ -86,13 +139,124 @@ impl ScriptExecutor {
 		}
 	}
 
+	/// Execute a logical plan, returning results for all statements.
+	///
+	/// This is the main entry point that mirrors `StreamExecutor::execute_collected`.
+	/// It handles:
+	/// - Converting LogicalPlan to ScriptPlan
+	/// - Building the initial ExecutionContext from session state
+	/// - Executing all statements with parallel execution where possible
+	/// - Converting StatementOutput to QueryResult
+	///
+	/// # Parameters
+	/// - `ds`: The datastore to execute against
+	/// - `plan`: The logical plan to execute
+	/// - `initial_ns`: Optional namespace name to initialize the session with
+	/// - `initial_db`: Optional database name to initialize the session with
+	/// - `auth`: The authentication context for this session
+	/// - `auth_enabled`: Whether authentication is enabled on the datastore
+	/// - `session_values`: Session-based parameters ($auth, $access, $token, $session)
+	pub(crate) async fn execute_collected(
+		ds: &Datastore,
+		execution_plan: ExecutionPlan,
+		initial_ns: Option<&str>,
+		initial_db: Option<&str>,
+		auth: Arc<Auth>,
+		auth_enabled: bool,
+		session_values: Vec<(&'static str, Value)>,
+	) -> Result<Vec<QueryResult>, anyhow::Error> {
+		// Create a read transaction for the initial context
+		let txn = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
+
+		// Initialize parameters with session values ($auth, $access, $token, $session)
+		let mut initial_params = Parameters::new();
+		for (name, value) in session_values {
+			initial_params.insert(Cow::Borrowed(name), Arc::new(value));
+		}
+		let params = Arc::new(initial_params);
+
+		// Build the initial ExecutionContext based on ns/db selection
+		// Note: datastore is None because we only have a borrowed reference.
+		// Root-level operations that need datastore access (e.g., BEGIN) will need
+		// to be handled differently.
+		let initial_context = if let Some(ns_name) = initial_ns {
+			// Look up namespace definition
+			let ns = txn
+				.expect_ns_by_name(ns_name)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to look up namespace '{}': {}", ns_name, e))?;
+
+			if let Some(db_name) = initial_db {
+				// Look up database definition
+				let db = txn.expect_db_by_name(ns_name, db_name).await.map_err(|e| {
+					anyhow::anyhow!("Failed to look up database '{}': {}", db_name, e)
+				})?;
+
+				// Database-level context
+				ExecutionContext::Database(DatabaseContext {
+					ns_ctx: NamespaceContext {
+						root: RootContext {
+							datastore: None,
+							params: params.clone(),
+							cancellation: CancellationToken::new(),
+							auth,
+							auth_enabled,
+							txn: txn.clone(),
+						},
+						ns,
+					},
+					db,
+				})
+			} else {
+				// Namespace-level context
+				ExecutionContext::Namespace(NamespaceContext {
+					root: RootContext {
+						datastore: None,
+						params: params.clone(),
+						cancellation: CancellationToken::new(),
+						auth,
+						auth_enabled,
+						txn: txn.clone(),
+					},
+					ns,
+				})
+			}
+		} else {
+			// Root-level context
+			ExecutionContext::Root(RootContext {
+				datastore: None,
+				params,
+				cancellation: CancellationToken::new(),
+				auth,
+				auth_enabled,
+				txn: txn.clone(),
+			})
+		};
+
+		// Create executor and run
+		let executor = StreamExecutor::new(initial_context);
+		let outputs = executor.execute(execution_plan).await?;
+
+		// Convert StatementOutput to QueryResult
+		let results = outputs
+			.into_iter()
+			.map(|output| statement_output_to_query_result(output))
+			.collect::<Result<Vec<_>, _>>()?;
+
+		Ok(results)
+	}
+
 	/// Execute a script plan, returning results for all statements.
 	///
 	/// Statements are executed in parallel where possible, respecting the
 	/// DAG ordering defined by `context_source` and `wait_for`.
+	///
+	/// Statement-level errors are captured in `StatementOutput::result` rather than
+	/// failing the entire execution. Only infrastructure errors (task panics,
+	/// invalid statement IDs) cause execution to fail.
 	pub async fn execute(
 		&self,
-		script: ScriptPlan,
+		script: ExecutionPlan,
 	) -> Result<Vec<StatementOutput>, ScriptExecutionError> {
 		let n = script.statements.len();
 		if n == 0 {
@@ -109,8 +273,7 @@ impl ScriptExecutor {
 			let stmt_id = stmt.id;
 			let context_source = stmt.context_source;
 			let wait_for = stmt.wait_for.clone();
-			let content = stmt.content.clone();
-			let mutates_ctx = stmt.mutates_context();
+			let plan = stmt.plan.clone();
 
 			let completed = Arc::clone(&completed);
 			let initial = self.initial_context.clone();
@@ -120,8 +283,7 @@ impl ScriptExecutor {
 					stmt_id,
 					context_source,
 					wait_for,
-					content,
-					mutates_ctx,
+					plan,
 					&completed,
 					&initial,
 				)
@@ -129,37 +291,48 @@ impl ScriptExecutor {
 
 				match result {
 					Ok(output) => {
+						// Statement executed (may have error in result, but infrastructure
+						// succeeded)
 						completed.complete(stmt_id, output);
-						(stmt_id, Ok(()))
+						Ok(stmt_id)
 					}
 					Err(e) => {
-						let error_msg = e.to_string();
-						completed.fail(stmt_id, error_msg.clone());
-						(stmt_id, Err(error_msg))
+						// Infrastructure error (bad dependency, etc.) - create error output
+						let error_output = StatementOutput {
+							context: initial.clone(),
+							result: StatementResult::Err(e.to_string()),
+							duration: std::time::Duration::ZERO,
+							is_scalar: false,
+						};
+						completed.complete(stmt_id, error_output);
+						Ok(stmt_id)
 					}
 				}
 			});
 		}
 
 		// Wait for all statements to complete
-		let mut errors = Vec::new();
+		let mut infrastructure_errors = Vec::new();
 		while let Some(result) = join_set.join_next().await {
 			match result {
-				Ok((stmt_id, Err(e))) => {
-					errors.push((stmt_id, e));
+				Ok(Ok(_stmt_id)) => {
+					// Statement completed (result may be success or error, but it's captured)
+				}
+				Ok(Err(e)) => {
+					// This shouldn't happen now since we handle errors above
+					infrastructure_errors.push((StatementId(usize::MAX), e));
 				}
 				Err(join_error) => {
-					errors.push((StatementId(usize::MAX), join_error.to_string()));
-				}
-				Ok((_, Ok(()))) => {
-					// Statement completed successfully
+					// Task panic - this is a fatal infrastructure error
+					infrastructure_errors
+						.push((StatementId(usize::MAX), format!("Task panicked: {}", join_error)));
 				}
 			}
 		}
 
-		// Report errors if any
-		if !errors.is_empty() {
-			return Err(ScriptExecutionError::MultipleStatementErrors(errors));
+		// Report infrastructure errors (task panics only)
+		if !infrastructure_errors.is_empty() {
+			return Err(ScriptExecutionError::MultipleStatementErrors(infrastructure_errors));
 		}
 
 		// Collect results in order
@@ -178,8 +351,7 @@ async fn execute_statement(
 	id: StatementId,
 	context_source: Option<StatementId>,
 	wait_for: Vec<StatementId>,
-	content: StatementContent,
-	mutates_ctx: bool,
+	plan: Arc<dyn OperatorPlan>,
 	completed: &CompletionMap,
 	initial: &ExecutionContext,
 ) -> Result<StatementOutput, anyhow::Error> {
@@ -203,57 +375,58 @@ async fn execute_statement(
 		}
 	};
 
-	// 3. Execute the statement content
-	let (results, output_ctx) = execute_content(&content, &input_ctx, mutates_ctx).await?;
+	// 3. Execute the plan
+	let (result, output_ctx, is_scalar) = execute_plan(plan.as_ref(), &input_ctx).await;
 
 	let duration = start.elapsed();
 
 	Ok(StatementOutput {
 		context: output_ctx,
-		results,
+		result,
 		duration,
+		is_scalar,
 	})
 }
 
-/// Execute statement content and return results and output context.
+/// Execute an operator plan and return result, output context, and whether it's a scalar.
 ///
 /// For context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL),
 /// this calls `output_context()` to get the modified context.
-async fn execute_content(
-	content: &StatementContent,
+/// Returns (result, output_context, is_scalar).
+///
+/// Statement-level errors are captured in the result rather than propagated up,
+/// matching SurrealDB's per-statement error semantics.
+async fn execute_plan(
+	plan: &dyn OperatorPlan,
 	ctx: &ExecutionContext,
-	_mutates_ctx: bool,
-) -> Result<(Vec<Value>, ExecutionContext), anyhow::Error> {
-	match content {
-		StatementContent::Query(plan) => {
-			// Execute the operator
-			let stream =
-				plan.execute(ctx).map_err(|e| anyhow::anyhow!("Query execution error: {}", e))?;
+) -> (StatementResult, ExecutionContext, bool) {
+	let is_scalar = plan.is_scalar();
 
-			let results = collect_stream(stream).await?;
+	// Execute the operator
+	let stream = match plan.execute(ctx) {
+		Ok(s) => s,
+		Err(e) => return (StatementResult::Err(e.to_string()), ctx.clone(), is_scalar),
+	};
 
-			// Compute output context if this operator mutates it
-			let output_ctx = if plan.mutates_context() {
-				plan.output_context(ctx)
-					.await
-					.map_err(|e| anyhow::anyhow!("Context mutation error: {}", e))?
-			} else {
-				ctx.clone()
-			};
+	let results = match collect_stream(stream).await {
+		Ok(r) => r,
+		Err(e) => return (StatementResult::Err(e.to_string()), ctx.clone(), is_scalar),
+	};
 
-			Ok((results, output_ctx))
+	// Compute output context if this operator mutates it
+	let output_ctx = if plan.mutates_context() {
+		match plan.output_context(ctx).await {
+			Ok(c) => c,
+			Err(e) => {
+				// Return the error message directly to preserve the error type formatting
+				return (StatementResult::Err(e.to_string()), ctx.clone(), is_scalar);
+			}
 		}
+	} else {
+		ctx.clone()
+	};
 
-		StatementContent::Scalar(expr) => {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx);
-			let value = expr
-				.evaluate(eval_ctx)
-				.await
-				.map_err(|e| anyhow::anyhow!("Scalar evaluation error: {}", e))?;
-			// Scalar expressions don't mutate context
-			Ok((vec![value], ctx.clone()))
-		}
-	}
+	(StatementResult::Ok(results), output_ctx, is_scalar)
 }
 
 /// Collect all values from a stream into a Vec
@@ -588,13 +761,13 @@ mod tests {
 
 	use super::*;
 	use crate::exec::OperatorPlan;
-	use crate::exec::operators::{BeginPlan, CancelPlan, CommitPlan, LetPlan, LetValue, UsePlan};
+	use crate::exec::operators::{BeginPlan, CancelPlan, CommitPlan, ExprPlan, LetPlan, UsePlan};
 	use crate::exec::physical_expr::Literal;
-	use crate::exec::statement::{StatementContent, StatementKind, StatementPlan};
+	use crate::exec::statement::{StatementKind, StatementPlan};
 
 	#[test]
 	fn test_script_plan_creation() {
-		let plan = ScriptPlan::new();
+		let plan = ExecutionPlan::new();
 		assert!(plan.is_empty());
 		assert_eq!(plan.len(), 0);
 	}
@@ -613,9 +786,9 @@ mod tests {
 	fn test_let_plan_mutates_context() {
 		let let_plan = LetPlan {
 			name: "x".to_string(),
-			value: LetValue::Scalar(Arc::new(Literal(crate::val::Value::Number(
-				crate::val::Number::Int(42),
-			)))),
+			value: Arc::new(ExprPlan {
+				expr: Arc::new(Literal(crate::val::Value::Number(crate::val::Number::Int(42)))),
+			}) as Arc<dyn OperatorPlan>,
 		};
 		assert!(let_plan.mutates_context());
 		assert_eq!(let_plan.name(), "Let");
@@ -671,7 +844,7 @@ mod tests {
 			id: StatementId(0),
 			context_source: None,
 			wait_for: vec![],
-			content: StatementContent::Query(use_plan),
+			plan: use_plan,
 			kind: StatementKind::ContextMutation,
 		};
 
@@ -687,7 +860,7 @@ mod tests {
 			id: StatementId(0),
 			context_source: None,
 			wait_for: vec![],
-			content: StatementContent::Query(begin_plan),
+			plan: begin_plan,
 			kind: StatementKind::Transaction,
 		};
 
@@ -705,16 +878,16 @@ mod tests {
 
 		let let_plan = Arc::new(LetPlan {
 			name: "x".to_string(),
-			value: LetValue::Scalar(Arc::new(Literal(crate::val::Value::Number(
-				crate::val::Number::Int(1),
-			)))),
+			value: Arc::new(ExprPlan {
+				expr: Arc::new(Literal(crate::val::Value::Number(crate::val::Number::Int(1)))),
+			}) as Arc<dyn OperatorPlan>,
 		}) as Arc<dyn OperatorPlan>;
 
 		let stmt0 = StatementPlan {
 			id: StatementId(0),
 			context_source: None, // Uses initial context
 			wait_for: vec![],
-			content: StatementContent::Query(use_plan),
+			plan: use_plan,
 			kind: StatementKind::ContextMutation,
 		};
 
@@ -722,25 +895,25 @@ mod tests {
 			id: StatementId(1),
 			context_source: Some(StatementId(0)), // Gets context from USE
 			wait_for: vec![],                     // No ordering dependency
-			content: StatementContent::Query(let_plan),
+			plan: let_plan,
 			kind: StatementKind::ContextMutation,
 		};
 
-		let plan = ScriptPlan {
+		let exec_plan = ExecutionPlan {
 			statements: vec![stmt0, stmt1],
 		};
 
-		assert_eq!(plan.len(), 2);
-		assert!(!plan.is_empty());
-		assert!(plan.get(StatementId(0)).is_some());
-		assert!(plan.get(StatementId(1)).is_some());
-		assert!(plan.get(StatementId(2)).is_none());
+		assert_eq!(exec_plan.len(), 2);
+		assert!(!exec_plan.is_empty());
+		assert!(exec_plan.get(StatementId(0)).is_some());
+		assert!(exec_plan.get(StatementId(1)).is_some());
+		assert!(exec_plan.get(StatementId(2)).is_none());
 
 		// Verify DAG structure
-		let stmt0_ref = plan.get(StatementId(0)).unwrap();
+		let stmt0_ref = exec_plan.get(StatementId(0)).unwrap();
 		assert!(stmt0_ref.context_source.is_none());
 
-		let stmt1_ref = plan.get(StatementId(1)).unwrap();
+		let stmt1_ref = exec_plan.get(StatementId(1)).unwrap();
 		assert_eq!(stmt1_ref.context_source, Some(StatementId(0)));
 	}
 }

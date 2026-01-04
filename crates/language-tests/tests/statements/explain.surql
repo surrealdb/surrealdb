@@ -2,43 +2,49 @@
 [test]
 
 [[test.results]]
-value = """
+value = """[
 "ComputeFields [ctx: Db] [table: 'person']
 └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
+value = """[
 "ComputeFields [ctx: Db] [table: 'person']
 └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
+value = """[
 "Filter [ctx: Db] [predicate: age > 18]
 └────> ComputeFields [ctx: Db] [table: 'person']
        └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
-'Let [name: $x]
-=> Literal
-'"""
+value = """[
+'Let [ctx: Rt] [name: $x]
+└────> Expr [ctx: Rt] [expr: 5]
+'
+]"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = """
-'Scalar => Param
-'"""
+value = """[
+'Expr [ctx: Rt] [expr: $x]
+'
+]"""
 
 [[test.results]]
-value = """
+value = """[
 'ComputeFields [ctx: Db] [table: $x]
 └────> Scan [ctx: Db] [table: $x]
-'"""
+'
+]"""
 
 */
 

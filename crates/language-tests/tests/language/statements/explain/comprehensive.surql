@@ -2,38 +2,43 @@
 [test]
 
 [[test.results]]
-value = """
+value = """[
 "ComputeFields [ctx: Db] [table: 'person']
 └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
+value = """[
 "Filter [ctx: Db] [predicate: age > 18]
 └────> ComputeFields [ctx: Db] [table: 'person']
        └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
+value = """[
 "Union [ctx: Db]
 ├────> ComputeFields [ctx: Db] [table: 'person']
 │      └────> Scan [ctx: Db] [table: 'person']
 └────> ComputeFields [ctx: Db] [table: 'company']
        └────> Scan [ctx: Db] [table: 'company']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
-"Let [name: $data]
+value = """[
+"Let [ctx: Db] [name: $data]
 └────> ComputeFields [ctx: Db] [table: 'person']
        └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 [[test.results]]
-value = """
-'Scalar => BinaryOp
-'"""
+value = """[
+'Expr [ctx: Rt] [expr: 1 + 2]
+'
+]"""
 
 */
 

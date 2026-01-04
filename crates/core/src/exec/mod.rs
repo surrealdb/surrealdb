@@ -13,13 +13,12 @@ pub(crate) mod access_mode;
 pub(crate) mod block;
 pub(crate) mod completion_map;
 pub(crate) mod context;
-pub(crate) mod explain;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
 pub(crate) mod planner;
-pub(crate) mod script_executor;
 pub(crate) mod statement;
+pub(crate) mod stream_executor;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
@@ -35,12 +34,12 @@ pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
 };
 // Re-export operator types
-pub(crate) use operators::{BeginPlan, CancelPlan, CommitPlan, LetPlan, LetValue, UsePlan};
+pub(crate) use operators::{BeginPlan, CancelPlan, CommitPlan, ExprPlan, LetPlan, UsePlan};
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
-pub(crate) use script_executor::{ScriptExecutionError, ScriptExecutor};
 pub(crate) use statement::{
-	ScriptPlan, StatementContent, StatementId, StatementKind, StatementOutput, StatementPlan,
+	ExecutionPlan, StatementId, StatementKind, StatementOutput, StatementPlan,
 };
+pub(crate) use stream_executor::{ScriptExecutionError, StreamExecutor};
 
 /// A batch of values returned by an execution plan.
 ///
@@ -129,6 +128,15 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	fn is_read_only(&self) -> bool {
 		self.access_mode() == AccessMode::ReadOnly
 	}
+
+	/// Returns true if this plan represents a scalar expression.
+	///
+	/// Scalar expressions return a single value directly, while queries
+	/// return results wrapped in an array. This is used by the executor
+	/// to format results correctly.
+	fn is_scalar(&self) -> bool {
+		false
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -138,7 +146,7 @@ pub(crate) enum PlannedStatement {
 	/// Bind expression result to a parameter
 	Let {
 		name: String,
-		value: LetValue,
+		value: Arc<dyn OperatorPlan>,
 	},
 	/// A scalar expression evaluated as a top-level statement (e.g., `1 + 1;`, `$param;`)
 	Scalar(Arc<dyn PhysicalExpr>),
@@ -392,13 +400,10 @@ mod tests {
 		let planned = result.unwrap();
 		assert_eq!(planned.len(), 1);
 
-		// Verify the first statement is a Query with a Union at the root
-		if let PlannedStatement::Query(exec_plan) = &planned[0] {
-			// The plan should be a Union with 3 children
-			assert_eq!(exec_plan.children().len(), 3, "Union should have 3 children");
-		} else {
-			panic!("Expected PlannedStatement::Query");
-		}
+		// Verify the first statement has a plan with a Union at the root
+		let stmt = &planned.statements[0];
+		// The plan should be a Union with 3 children
+		assert_eq!(stmt.plan.children().len(), 3, "Union should have 3 children");
 	}
 
 	/// Test the planner with a single source (no Union created)
@@ -422,18 +427,15 @@ mod tests {
 		let planned = result.unwrap();
 		assert_eq!(planned.len(), 1);
 
-		// Verify the first statement is a Query with ComputeFields->Scan (not Union)
-		if let PlannedStatement::Query(exec_plan) = &planned[0] {
-			// A single source should have 1 child (ComputeFields wraps Scan),
-			// not 3+ children which would indicate a Union
-			assert!(
-				exec_plan.children().len() <= 1,
-				"Single source should not produce Union (expected <= 1 child, got {})",
-				exec_plan.children().len()
-			);
-		} else {
-			panic!("Expected PlannedStatement::Query");
-		}
+		// Verify the first statement has a plan with ComputeFields->Scan (not Union)
+		let stmt = &planned.statements[0];
+		// A single source should have 1 child (ComputeFields wraps Scan),
+		// not 3+ children which would indicate a Union
+		assert!(
+			stmt.plan.children().len() <= 1,
+			"Single source should not produce Union (expected <= 1 child, got {})",
+			stmt.plan.children().len()
+		);
 	}
 
 	// =========================================================================

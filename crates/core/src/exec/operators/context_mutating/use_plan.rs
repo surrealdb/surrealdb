@@ -65,8 +65,12 @@ impl OperatorPlan for UsePlan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		// USE produces no data output - it only mutates context
-		Ok(Box::pin(stream::empty()))
+		// USE returns NONE as its result
+		Ok(Box::pin(stream::once(async {
+			Ok(crate::exec::ValueBatch {
+				values: vec![crate::val::Value::None],
+			})
+		})))
 	}
 
 	fn mutates_context(&self) -> bool {

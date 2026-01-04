@@ -3,11 +3,12 @@
 reason = "Test EXPLAIN with SELECT WHERE to show Filter operator"
 
 [[test.results]]
-value = """
+value = """[
 "Filter [ctx: Db] [predicate: age > 18]
 └────> ComputeFields [ctx: Db] [table: 'person']
        └────> Scan [ctx: Db] [table: 'person']
-""""
+"
+]"""
 
 */
 

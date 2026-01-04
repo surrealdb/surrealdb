@@ -35,8 +35,12 @@ impl OperatorPlan for CommitPlan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		// COMMIT produces no data output - it only mutates context
-		Ok(Box::pin(stream::empty()))
+		// COMMIT returns NONE as its result
+		Ok(Box::pin(stream::once(async {
+			Ok(crate::exec::ValueBatch {
+				values: vec![crate::val::Value::None],
+			})
+		})))
 	}
 
 	fn mutates_context(&self) -> bool {
@@ -47,10 +51,10 @@ impl OperatorPlan for CommitPlan {
 		// Get the current transaction
 		let txn = input.txn();
 
-		// Check if the transaction is writable
+		// Check if the transaction is writable (indicates we're in a transaction)
 		if !txn.writeable() {
-			return Err(Error::Thrown(
-				"COMMIT requires a write transaction (use BEGIN first)".to_string(),
+			return Err(Error::InvalidStatement(
+				"Cannot COMMIT without starting a transaction".to_string(),
 			));
 		}
 

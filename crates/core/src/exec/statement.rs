@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::exec::{AccessMode, ExecutionContext, OperatorPlan, PhysicalExpr};
+use crate::exec::{AccessMode, ExecutionContext, OperatorPlan};
 use crate::val::Value;
 
 /// Unique identifier for statements within a script.
@@ -86,22 +86,6 @@ impl StatementKind {
 	}
 }
 
-/// Content of a statement - what actually gets executed.
-///
-/// All context-mutating statements (USE, LET, BEGIN, COMMIT, CANCEL) are now
-/// represented as Query operators that implement `mutates_context() = true`.
-#[derive(Debug, Clone)]
-pub enum StatementContent {
-	/// An operator plan (SELECT, USE, LET, BEGIN, COMMIT, CANCEL, etc.)
-	///
-	/// For context-mutating operators, the executor calls `output_context()`
-	/// after execution to get the modified context.
-	Query(Arc<dyn OperatorPlan>),
-
-	/// A scalar expression evaluated as a top-level statement (e.g., `1 + 1;`, `$param;`)
-	Scalar(Arc<dyn PhysicalExpr>),
-}
-
 /// A planned statement with DAG dependencies.
 ///
 /// Each statement in a script becomes a `StatementPlan` node in the execution DAG.
@@ -127,8 +111,13 @@ pub struct StatementPlan {
 	/// - For statements after a mutation: contains the mutation ID
 	pub wait_for: Vec<StatementId>,
 
-	/// What this statement executes
-	pub content: StatementContent,
+	/// The operator plan to execute.
+	///
+	/// All statements are represented as operator plans, including:
+	/// - Queries (SELECT, CREATE, UPDATE, DELETE, etc.)
+	/// - Context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL)
+	/// - Scalar expressions (wrapped in ExprPlan)
+	pub plan: Arc<dyn OperatorPlan>,
 
 	/// Statement classification for dependency tracking
 	pub kind: StatementKind,
@@ -156,16 +145,13 @@ impl StatementPlan {
 		self.kind.mutates_context()
 	}
 
-	/// Get the access mode for this statement based on its content.
+	/// Get the access mode for this statement based on its plan.
 	///
 	/// This is the plan-based access mode analysis that correctly handles
 	/// cases like `SELECT *, (UPSERT person) FROM person` which are
 	/// syntactically SELECT but actually perform mutations.
 	pub fn access_mode(&self) -> AccessMode {
-		match &self.content {
-			StatementContent::Query(plan) => plan.access_mode(),
-			StatementContent::Scalar(expr) => expr.access_mode(),
-		}
+		self.plan.access_mode()
 	}
 
 	/// Check if this statement is read-only based on plan analysis.
@@ -189,13 +175,29 @@ pub struct StatementOutput {
 	/// modified context. For other statements, this is the input context.
 	pub context: ExecutionContext,
 
-	/// The data produced by this statement.
+	/// The result of the statement: either values or an error.
 	///
-	/// Empty for statements like USE that produce no data.
-	pub results: Vec<Value>,
+	/// This matches SurrealDB semantics where statement errors are
+	/// captured per-statement rather than failing the entire script.
+	pub result: StatementResult,
 
 	/// How long the statement took to execute.
 	pub duration: Duration,
+
+	/// Whether this was a scalar expression (not a query).
+	///
+	/// Scalar expressions return their value directly, while queries
+	/// wrap results in an array.
+	pub is_scalar: bool,
+}
+
+/// The result of a statement execution - either values or an error.
+#[derive(Clone, Debug)]
+pub enum StatementResult {
+	/// Successful execution with zero or more values.
+	Ok(Vec<Value>),
+	/// Statement-level error (not a fatal execution error).
+	Err(String),
 }
 
 /// A collection of statements forming the execution DAG.
@@ -203,12 +205,12 @@ pub struct StatementOutput {
 /// The script plan contains all statements with their dependencies,
 /// ready for parallel execution.
 #[derive(Debug)]
-pub struct ScriptPlan {
+pub struct ExecutionPlan {
 	/// All statements in the script, in order
 	pub statements: Vec<StatementPlan>,
 }
 
-impl ScriptPlan {
+impl ExecutionPlan {
 	/// Create a new empty script plan.
 	pub fn new() -> Self {
 		Self {
@@ -232,7 +234,7 @@ impl ScriptPlan {
 	}
 }
 
-impl Default for ScriptPlan {
+impl Default for ExecutionPlan {
 	fn default() -> Self {
 		Self::new()
 	}
