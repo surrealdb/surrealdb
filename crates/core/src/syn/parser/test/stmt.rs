@@ -2011,7 +2011,7 @@ fn parse_define_index() {
 			if_not_exists: false,
 			overwrite: false,
 			concurrently: false,
-			defer: false,
+			defer: true,
 		}))
 	);
 

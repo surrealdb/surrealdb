@@ -158,7 +158,7 @@ impl IndexBuilder {
 		}
 	}
 
-	async fn start_building(
+	fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -168,6 +168,7 @@ impl IndexBuilder {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
 		let b = building.clone();
 		spawn(async move {
+			// Ensure that in case of an unexpected exit the building process is declared finished
 			let guard = BuildingFinishGuard(b.clone());
 			let r = b.run().await;
 			if let Err(err) = &r {
@@ -178,19 +179,20 @@ impl IndexBuilder {
 					warn!("Failed to send index building result to the consumer");
 				}
 			}
-			drop(guard);
-		});
-		// If it is a deferred indexing, start the daemon and return
-		let b = building.clone();
-		spawn(async move {
-			loop {
-				if let Err(e) = b.index_appending_loop(0).await {
-					error!("Index appending loop error: {}", e);
-					b.set_status(BuildingStatus::Error(e.to_string())).await;
-					break;
-				}
-				sleep(Duration::from_millis(100)).await;
+			if b.ix.defer {
+				// If it is a deferred indexing, start the daemon and return
+				spawn(async move {
+					loop {
+						if let Err(e) = b.index_appending_loop(0).await {
+							error!("Index appending loop error: {}", e);
+							b.set_status(BuildingStatus::Error(e.to_string())).await;
+							break;
+						}
+						sleep(Duration::from_millis(100)).await;
+					}
+				});
 			}
+			drop(guard);
 		});
 		Ok(building)
 	}
@@ -218,12 +220,12 @@ impl IndexBuilder {
 						name: e.key().ix.clone(),
 					});
 				}
-				let ib = self.start_building(ctx, opt, ix, sdr).await?;
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr).await?;
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
 				e.insert(ib);
 			}
 		}
@@ -337,6 +339,7 @@ struct Building {
 	status: RwLock<BuildingStatus>,
 	queue: RwLock<QueueSequences>,
 	aborted: AtomicBool,
+	// true if the initial building is finished
 	finished: AtomicBool,
 }
 
@@ -379,7 +382,7 @@ impl Building {
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built, and it is not a defered index:
-			if self.ix.defer && self.status.read().await.is_ready() {
+			if !self.ix.defer && self.status.read().await.is_ready() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}
@@ -487,9 +490,18 @@ impl Building {
 	}
 
 	async fn index_appending_loop(&self, initial_count: usize) -> Result<(), Error> {
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(initial_count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: Some(0),
+		})
+		.await;
 		let mut updates_count = 0;
 		let mut next_to_index = None;
-		while !self.is_aborted().await {
+		loop {
+			if self.is_aborted().await {
+				break;
+			}
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -506,6 +518,7 @@ impl Building {
 					.await;
 					// This is here to be sure the lock on back is not released early
 					queue.clear();
+					break;
 				}
 				queue.next_indexing_batch(*NORMAL_FETCH_SIZE)
 			};

@@ -13,7 +13,6 @@ use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
-use test_log::test;
 use tracing::info;
 
 #[tokio::test]
@@ -226,6 +225,10 @@ async fn define_statement_index_concurrently_building_status(
 							info!("Started");
 							continue;
 						}
+						"cleaning" => {
+							info!("Cleaning");
+							continue;
+						}
 						"indexing" => {
 							{
 								if new_initial != initial_count {
@@ -294,7 +297,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -306,7 +309,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text_overwrite(
 ) -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
