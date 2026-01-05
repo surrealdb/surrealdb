@@ -70,9 +70,15 @@ impl RebuildIndexStatement {
 			}
 		};
 		let tb = ctx.tx().expect_tb(ns, db, &self.table).await?;
+		let ns_id = tb.namespace_id;
+		let db_id = tb.database_id;
+		let tb_id = tb.table_id;
 
-		// Rebuild the index
-		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
+		// Commit before rebuilding to avoid transaction conflicts during long-running operations
+		ctx.tx().commit().await?;
+
+		// Rebuild the index (uses its own transactions internally)
+		run_indexing(ctx, opt, ns_id, db_id, tb_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

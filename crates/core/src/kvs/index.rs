@@ -193,16 +193,18 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn build(
 		&self,
 		ctx: &FrozenContext,
 		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
 		ix.expect_not_prepare_remove()?;
-		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
@@ -347,6 +349,7 @@ struct Building {
 }
 
 impl Building {
+	#[allow(clippy::too_many_arguments)]
 	fn new(
 		ctx: &FrozenContext,
 		tf: TransactionFactory,
@@ -495,25 +498,19 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
+
 			let batch = {
 				let tx = self.new_read_tx().await?;
-				// Check if the index has been decommissioned
 				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
-				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
-			// Set the next scan range
 			next = batch.next;
-			// Check there are records
 			if batch.result.is_empty() {
-				// If not, we are with the initial indexing
 				break;
 			}
-			// Create a new context with a "write" transaction
 			{
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
-				// Index the batch
 				catch!(
 					tx,
 					self.index_initial_batch(&ctx, &tx, batch.result, &mut initial_count).await
@@ -522,7 +519,7 @@ impl Building {
 			}
 		}
 		// Second iteration, we index/remove any records that has been added or removed
-		// since the initial indexing
+		// since the initial indexing.
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -536,7 +533,6 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Check the index still exists and is not decommissioned
 			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 			let range = {
 				let mut queue = self.queue.write().await;

@@ -15,6 +15,7 @@
 pub mod all;
 pub mod dc;
 pub mod dl;
+pub(crate) mod dle;
 pub mod hd;
 pub mod he;
 pub mod hi;

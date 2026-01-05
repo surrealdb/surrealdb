@@ -97,7 +97,7 @@ impl PartialOrd for RrfDoc {
 
 impl Ord for RrfDoc {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+		other.0.partial_cmp(&self.0).unwrap_or(std::cmp::Ordering::Equal)
 	}
 }
 
@@ -215,18 +215,17 @@ pub async fn rrf(
 		}
 	}
 
-	// Use a min-heap (BinaryHeap) to efficiently maintain only the top `limit`
-	// documents This avoids sorting all documents when we only need the top-k
-	// results
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top `limit`
+	// documents. This avoids sorting all documents when we only need the top-k results.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
 			// Heap not full yet - add document directly
 			scored_docs.push(RrfDoc(score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
-			// Heap is full - only add if this document has a higher score than the minimum
-			if score > *min_score {
-				scored_docs.pop(); // Remove the lowest scoring document
+		} else if let Some(RrfDoc(heap_min_score, _, _)) = scored_docs.peek() {
+			// Heap is full - only add if this document has a higher score than the heap minimum
+			if score > *heap_min_score {
+				scored_docs.pop(); // Remove the lowest scoring document from top-k
 				scored_docs.push(RrfDoc(score, id, objects)); // Add the new higher scoring document
 			}
 		}
@@ -236,10 +235,10 @@ pub async fn rrf(
 		count += 1;
 	}
 
-	// Extract the top `limit` results from the heap and build the final result
-	// array Note: BinaryHeap.pop() returns documents in descending order by RRF
-	// score (highest first)
-	let mut result_array = Array::new();
+	// Extract the top `limit` results from the heap and build the final result array.
+	// Since we use a min-heap, pop() returns documents in ascending order (lowest first),
+	// so we collect them and reverse to get descending order (highest first).
+	let mut result_array = Array::with_capacity(scored_docs.len());
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID across different result lists
 		// This combines fields like 'distance' from vector search and 'ft_score' from
@@ -258,7 +257,8 @@ pub async fn rrf(
 		}
 		count += 1;
 	}
-	// Return the fused results sorted by RRF score in descending order
+	// Reverse to get descending order by RRF score (highest first)
+	result_array.reverse();
 	Ok(Value::Array(result_array))
 }
 
@@ -468,7 +468,7 @@ pub async fn linear(
 		}
 	}
 
-	// Use a min-heap to efficiently maintain only the top `limit` documents
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top `limit` documents.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 
 	for (id, (scores, objects)) in documents {
@@ -499,8 +499,8 @@ pub async fn linear(
 
 		if scored_docs.len() < limit {
 			scored_docs.push(RrfDoc(combined_score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek()
-			&& combined_score > *min_score
+		} else if let Some(RrfDoc(heap_min_score, _, _)) = scored_docs.peek()
+			&& combined_score > *heap_min_score
 		{
 			scored_docs.pop();
 			scored_docs.push(RrfDoc(combined_score, id, objects));
@@ -512,7 +512,7 @@ pub async fn linear(
 	}
 
 	// Build the final result array
-	let mut result_array = Array::new();
+	let mut result_array = Array::with_capacity(scored_docs.len());
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID
 		let mut obj = Object::default();
@@ -528,6 +528,6 @@ pub async fn linear(
 		}
 		count += 1;
 	}
-
+	result_array.reverse();
 	Ok(Value::Array(result_array))
 }

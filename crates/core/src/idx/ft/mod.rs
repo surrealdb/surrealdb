@@ -2,6 +2,7 @@ pub(crate) mod analyzer;
 pub(crate) mod fulltext;
 pub(crate) mod highlighter;
 pub(crate) mod offset;
+pub(crate) mod smallfloat;
 
 pub(super) type Position = u32;
 pub(crate) type DocLength = u64;
