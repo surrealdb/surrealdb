@@ -555,7 +555,7 @@ impl Building {
 					self.set_status(BuildingStatus::Ready {
 						initial: initial_count,
 						pending: Some(queue.pending() as usize),
-						updated: updates_count.clone(),
+						updated: updates_count,
 					})
 					.await;
 					// This is here to be sure the lock on back is not released early
@@ -679,7 +679,7 @@ impl Building {
 				self.set_status(BuildingStatus::Indexing {
 					initial,
 					pending: Some(self.queue.read().await.pending() as usize),
-					updated: count.clone(),
+					updated: *count,
 				})
 				.await;
 			}
