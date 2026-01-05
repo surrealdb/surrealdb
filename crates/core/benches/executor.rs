@@ -526,7 +526,7 @@ fn bench_table_select_group(c: &mut Criterion) {
 		&dbs,
 		&ses,
 		throughput: 10_000,
-		expected: |result| result.as_array().unwrap().len() > 0,
+		expected: |result| !result.as_array().unwrap().is_empty(),
 		"SELECT count(), level, stats.rank FROM item GROUP BY level, stats.rank;"
 	);
 
@@ -677,7 +677,7 @@ fn bench_subqueries(c: &mut Criterion) {
 		&dbs,
 		&ses,
 		throughput: 1_000,
-		expected: |result| result.as_array().unwrap().len() > 0,
+		expected: |result| !result.as_array().unwrap().is_empty(),
 		"SELECT * FROM (SELECT * FROM item WHERE level > 50);"
 	);
 
@@ -707,7 +707,7 @@ fn bench_subqueries(c: &mut Criterion) {
 		&dbs,
 		&ses,
 		throughput: 1_000,
-		expected: |result| result.as_array().unwrap().len() > 0,
+		expected: |result| !result.as_array().unwrap().is_empty(),
 		"SELECT * FROM (SELECT * FROM (SELECT * FROM item WHERE level > 50) WHERE active = true);"
 	);
 

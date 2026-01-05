@@ -139,7 +139,7 @@ pub async fn setup_datastore_with_query(query: &str) -> (Datastore, Session) {
 	// Specify the test namespace and database
 	dbs.execute("USE NAMESPACE test DATABASE test", &ses, None).await.unwrap();
 	// Load data using executor (setup phase, not benchmarked)
-	dbs.execute(&query, &ses, None).await.unwrap();
+	dbs.execute(query, &ses, None).await.unwrap();
 	// Return the datastore and session
 	(dbs, ses)
 }
