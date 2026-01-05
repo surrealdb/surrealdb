@@ -165,6 +165,9 @@ impl Display for DefineIndexStatement {
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}
+		if self.defer {
+			write!(f, " DEFER")?
+		}
 		Ok(())
 	}
 }
@@ -176,6 +179,7 @@ impl InfoStructure for DefineIndexStatement {
 			"what".to_string() => self.what.structure(),
 			"cols".to_string() => self.cols.structure(),
 			"index".to_string() => self.index.structure(),
+			"defer".to_string() => self.defer.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

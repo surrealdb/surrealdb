@@ -25,8 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::{Mutex, RwLock};
-use tokio::task::JoinHandle;
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -183,7 +182,7 @@ impl IndexBuilder {
 		});
 		// If it is a deferred indexing, start the daemon and return
 		let b = building.clone();
-		let defer_join_handle = spawn(async move {
+		spawn(async move {
 			loop {
 				if let Err(e) = b.index_appending_loop(0).await {
 					error!("Index appending loop error: {}", e);
@@ -193,7 +192,6 @@ impl IndexBuilder {
 				sleep(Duration::from_millis(100)).await;
 			}
 		});
-		*building.defer_daemon.lock().await = Some(defer_join_handle);
 		Ok(building)
 	}
 
@@ -340,7 +338,6 @@ struct Building {
 	queue: RwLock<QueueSequences>,
 	aborted: AtomicBool,
 	finished: AtomicBool,
-	defer_daemon: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Building {
@@ -360,7 +357,6 @@ impl Building {
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
-			defer_daemon: Mutex::new(None),
 		})
 	}
 
