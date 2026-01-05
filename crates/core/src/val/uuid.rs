@@ -122,7 +122,7 @@ mod tests {
 		let uuid = Uuid::from_str(uuid_str).unwrap();
 
 		let mut output = String::new();
-		uuid.fmt_sql(&mut output, SqlFormat::Standard);
+		uuid.fmt_sql(&mut output, SqlFormat::SingleLine);
 
 		assert_eq!(output, format!("u'{}'", uuid_str));
 	}
