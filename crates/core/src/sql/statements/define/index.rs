@@ -30,6 +30,7 @@ pub struct DefineIndexStatement {
 	#[revision(start = 4)]
 	pub concurrently: bool,
 	#[revision(start = 5)]
+	/// Whether to defer the index creation and keep it updated in the background
 	pub defer: bool,
 }
 

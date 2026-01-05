@@ -32,19 +32,31 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
+	/// The indexing process has started
 	Started,
+	/// The index is being cleaned
 	Cleaning,
+	/// The index is currently being built
 	Indexing {
+		/// The number of initial records indexed
 		initial: Option<usize>,
+		/// The number of records updated since the initial indexing
 		updated: Option<usize>,
+		/// The number of records pending in the appending queue
 		pending: Option<usize>,
 	},
+	/// The index is ready and fully up-to-date
 	Ready {
+		/// The number of initial records indexed
 		initial: Option<usize>,
+		/// The number of records updated since the initial indexing
 		updated: Option<usize>,
+		/// The number of records pending in the appending queue
 		pending: Option<usize>,
 	},
+	/// The indexing process was aborted
 	Aborted,
+	/// An error occurred during the indexing process
 	Error(String),
 }
 
@@ -125,6 +137,7 @@ impl From<BuildingStatus> for Value {
 
 type IndexBuilding = Arc<Building>;
 
+/// A unique key for an index building process
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
 	ns: String,
@@ -144,6 +157,7 @@ impl IndexKey {
 	}
 }
 
+/// The builder for background index creation
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
@@ -151,6 +165,7 @@ pub(crate) struct IndexBuilder {
 }
 
 impl IndexBuilder {
+	/// Create a new IndexBuilder
 	pub(super) fn new(tf: TransactionFactory) -> Self {
 		Self {
 			tf,
@@ -158,6 +173,7 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Start building an index in the background
 	fn start_building(
 		&self,
 		ctx: &Context,
@@ -173,6 +189,7 @@ impl IndexBuilder {
 			let r = b.run().await;
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
+				return;
 			}
 			if let Some(s) = sdr {
 				if s.send(r).is_err() {
@@ -183,7 +200,11 @@ impl IndexBuilder {
 				// If it is a deferred indexing, start the daemon and return
 				spawn(async move {
 					loop {
-						if let Err(e) = b.index_appending_loop(0).await {
+						if b.is_aborted().await {
+							b.set_status(BuildingStatus::Aborted).await;
+							break;
+						}
+						if let Err(e) = b.index_appending_loop(None).await {
 							error!("Index appending loop error: {}", e);
 							b.set_status(BuildingStatus::Error(e.to_string())).await;
 							break;
@@ -197,6 +218,7 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
+	/// Build an index
 	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
@@ -232,6 +254,7 @@ impl IndexBuilder {
 		Ok(rcv)
 	}
 
+	/// Consume a document update for indexing
 	pub(crate) async fn consume(
 		&self,
 		ctx: &Context,
@@ -248,6 +271,7 @@ impl IndexBuilder {
 		Ok(ConsumeResult::Ignored(old_values, new_values))
 	}
 
+	/// Get the status of an index building process
 	pub(crate) async fn get_status(
 		&self,
 		ns: &str,
@@ -262,6 +286,7 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Remove an index building process
 	pub(crate) async fn remove_index(
 		&self,
 		ns: &str,
@@ -330,16 +355,25 @@ impl QueueSequences {
 	}
 }
 
+/// A building process for a specific index
 struct Building {
+	/// The context used for the building process
 	ctx: Context,
+	/// The options used for the building process
 	opt: Options,
+	/// The transaction factory used to create transactions
 	tf: TransactionFactory,
+	/// The statement that defines the index
 	ix: Arc<DefineIndexStatement>,
+	/// The table name
 	tb: String,
+	/// The current status of the building process
 	status: RwLock<BuildingStatus>,
+	/// The queue of records that need to be indexed
 	queue: RwLock<QueueSequences>,
+	/// Whether the building process has been aborted
 	aborted: AtomicBool,
-	// true if the initial building is finished
+	/// Whether the initial building process has finished
 	finished: AtomicBool,
 }
 
@@ -371,6 +405,9 @@ impl Building {
 		}
 	}
 
+	/// Try to consume a document update.
+	/// If the index is currently building, the update is enqueued to be indexed asynchronously.
+	/// If the index is already built and not deferred, the update is ignored and the document can be updated normally.
 	async fn maybe_consume(
 		&self,
 		ctx: &Context,
@@ -381,7 +418,7 @@ impl Building {
 		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
-			// If the appending queue is empty and the index is built, and it is not a defered index:
+			// If the appending queue is empty and the index is built, and it is not a deferred index:
 			if !self.ix.defer && self.status.read().await.is_ready() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
@@ -430,6 +467,7 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
+	/// Run the initial building process
 	async fn run(&self) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		// Remove the index data
@@ -482,21 +520,22 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(initial_count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: None,
+		})
+		.await;
 		if !self.ix.defer {
 			// Second iteration, we index/remove any records that have been added or removed since the initial indexing
-			self.index_appending_loop(initial_count).await?;
+			self.index_appending_loop(Some(initial_count)).await?;
 		}
 		Ok(())
 	}
 
-	async fn index_appending_loop(&self, initial_count: usize) -> Result<(), Error> {
-		self.set_status(BuildingStatus::Indexing {
-			initial: Some(initial_count),
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: Some(0),
-		})
-		.await;
-		let mut updates_count = 0;
+	/// Loop through the appending queue and index the records
+	async fn index_appending_loop(&self, initial_count: Option<usize>) -> Result<(), Error> {
+		let mut updates_count = initial_count.map(|_| 0);
 		let mut next_to_index = None;
 		loop {
 			if self.is_aborted().await {
@@ -511,9 +550,9 @@ impl Building {
 					// If the batch is empty, we are done.
 					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
 					self.set_status(BuildingStatus::Ready {
-						initial: Some(initial_count),
+						initial: initial_count,
 						pending: Some(queue.pending() as usize),
-						updated: Some(updates_count),
+						updated: updates_count.clone(),
 					})
 					.await;
 					// This is here to be sure the lock on back is not released early
@@ -603,13 +642,14 @@ impl Building {
 		Ok(())
 	}
 
+	/// Index a range of records from the appending queue
 	async fn index_appending_range(
 		&self,
 		ctx: &Context,
 		tx: &Transaction,
 		range: Range<u32>,
-		initial: usize,
-		count: &mut usize,
+		initial: Option<usize>,
+		count: &mut Option<usize>,
 	) -> Result<(), Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
@@ -630,11 +670,13 @@ impl Building {
 				let ip = self.new_ip_key(rid.id)?;
 				tx.del(ip).await?;
 
-				*count += 1;
+				if let Some(c) = count {
+					*c += 1;
+				}
 				self.set_status(BuildingStatus::Indexing {
-					initial: Some(initial),
+					initial,
 					pending: Some(self.queue.read().await.pending() as usize),
-					updated: Some(*count),
+					updated: count.clone(),
 				})
 				.await;
 			}

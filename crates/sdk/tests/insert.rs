@@ -3,11 +3,13 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
+use std::sync::Arc;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Part;
 use surrealdb::sql::Value;
+use tokio::time::timeout;
 
 #[tokio::test]
 async fn insert_statement_object_single() -> Result<(), Error> {
@@ -818,6 +820,73 @@ async fn insert_relation_ignore_unique_index_fix_test() -> Result<(), Error> {
 		"INSERT IGNORE bug: Expected 1 record, got {}. Duplicates not ignored!",
 		records.len()
 	);
+
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn insert_parallel_full_text() -> Result<(), Error> {
+	let dbs = new_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	// Define analyzer and index
+	let sql = "
+		DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+		DEFINE INDEX title_index ON blog FIELDS title SEARCH ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS DEFER;
+	";
+	dbs.execute(sql, &ses, None).await?;
+
+	let dbs = Arc::new(dbs);
+	let mut tasks = Vec::new();
+
+	for i in 0..50 {
+		let dbs = dbs.clone();
+		let ses = ses.clone();
+		tasks.push(tokio::spawn(async move {
+			let sql = format!("INSERT INTO blog {{ title: 'Title {}' }};", i);
+			let mut res = dbs.execute(&sql, &ses, None).await?;
+			res.remove(0).result?;
+			Ok::<(), Error>(())
+		}));
+	}
+
+	for task in tasks {
+		task.await.unwrap()?;
+	}
+
+	// Verify counts
+	let expected = Value::parse("[{ count: 50 }]");
+	timeout(std::time::Duration::from_secs(60), async {
+		loop {
+			let mut res = dbs.execute("SELECT count() FROM blog GROUP ALL;", &ses, None).await?;
+			let val = res.remove(0).result?;
+			if expected.equal(&val) {
+				break;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+		}
+		Ok::<(), Error>(())
+	})
+	.await
+	.map_err(|_| Error::QueryTimedout)??;
+
+	// Verify index works again (optional, but keeps original structure)
+	timeout(std::time::Duration::from_secs(60), async {
+		loop {
+			let res = &mut dbs
+				.execute("SELECT * FROM blog WHERE title @0@ 'Title 25';", &ses, None)
+				.await?;
+			let result = res.remove(0).result?;
+			if let Value::Array(arr) = result {
+				if arr.len() == 1 {
+					break;
+				}
+			}
+		}
+		Ok::<(), Error>(())
+	})
+	.await
+	.map_err(|_| Error::QueryTimedout)??;
 
 	Ok(())
 }

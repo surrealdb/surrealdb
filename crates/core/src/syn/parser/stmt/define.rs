@@ -1284,6 +1284,9 @@ impl Parser<'_> {
 		if matches!(res.index, Index::Count) && !res.cols.is_empty() {
 			bail!("Cannot create a count index with fields");
 		}
+		if matches!(res.index, Index::Uniq) && res.defer {
+			bail!("Unique index does not support DEFER.");
+		}
 		Ok(res)
 	}
 
