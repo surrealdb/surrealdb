@@ -47,13 +47,40 @@ runs:
         # Create a temporary branch in case the git ref is not a branch
         git checkout -b crate
 
-        extra_args=""
-
         if [[ "${{ inputs.publish }}" == "false" || "${{ inputs.nightly-release }}" == "true" ]]; then
-          # Dry run to test publishing
-          extra_args="${extra_args} --dry-run"
-        fi
+          # Dry run - use cargo publish directly as it works better for testing
+          cargo publish --workspace --dry-run
+        else
+          # Real publish - use release-plz for retry logic
+          # If all crates are already published, release-plz will fail
+          # We should treat this as success (idempotency)
+          if ! release-plz release --config /tmp/release-plz.toml; then
+            # Check if the failure was because everything is already published
+            echo "release-plz failed, checking if all crates are already published..."
 
-        release-plz release --config /tmp/release-plz.toml ${extra_args}
+            # Get all workspace crates (exclude crates with publish = false)
+            all_published=true
+            for crate in $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.publish != []) | .name'); do
+              version=$(cargo metadata --format-version 1 --no-deps | jq -r ".packages[] | select(.name == \"$crate\") | .version")
+              echo "Checking if $crate@$version is published..."
+
+              if ! cargo search "$crate" --limit 1 | grep -q "^$crate = \"$version\""; then
+                echo "  $crate@$version is NOT published"
+                all_published=false
+                break
+              else
+                echo "  $crate@$version is already published"
+              fi
+            done
+
+            if [[ "$all_published" == "true" ]]; then
+              echo "All crates are already published. Treating as success (idempotent)."
+              exit 0
+            else
+              echo "Some crates failed to publish. Failing."
+              exit 1
+            fi
+          fi
+        fi
 
 
