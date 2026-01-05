@@ -189,12 +189,15 @@ impl IndexBuilder {
 			let r = b.run().await;
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
-				return;
 			}
+			let is_err = r.is_err();
 			if let Some(s) = sdr {
 				if s.send(r).is_err() {
 					warn!("Failed to send index building result to the consumer");
 				}
+			}
+			if is_err {
+				return;
 			}
 			if b.ix.defer {
 				// If it is a deferred indexing, start the daemon and return
