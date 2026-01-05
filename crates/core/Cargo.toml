@@ -250,5 +250,17 @@ workspace = true
 name = "surrealdb_core"
 
 [[bench]]
-name = "allocation_tracking"
+name = "allocator"
+harness = false
+
+[[bench]]
+name = "executor"
+harness = false
+
+[[bench]]
+name = "statements"
+harness = false
+
+[[bench]]
+name = "functions"
 harness = false
