@@ -108,6 +108,22 @@ impl Display for Uuid {
 
 impl ToSql for Uuid {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}", &QuoteStr(&self.0.to_string()))
+		write_sql!(f, sql_fmt, "u{}", QuoteStr(&self.0.to_string()))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_uuid_to_sql_with_prefix() {
+		let uuid_str = "8424486b-85b3-4448-ac8d-5d51083391c7";
+		let uuid = Uuid::from_str(uuid_str).unwrap();
+
+		let mut output = String::new();
+		uuid.fmt_sql(&mut output, SqlFormat::Standard);
+
+		assert_eq!(output, format!("u'{}'", uuid_str));
 	}
 }
