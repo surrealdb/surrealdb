@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -29,6 +29,8 @@ pub struct DefineIndexStatement {
 	pub overwrite: bool,
 	#[revision(start = 4)]
 	pub concurrently: bool,
+	#[revision(start = 5)]
+	pub defer: bool,
 }
 
 impl DefineIndexStatement {

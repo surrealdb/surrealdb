@@ -25,6 +25,7 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -324,6 +325,7 @@ struct Building {
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
 	finished: AtomicBool,
+	defer_daemon: Option<JoinHandle<()>>,
 }
 
 impl Building {
@@ -343,6 +345,7 @@ impl Building {
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
+			defer_daemon: None,
 		})
 	}
 
@@ -364,8 +367,8 @@ impl Building {
 		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
-			// If the appending queue is empty and the index is built...
-			if self.status.read().await.is_ready() {
+			// If the appending queue is empty and the index is built, and it is not a defered index:
+			if self.defer_daemon.is_none() && self.status.read().await.is_ready() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}

@@ -1274,6 +1274,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				t!("DEFER") => {
+					self.pop_peek();
+					res.defer = true;
+				}
 				_ => break,
 			}
 		}
