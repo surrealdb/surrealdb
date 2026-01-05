@@ -259,3 +259,7 @@ harness = false
 [[bench]]
 name = "statements"
 harness = false
+
+[[bench]]
+name = "functions"
+harness = false
