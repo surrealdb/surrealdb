@@ -61,7 +61,6 @@ surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 
 # Other crates
-bincode.workspace = true
 boxcar.workspace = true
 async-channel.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -121,6 +120,7 @@ tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
+bincode.workspace = true
 ciborium.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
