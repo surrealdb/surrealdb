@@ -60,7 +60,7 @@ DefineDatabaseStatement:3(crates/core/src/sql/statements/define/database.rs)(677
 DefineEventStatement:3(crates/core/src/sql/statements/define/event.rs)(3423152611)
 DefineFieldStatement:6(crates/core/src/sql/statements/define/field.rs)(647198236)
 DefineFunctionStatement:4(crates/core/src/sql/statements/define/function.rs)(1601564888)
-DefineIndexStatement:4(crates/core/src/sql/statements/define/index.rs)(49924309)
+DefineIndexStatement:5(crates/core/src/sql/statements/define/index.rs)(76221583)
 DefineModelStatement:3(crates/core/src/sql/statements/define/model.rs)(140136516)
 DefineNamespaceStatement:3(crates/core/src/sql/statements/define/namespace.rs)(297116727)
 DefineParamStatement:3(crates/core/src/sql/statements/define/param.rs)(2700791309)

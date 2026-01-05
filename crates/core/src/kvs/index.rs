@@ -22,10 +22,12 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -157,7 +159,7 @@ impl IndexBuilder {
 		}
 	}
 
-	fn start_building(
+	async fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -179,6 +181,19 @@ impl IndexBuilder {
 			}
 			drop(guard);
 		});
+		// If it is a deferred indexing, start the daemon and return
+		let b = building.clone();
+		let defer_join_handle = spawn(async move {
+			loop {
+				if let Err(e) = b.index_appending_loop(0).await {
+					error!("Index appending loop error: {}", e);
+					b.set_status(BuildingStatus::Error(e.to_string())).await;
+					break;
+				}
+				sleep(Duration::from_millis(100)).await;
+			}
+		});
+		*building.defer_daemon.lock().await = Some(defer_join_handle);
 		Ok(building)
 	}
 
@@ -205,12 +220,12 @@ impl IndexBuilder {
 						name: e.key().ix.clone(),
 					});
 				}
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ix, sdr).await?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ix, sdr).await?;
 				e.insert(ib);
 			}
 		}
@@ -321,11 +336,11 @@ struct Building {
 	tf: TransactionFactory,
 	ix: Arc<DefineIndexStatement>,
 	tb: String,
-	status: Arc<RwLock<BuildingStatus>>,
-	queue: Arc<RwLock<QueueSequences>>,
+	status: RwLock<BuildingStatus>,
+	queue: RwLock<QueueSequences>,
 	aborted: AtomicBool,
 	finished: AtomicBool,
-	defer_daemon: Option<JoinHandle<()>>,
+	defer_daemon: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Building {
@@ -341,11 +356,11 @@ impl Building {
 			tf,
 			tb: ix.what.to_raw(),
 			ix,
-			status: Arc::new(RwLock::new(BuildingStatus::Started)),
+			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
-			defer_daemon: None,
+			defer_daemon: Mutex::new(None),
 		})
 	}
 
@@ -368,7 +383,7 @@ impl Building {
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built, and it is not a defered index:
-			if self.defer_daemon.is_none() && self.status.read().await.is_ready() {
+			if self.ix.defer && self.status.read().await.is_ready() {
 				// ... we return the values back, so the document can be updated the usual way
 				return Ok(ConsumeResult::Ignored(old_values, new_values));
 			}
@@ -468,19 +483,17 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
-		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
-		self.set_status(BuildingStatus::Indexing {
-			initial: Some(initial_count),
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: Some(0),
-		})
-		.await;
+		if !self.ix.defer {
+			// Second iteration, we index/remove any records that have been added or removed since the initial indexing
+			self.index_appending_loop(initial_count).await?;
+		}
+		Ok(())
+	}
+
+	async fn index_appending_loop(&self, initial_count: usize) -> Result<(), Error> {
 		let mut updates_count = 0;
 		let mut next_to_index = None;
-		loop {
-			if self.is_aborted().await {
-				return Ok(());
-			}
+		while !self.is_aborted().await {
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -497,7 +510,6 @@ impl Building {
 					.await;
 					// This is here to be sure the lock on back is not released early
 					queue.clear();
-					break;
 				}
 				queue.next_indexing_batch(*NORMAL_FETCH_SIZE)
 			};
