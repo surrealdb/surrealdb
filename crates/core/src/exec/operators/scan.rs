@@ -1,3 +1,4 @@
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,11 +18,30 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::kvs::KVValue;
-use crate::val::{TableName, Value};
+use crate::key::record;
+use crate::kvs::{KVKey, KVValue};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Batch size for collecting records before yielding.
 const BATCH_SIZE: usize = 1000;
+
+/// Represents the target of a scan operation.
+enum ScanTarget {
+	/// Scan all records in a table
+	Table(TableName),
+	/// Scan a specific record or range by RecordId
+	RecordId(RecordId),
+}
+
+impl ScanTarget {
+	/// Get the table name for permission lookup
+	fn table_name(&self) -> TableName {
+		match self {
+			ScanTarget::Table(t) => t.clone(),
+			ScanTarget::RecordId(rid) => rid.table.clone(),
+		}
+	}
+}
 
 /// Full table scan - iterates over all records in a table.
 ///
@@ -84,16 +104,21 @@ impl OperatorPlan for Scan {
 				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
 			})?;
 
-			let table_name = match table_value {
-				Value::String(s) => TableName::from(s),
-				Value::Table(t) => t,
+			// Determine scan target: either a table name or a record ID
+			let scan_target = match table_value {
+				Value::String(s) => ScanTarget::Table(TableName::from(s)),
+				Value::Table(t) => ScanTarget::Table(t),
+				Value::RecordId(rid) => ScanTarget::RecordId(rid),
 				_ => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Table expression must evaluate to a string or table, got: {:?}",
+						"Table expression must evaluate to a string, table, or record ID, got: {:?}",
 						table_value
 					)))?
 				}
 			};
+
+			// Get table name for permission lookup
+			let table_name = scan_target.table_name();
 
 			// Resolve SELECT permission
 			let select_permission = if check_perms {
@@ -118,45 +143,132 @@ impl OperatorPlan for Scan {
 				return;
 			}
 
-			// Create key range
-			let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
-			let end = crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
+			// Execute based on scan target type
+			match scan_target {
+				ScanTarget::Table(table_name) => {
+					// Full table scan
+					let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
+						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
+					let end = crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
+						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
 
-			// Create the KV stream ONCE
-			let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
-			futures::pin_mut!(kv_stream);
+					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+					futures::pin_mut!(kv_stream);
 
-			// Collect values into batches
-			let mut batch = Vec::with_capacity(BATCH_SIZE);
+					let mut batch = Vec::with_capacity(BATCH_SIZE);
 
-			while let Some(result) = kv_stream.next().await {
-				let (key, val) = result
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+					while let Some(result) = kv_stream.next().await {
+						let (key, val) = result
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
 
-				// Decode record
-				let value = decode_record(&key, val)?;
+						let value = decode_record(&key, val)?;
 
-				// Check permission
-				let allowed = check_permission_for_value(&select_permission, &value, &ctx)
-					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
+						let allowed = check_permission_for_value(&select_permission, &value, &ctx)
+							.await
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
 
-				if allowed {
-					batch.push(value);
+						if allowed {
+							batch.push(value);
+							if batch.len() >= BATCH_SIZE {
+								yield ValueBatch { values: std::mem::take(&mut batch) };
+								batch.reserve(BATCH_SIZE);
+							}
+						}
+					}
 
-					// Yield when batch is full
-					if batch.len() >= BATCH_SIZE {
-						yield ValueBatch { values: std::mem::take(&mut batch) };
-						batch.reserve(BATCH_SIZE);
+					if !batch.is_empty() {
+						yield ValueBatch { values: batch };
 					}
 				}
-			}
+				ScanTarget::RecordId(rid) => {
+					// Check if this is a range query or a point lookup
+					match &rid.key {
+						RecordIdKey::Range(range) => {
+							// Range scan within the table - prepare key range like processor.rs does
+							let beg = match &range.start {
+								Bound::Unbounded => record::prefix(ns.namespace_id, db.database_id, &rid.table)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?,
+								Bound::Included(v) => record::new(ns.namespace_id, db.database_id, &rid.table, v)
+									.encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}")))?,
+								Bound::Excluded(v) => {
+									let mut key = record::new(ns.namespace_id, db.database_id, &rid.table, v)
+										.encode_key()
+										.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}")))?;
+									key.push(0x00);
+									key
+								}
+							};
+							let end = match &range.end {
+								Bound::Unbounded => record::suffix(ns.namespace_id, db.database_id, &rid.table)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?,
+								Bound::Excluded(v) => record::new(ns.namespace_id, db.database_id, &rid.table, v)
+									.encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?,
+								Bound::Included(v) => {
+									let mut key = record::new(ns.namespace_id, db.database_id, &rid.table, v)
+										.encode_key()
+										.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?;
+									key.push(0x00);
+									key
+								}
+							};
 
-			// Yield remaining values
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
+							let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+							futures::pin_mut!(kv_stream);
+
+							let mut batch = Vec::with_capacity(BATCH_SIZE);
+
+							while let Some(result) = kv_stream.next().await {
+								let (key, val) = result
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+
+								let value = decode_record(&key, val)?;
+
+								let allowed = check_permission_for_value(&select_permission, &value, &ctx)
+									.await
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
+
+								if allowed {
+									batch.push(value);
+									if batch.len() >= BATCH_SIZE {
+										yield ValueBatch { values: std::mem::take(&mut batch) };
+										batch.reserve(BATCH_SIZE);
+									}
+								}
+							}
+
+							if !batch.is_empty() {
+								yield ValueBatch { values: batch };
+							}
+						}
+						_ => {
+							// Point lookup for a single record
+							let record = txn
+								.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
+								.await
+								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
+
+							// Check if record exists
+							if record.data.as_ref().is_none() {
+								return;
+							}
+
+							// Inject the id field into the document
+							let mut value = record.data.as_ref().clone();
+							value.def(&rid);
+
+							// Check permission for this record
+							let allowed = check_permission_for_value(&select_permission, &value, &ctx)
+								.await
+								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
+
+							if allowed {
+								yield ValueBatch { values: vec![value] };
+							}
+						}
+					}
+				}
 			}
 		};
 

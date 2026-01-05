@@ -8,6 +8,7 @@ use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
 	ValueBatch, ValueBatchStream,
 };
+use crate::expr::FlowResult;
 
 /// Filters a stream of values based on a predicate.
 ///
@@ -57,7 +58,7 @@ impl OperatorPlan for Filter {
 
 		let filtered = input_stream.filter_map(move |batch_result| {
 			let predicate = predicate.clone();
-			
+
 			let exec_ctx = ctx.clone();
 
 			async move {
@@ -67,33 +68,9 @@ impl OperatorPlan for Filter {
 					Err(e) => return Some(Err(e)),
 				};
 
-				// In-place filtering using swap-and-truncate (zero allocation)
-				let mut write_idx = 0;
-				for read_idx in 0..batch.values.len() {
-					// Scope the borrow so it ends before the swap
-					let keep = {
-						let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx)
-							.with_value(&batch.values[read_idx]);
-						match predicate.evaluate(eval_ctx).await {
-							Ok(pred) => pred.is_truthy(),
-							Err(e) => {
-								use crate::expr::ControlFlow;
-								return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-									"Filter predicate error: {}",
-									e
-								))));
-							}
-						}
-					};
-
-					if keep {
-						if write_idx != read_idx {
-							batch.values.swap(write_idx, read_idx);
-						}
-						write_idx += 1;
-					}
+				if let Err(err) = filter_batch_in_place(&mut batch, &*predicate, &exec_ctx).await {
+					return Some(Err(err));
 				}
-				batch.values.truncate(write_idx);
 
 				// Only emit non-empty batches
 				if batch.values.is_empty() {
@@ -106,4 +83,27 @@ impl OperatorPlan for Filter {
 
 		Ok(Box::pin(filtered))
 	}
+}
+
+async fn filter_batch_in_place(
+	batch: &mut ValueBatch,
+	predicate: &dyn PhysicalExpr,
+	exec_ctx: &ExecutionContext,
+) -> FlowResult<()> {
+	let mut write_idx = 0;
+	for read_idx in 0..batch.values.len() {
+		let keep = {
+			let eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(&batch.values[read_idx]);
+			predicate.evaluate(eval_ctx).await?.is_truthy()
+		};
+
+		if keep {
+			if write_idx != read_idx {
+				batch.values.swap(write_idx, read_idx);
+			}
+			write_idx += 1;
+		}
+	}
+	batch.values.truncate(write_idx);
+	Ok(())
 }

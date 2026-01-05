@@ -155,8 +155,10 @@ async fn resolve_table_name(
 	match table_value {
 		Value::String(s) => Ok(TableName::from(s)),
 		Value::Table(t) => Ok(t),
+		// RecordId: extract the table name from the record ID
+		Value::RecordId(rid) => Ok(rid.table.clone()),
 		_ => Err(ControlFlow::Err(anyhow::anyhow!(
-			"Table expression must evaluate to a string or table, got: {:?}",
+			"Table expression must evaluate to a string, table, or record ID, got: {:?}",
 			table_value
 		))),
 	}

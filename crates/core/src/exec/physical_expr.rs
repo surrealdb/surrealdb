@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::err::Error;
 use crate::exec::{AccessMode, ExecutionContext, OperatorPlan};
 use crate::expr::Idiom;
 use crate::val::Value;

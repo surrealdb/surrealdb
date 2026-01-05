@@ -55,7 +55,7 @@ impl ContextLevel {
 /// - Query parameters
 /// - Cancellation token
 /// - Authentication context
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RootContext {
 	/// The underlying datastore (optional - only needed for root-level operations
 	/// like INFO FOR ROOT, DEFINE USER ON ROOT, etc.)
@@ -93,7 +93,7 @@ impl std::fmt::Debug for RootContext {
 /// Contains everything from RootContext plus:
 /// - Namespace definition
 /// - Transaction (created at namespace level)
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NamespaceContext {
 	/// Root context (datastore, params, cancellation)
 	pub root: RootContext,
@@ -133,7 +133,7 @@ impl NamespaceContext {
 ///
 /// Contains everything from NamespaceContext plus:
 /// - Database definition
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DatabaseContext {
 	/// Namespace context (root + ns)
 	pub ns_ctx: NamespaceContext,
@@ -188,7 +188,7 @@ impl DatabaseContext {
 /// appropriate context level. The accessors return `Result` for levels that
 /// may not be available, providing runtime safety in addition to the
 /// compile-time safety from the typed context structs.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum ExecutionContext {
 	/// Root-level context (no ns/db selected)
 	Root(RootContext),
@@ -196,16 +196,6 @@ pub enum ExecutionContext {
 	Namespace(NamespaceContext),
 	/// Database-level context (both ns and db selected)
 	Database(DatabaseContext),
-}
-
-impl std::fmt::Debug for ExecutionContext {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::Root(r) => f.debug_tuple("Root").field(r).finish(),
-			Self::Namespace(n) => f.debug_tuple("Namespace").field(n).finish(),
-			Self::Database(d) => f.debug_tuple("Database").field(d).finish(),
-		}
-	}
 }
 
 impl ExecutionContext {

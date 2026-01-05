@@ -1779,7 +1779,8 @@ impl Datastore {
 			_ => DbResultError::InternalError(e.to_string()),
 		})?;
 
-		// Store the query variables
+		// Store the query variables (clone for fallback path, pass original to StreamExecutor)
+		let vars_for_stream = vars.clone();
 		if let Some(vars) = vars {
 			ctx.attach_variables(vars.into()).map_err(|e| match e {
 				Error::InvalidParam {
@@ -1794,8 +1795,8 @@ impl Datastore {
 
 		let results = match logical_plan_to_execution_plan(&plan) {
 			Ok(execution_plan) => {
-				// Pass session's ns/db, auth, and session values to initialize the stream
-				// executor's context
+				// Pass session's ns/db, auth, session values, and query variables to initialize
+				// the stream executor's context
 				StreamExecutor::execute_collected(
 					self,
 					execution_plan,
@@ -1804,6 +1805,7 @@ impl Datastore {
 					sess.au.clone(),
 					self.auth_enabled,
 					sess.values(),
+					vars_for_stream,
 				)
 				.await
 			}

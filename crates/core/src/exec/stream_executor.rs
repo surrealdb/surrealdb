@@ -39,6 +39,8 @@ use crate::expr::LogicalPlan;
 use crate::iam::Auth;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::DbResultError;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::PublicVariables;
 use crate::val::{Array, Value, convert_value_to_public_value};
 
 /// Error during script execution
@@ -156,6 +158,7 @@ impl StreamExecutor {
 	/// - `auth`: The authentication context for this session
 	/// - `auth_enabled`: Whether authentication is enabled on the datastore
 	/// - `session_values`: Session-based parameters ($auth, $access, $token, $session)
+	/// - `query_vars`: Optional query-level variables (e.g., $_record_id, $_table from SDK)
 	pub(crate) async fn execute_collected(
 		ds: &Datastore,
 		execution_plan: ExecutionPlan,
@@ -164,6 +167,7 @@ impl StreamExecutor {
 		auth: Arc<Auth>,
 		auth_enabled: bool,
 		session_values: Vec<(&'static str, Value)>,
+		query_vars: Option<PublicVariables>,
 	) -> Result<Vec<QueryResult>, anyhow::Error> {
 		// Create a read transaction for the initial context
 		let txn = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
@@ -173,6 +177,15 @@ impl StreamExecutor {
 		for (name, value) in session_values {
 			initial_params.insert(Cow::Borrowed(name), Arc::new(value));
 		}
+
+		// Add query-level variables (e.g., $_record_id, $_table from SDK CRUD operations)
+		if let Some(vars) = query_vars {
+			for (name, value) in vars {
+				initial_params
+					.insert(Cow::Owned(name), Arc::new(convert_public_value_to_internal(value)));
+			}
+		}
+
 		let params = Arc::new(initial_params);
 
 		// Build the initial ExecutionContext based on ns/db selection
