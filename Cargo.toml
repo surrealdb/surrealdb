@@ -78,6 +78,7 @@ argon2 = "0.5.2"
 arrayvec = "0.7.6"
 async-channel = "2.3.1"
 async-executor = "1.13.1"
+async-stream = "0.3.6"
 async-graphql = { version = "7.0.17", default-features = false, features = ["custom-error-conversion"] }
 async-graphql-axum = "7.0.17"
 async-trait = "0.1.88"

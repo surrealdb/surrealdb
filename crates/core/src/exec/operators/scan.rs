@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::stream;
+use futures::StreamExt;
 
 use crate::catalog::Permission;
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
@@ -16,7 +16,12 @@ use crate::exec::{
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
+use crate::idx::planner::ScanDirection;
+use crate::kvs::KVValue;
 use crate::val::{TableName, Value};
+
+/// Batch size for collecting records before yielding.
+const BATCH_SIZE: usize = 1000;
 
 /// Full table scan - iterates over all records in a table.
 ///
@@ -62,222 +67,118 @@ impl OperatorPlan for Scan {
 		// Check if we need to enforce permissions
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
-		// Clone the context for the async block (all fields are Arc/String so cheap to clone)
-		let table_expr = self.table.clone();
+		// Clone for the async block
+		let table_expr = Arc::clone(&self.table);
 		let version = self.version;
 		let ctx = ctx.clone();
 
-		// Create an async stream using try_unfold
-		let stream = stream::try_unfold(None::<ScanState>, move |state| {
-			let table_expr = table_expr.clone();
+		// Use try_stream! for clean async generator syntax
+		let stream = async_stream::try_stream! {
+			let txn = Arc::clone(ctx.txn());
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
-			let ctx = ctx.clone();
 
-			async move {
-				let txn = ctx.txn().clone();
+			// Evaluate table expression
+			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+			let table_value = table_expr.evaluate(eval_ctx).await.map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
+			})?;
 
-				// Initialize state on first call
-				let state = if let Some(s) = state {
-					s
-				} else {
-					// Build execution context for table expression evaluation
-					let exec_ctx = ctx.clone();
-
-					// Evaluate the table expression to get the table name
-					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx);
-					let table_value = table_expr.evaluate(eval_ctx).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!(
-							"Failed to evaluate table expression: {}",
-							e
-						))
-					})?;
-
-					// Convert to table name
-					let table_name = match table_value {
-						Value::String(s) => TableName::from(s),
-						Value::Table(t) => t,
-						_ => {
-							return Err(ControlFlow::Err(anyhow::anyhow!(
-								"Table expression must evaluate to a string or table, got: {:?}",
-								table_value
-							)));
-						}
-					};
-
-					// Get namespace and database IDs
-
-					// Resolve table definition and SELECT permission at execution time
-					let select_permission = if check_perms {
-						let table_def =
-							txn.get_tb_by_name(&ns.name, &db.name, &table_name).await.map_err(
-								|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {}", e)),
-							)?;
-
-						let catalog_perm = match table_def {
-							Some(def) => def.permissions.select.clone(),
-							// Schemaless table: deny access for record users
-							None => Permission::None,
-						};
-						// Convert to physical permission
-						convert_permission_to_physical(&catalog_perm).map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {}", e))
-						})?
-					} else {
-						// Permissions bypassed - allow all
-						PhysicalPermission::Allow
-					};
-
-					// Create key range for all records in the table
-					let beg =
-						crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
-							.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!(
-									"Failed to create prefix key: {}",
-									e
-								))
-							})?;
-					let end =
-						crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
-							.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!(
-									"Failed to create suffix key: {}",
-									e
-								))
-							})?;
-
-					ScanState {
-						next_key: Some(beg),
-						end,
-						table_name,
-						ns_id: ns.namespace_id,
-						db_id: db.database_id,
-						select_permission,
-						version,
-					}
-				};
-
-				// Check if permission is Deny - return empty result immediately
-				if matches!(&state.select_permission, PhysicalPermission::Deny) {
-					return Ok(None);
+			let table_name = match table_value {
+				Value::String(s) => TableName::from(s),
+				Value::Table(t) => t,
+				_ => {
+					Err(ControlFlow::Err(anyhow::anyhow!(
+						"Table expression must evaluate to a string or table, got: {:?}",
+						table_value
+					)))?
 				}
+			};
 
-				// Check if we're done
-				let Some(next_key) = state.next_key else {
-					return Ok(None);
-				};
-
-				// Scan a batch (with optional version for time-travel)
-				const BATCH_SIZE: u32 = 1000;
-				let records = txn
-					.scan(next_key.clone()..state.end.clone(), BATCH_SIZE, state.version)
+			// Resolve SELECT permission
+			let select_permission = if check_perms {
+				let table_def = txn
+					.get_tb_by_name(&ns.name, &db.name, &table_name)
 					.await
-					.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to scan records: {}", e))
-					})?;
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
 
-				if records.is_empty() {
-					return Ok(None);
-				}
-
-				// Save length and last key before consuming
-				let records_len = records.len();
-				let last_key = records.last().map(|(k, _)| k.clone());
-
-				// Deserialize and collect values, filtering by permission
-				let mut values = Vec::with_capacity(records_len);
-				for (key, val) in records {
-					use crate::kvs::KVValue;
-
-					// Decode the record key to get the RecordId
-					let decoded_key =
-						crate::key::record::RecordKey::decode_key(&key).map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!("Failed to decode record key: {}", e))
-						})?;
-
-					let rid = crate::val::RecordId {
-						table: decoded_key.tb.into_owned(),
-						key: decoded_key.id,
-					};
-
-					let mut record = crate::catalog::Record::kv_decode_value(val).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to deserialize record: {}", e))
-					})?;
-
-					// Inject the id field into the document
-					record.data.to_mut().def(&rid);
-
-					let value = record.data.as_ref().clone();
-
-					// Check permission for this record
-					let allowed =
-						check_permission_for_value(&state.select_permission, &value, &ctx)
-							.await
-							.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!(
-									"Failed to check permission: {}",
-									e
-								))
-							})?;
-
-					if allowed {
-						values.push(value);
-					}
-				}
-
-				// Determine next state
-				let next_state = if records_len < BATCH_SIZE as usize {
-					// Done scanning
-					ScanState {
-						next_key: None,
-						..state
-					}
-				} else if let Some(last_key) = last_key {
-					// More to scan - start after the last key
-					let mut new_key = last_key;
-					new_key.push(0);
-					ScanState {
-						next_key: Some(new_key),
-						..state
-					}
-				} else {
-					// No more records
-					ScanState {
-						next_key: None,
-						..state
-					}
+				let catalog_perm = match table_def {
+					Some(def) => def.permissions.select.clone(),
+					None => Permission::None, // Schemaless: deny for record users
 				};
 
-				Ok(Some((
-					ValueBatch {
-						values,
-					},
-					Some(next_state),
-				)))
-			}
-		});
+				convert_permission_to_physical(&catalog_perm)
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}")))?
+			} else {
+				PhysicalPermission::Allow
+			};
 
-		// Filter out empty batches from the stream
-		let filtered_stream = futures::StreamExt::filter_map(stream, |result| async move {
-			match result {
-				Ok(batch) if batch.values.is_empty() => None,
-				other => Some(other),
+			// Early exit if denied - yield nothing
+			if matches!(select_permission, PhysicalPermission::Deny) {
+				return;
 			}
-		});
 
-		Ok(Box::pin(filtered_stream))
+			// Create key range
+			let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
+			let end = crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
+
+			// Create the KV stream ONCE
+			let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+			futures::pin_mut!(kv_stream);
+
+			// Collect values into batches
+			let mut batch = Vec::with_capacity(BATCH_SIZE);
+
+			while let Some(result) = kv_stream.next().await {
+				let (key, val) = result
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+
+				// Decode record
+				let value = decode_record(&key, val)?;
+
+				// Check permission
+				let allowed = check_permission_for_value(&select_permission, &value, &ctx)
+					.await
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
+
+				if allowed {
+					batch.push(value);
+
+					// Yield when batch is full
+					if batch.len() >= BATCH_SIZE {
+						yield ValueBatch { values: std::mem::take(&mut batch) };
+						batch.reserve(BATCH_SIZE);
+					}
+				}
+			}
+
+			// Yield remaining values
+			if !batch.is_empty() {
+				yield ValueBatch { values: batch };
+			}
+		};
+
+		Ok(Box::pin(stream))
 	}
 }
 
-// Create state for the scan
-#[derive(Clone)]
-struct ScanState {
-	next_key: Option<Vec<u8>>,
-	end: Vec<u8>,
-	table_name: TableName,
-	ns_id: crate::catalog::NamespaceId,
-	db_id: crate::catalog::DatabaseId,
-	select_permission: PhysicalPermission,
-	/// Optional version timestamp for time-travel queries
-	version: Option<u64>,
+/// Decode a record from its key and value bytes.
+fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
+	let decoded_key = crate::key::record::RecordKey::decode_key(key)
+		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode record key: {e}")))?;
+
+	let rid = crate::val::RecordId {
+		table: decoded_key.tb.into_owned(),
+		key: decoded_key.id,
+	};
+
+	let mut record = crate::catalog::Record::kv_decode_value(val)
+		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to deserialize record: {e}")))?;
+
+	// Inject the id field into the document
+	record.data.to_mut().def(&rid);
+
+	Ok(record.data.as_ref().clone())
 }

@@ -47,97 +47,63 @@ impl OperatorPlan for Filter {
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
 		// Get database context - we declared Database level, so this should succeed
-		let db_ctx = ctx.database()?;
+		// let db_ctx = ctx.database()?;
 
 		let input_stream = self.input.execute(ctx)?;
-		let predicate = self.predicate.clone();
+		let predicate = Arc::clone(&self.predicate);
 
 		// Clone all necessary data for the async move closure
-		let params = db_ctx.ns_ctx.root.params.clone();
-		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-		let db = Arc::clone(&db_ctx.db);
-		let txn = db_ctx.ns_ctx.root.txn.clone();
-		let auth = db_ctx.ns_ctx.root.auth.clone();
-		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
+		let ctx = ctx.clone();
 
 		let filtered = input_stream.filter_map(move |batch_result| {
 			let predicate = predicate.clone();
-			let params = params.clone();
-			let txn = txn.clone();
-			let ns = ns.clone();
-			let db = db.clone();
-			let auth = auth.clone();
+			
+			let exec_ctx = ctx.clone();
 
 			async move {
 				// Handle errors in the input batch
-				let batch = match batch_result {
+				let mut batch = match batch_result {
 					Ok(b) => b,
 					Err(e) => return Some(Err(e)),
 				};
 
-				let mut kept = Vec::new();
-				for value in batch.values {
-					// Build execution context for expression evaluation
-					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
-						ns_ctx: crate::exec::NamespaceContext {
-							root: crate::exec::RootContext {
-								datastore: None,
-								params: params.clone(),
-								cancellation: tokio_util::sync::CancellationToken::new(),
-								auth: auth.clone(),
-								auth_enabled,
-								txn: txn.clone(),
-							},
-							ns: ns.clone(),
-						},
-						db: db.clone(),
-					});
-					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx).with_value(&value);
-
-					// Evaluate predicate
-					match predicate.evaluate(eval_ctx).await {
-						Ok(result) => {
-							// Check if result is truthy
-							if is_truthy(&result) {
-								kept.push(value);
+				// In-place filtering using swap-and-truncate (zero allocation)
+				let mut write_idx = 0;
+				for read_idx in 0..batch.values.len() {
+					// Scope the borrow so it ends before the swap
+					let keep = {
+						let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx)
+							.with_value(&batch.values[read_idx]);
+						match predicate.evaluate(eval_ctx).await {
+							Ok(pred) => pred.is_truthy(),
+							Err(e) => {
+								use crate::expr::ControlFlow;
+								return Some(Err(ControlFlow::Err(anyhow::anyhow!(
+									"Filter predicate error: {}",
+									e
+								))));
 							}
 						}
-						Err(e) => {
-							use crate::expr::ControlFlow;
-							return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-								"Filter predicate error: {}",
-								e
-							))));
+					};
+
+					if keep {
+						if write_idx != read_idx {
+							batch.values.swap(write_idx, read_idx);
 						}
+						write_idx += 1;
 					}
 				}
+				batch.values.truncate(write_idx);
 
 				// Only emit non-empty batches
-				if kept.is_empty() {
+				if batch.values.is_empty() {
 					None
 				} else {
-					Some(Ok(ValueBatch {
-						values: kept,
-					}))
+					Some(Ok(batch))
 				}
 			}
 		});
 
 		Ok(Box::pin(filtered))
-	}
-}
-
-/// Check if a value is truthy
-fn is_truthy(value: &crate::val::Value) -> bool {
-	use crate::val::Value;
-
-	match value {
-		Value::None | Value::Null => false,
-		Value::Bool(b) => *b,
-		Value::Number(n) => !n.is_zero(),
-		Value::String(s) => !s.is_empty(),
-		Value::Array(a) => !a.is_empty(),
-		Value::Object(o) => !o.is_empty(),
-		_ => true,
 	}
 }

@@ -55,7 +55,7 @@ impl ContextLevel {
 /// - Query parameters
 /// - Cancellation token
 /// - Authentication context
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RootContext {
 	/// The underlying datastore (optional - only needed for root-level operations
 	/// like INFO FOR ROOT, DEFINE USER ON ROOT, etc.)
@@ -93,7 +93,7 @@ impl std::fmt::Debug for RootContext {
 /// Contains everything from RootContext plus:
 /// - Namespace definition
 /// - Transaction (created at namespace level)
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct NamespaceContext {
 	/// Root context (datastore, params, cancellation)
 	pub root: RootContext,
@@ -133,7 +133,7 @@ impl NamespaceContext {
 ///
 /// Contains everything from NamespaceContext plus:
 /// - Database definition
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct DatabaseContext {
 	/// Namespace context (root + ns)
 	pub ns_ctx: NamespaceContext,
