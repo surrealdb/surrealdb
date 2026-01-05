@@ -13,7 +13,7 @@ use crate::types::PublicValue;
 pub struct ApiResponse {
 	pub raw: Option<bool>,
 	pub status: StatusCode,
-	pub body: Option<PublicValue>,
+	pub body: PublicValue,
 	pub headers: HeaderMap,
 }
 

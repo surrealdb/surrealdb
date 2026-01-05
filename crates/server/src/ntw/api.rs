@@ -93,9 +93,9 @@ async fn handler(
 		return Err(NetError::NotFound(url).into());
 	};
 
-	let res_body: Vec<u8> = if let Some(body) = res.body {
+	let res_body: Vec<u8> = if !res.body.is_none() {
 		match res_instruction {
-			ResponseInstruction::Raw => match body {
+			ResponseInstruction::Raw => match res.body {
 				Value::String(v) => {
 					res.headers.entry(CONTENT_TYPE).or_insert(
 						surrealdb_core::api::format::PLAIN
@@ -131,15 +131,15 @@ async fn handler(
 				let (header, val) = match format {
 					Format::Json => (
 						surrealdb_core::api::format::JSON,
-						json::encode(body).map_err(|_| RpcError::ParseError)?,
+						json::encode(res.body).map_err(|_| RpcError::ParseError)?,
 					),
 					Format::Cbor => (
 						surrealdb_core::api::format::CBOR,
-						cbor::encode(body).map_err(|_| RpcError::ParseError)?,
+						cbor::encode(res.body).map_err(|_| RpcError::ParseError)?,
 					),
 					Format::Flatbuffers => (
 						surrealdb_core::api::format::FLATBUFFERS,
-						flatbuffers::encode(&body).map_err(|_| RpcError::ParseError)?,
+						flatbuffers::encode(&res.body).map_err(|_| RpcError::ParseError)?,
 					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};

@@ -177,6 +177,8 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
 ], optional = true }
 tempfile = { workspace = true, optional = true }
+headers = "0.4.1"
+mime = "0.3.17"
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
