@@ -1,2 +1,7 @@
 [workspace]
+resolver = "3"
 members = ["crud-bench"]
+
+# Profile configuration is automatically copied from crud-bench's Cargo.toml
+# during the CI workflow run to ensure the benchmark binary is built with
+# the correct optimizations for the specific crud-bench version being used.
