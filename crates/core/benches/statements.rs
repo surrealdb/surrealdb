@@ -218,7 +218,7 @@ fn bench_relate(c: &mut Criterion) {
 		relate_simple,
 		&dbs,
 		&ses,
-		"RELATE person:test->knows->person:other SET date = time::now(); weight = 0.8;"
+		"RELATE person:test->knows->person:other SET date = time::now(), weight = 0.8;"
 	);
 
 	bench!(
