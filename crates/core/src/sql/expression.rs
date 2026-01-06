@@ -12,7 +12,7 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
+	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param, Part,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
@@ -159,7 +159,13 @@ impl Expr {
 			Expr::Postfix {
 				op,
 				..
-			} => matches!(op, PostfixOperator::Range | PostfixOperator::RangeSkip),
+			} => matches!(
+				op,
+				PostfixOperator::Range
+					| PostfixOperator::RangeSkip
+					| PostfixOperator::MethodCall(_, _)
+					| PostfixOperator::Call(_)
+			),
 
 			Expr::Literal(_)
 			| Expr::Param(_)
@@ -175,6 +181,32 @@ impl Expr {
 				..
 			}
 			| Expr::FunctionCall(_) => false,
+		}
+	}
+
+	/// Returns true if there is a `NONE` or `NULL` value in the left most spot when formatting.
+	/// returns true for `NONE + 1`, `NULL()`, `NONE`, `NULL..` etc.
+	///
+	/// Required for proper formatting when `NONE` can conflict with a clause.
+	pub fn has_left_none_null(&self) -> bool {
+		match self {
+			Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => true,
+			Expr::Binary {
+				left,
+				..
+			} => left.has_left_none_null(),
+			Expr::Postfix {
+				expr,
+				..
+			} => expr.has_left_none_null(),
+			Expr::Idiom(x) => {
+				if let Some(Part::Start(x)) = x.0.first() {
+					x.has_left_none_null()
+				} else {
+					false
+				}
+			}
+			_ => false,
 		}
 	}
 }

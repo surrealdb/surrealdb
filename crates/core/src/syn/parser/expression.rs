@@ -149,7 +149,7 @@ impl Parser<'_> {
 			t!("<") => {
 				if let Some(peek) = self.peek_whitespace1() {
 					if peek.kind == t!("-") {
-						let recover = self.recent_span();
+						let recover = self.last_span();
 						if self.peek2().kind == TokenKind::Digits {
 							self.backup_after(recover);
 							return Some(BindingPower::Prefix);
@@ -172,16 +172,15 @@ impl Parser<'_> {
 				if let Some(peek) = self.peek_whitespace1()
 					&& let t!("..") = peek.kind
 				{
-					return None;
+					if let Some(peek) = self.peek_whitespace2()
+						&& (t!("=") == peek.kind || Self::kind_starts_expression(peek.kind))
+					{
+						return None;
+					} else {
+						return Some(BindingPower::Range);
+					}
 				}
-
-				if let Some(peek) = self.peek_whitespace2()
-					&& (t!("=") == peek.kind || Self::kind_starts_expression(peek.kind))
-				{
-					return None;
-				}
-
-				Some(BindingPower::Range)
+				None
 			}
 			t!("..") => match self.peek_whitespace1().map(|x| x.kind) {
 				Some(t!("=")) => None,
@@ -293,7 +292,7 @@ impl Parser<'_> {
 						PrefixOperator::Range
 					}
 				} else {
-					PrefixOperator::Range
+					return Ok(Expr::Literal(Literal::UnboundedRange));
 				}
 			}
 			// should be unreachable as we previously check if the token was a prefix op.
@@ -340,8 +339,11 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	fn operator_is_relation(operator: &BinaryOperator) -> bool {
-		matches!(
+	/// Returns if an operator has a defined associativity.
+	/// For example: `a - b - c == (a - b) - c` so `-` is left associative.
+	/// However `a == b == c` is not defined to be either `(a == b) == c` nor `a == (b == c)`.
+	fn operator_has_associativity(operator: &BinaryOperator) -> bool {
+		!matches!(
 			operator,
 			BinaryOperator::Equal
 				| BinaryOperator::NotEqual
@@ -487,36 +489,45 @@ impl Parser<'_> {
 		let rhs_covered = self.peek().kind == t!("(");
 		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
-		let is_relation = Self::operator_is_relation(&operator);
-		if !lhs_prime && is_relation && BindingPower::for_expr(&lhs) == min_bp {
+		let has_associatitivity = Self::operator_has_associativity(&operator);
+		if !lhs_prime
+			&& !has_associatitivity
+			&& BindingPower::for_expr(&lhs) == BindingPower::for_binary_operator(&operator)
+		{
 			let span = token.span.covers(self.recent_span());
-			bail!("Chained relational operators have no defined associativity.",
-				@span => "Use parens, '()', to specify which operator must be evaluated first")
-		}
-
-		let is_range = matches!(
-			operator,
-			BinaryOperator::Range
-				| BinaryOperator::RangeSkipInclusive
-				| BinaryOperator::RangeSkip
-				| BinaryOperator::RangeInclusive
-		);
-		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
-			let span = token.span.covers(self.recent_span());
-			bail!("Chained range operators has no specified associativity",
+			if matches!(
+				operator,
+				BinaryOperator::Range
+					| BinaryOperator::RangeSkipInclusive
+					| BinaryOperator::RangeSkip
+					| BinaryOperator::RangeInclusive
+			) {
+				bail!("Chained range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
+			} else {
+				bail!("Chained relational operators have no defined associativity.",
+				@span => "Use parens, '()', to specify which operator must be evaluated first")
+			}
 		}
 
-		if !rhs_covered && is_relation && BindingPower::for_expr(&rhs) == min_bp {
+		if !rhs_covered
+			&& !has_associatitivity
+			&& BindingPower::for_expr(&rhs) == BindingPower::for_binary_operator(&operator)
+		{
 			let span = token.span.covers(self.recent_span());
-			bail!("Chained relational operators have no defined associativity.",
+			if matches!(
+				operator,
+				BinaryOperator::Range
+					| BinaryOperator::RangeSkipInclusive
+					| BinaryOperator::RangeSkip
+					| BinaryOperator::RangeInclusive
+			) {
+				bail!("Chained range operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
-		}
-
-		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
-			let span = token.span.covers(self.recent_span());
-			bail!("Chained range operators have no defined associativity.",
+			} else {
+				bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
+			}
 		}
 
 		Ok(Expr::Binary {

@@ -314,7 +314,7 @@ impl Parser<'_> {
 							self.pop_peek();
 							token.span.covers(peek.span)
 						}
-						TokenKind::Identifier => {
+						TokenKind::Identifier | TokenKind::NaN | TokenKind::Infinity => {
 							self.pop_peek();
 							token.span.covers(peek.span)
 						}
@@ -325,7 +325,7 @@ impl Parser<'_> {
 				};
 				Ok(self.lexer.span_str(span).to_owned())
 			}
-			TokenKind::Identifier => {
+			TokenKind::Identifier | TokenKind::NaN | TokenKind::Infinity => {
 				let str = self.lexer.span_str(token.span);
 				let str = Lexer::unescape_ident_span(str, token.span, &mut self.unscape_buffer)?;
 				Ok(str.to_owned())

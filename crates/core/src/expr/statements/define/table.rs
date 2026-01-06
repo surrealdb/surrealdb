@@ -758,13 +758,16 @@ impl DefineTableStatement {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+				let val = rel
+					.from
+					.as_ref()
+					.map(|x| Kind::Record(x.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
 						table: tb.name.clone(),
-						field_kind: Some(val),
+						field_kind: val,
 						..Default::default()
 					},
 					None,
@@ -774,13 +777,16 @@ impl DefineTableStatement {
 			// Set the `out` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+				let val = rel
+					.from
+					.as_ref()
+					.map(|x| Kind::Record(x.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
 						table: tb.name.clone(),
-						field_kind: Some(val),
+						field_kind: val,
 						..Default::default()
 					},
 					None,

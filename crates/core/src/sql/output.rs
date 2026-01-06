@@ -1,7 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::sql::Field;
 use crate::sql::field::{Fields, Selector};
-use crate::sql::{Expr, Field, Literal};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -19,6 +19,9 @@ impl ToSql for Output {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("RETURN ");
 		match self {
+			// TODO: This none here is really annoying for parsing and formatting.
+			// it conflicts with value NONE. Ideally we should find some way to differentiate with
+			// `NONE` the clause and `NONE` the value.
 			Self::None => f.push_str("NONE"),
 			Self::Null => f.push_str("NULL"),
 			Self::Diff => f.push_str("DIFF"),
@@ -31,10 +34,17 @@ impl ToSql for Output {
 						let mut iter = fields.iter();
 						match iter.next() {
 							Some(Field::Single(Selector {
-								expr: Expr::Literal(Literal::None),
+								expr,
 								alias,
 							})) => {
-								f.push_str("(NONE)");
+								let has_left_none = expr.has_left_none_null();
+								if has_left_none {
+									f.push('(');
+								}
+								expr.fmt_sql(f, fmt);
+								if has_left_none {
+									f.push(')');
+								}
 								if let Some(alias) = alias {
 									write_sql!(f, fmt, " AS {alias}");
 								}

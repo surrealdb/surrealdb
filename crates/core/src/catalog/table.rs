@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::DefineTableStatement;
@@ -161,10 +162,23 @@ impl ToSql for TableType {
 			TableType::Relation(rel) => {
 				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					write_sql!(f, sql_fmt, " IN {}", kind.to_sql());
+					f.push_str(" IN ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k));
+					}
 				}
 				if let Some(kind) = &rel.to {
-					write_sql!(f, sql_fmt, " OUT {}", kind.to_sql());
+					f.push_str(" OUT ");
+					write_sql!(f, sql_fmt, " OUT ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k));
+					}
 				}
 				if rel.enforced {
 					f.push_str(" ENFORCED");
@@ -185,9 +199,9 @@ impl InfoStructure for TableType {
 			}),
 			Self::Relation(rel) => Value::from(map! {
 				"kind".to_string() => "RELATION".into(),
-				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
+				"in".to_string(), if let Some(tables) = rel.from =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
+				"out".to_string(), if let Some(tables) = rel.to =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"enforced".to_string() => rel.enforced.into()
 			}),
@@ -195,10 +209,43 @@ impl InfoStructure for TableType {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
-	pub from: Option<Kind>,
-	pub to: Option<Kind>,
+	#[revision(end = 2, convert_fn = "rev_convert_from")]
+	pub old_from: Option<Kind>,
+	#[revision(start = 2)]
+	pub from: Option<Vec<String>>,
+	#[revision(end = 2, convert_fn = "rev_convert_to")]
+	pub old_to: Option<Kind>,
+	#[revision(start = 2)]
+	pub to: Option<Vec<String>>,
 	pub enforced: bool,
+}
+
+impl Relation {
+	fn rev_convert_from(&mut self, _rev: u16, value: Option<Kind>) -> Result<(), revision::Error> {
+		if let Some(x) = value {
+			let Kind::Record(x) = x else {
+				return Err(revision::Error::Conversion(format!(
+					"Invalid kind within table relation, should have been a record, found: {:#?}",
+					x,
+				)));
+			};
+			self.from = Some(x.into_iter().map(|x| x.into_string()).collect())
+		}
+		Ok(())
+	}
+	fn rev_convert_to(&mut self, _rev: u16, value: Option<Kind>) -> Result<(), revision::Error> {
+		if let Some(x) = value {
+			let Kind::Record(x) = x else {
+				return Err(revision::Error::Conversion(format!(
+					"Invalid kind within table relation, should have been a record, found: {:#?}",
+					x,
+				)));
+			};
+			self.to = Some(x.into_iter().map(|x| x.into_string()).collect())
+		}
+		Ok(())
+	}
 }

@@ -5,6 +5,7 @@ use reblessive::Stk;
 use surrealdb_types::ToSql;
 
 use super::{ParseResult, Parser};
+use crate::iam::Token;
 use crate::sql::lookup::LookupSubject;
 use crate::sql::{Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;
@@ -282,7 +283,9 @@ impl Parser<'_> {
 			TokenKind::Digits => {
 				if self.settings.flexible_record_id
 					&& let Some(next) = self.peek_whitespace1()
-					&& Self::kind_is_identifier(next.kind)
+					&& (Self::kind_is_identifier(next.kind)
+						|| next.kind == TokenKind::NaN
+						|| next.kind == TokenKind::Infinity)
 				{
 					let ident = self.parse_flexible_ident()?;
 					return Ok(RecordIdKeyLit::String(ident));

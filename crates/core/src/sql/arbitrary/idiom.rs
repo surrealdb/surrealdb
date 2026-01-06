@@ -15,6 +15,10 @@ impl<'a> Arbitrary<'a> for Idiom {
 			_ => unreachable!(),
 		};
 		let mut res = vec![res];
+		if matches!(res[0], Part::Start(_)) {
+			res.push(u.arbitrary()?);
+		}
+
 		let len = u.arbitrary_len::<Part>()?;
 		res.reserve(len);
 		for _ in 0..len {

@@ -51,7 +51,11 @@ impl ToSql for Block {
 				} else {
 					// Non-pretty: compact format
 					f.push_str("{ ");
-					v.fmt_sql(f, fmt);
+					if let Expr::Literal(Literal::RecordId(_)) = v {
+						write_sql!(f, fmt, "({v})");
+					} else {
+						v.fmt_sql(f, fmt);
+					}
 					f.push_str(" }");
 				}
 			}
@@ -94,6 +98,12 @@ impl ToSql for Block {
 					for (i, v) in self.0.iter().enumerate() {
 						if i > 0 {
 							f.push(' ');
+						} else {
+							f.push('(');
+							v.fmt_sql(f, fmt);
+							f.push(')');
+							f.push(';');
+							continue;
 						}
 						v.fmt_sql(f, fmt);
 						f.push(';');

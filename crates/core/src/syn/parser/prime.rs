@@ -1,4 +1,3 @@
-use core::f64;
 use std::ops::Bound;
 
 use reblessive::Stk;

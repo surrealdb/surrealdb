@@ -6,7 +6,8 @@ use crate::sql::arbitrary::{
 };
 use crate::sql::kind::KindLiteral;
 use crate::sql::statements::alter::{
-	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterSystemStatement,
+	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterNamespaceStatement,
+	AlterSystemStatement,
 };
 use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
@@ -170,22 +171,22 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let expr = u.arbitrary()?;
+		let mut expr = u.arbitrary()?;
 
 		let group = if u.arbitrary()? {
-			Some(arb_group(u, &expr)?)
+			Some(arb_group(u, &mut expr)?)
 		} else {
 			None
 		};
 
 		let split = if u.arbitrary()? {
-			Some(arb_splits(u, &expr)?)
+			Some(arb_splits(u, &mut expr)?)
 		} else {
 			None
 		};
 
 		let order = if u.arbitrary()? {
-			Some(arb_order(u, &expr)?)
+			Some(arb_order(u, &mut expr)?)
 		} else {
 			None
 		};
@@ -214,10 +215,10 @@ impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for View {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let expr = u.arbitrary()?;
+		let mut expr = u.arbitrary()?;
 
 		let group = if u.arbitrary()? {
-			Some(arb_group(u, &expr)?)
+			Some(arb_group(u, &mut expr)?)
 		} else {
 			None
 		};
@@ -325,6 +326,14 @@ impl<'a> arbitrary::Arbitrary<'a> for AlterSystemStatement {
 impl<'a> arbitrary::Arbitrary<'a> for AlterDatabaseStatement {
 	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		Ok(AlterDatabaseStatement {
+			compact: true,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterNamespaceStatement {
+	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(AlterNamespaceStatement {
 			compact: true,
 		})
 	}

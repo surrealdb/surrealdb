@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::Kind;
+use crate::fmt::EscapeKwFreeIdent;
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -21,10 +21,22 @@ impl ToSql for TableType {
 			TableType::Relation(rel) => {
 				write_sql!(f, sql_fmt, " RELATION");
 				if let Some(kind) = &rel.from {
-					write_sql!(f, sql_fmt, " IN {kind}");
+					f.push_str(" IN ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k))
+					}
 				}
 				if let Some(kind) = &rel.to {
-					write_sql!(f, sql_fmt, " OUT {kind}");
+					f.push_str(" OUT ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k))
+					}
 				}
 				if rel.enforced {
 					write_sql!(f, sql_fmt, " ENFORCED");
@@ -60,8 +72,10 @@ impl From<crate::catalog::TableType> for TableType {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Relation {
-	pub from: Option<Kind>,
-	pub to: Option<Kind>,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::opt_atleast_one))]
+	pub from: Option<Vec<String>>,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::opt_atleast_one))]
+	pub to: Option<Vec<String>>,
 	pub enforced: bool,
 }
 

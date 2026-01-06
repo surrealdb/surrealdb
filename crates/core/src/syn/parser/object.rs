@@ -40,7 +40,9 @@ impl Parser<'_> {
 			&& let Some(x) = self
 				.speculate(stk, async |stk, this| {
 					enter_object_recursion!(this = this => {
-						let key = this.parse_object_key()?;
+						let Ok(key) = this.parse_object_key() else {
+							return Ok(None)
+						};
 
 						if !this.eat(t!(":")){
 							return Ok(None)

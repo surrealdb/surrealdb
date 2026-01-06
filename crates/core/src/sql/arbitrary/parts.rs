@@ -1,28 +1,39 @@
 use std::ops::Bound;
+use std::sync::LazyLock;
 
 use arbitrary::Arbitrary;
+use surrealdb_types::ToSql as _;
 
 use crate::sql::access_type::{JwtAccess, JwtAccessIssue, JwtAccessVerify};
 use crate::sql::arbitrary::idiom::plain_idiom;
-use crate::sql::arbitrary::{arb_vec1, atleast_one, basic_idiom};
+use crate::sql::arbitrary::{arb_vec1, arb_vec2, atleast_one, basic_idiom};
 use crate::sql::field::Selector;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::Subject;
 use crate::sql::statements::define::config::api::Middleware;
 use crate::sql::{
 	Closure, Data, Expr, Fetch, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Kind,
-	Lookup, Model, Order, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, Split, Splits,
+	Literal, Lookup, Model, Order, Part, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, Scoring,
+	Split, Splits,
 };
-use crate::syn::parser::PATHS;
+use crate::syn::parser::{PATHS, PathKind};
+
+static FN_PATH_INDECIES: LazyLock<Vec<usize>> = LazyLock::new(|| {
+	PATHS
+		.values()
+		.enumerate()
+		.filter(|(_, (k, _))| matches!(k, PathKind::Function))
+		.map(|x| x.0)
+		.collect()
+});
 
 impl<'a> Arbitrary<'a> for Function {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		match u.int_in_range::<u8>(0..=5)? {
 			0 => {
-				let pick = u.int_in_range(0..=(PATHS.len() - 1))?;
-				Ok(Function::Normal(
-					PATHS.keys().nth(pick).expect("should be in range").to_string(),
-				))
+				let pick = u.int_in_range(0..=(FN_PATH_INDECIES.len() - 1))?;
+				let idx = FN_PATH_INDECIES[pick];
+				Ok(Function::Normal(PATHS.keys().nth(idx).expect("should be in range").to_string()))
 			}
 			1 => Ok(Self::Custom(u.arbitrary()?)),
 			2 => Ok(Self::Script(u.arbitrary()?)),
@@ -231,9 +242,9 @@ impl<'a> Arbitrary<'a> for Lookup {
 				..Default::default()
 			},
 			2 => {
-				let expr: Option<Fields> = u.arbitrary()?;
+				let mut expr: Option<Fields> = u.arbitrary()?;
 
-				let (split, group, order) = if let Some(expr) = &expr {
+				let (split, group, order) = if let Some(expr) = &mut expr {
 					let split = if u.arbitrary()? {
 						Some(arb_splits(u, expr)?)
 					} else {
@@ -295,8 +306,8 @@ impl<'a> Arbitrary<'a> for Middleware {
 }
 
 pub fn either_kind<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Vec<Kind>> {
-	arb_vec1(u, |u| {
-		let r = match u.int_in_range(0u8..=23)? {
+	let mut k = arb_vec2(u, |u| {
+		let r = match u.int_in_range(0u8..=22)? {
 			0 => Kind::None,
 			1 => Kind::Null,
 			2 => Kind::Bool,
@@ -325,12 +336,26 @@ pub fn either_kind<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result
 			_ => unreachable!(),
 		};
 		Ok(r)
-	})
+	})?;
+
+	let Kind::Either(k) = Kind::either(k.clone()) else {
+		if k.contains(&Kind::None) {
+			k.push(Kind::Null)
+		} else {
+			k.push(Kind::None)
+		};
+		let Kind::Either(k) = Kind::either(k) else {
+			unreachable!()
+		};
+		return Ok(k);
+	};
+
+	Ok(k)
 }
 
 pub fn arb_splits<'a>(
 	u: &mut arbitrary::Unstructured<'a>,
-	expr: &Fields,
+	expr: &mut Fields,
 ) -> arbitrary::Result<Splits> {
 	if expr.contains_all() {
 		return arb_vec1(u, |u| basic_idiom(u).map(Split)).map(Splits);
@@ -345,7 +370,7 @@ pub fn arb_splits<'a>(
 
 pub fn arb_order<'a>(
 	u: &mut arbitrary::Unstructured<'a>,
-	expr: &Fields,
+	expr: &mut Fields,
 ) -> arbitrary::Result<Ordering> {
 	if u.arbitrary()? {
 		return Ok(Ordering::Random);
@@ -375,7 +400,7 @@ pub fn arb_order<'a>(
 
 pub fn arb_group<'a>(
 	u: &mut arbitrary::Unstructured<'a>,
-	expr: &Fields,
+	expr: &mut Fields,
 ) -> arbitrary::Result<Groups> {
 	if expr.contains_all() {
 		return arb_vec1(u, |u| basic_idiom(u).map(Group)).map(Groups);
@@ -389,10 +414,34 @@ pub fn arb_group<'a>(
 	Ok(Groups(res))
 }
 
+fn idiom_is_basic(idiom: &Idiom) -> bool {
+	let Some(Part::Field(_)) = idiom.0.first() else {
+		return false;
+	};
+
+	for p in idiom.0[1..].iter() {
+		if !matches!(
+			p,
+			Part::Field(_)
+				| Part::All | Part::Value(Expr::Literal(
+				Literal::Integer(_) | Literal::Float(_) | Literal::Decimal(_)
+			))
+		) {
+			return false;
+		}
+	}
+
+	true
+}
+
 fn idiom_from_expr<'a>(
 	u: &mut arbitrary::Unstructured<'a>,
-	expr: &Fields,
+	expr: &mut Fields,
 ) -> arbitrary::Result<Idiom> {
+	if expr.contains_all() {
+		return basic_idiom(u);
+	}
+
 	match expr {
 		Fields::Value(selector) => {
 			if let Some(alias) = selector.alias.clone() {
@@ -400,21 +449,85 @@ fn idiom_from_expr<'a>(
 			}
 
 			match &selector.expr {
-				Expr::Idiom(x) => Ok(x.clone()),
-				x => Ok(x.to_idiom()),
+				Expr::Idiom(x) => {
+					if idiom_is_basic(x) {
+						return Ok(x.clone());
+					}
+
+					let first = selector.clone();
+					let res = basic_idiom(u)?;
+					*expr = Fields::Select(vec![
+						Field::Single(*first),
+						Field::Single(Selector {
+							expr: Expr::Idiom(res.clone()),
+							alias: None,
+						}),
+					]);
+
+					Ok(res)
+				}
+				x => {
+					let s = x.to_sql();
+					let s = crate::syn::parse_with_settings(
+						s.as_bytes(),
+						crate::syn::ParserSettings {
+							legacy_strands: true,
+							flexible_record_id: true,
+							object_recursion_limit: 10000000,
+							query_recursion_limit: 1000000,
+							define_api_enabled: true,
+							files_enabled: true,
+							surrealism_enabled: true,
+						},
+						async |p, stk| p.parse_expr_start(stk).await,
+					)
+					.expect("");
+
+					Ok(s.to_idiom())
+				}
 			}
 		}
 		Fields::Select(fields) => {
 			let Field::Single(selector) = u.choose(fields)? else {
 				return basic_idiom(u);
 			};
+
 			if let Some(alias) = selector.alias.clone() {
 				return Ok(alias);
 			}
 
 			match &selector.expr {
-				Expr::Idiom(x) => Ok(x.clone()),
-				x => Ok(x.to_idiom()),
+				Expr::Idiom(x) => {
+					if idiom_is_basic(x) {
+						return Ok(x.clone());
+					}
+					let idiom = basic_idiom(u)?;
+					fields.push(Field::Single(Selector {
+						expr: Expr::Idiom(idiom.clone()),
+
+						alias: None,
+					}));
+					Ok(idiom)
+				}
+				x => {
+					let s = x.to_sql();
+					let s = crate::syn::parse_with_settings(
+						s.as_bytes(),
+						crate::syn::ParserSettings {
+							legacy_strands: true,
+							flexible_record_id: true,
+							object_recursion_limit: 10000000,
+							query_recursion_limit: 1000000,
+							define_api_enabled: true,
+							files_enabled: true,
+							surrealism_enabled: true,
+						},
+						async |p, stk| p.parse_expr_start(stk).await,
+					)
+					.expect("");
+
+					Ok(s.to_idiom())
+				}
 			}
 		}
 	}
@@ -430,17 +543,15 @@ impl<'a> Arbitrary<'a> for JwtAccess {
 				u.arbitrary()?
 			};
 
-			let key = if alg.is_symmetric()
-				&& let JwtAccessVerify::Key(ref ver) = verify
-			{
-				ver.key.clone()
+			if alg.is_symmetric() {
+				None
 			} else {
-				u.arbitrary()?
-			};
-			Some(JwtAccessIssue {
-				alg,
-				key,
-			})
+				let key = u.arbitrary()?;
+				Some(JwtAccessIssue {
+					alg,
+					key,
+				})
+			}
 		} else {
 			None
 		};
@@ -448,6 +559,19 @@ impl<'a> Arbitrary<'a> for JwtAccess {
 		Ok(JwtAccess {
 			verify,
 			issue,
+		})
+	}
+}
+
+impl<'a> Arbitrary<'a> for Scoring {
+	fn size_hint(depth: usize) -> (usize, Option<usize>) {
+		arbitrary::size_hint::and(f32::size_hint(depth), f32::size_hint(depth))
+	}
+
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(Scoring::Bm {
+			k1: u.arbitrary()?,
+			b: u.arbitrary()?,
 		})
 	}
 }

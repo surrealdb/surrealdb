@@ -1047,12 +1047,6 @@ implement_visitor! {
 	}
 
 	fn visit_relation(this, r: &Relation){
-		if let Some(k) = r.from.as_ref(){
-			this.visit_kind(k)?;
-		}
-		if let Some(k) = r.to.as_ref(){
-			this.visit_kind(k)?;
-		}
 		Ok(())
 	}
 
@@ -2455,12 +2449,6 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_relation(this, r: &mut Relation){
-		if let Some(k) = r.from.as_mut(){
-			this.visit_mut_kind(k)?;
-		}
-		if let Some(k) = r.to.as_mut(){
-			this.visit_mut_kind(k)?;
-		}
 		Ok(())
 	}
 

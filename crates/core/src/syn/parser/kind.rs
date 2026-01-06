@@ -1,14 +1,12 @@
-use core::f64;
 use std::collections::BTreeMap;
 
 use reblessive::Stk;
 
-use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
 use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
-use crate::syn::lexer::compound;
+use crate::syn::lexer::{Lexer, compound};
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Keyword, Span, TokenKind, t};
 use crate::types::PublicDuration;
@@ -70,13 +68,63 @@ impl Parser<'_> {
 
 	/// Parse a single kind which is not any, option, or either.
 	async fn parse_concrete_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
-		if Self::token_can_be_literal_kind(self.peek_kind()) {
-			let literal = self.parse_literal_kind(stk).await?;
-			return Ok(Kind::Literal(literal));
-		}
-
 		let next = self.next();
 		match next.kind {
+			t!("true") => Ok(Kind::Literal(KindLiteral::Bool(true))),
+			t!("false") => Ok(Kind::Literal(KindLiteral::Bool(false))),
+			t!("'") | t!("\"") => {
+				let str = self.lexer.span_str(next.span);
+				let str = Lexer::unescape_string_span(str, next.span, &mut self.unscape_buffer)?;
+				Ok(Kind::Literal(KindLiteral::String(str.to_owned())))
+			}
+			TokenKind::NaN => Ok(Kind::Literal(KindLiteral::Float(f64::NAN))),
+			TokenKind::Infinity => Ok(Kind::Literal(KindLiteral::Float(f64::INFINITY))),
+			t!("+") | t!("-") => {
+				let compound = self.lexer.lex_compound(next, compound::number)?;
+				let kind = match compound.value {
+					compound::Numeric::Float(f) => KindLiteral::Float(f),
+					compound::Numeric::Integer(int) => {
+						KindLiteral::Integer(int.into_int(compound.span)?)
+					}
+					compound::Numeric::Decimal(decimal) => KindLiteral::Decimal(decimal),
+					compound::Numeric::Duration(_) => unreachable!(),
+				};
+				Ok(Kind::Literal(kind))
+			}
+			TokenKind::Digits => {
+				let compound = self.lexer.lex_compound(next, compound::numeric)?;
+				let v = match compound.value {
+					compound::Numeric::Integer(x) => {
+						KindLiteral::Integer(x.into_int(compound.span)?)
+					}
+					compound::Numeric::Float(x) => KindLiteral::Float(x),
+					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
+					compound::Numeric::Duration(x) => {
+						KindLiteral::Duration(PublicDuration::from_std(x))
+					}
+				};
+				Ok(Kind::Literal(v))
+			}
+			t!("{") => {
+				let mut obj = BTreeMap::new();
+				while !self.eat(t!("}")) {
+					let key = self.parse_object_key()?;
+					expected!(self, t!(":"));
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					obj.insert(key, kind);
+					self.eat(t!(","));
+				}
+				Ok(Kind::Literal(KindLiteral::Object(obj)))
+			}
+			t!("[") => {
+				let mut arr = Vec::new();
+				while !self.eat(t!("]")) {
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+					arr.push(kind);
+					self.eat(t!(","));
+				}
+				Ok(Kind::Literal(KindLiteral::Array(arr)))
+			}
 			t!("BOOL") => Ok(Kind::Bool),
 			t!("NONE") => Ok(Kind::None),
 			t!("NULL") => Ok(Kind::Null),
@@ -188,94 +236,6 @@ impl Parser<'_> {
 			},
 			_ => unexpected!(self, next, "a geometry kind name"),
 		}
-	}
-
-	/// Parse a literal kind
-	async fn parse_literal_kind(&mut self, stk: &mut Stk) -> ParseResult<KindLiteral> {
-		let peek = self.peek();
-		match peek.kind {
-			t!("true") => {
-				self.pop_peek();
-				Ok(KindLiteral::Bool(true))
-			}
-			t!("false") => {
-				self.pop_peek();
-				Ok(KindLiteral::Bool(false))
-			}
-			t!("'") | t!("\"") => {
-				let s = self.parse_string_lit()?;
-				Ok(KindLiteral::String(s))
-			}
-			TokenKind::NaN => {
-				self.pop_peek();
-				Ok(KindLiteral::Float(f64::NAN))
-			}
-			TokenKind::Infinity => {
-				self.pop_peek();
-				Ok(KindLiteral::Float(f64::INFINITY))
-			}
-			t!("+") | t!("-") => {
-				let kind = self.next_token_value::<NumberToken>()?;
-				let kind = match kind {
-					NumberToken::Float(f) => KindLiteral::Float(f),
-					NumberToken::Integer(i) => {
-						KindLiteral::Integer(i.into_int(self.recent_span())?)
-					}
-					NumberToken::Decimal(d) => KindLiteral::Decimal(d),
-				};
-				Ok(kind)
-			}
-			TokenKind::Digits => {
-				self.pop_peek();
-				let compound = self.lexer.lex_compound(peek, compound::numeric)?;
-				let v = match compound.value {
-					compound::Numeric::Integer(x) => {
-						KindLiteral::Integer(x.into_int(compound.span)?)
-					}
-					compound::Numeric::Float(x) => KindLiteral::Float(x),
-					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
-					compound::Numeric::Duration(x) => {
-						KindLiteral::Duration(PublicDuration::from_std(x))
-					}
-				};
-				Ok(v)
-			}
-			t!("{") => {
-				self.pop_peek();
-				let mut obj = BTreeMap::new();
-				while !self.eat(t!("}")) {
-					let key = self.parse_object_key()?;
-					expected!(self, t!(":"));
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-					obj.insert(key, kind);
-					self.eat(t!(","));
-				}
-				Ok(KindLiteral::Object(obj))
-			}
-			t!("[") => {
-				self.pop_peek();
-				let mut arr = Vec::new();
-				while !self.eat(t!("]")) {
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-					arr.push(kind);
-					self.eat(t!(","));
-				}
-				Ok(KindLiteral::Array(arr))
-			}
-			_ => unexpected!(self, peek, "a literal kind"),
-		}
-	}
-
-	fn token_can_be_literal_kind(t: TokenKind) -> bool {
-		matches!(
-			t,
-			t!("true")
-				| t!("false")
-				| t!("'") | t!("\"")
-				| t!("+") | t!("-")
-				| TokenKind::Digits
-				| t!("{") | t!("[")
-		)
 	}
 }
 

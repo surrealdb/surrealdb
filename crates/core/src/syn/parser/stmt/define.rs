@@ -1118,9 +1118,13 @@ impl Parser<'_> {
 						}
 					}
 
-					let m = m.unwrap_or(12);
-					let m0 = m0.unwrap_or(m * 2);
-					let ml = ml.unwrap_or(1.0 / (m as f64).ln()).into();
+					let m = m.unwrap_or(12u8);
+					// TODO: @Emmanuel please look at what to do if `m` is larger then 127.,
+					// previously m0 would overflow, currently I am just limiting it to u8::MAX
+					// but I am not sure if that is the correct thing to do, maybe we should error
+					// if `m` is larger then 127 and no `m0` is specified?
+					let m0 = m0.unwrap_or(m.saturating_mul(2));
+					let ml = ml.unwrap_or((1.0 / (m as f64).ln()).into());
 					res.index = Index::Hnsw(HnswParams {
 						dimension,
 						distance,
@@ -1526,7 +1530,7 @@ impl Parser<'_> {
 						}
 						t!("EXCLUDE") => {
 							tmp_tables =
-								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+								Some(TablesConfig::Exclude(self.parse_graphql_table_configs()?))
 						}
 						t!("NONE") => {
 							tmp_tables = Some(TablesConfig::None);
@@ -1608,12 +1612,12 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
+	pub fn parse_tables(&mut self) -> ParseResult<Vec<String>> {
 		let mut names = vec![self.parse_ident()?];
 		while self.eat(t!("|")) {
 			names.push(self.parse_ident()?);
 		}
-		Ok(Kind::Record(names))
+		Ok(names)
 	}
 
 	async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
@@ -1706,6 +1710,9 @@ impl Parser<'_> {
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify
 							&& ver.alg.is_symmetric()
+							// TODO(3.0.0): This check is broken now that the value is
+							// parameterized. The expression can be the same by the final key might
+							// be different. Move this check to runtime instead?
 							&& key != ver.key
 						{
 							unexpected!(self, peek, "a symmetric key or no key");

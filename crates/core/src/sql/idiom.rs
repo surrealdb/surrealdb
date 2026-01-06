@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
-use crate::sql::Part;
+use crate::sql::{Expr, Part};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -82,7 +82,9 @@ impl surrealdb_types::ToSql for Idiom {
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
 			Some(Part::Start(x)) => {
-				if x.needs_parentheses() {
+				if x.needs_parentheses()
+					|| matches!(x, Expr::Binary { .. } | Expr::Prefix { .. } | Expr::Postfix { .. })
+				{
 					write_sql!(f, fmt, "({x})");
 				} else {
 					write_sql!(f, fmt, "{x}");
