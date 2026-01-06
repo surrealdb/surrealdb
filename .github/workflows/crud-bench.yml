@@ -19,7 +19,7 @@ on:
       crud_bench_revision:
         description: 'crud-bench git revision (commit, tag, or branch)'
         required: false
-        default: 'f8429e8cb3c4aa10dad72ac330f6d59af7d9f76c'
+        default: c8686e825e9c3b7077446f1f1a7ae2f002620d20
         type: string
   pull_request:
     types:
@@ -84,7 +84,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: surrealdb/crud-bench
-          ref: ${{ inputs.crud_bench_revision || 'f8429e8cb3c4aa10dad72ac330f6d59af7d9f76c' }}
+          ref: ${{ inputs.crud_bench_revision }}
           path: crud-bench
 
       - name: Setup crud-bench cache
