@@ -50,7 +50,7 @@ storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealdb-types = { version = "3.0.0-beta.1" }
 surrealdb-types-derive = { version = "3.0.0-beta.1" }
 surrealism-runtime = { version = "0.1.6" }
-surrealkv = { git = "https://github.com/surrealdb/surrealkv", branch = "range-bound-bug-versioned-queries" }
+surrealkv = { git = "https://github.com/surrealdb/surrealkv", branch = "main" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
