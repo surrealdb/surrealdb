@@ -138,7 +138,7 @@ impl From<BuildingStatus> for Value {
 type IndexBuilding = Arc<Building>;
 
 /// A unique key for an index building process
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq, Clone)]
 struct IndexKey {
 	ns: String,
 	db: String,
@@ -185,8 +185,8 @@ impl IndexBuilder {
 		building.recover_queue().await?;
 		let b = building.clone();
 		spawn(async move {
-			// Ensure that in case of an unexpected exit the building process is declared finished
-			let guard = BuildingFinishGuard(b.clone());
+			// Ensure that in case of an unexpected exit the initial build is marked as complete
+			let initial_guard = InitialBuildGuard(b.clone());
 			let r = b.run().await;
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
@@ -202,22 +202,27 @@ impl IndexBuilder {
 			}
 			if b.ix.defer {
 				// If it is a deferred indexing, start the daemon and return
+				let b_daemon = b.clone();
 				spawn(async move {
+					// Ensure that the daemon running flag is properly managed
+					let daemon_guard = DeferredDaemonGuard(b_daemon.clone());
+					b_daemon.deferred_daemon_running.store(true, Ordering::Relaxed);
 					loop {
-						if b.is_aborted().await {
-							b.set_status(BuildingStatus::Aborted).await;
+						if b_daemon.is_aborted().await {
+							b_daemon.set_status(BuildingStatus::Aborted).await;
 							break;
 						}
-						if let Err(e) = b.index_appending_loop(None).await {
+						if let Err(e) = b_daemon.index_appending_loop(None).await {
 							error!("Index appending loop error: {}", e);
-							b.set_status(BuildingStatus::Error(e.to_string())).await;
+							b_daemon.set_status(BuildingStatus::Error(e.to_string())).await;
 							break;
 						}
 						sleep(Duration::from_millis(100)).await;
 					}
+					drop(daemon_guard);
 				});
 			}
-			drop(guard);
+			drop(initial_guard);
 		});
 		Ok(building)
 	}
@@ -238,14 +243,15 @@ impl IndexBuilder {
 		} else {
 			(None, None)
 		};
-		match self.indexes.write().await.entry(key) {
+		match self.indexes.write().await.entry(key.clone()) {
 			Entry::Occupied(mut e) => {
-				// If the building is currently running, we return an error
-				if !e.get().is_finished() {
-					return Err(Error::IndexAlreadyBuilding {
-						name: e.key().ix.clone(),
-					});
-				}
+				// If the building is currently running, we need to wait for it to finish
+				let old_builder = e.get();
+				// Abort the old builder to signal it should stop
+				old_builder.abort();
+				// Wait for the old builder to fully stop
+				old_builder.wait_for_completion().await;
+				// Start building the index
 				let ib = self.start_building(ctx, opt, ix, sdr).await?;
 				e.insert(ib);
 			}
@@ -392,8 +398,10 @@ struct Building {
 	queue: RwLock<QueueSequences>,
 	/// Whether the building process has been aborted
 	aborted: AtomicBool,
-	/// Whether the initial building process has finished
-	finished: AtomicBool,
+	/// Whether the initial building process (run()) has completed
+	initial_build_complete: AtomicBool,
+	/// Whether the deferred daemon is currently running (for deferred indexes only)
+	deferred_daemon_running: AtomicBool,
 }
 
 impl Building {
@@ -412,7 +420,8 @@ impl Building {
 			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
-			finished: AtomicBool::new(false),
+			initial_build_complete: AtomicBool::new(false),
+			deferred_daemon_running: AtomicBool::new(false),
 		})
 	}
 
@@ -775,14 +784,37 @@ impl Building {
 	}
 
 	fn is_finished(&self) -> bool {
-		self.finished.load(Ordering::Relaxed)
+		// For deferred indexes, we're not finished while the daemon is running
+		if self.ix.defer {
+			!self.deferred_daemon_running.load(Ordering::Relaxed)
+		} else {
+			// For non-deferred indexes, we're finished when the initial build completes
+			self.initial_build_complete.load(Ordering::Relaxed)
+		}
+	}
+
+	/// Wait for the builder to finish (both initial build and deferred daemon if applicable)
+	async fn wait_for_completion(&self) {
+		while !self.is_finished() {
+			sleep(Duration::from_millis(50)).await;
+		}
 	}
 }
 
-struct BuildingFinishGuard(IndexBuilding);
+/// Guard to mark the initial build as complete when dropped
+struct InitialBuildGuard(IndexBuilding);
 
-impl Drop for BuildingFinishGuard {
+impl Drop for InitialBuildGuard {
 	fn drop(&mut self) {
-		self.0.finished.store(true, Ordering::Relaxed);
+		self.0.initial_build_complete.store(true, Ordering::Relaxed);
+	}
+}
+
+/// Guard to track the deferred daemon lifecycle
+struct DeferredDaemonGuard(IndexBuilding);
+
+impl Drop for DeferredDaemonGuard {
+	fn drop(&mut self) {
+		self.0.deferred_daemon_running.store(false, Ordering::Relaxed);
 	}
 }
