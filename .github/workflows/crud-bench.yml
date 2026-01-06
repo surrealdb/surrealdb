@@ -7,8 +7,8 @@ name: Performance Benchmarks
 # Documentation: doc/BENCHMARKING.md
 #
 # To upgrade crud-bench:
-# 1. Update the default revision in inputs.crud_bench_revision below
-# 2. Test manually using workflow_dispatch
+# 1. Update the CRUD_BENCH_REVISION in the env section below
+# 2. Test manually using workflow_dispatch with the new revision
 # 3. Commit and let benchmarks run on a PR to verify
 
 run-name: "Benchmark run '${{ github.head_ref || github.ref_name }}'"
@@ -19,7 +19,6 @@ on:
       crud_bench_revision:
         description: 'crud-bench git revision (commit, tag, or branch)'
         required: false
-        default: c8686e825e9c3b7077446f1f1a7ae2f002620d20
         type: string
   pull_request:
     types:
@@ -38,6 +37,11 @@ defaults:
 permissions:
   contents: write
   pull-requests: write
+
+env:
+  # Default crud-bench revision - update this to upgrade crud-bench version
+  # This ensures consistent benchmarking across all PRs
+  CRUD_BENCH_REVISION: ${{ inputs.crud_bench_revision || 'c8686e825e9c3b7077446f1f1a7ae2f002620d20' }}
 
 jobs:
   # ----------------------------------------
@@ -84,7 +88,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: surrealdb/crud-bench
-          ref: ${{ inputs.crud_bench_revision }}
+          ref: ${{ env.CRUD_BENCH_REVISION }}
           path: ../crud-bench
 
       - name: Setup crud-bench cache

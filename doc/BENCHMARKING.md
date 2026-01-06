@@ -39,7 +39,7 @@ When you want to upgrade to a newer version of crud-bench:
 
 2. **Update the workflow:**
    - Edit `.github/workflows/crud-bench.yml`
-   - Update the default in the `inputs.crud_bench_revision` section
+   - Update `CRUD_BENCH_REVISION` in the `env` section
    - Update the comment at the top with the new revision and date
 
 3. **Test the upgrade:**
