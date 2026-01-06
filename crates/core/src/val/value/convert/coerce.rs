@@ -13,6 +13,15 @@ use crate::val::{
 	RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
 };
 
+/// Position information for element coercion errors
+#[derive(Clone, Debug)]
+pub(crate) enum ElementPosition {
+	/// Array index (0-based)
+	Index(usize),
+	/// Object key name
+	Key(String),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum CoerceError {
 	// Coercion error at the end.
@@ -28,6 +37,7 @@ pub(crate) enum CoerceError {
 	ElementOf {
 		inner: Box<CoerceError>,
 		into: String,
+		position: Option<ElementPosition>,
 	},
 }
 impl std::error::Error for CoerceError {}
@@ -43,9 +53,20 @@ impl fmt::Display for CoerceError {
 			CoerceError::ElementOf {
 				inner,
 				into,
+				position,
 			} => {
 				inner.fmt(f)?;
-				write!(f, " when coercing an element of `{into}`")
+				match position {
+					Some(ElementPosition::Index(i)) => {
+						write!(f, " when coercing element at index {i} of `{into}`")
+					}
+					Some(ElementPosition::Key(k)) => {
+						write!(f, " when coercing value for key '{k}' of `{into}`")
+					}
+					None => {
+						write!(f, " when coercing an element of `{into}`")
+					}
+				}
 			}
 			CoerceError::InvalidLength {
 				len,
@@ -61,6 +82,14 @@ pub trait CoerceErrorExt {
 	fn with_element_of<F>(self, f: F) -> Self
 	where
 		F: Fn() -> String;
+
+	fn with_element_of_at_index<F>(self, index: usize, f: F) -> Self
+	where
+		F: Fn() -> String;
+
+	fn with_element_of_at_key<F>(self, key: String, f: F) -> Self
+	where
+		F: Fn() -> String;
 }
 
 impl<T> CoerceErrorExt for Result<T, CoerceError> {
@@ -73,6 +102,35 @@ impl<T> CoerceErrorExt for Result<T, CoerceError> {
 			Err(e) => Err(CoerceError::ElementOf {
 				inner: Box::new(e),
 				into: f(),
+				position: None,
+			}),
+		}
+	}
+
+	fn with_element_of_at_index<F>(self, index: usize, f: F) -> Self
+	where
+		F: Fn() -> String,
+	{
+		match self {
+			Ok(x) => Ok(x),
+			Err(e) => Err(CoerceError::ElementOf {
+				inner: Box::new(e),
+				into: f(),
+				position: Some(ElementPosition::Index(index)),
+			}),
+		}
+	}
+
+	fn with_element_of_at_key<F>(self, key: String, f: F) -> Self
+	where
+		F: Fn() -> String,
+	{
+		match self {
+			Ok(x) => Ok(x),
+			Err(e) => Err(CoerceError::ElementOf {
+				inner: Box::new(e),
+				into: f(),
+				position: Some(ElementPosition::Key(key)),
 			}),
 		}
 	}
@@ -320,9 +378,11 @@ impl<T: Coerce + HasKind> Coerce for Vec<T> {
 		let array = v.into_array().expect("value type checked above");
 
 		let mut res = Vec::with_capacity(array.0.len());
-		for x in array.0 {
-			// TODO: Improve error message here.
-			res.push(x.coerce_to::<T>().with_element_of(|| <Self as HasKind>::kind().to_sql())?)
+		for (index, x) in array.0.into_iter().enumerate() {
+			res.push(
+				x.coerce_to::<T>()
+					.with_element_of_at_index(index, || <Self as HasKind>::kind().to_sql())?,
+			)
 		}
 		Ok(res)
 	}
@@ -348,13 +408,10 @@ impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
 
 		let mut res = BTreeMap::new();
 		for (k, v) in obj.0 {
-			// TODO: Improve error message here.
-			// object<T> kinds don't actually exist in surql.
-			res.insert(
-				k,
-				v.coerce_to::<T>()
-					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind().to_sql()))?,
-			);
+			let coerced = v.coerce_to::<T>().with_element_of_at_key(k.clone(), || {
+				format!("object<{}>", <T as HasKind>::kind().to_sql())
+			})?;
+			res.insert(k, coerced);
 		}
 		Ok(res)
 	}
@@ -380,13 +437,10 @@ impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T
 
 		let mut res = HashMap::default();
 		for (k, v) in obj.0 {
-			// TODO: Improve error message here.
-			// object<T> kinds don't actually exist in surql.
-			res.insert(
-				k,
-				v.coerce_to::<T>()
-					.with_element_of(|| format!("object<{}>", <T as HasKind>::kind().to_sql()))?,
-			);
+			let coerced = v.coerce_to::<T>().with_element_of_at_key(k.clone(), || {
+				format!("object<{}>", <T as HasKind>::kind().to_sql())
+			})?;
+			res.insert(k, coerced);
 		}
 		Ok(res)
 	}
@@ -764,11 +818,16 @@ impl Value {
 
 	/// Try to coerce this value to an `Array` of a certain type
 	pub(crate) fn coerce_to_array_type(self, kind: &Kind) -> Result<Array, CoerceError> {
-		self.coerce_to::<Array>()?
-			.into_iter()
-			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))
+		let array = self.coerce_to::<Array>()?;
+		let mut res = Array::with_capacity(array.len());
+		for (index, value) in array.into_iter().enumerate() {
+			res.push(
+				value
+					.coerce_to_kind(kind)
+					.with_element_of_at_index(index, || format!("array<{}>", kind.to_sql()))?,
+			);
+		}
+		Ok(res)
 	}
 
 	/// Try to coerce this value to an `Array` of a certain type, and length
@@ -786,39 +845,51 @@ impl Value {
 			});
 		}
 
-		array
-			.into_iter()
-			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Array, CoerceError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))
+		let mut res = Array::with_capacity(array.len());
+		for (index, value) in array.into_iter().enumerate() {
+			res.push(
+				value
+					.coerce_to_kind(kind)
+					.with_element_of_at_index(index, || format!("array<{}>", kind.to_sql()))?,
+			);
+		}
+		Ok(res)
 	}
 
 	/// Try to coerce this value to a `Set` of a certain type
 	pub(crate) fn coerce_to_set_kind(self, kind: &Kind) -> Result<Set, CoerceError> {
-		self.coerce_to::<Set>()?
-			.into_iter()
-			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Set, CoerceError>>()
-			.with_element_of(|| format!("set<{}>", kind.to_sql()))
+		let set = self.coerce_to::<Set>()?;
+		let mut res = Set::new();
+		for (index, value) in set.into_iter().enumerate() {
+			res.insert(
+				value
+					.coerce_to_kind(kind)
+					.with_element_of_at_index(index, || format!("set<{}>", kind.to_sql()))?,
+			);
+		}
+		Ok(res)
 	}
 
 	/// Try to coerce this value to a `Set` of a certain type and length
 	pub(crate) fn coerce_to_set_kind_len(self, kind: &Kind, len: u64) -> Result<Set, CoerceError> {
-		let array = self
-			.coerce_to::<Set>()?
-			.into_iter()
-			.map(|value| value.coerce_to_kind(kind))
-			.collect::<Result<Set, CoerceError>>()
-			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
+		let set = self.coerce_to::<Set>()?;
+		let mut res = Set::new();
+		for (index, value) in set.into_iter().enumerate() {
+			res.insert(
+				value
+					.coerce_to_kind(kind)
+					.with_element_of_at_index(index, || format!("set<{}>", kind.to_sql()))?,
+			);
+		}
 
-		if array.len() as u64 != len {
+		if res.len() as u64 != len {
 			return Err(CoerceError::InvalidLength {
 				into: format!("set<{},{}>", kind.to_sql(), len),
-				len: array.len(),
+				len: res.len(),
 			});
 		}
 
-		Ok(array)
+		Ok(res)
 	}
 
 	pub(crate) fn coerce_to_file_buckets(self, buckets: &[String]) -> Result<File, CoerceError> {
@@ -910,5 +981,85 @@ mod tests {
 		let kind = Kind::Table(vec![]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_err()); // Coercion from string is strict
+	}
+
+	#[test]
+	fn test_array_coerce_error_shows_index() {
+		use crate::val::Array;
+
+		// Create an array with a bad element at index 2
+		// Test the Vec<T> impl directly (this is what has index tracking)
+		let array: Array = vec![
+			Value::from(1i64),
+			Value::from(2i64),
+			Value::from("not an int"), // This should fail at index 2
+			Value::from(4i64),
+		]
+		.into();
+
+		let result: Result<Vec<i64>, _> = Value::Array(array).coerce_to();
+
+		assert!(result.is_err());
+		let error = result.unwrap_err();
+		let error_msg = error.to_string();
+		assert!(error_msg.contains("index 2"), "Error should mention index 2, got: {error_msg}");
+	}
+
+	#[test]
+	fn test_object_coerce_error_shows_key() {
+		use crate::val::Object;
+		use std::collections::BTreeMap;
+
+		// Create an object with a bad value for key "age"
+		let mut map = BTreeMap::new();
+		map.insert("name".to_string(), Value::from("Alice"));
+		map.insert("age".to_string(), Value::from("not an int")); // This should fail
+		let obj = Object(map);
+
+		let value = Value::Object(obj);
+
+		// Coerce to BTreeMap<String, i64>
+		let result: Result<BTreeMap<String, i64>, _> = value.coerce_to();
+
+		assert!(result.is_err());
+		let error = result.unwrap_err();
+		let error_msg = error.to_string();
+		assert!(
+			error_msg.contains("'age'") || error_msg.contains("'name'"),
+			"Error should mention the key name, got: {error_msg}"
+		);
+	}
+
+	#[test]
+	fn test_array_coerce_first_element_error() {
+		use crate::val::Array;
+
+		// Error on first element (index 0)
+		// Test the Vec<T> impl directly (this is what has index tracking)
+		let array: Array = vec![Value::from("bad"), Value::from(1i64)].into();
+
+		let result: Result<Vec<i64>, _> = Value::Array(array).coerce_to();
+
+		assert!(result.is_err());
+		let error_msg = result.unwrap_err().to_string();
+		assert!(error_msg.contains("index 0"), "Error should mention index 0, got: {error_msg}");
+	}
+
+	#[test]
+	fn test_vec_coerce_error_shows_index() {
+		use crate::val::Array;
+
+		// Test the Vec<T> impl directly
+		let array: Array = vec![
+			Value::from(1i64),
+			Value::from("bad"), // index 1
+		]
+		.into();
+
+		let result: Result<Vec<i64>, _> = Value::Array(array).coerce_to();
+
+		assert!(result.is_err());
+		let error_msg = result.unwrap_err().to_string();
+		assert!(error_msg.contains("index 1"), "Error should mention index 1, got: {error_msg}");
 	}
 }
