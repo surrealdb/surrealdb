@@ -46,6 +46,7 @@ impl Endpoint {
 	}
 
 	#[doc(hidden)]
+	#[allow(clippy::result_large_err)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
 			EndpointKind::Unsupported(s) => Err(Error::Scheme(s).into()),
@@ -60,6 +61,7 @@ pub trait IntoEndpoint<Scheme> {
 	type Client: Connection;
 	/// Converts an input into a server address object
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 

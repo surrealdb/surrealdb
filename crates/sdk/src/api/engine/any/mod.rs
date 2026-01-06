@@ -147,6 +147,7 @@ use url::Url;
 pub trait IntoEndpoint {
 	/// Converts an input into a server address object
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_endpoint(self) -> Result<Endpoint>;
 }
 
@@ -161,6 +162,7 @@ fn split_url(url: &str) -> (&str, &str) {
 }
 
 impl IntoEndpoint for &str {
+	#[allow(clippy::result_large_err)]
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
 			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
