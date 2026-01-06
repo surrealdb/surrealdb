@@ -409,7 +409,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.86
+          toolchain: 1.89
 
       - name: Checkout sources
         uses: actions/checkout@v4

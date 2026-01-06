@@ -447,14 +447,16 @@ impl Datastore {
 
 	pub fn register_metrics(&self) -> Option<Metrics> {
 		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
 			_ => None,
 		}
 	}
 
-	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+	pub fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
 		match self.transaction_factory.flavor.as_ref() {
-			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(metric),
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(_metric),
 			_ => None,
 		}
 	}

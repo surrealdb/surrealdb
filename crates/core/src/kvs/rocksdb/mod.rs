@@ -380,10 +380,10 @@ impl Datastore {
 		})
 	}
 
-	const BLOCK_CACHE_USAGE: &str = "rocksdb.block-cache-usage";
-	const BLOCK_CACHE_PINNED_USAGE: &str = "rocksdb.block-cache-pinned-usage";
-	const ESTIMATE_TABLE_READERS_MEM: &str = "rocksdb.estimate-table-readers-mem";
-	const CUR_SIZE_ALL_MEM_TABLES: &str = "rocksdb.cur-size-all-mem-tables";
+	const BLOCK_CACHE_USAGE: &str = "rocksdb.block_cache_usage";
+	const BLOCK_CACHE_PINNED_USAGE: &str = "rocksdb.block_cache_pinned_usage";
+	const ESTIMATE_TABLE_READERS_MEM: &str = "rocksdb.estimate_table_readers_mem";
+	const CUR_SIZE_ALL_MEM_TABLES: &str = "rocksdb.cur_size_all_mem_tables";
 
 	pub(crate) fn register_metrics(&self) -> Metrics {
 		Metrics {
