@@ -44,18 +44,21 @@ impl<'a> Ia<'a> {
 	}
 }
 
+/// Returns the prefix for all index appending keys for the given index
 pub fn prefix(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
 	let mut k = all::new(ns, db, tb, ix).encode()?;
 	k.extend_from_slice(b"!ia");
 	Ok(k)
 }
 
+/// Returns the beginning of the range for all index appending keys for the given index
 pub fn prefix_beg(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
 	let mut k = prefix(ns, db, tb, ix)?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
+/// Returns the end of the range for all index appending keys for the given index
 pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Error> {
 	let mut k = prefix(ns, db, tb, ix)?;
 	k.extend_from_slice(&[0xff, 0xff, 0xff, 0xff, 0xff]);

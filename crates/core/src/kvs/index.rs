@@ -306,20 +306,26 @@ impl IndexBuilder {
 	}
 }
 
+/// A document update enqueued for background indexing
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
 struct Appending {
+	/// The old values of the document
 	old_values: Option<Vec<Value>>,
+	/// The new values of the document
 	new_values: Option<Vec<Value>>,
+	/// The ID of the document
 	id: Id,
 }
 
+/// A sequence number for the primary key of the appending queue
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
 struct PrimaryAppending(u32);
 
+/// Manages the sequence numbers for the background indexing queue
 #[derive(Default)]
 struct QueueSequences {
 	/// The index of the next appending to be indexed
@@ -344,20 +350,24 @@ impl QueueSequences {
 		self.next = 0;
 	}
 
+	/// Returns the number of updates pending in the queue
 	fn pending(&self) -> u32 {
 		self.next - self.to_index
 	}
 
+	/// Sets the index of the next update to be indexed
 	fn set_to_index(&mut self, i: u32) {
 		self.to_index = i;
 	}
 
+	/// Returns the range of the next batch of updates to be indexed
 	fn next_indexing_batch(&self, page: u32) -> Range<u32> {
 		let s = self.to_index;
 		let e = (s + page).min(self.next);
 		s..e
 	}
 
+	/// Restores the queue range from the given minimum and maximum indices
 	fn restore_range(&mut self, min: u32, max: u32) {
 		self.to_index = min;
 		self.next = max.saturating_add(1);
@@ -406,6 +416,7 @@ impl Building {
 		})
 	}
 
+	/// Set the status of the building process
 	async fn set_status(&self, status: BuildingStatus) {
 		let mut s = self.status.write().await;
 		// We want to keep only the first error
@@ -414,6 +425,8 @@ impl Building {
 		}
 	}
 
+	/// Recovers the index queue from the storage.
+	/// This is used when the server is restarted during an indexing process.
 	async fn recover_queue(&self) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		let beg = crate::key::index::ia::prefix_beg(ns, db, &self.ix.what, &self.ix.name)?;
@@ -615,6 +628,7 @@ impl Building {
 		Ok(())
 	}
 
+	/// Index a batch of records from the table
 	async fn index_initial_batch(
 		&self,
 		ctx: &Context,
@@ -722,6 +736,7 @@ impl Building {
 		Ok(())
 	}
 
+	/// Check if the index needs compaction and trigger it if necessary
 	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<(), Error> {
 		if !*rc {
 			return Ok(());
