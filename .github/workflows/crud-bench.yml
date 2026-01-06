@@ -1,0 +1,255 @@
+name: Performance Benchmarks
+#
+# This workflow runs CRUD benchmarks using a pinned version of crud-bench.
+# The crud-bench revision is intentionally pinned to ensure consistent
+# benchmarking across all PRs (apples-to-apples comparison).
+#
+# Documentation: doc/BENCHMARKING.md
+#
+# To upgrade crud-bench:
+# 1. Update the default revision in inputs.crud_bench_revision below
+# 2. Test manually using workflow_dispatch
+# 3. Commit and let benchmarks run on a PR to verify
+
+run-name: "Benchmark run '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  workflow_dispatch:
+    inputs:
+      crud_bench_revision:
+        description: 'crud-bench git revision (commit, tag, or branch)'
+        required: false
+        default: 'f8429e8cb3c4aa10dad72ac330f6d59af7d9f76c'
+        type: string
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # ----------------------------------------
+  # Run CRUD benchmarks
+  # ----------------------------------------
+
+  crud-benchmark:
+    name: CRUD Benchmark (${{ matrix.config }})
+    runs-on: [runner-amd64-large]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: memory
+            database: surrealdb-memory
+            endpoint: ""
+            description: "SurrealDB with in-memory storage"
+          - config: rocksdb
+            database: surrealdb-rocksdb
+            endpoint: ""
+            description: "SurrealDB with RocksDB storage"
+          - config: embedded
+            database: surrealdb
+            endpoint: "-e memory"
+            description: "SurrealDB embedded with in-memory storage"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+
+      - name: Build SurrealDB binary
+        run: |
+          cargo build --release
+          mkdir -p ${{ github.workspace }}/bin
+          cp target/release/surreal ${{ github.workspace }}/bin/
+          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
+
+      - name: Checkout crud-bench repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: surrealdb/crud-bench
+          ref: ${{ inputs.crud_bench_revision || 'f8429e8cb3c4aa10dad72ac330f6d59af7d9f76c' }}
+          path: crud-bench
+
+      - name: Setup crud-bench cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: crud-bench
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build crud-bench
+        run: |
+          cd crud-bench
+          cargo build --release
+
+      - name: Setup Docker (if needed)
+        run: |
+          docker --version
+          docker ps
+
+      - name: Clean up environment
+        run: |
+          rm -rf ~/crud-bench-data
+          mkdir -p ~/crud-bench-data
+          chmod 777 ~/crud-bench-data
+          rm -f result*.json result*.html result*.csv
+          docker container prune --force || true
+          docker volume prune --all --force || true
+
+      - name: Optimize system
+        run: |
+          sync
+          ulimit -n 65536 || true
+          ulimit -u unlimited || true
+          ulimit -l unlimited || true
+
+      - name: Run benchmark - ${{ matrix.description }}
+        timeout-minutes: 30
+        run: |
+          cd crud-bench
+          ./target/release/crud-bench \
+            -d ${{ matrix.database }} \
+            ${{ matrix.endpoint }} \
+            -s 5000 \
+            -c 8 \
+            -t 16 \
+            -r \
+            -n ${{ matrix.config }}
+        env:
+          SURREALDB_USER: root
+          SURREALDB_PASS: root
+
+      - name: Collect results
+        run: |
+          mkdir -p ${{ github.workspace }}/benchmark-results
+          cp crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
+          ls -la ${{ github.workspace }}/benchmark-results
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-results-${{ matrix.config }}
+          path: ${{ github.workspace }}/benchmark-results/*.json
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker container kill crud-bench &>/dev/null || true
+          docker container rm crud-bench &>/dev/null || true
+          docker container prune --force || true
+          docker volume prune --all --force || true
+
+  # ----------------------------------------
+  # Analyze results and report
+  # ----------------------------------------
+
+  analyze-and-report:
+    name: Analyze and Report
+    runs-on: ubuntu-latest
+    needs: [crud-benchmark]
+    if: always()
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Download all benchmark results
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: benchmark-results-*
+          path: ${{ github.workspace }}/results
+          merge-multiple: true
+
+      - name: List downloaded results
+        run: |
+          echo "Downloaded benchmark results:"
+          find ${{ github.workspace }}/results -type f
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install numpy scipy
+
+      - name: Fetch historical benchmark data
+        run: |
+          git fetch origin benchmark-results:benchmark-results || echo "No benchmark-results branch yet"
+          git checkout benchmark-results || git checkout --orphan benchmark-results
+          git checkout ${{ github.sha }} -- .github/scripts/analyze_benchmark.py || true
+          git checkout ${{ github.event.pull_request.base.sha || 'main' }} || true
+
+      - name: Run analysis
+        id: analysis
+        run: |
+          python3 .github/scripts/analyze_benchmark.py \
+            --results-dir ${{ github.workspace }}/results \
+            --output ${{ github.workspace }}/report.md \
+            --json-output ${{ github.workspace }}/analysis.json
+        continue-on-error: true
+
+      - name: Store results to benchmark-results branch
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout benchmark-results || git checkout --orphan benchmark-results
+          git rm -rf . || true
+          mkdir -p results/$(date +%Y-%m-%d)
+          cp ${{ github.workspace }}/results/*.json results/$(date +%Y-%m-%d)/ || true
+          git add results/
+          git commit -m "Add benchmark results for ${{ github.sha }}" || true
+          git push origin benchmark-results || true
+
+      - name: Read report
+        id: report
+        run: |
+          if [ -f ${{ github.workspace }}/report.md ]; then
+            echo "report<<EOF" >> $GITHUB_OUTPUT
+            cat ${{ github.workspace }}/report.md >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "report=No benchmark report generated" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ${{ steps.report.outputs.report }}
+
+            ---
+            <sub>Benchmark run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>
+
+      - name: Upload analysis results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-analysis
+          path: |
+            ${{ github.workspace }}/report.md
+            ${{ github.workspace }}/analysis.json
+          retention-days: 90
+
