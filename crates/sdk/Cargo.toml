@@ -151,10 +151,6 @@ name = "surrealdb" # Needed for the nightly crate as we will be renaming it
 bench = false
 
 [[bench]]
-name = "executor"
-harness = false
-
-[[bench]]
 name = "parser"
 harness = false
 
@@ -180,18 +176,6 @@ harness = false
 
 [[bench]]
 name = "hashset_vs_vector"
-harness = false
-
-[[bench]]
-name = "with_or_without_index"
-harness = false
-
-[[bench]]
-name = "order"
-harness = false
-
-[[bench]]
-name = "allocator"
 harness = false
 
 [[bench]]
