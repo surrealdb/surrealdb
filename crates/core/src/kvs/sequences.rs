@@ -259,6 +259,46 @@ impl Sequences {
 		s.lock().await.next(self, ctx, &seq, batch).await
 	}
 
+	/// Generates a contiguous range of values from a sequence.
+	///
+	/// This method allocates `count` consecutive values from the specified sequence.
+	/// It's used for bulk operations where multiple consecutive IDs are needed at once.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `seq` - The sequence domain to generate values from
+	/// * `start` - The starting value if the sequence hasn't been initialized
+	/// * `count` - The number of consecutive values to allocate
+	/// * `timeout` - Optional timeout for batch allocation operations
+	///
+	/// # Returns
+	/// The first value in the allocated range. The range is [result, result + count).
+	async fn next_val_range(
+		&self,
+		ctx: Option<&Context>,
+		seq: Arc<SequenceDomain>,
+		start: i64,
+		count: u64,
+		timeout: Option<Duration>,
+	) -> Result<i64> {
+		let sequence = self.sequences.read().await.get(&seq).cloned();
+		if let Some(s) = sequence {
+			return s.lock().await.next_range(self, ctx, &seq, count).await;
+		}
+		let s = match self.sequences.write().await.entry(seq.clone()) {
+			Entry::Occupied(e) => e.get().clone(),
+			Entry::Vacant(e) => {
+				// Use count as batch size to ensure we get enough IDs
+				let batch = count.max(1000) as u32;
+				let s = Arc::new(Mutex::new(
+					Sequence::load(ctx, self, &seq, start, batch, timeout).await?,
+				));
+				e.insert(s).clone()
+			}
+		};
+		s.lock().await.next_range(self, ctx, &seq, count).await
+	}
+
 	/// Generates the next namespace ID.
 	///
 	/// # Arguments
@@ -375,6 +415,30 @@ impl Sequences {
 		let id = self.next_val(ctx, domain, 0, batch, None).await?;
 		Ok(id as DocId)
 	}
+
+	/// Allocates a contiguous range of full-text search document IDs.
+	///
+	/// This method allocates `count` consecutive document IDs for bulk indexing.
+	/// Unlike `next_fts_doc_id` which allocates one at a time, this method
+	/// reserves an entire range atomically.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `ikb` - The index key base identifying the full-text index
+	/// * `count` - The number of document IDs to allocate
+	///
+	/// # Returns
+	/// The first document ID in the allocated range. The range is [result, result + count).
+	pub(crate) async fn next_fts_doc_id_range(
+		&self,
+		ctx: Option<&Context>,
+		ikb: IndexKeyBase,
+		count: u64,
+	) -> Result<DocId> {
+		let domain = Arc::new(SequenceDomain::new_ft_doc_ids(ikb));
+		let id = self.next_val_range(ctx, domain, 0, count, None).await?;
+		Ok(id as DocId)
+	}
 }
 
 /// Internal per-node sequence state manager.
@@ -467,6 +531,55 @@ impl Sequence {
 		}
 		let v = self.st.next;
 		self.st.next += 1;
+		// write the state on the KV store
+		let tx =
+			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
+
+		// Execute operations and ensure transaction is cancelled on error
+		match tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await {
+			Ok(_) => {
+				tx.commit().await?;
+				Ok(v)
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				Err(e)
+			}
+		}
+	}
+
+	/// Gets a contiguous range of IDs from this sequence.
+	///
+	/// Unlike `next()` which allocates one ID at a time, this method allocates
+	/// `count` consecutive IDs atomically. If the current batch doesn't have
+	/// enough IDs, a larger batch is allocated.
+	///
+	/// # Arguments
+	/// * `sqs` - The sequences manager
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `seq` - The sequence domain
+	/// * `count` - The number of consecutive IDs to allocate
+	///
+	/// # Returns
+	/// The first ID in the allocated range. The range is [result, result + count).
+	async fn next_range(
+		&mut self,
+		sqs: &Sequences,
+		ctx: Option<&Context>,
+		seq: &SequenceDomain,
+		count: u64,
+	) -> Result<i64> {
+		let count = count as i64;
+		// Check if current batch has enough IDs
+		if self.st.next + count > self.to {
+			// Need to allocate a larger batch
+			let needed = count.max(1000) as u32; // At least 1000 or the count
+			(self.st.next, self.to) =
+				Self::find_batch_allocation(sqs, ctx, seq, self.st.next, needed, self.timeout)
+					.await?;
+		}
+		let v = self.st.next;
+		self.st.next += count;
 		// write the state on the KV store
 		let tx =
 			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
