@@ -21,6 +21,7 @@ macro_rules! include_tests {
 	};
 }
 
+#[cfg(feature = "kv-rocksdb")]
 mod metrics;
 mod multireader;
 mod multiwriter_different_keys;

@@ -6,7 +6,7 @@ use crate::{
 	dbs::node::Timestamp,
 	kvs::clock::{FakeClock, SizedClock},
 };
-pub async fn metrics(new_ds: impl CreateDs) {
+pub async fn registers_rocksdb_metrics(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("b7afc077-3234-476f-bee0-43d7504f1e0a").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -37,8 +37,8 @@ macro_rules! define_tests {
 	($new_ds:ident) => {
 		#[tokio::test]
 		#[serial_test::serial]
-		async fn metrics() {
-			super::metrics::metrics($new_ds).await;
+		async fn registers_rocksdb_metrics() {
+			super::metrics::registers_rocksdb_metrics($new_ds).await;
 		}
 	};
 }
