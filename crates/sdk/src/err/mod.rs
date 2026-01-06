@@ -2,7 +2,6 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::Serialize;
-use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 use surrealdb_core::rpc::DbResultError;
 use thiserror::Error;
 
@@ -42,10 +41,6 @@ pub enum Error {
 	#[error("Already connected")]
 	AlreadyConnected,
 
-	/// `Query::bind` not called with an object nor a key/value tuple
-	#[error("Invalid bindings: {0:?}")]
-	InvalidBindings(Value),
-
 	/// Tried to use a range query on a record ID
 	#[error("Tried to add a range to an record-id resource")]
 	RangeOnRecordId,
@@ -57,10 +52,6 @@ pub enum Error {
 	/// Tried to use a range query on an array
 	#[error("Tried to add a range to an array resource")]
 	RangeOnArray,
-
-	/// Tried to use a range query on an edge or edges
-	#[error("Tried to add a range to an edge resource")]
-	RangeOnEdges,
 
 	/// Tried to use a range query on an existing range
 	#[error("Tried to add a range to a resource which was already a range")]
@@ -107,27 +98,6 @@ pub enum Error {
 	#[error("Failed to convert `{value:?}` to `T`: {error}")]
 	FromValue {
 		value: Value,
-		error: String,
-	},
-
-	/// Failed to deserialize a binary response
-	#[error("Failed to deserialize a binary response: {error}")]
-	ResponseFromBinary {
-		binary: Vec<u8>,
-		error: bincode::Error,
-	},
-
-	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
-	ToJsonString {
-		value: Value,
-		error: String,
-	},
-
-	/// Failed to deserialize from JSON string to `sql::Value`
-	#[error("Failed to deserialize `{string}` to sql::Value: {error}")]
-	FromJsonString {
-		string: String,
 		error: String,
 	},
 
@@ -196,10 +166,6 @@ pub enum Error {
 	#[error("Live queries on arrays not supported")]
 	LiveOnArray,
 
-	/// Tried to use a range query on an edge or edges
-	#[error("Live queries on edges not supported")]
-	LiveOnEdges,
-
 	/// Tried to access a query statement as a live query when it isn't a live
 	/// query
 	#[error("Query statement {0} is not a live query")]
@@ -224,44 +190,19 @@ pub enum Error {
 	InsertOnArray,
 
 	/// Tried to insert on an edge or edges
-	#[error("Insert queries on edges are not supported")]
-	InsertOnEdges,
-
-	/// Tried to insert on an edge or edges
 	#[error("Insert queries on ranges are not supported")]
 	InsertOnRange,
-
-	#[error("Crendentials for signin and signup should be an object")]
-	CrendentialsNotObject,
-
-	#[error("{0}")]
-	InvalidNetTarget(#[from] ParseNetTargetError),
-
-	#[error("{0}")]
-	InvalidFuncTarget(#[from] ParseFuncTargetError),
 
 	#[error("failed to serialize Value: {0}")]
 	SerializeValue(String),
 	#[error("failed to deserialize Value: {0}")]
 	DeSerializeValue(String),
 
-	#[error("failed to serialize to a Value: {0}")]
-	Serializer(String),
-	#[error("failed to deserialize from a Value: {0}")]
-	Deserializer(String),
-
 	#[error("The server returned an unexpected response: {0}")]
 	InvalidResponse(String),
 
 	#[error("Tried to send a value which could not be serialized: {0}")]
 	UnserializableValue(String),
-
-	/// Tried to convert an value which contained something like for example a
-	/// query or future.
-	#[error(
-		"tried to convert from a value which contained non-primitive values to a value which only allows primitive values."
-	)]
-	ReceivedInvalidValue,
 
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
@@ -420,9 +361,6 @@ impl From<Error> for DbResultError {
 			Error::AlreadyConnected => {
 				DbResultError::InternalError("Already connected".to_string())
 			}
-			Error::InvalidBindings(_) => {
-				DbResultError::InvalidParams("Invalid bindings".to_string())
-			}
 			Error::RangeOnRecordId => {
 				DbResultError::InvalidParams("Range on record ID not supported".to_string())
 			}
@@ -431,9 +369,6 @@ impl From<Error> for DbResultError {
 			}
 			Error::RangeOnArray => {
 				DbResultError::InvalidParams("Range on array not supported".to_string())
-			}
-			Error::RangeOnEdges => {
-				DbResultError::InvalidParams("Range on edges not supported".to_string())
 			}
 			Error::RangeOnRange => {
 				DbResultError::InvalidParams("Range on range not supported".to_string())
@@ -458,23 +393,6 @@ impl From<Error> for DbResultError {
 				value: _,
 				error,
 			} => DbResultError::InvalidParams(format!("Value conversion error: {}", error)),
-			Error::ResponseFromBinary {
-				error: _,
-				..
-			} => DbResultError::DeserializationError(
-				"Binary response deserialization error".to_string(),
-			),
-			Error::ToJsonString {
-				value: _,
-				error,
-			} => DbResultError::SerializationError(format!("JSON serialization error: {}", error)),
-			Error::FromJsonString {
-				string: _,
-				error,
-			} => DbResultError::DeserializationError(format!(
-				"JSON deserialization error: {}",
-				error
-			)),
 			Error::InvalidNsName(name) => {
 				DbResultError::InvalidParams(format!("Invalid namespace name: {:?}", name))
 			}
@@ -514,9 +432,6 @@ impl From<Error> for DbResultError {
 			Error::LiveOnArray => DbResultError::BadLiveQueryConfig(
 				"Live queries on arrays not supported".to_string(),
 			),
-			Error::LiveOnEdges => {
-				DbResultError::BadLiveQueryConfig("Live queries on edges not supported".to_string())
-			}
 			Error::NotLiveQuery(idx) => DbResultError::BadLiveQueryConfig(format!(
 				"Query statement {} is not a live query",
 				idx
@@ -533,32 +448,15 @@ impl From<Error> for DbResultError {
 			Error::InsertOnArray => DbResultError::InvalidParams(
 				"Insert queries on arrays are not supported".to_string(),
 			),
-			Error::InsertOnEdges => DbResultError::InvalidParams(
-				"Insert queries on edges are not supported".to_string(),
-			),
 			Error::InsertOnRange => DbResultError::InvalidParams(
 				"Insert queries on ranges are not supported".to_string(),
 			),
-			Error::CrendentialsNotObject => DbResultError::InvalidParams(
-				"Credentials for signin and signup should be an object".to_string(),
-			),
-			Error::InvalidNetTarget(err) => {
-				DbResultError::InvalidParams(format!("Invalid network target: {}", err))
-			}
-			Error::InvalidFuncTarget(err) => {
-				DbResultError::InvalidParams(format!("Invalid function target: {}", err))
-			}
 			Error::SerializeValue(msg) => DbResultError::SerializationError(msg),
 			Error::DeSerializeValue(msg) => DbResultError::DeserializationError(msg),
-			Error::Serializer(msg) => DbResultError::SerializationError(msg),
-			Error::Deserializer(msg) => DbResultError::DeserializationError(msg),
 			Error::InvalidResponse(msg) => {
 				DbResultError::InternalError(format!("Invalid response: {}", msg))
 			}
 			Error::UnserializableValue(msg) => DbResultError::SerializationError(msg),
-			Error::ReceivedInvalidValue => {
-				DbResultError::InvalidParams("Received invalid value".to_string())
-			}
 			Error::VersionsNotSupported(engine) => DbResultError::MethodNotAllowed(format!(
 				"The '{}' engine does not support data versioning",
 				engine
