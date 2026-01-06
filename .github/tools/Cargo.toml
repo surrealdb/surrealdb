@@ -1,0 +1,4 @@
+[workspace]
+# Empty workspace to prevent crud-bench from being detected
+# as part of the parent SurrealDB workspace
+
