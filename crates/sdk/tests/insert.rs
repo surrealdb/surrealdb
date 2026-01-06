@@ -3,13 +3,11 @@ use parse::Parse;
 mod helpers;
 use crate::helpers::Test;
 use helpers::new_ds;
-use std::sync::Arc;
 use surrealdb::dbs::Session;
 use surrealdb::err::Error;
 use surrealdb::iam::Role;
 use surrealdb::sql::Part;
 use surrealdb::sql::Value;
-use tokio::time::timeout;
 
 #[tokio::test]
 async fn insert_statement_object_single() -> Result<(), Error> {

@@ -1,6 +1,5 @@
 //! Store appended records for concurrent index building
-use crate::kvs::impl_key;
-use crate::kvs::KeyEncode;
+use crate::kvs::{impl_key, KeyEncode};
 use crate::{err::Error, key::index::all};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -65,7 +64,7 @@ pub fn prefix_end(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Vec<u8>, Err
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use crate::kvs::KeyDecode;
 
 	#[test]
 	fn key() {
