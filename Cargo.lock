@@ -6662,7 +6662,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.16.0"
-source = "git+https://github.com/surrealdb/surrealkv?branch=main#f6aa2b851f28ffac58cddfe7f6befa6c18c08939"
+source = "git+https://github.com/surrealdb/surrealkv?branch=fix-level-compaction#7a43ccc0259fbdc5f4e133ad664581ecca5a3c10"
 dependencies = [
  "arc-swap",
  "async-channel",
