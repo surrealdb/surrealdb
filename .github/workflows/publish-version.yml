@@ -27,7 +27,7 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.89"
+        default: "1.86"
         description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
@@ -74,7 +74,7 @@ jobs:
           toolchain: ${{ inputs.rust-version }}
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
         with:
           ref: ${{ inputs.git-ref }}
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
@@ -190,8 +190,8 @@ jobs:
 
   test:
     name: Test
-    needs: [ prepare-vars ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
@@ -235,8 +235,8 @@ jobs:
 
   lint:
     name: Lint
-    needs: [ prepare-vars ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -267,7 +267,7 @@ jobs:
 
   build:
     name: Release binaries
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     uses: ./.github/workflows/build.yml
     with:
       name: ${{ needs.prepare-vars.outputs.name }}
@@ -281,10 +281,10 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    permissions:
+    permissions: 
       contents: write
-    needs: [ prepare-vars, test, lint, build ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [prepare-vars, test, lint, build]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -426,7 +426,7 @@ jobs:
 
   docker:
     name: Docker images
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     if: ${{ inputs.publish }}
     uses: ./.github/workflows/docker.yml
     with:
@@ -440,7 +440,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     runs-on: macos-latest
     env:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
@@ -481,7 +481,7 @@ jobs:
     name: Propagate binaries to all regions
     if: ${{ inputs.publish }}
     environment: ${{ needs.prepare-vars.outputs.environment }}
-    needs: [ publish, package-macos, prepare-vars ]
+    needs: [publish, package-macos, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
@@ -502,13 +502,13 @@ jobs:
     name: Cleanup
     permissions:
       contents: write
-    needs: [ publish, prepare-vars ]
+    needs: [publish, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }} 
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
         run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true

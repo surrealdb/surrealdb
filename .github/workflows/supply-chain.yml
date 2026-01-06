@@ -47,9 +47,9 @@ defaults:
 
 permissions:
   contents: read
-
+  
 env:
-  RUST_VERSION: 1.89.0
+  RUST_VERSION: 1.86.0
 
 jobs:
   cargo-deny:
