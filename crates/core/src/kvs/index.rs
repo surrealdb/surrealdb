@@ -784,13 +784,15 @@ impl Building {
 	}
 
 	fn is_finished(&self) -> bool {
-		// For deferred indexes, we're not finished while the daemon is running
-		if self.ix.defer {
-			!self.deferred_daemon_running.load(Ordering::Relaxed)
-		} else {
-			// For non-deferred indexes, we're finished when the initial build completes
-			self.initial_build_complete.load(Ordering::Relaxed)
+		// Check if initial build is complete
+		if !self.initial_build_complete.load(Ordering::Relaxed) {
+			return false;
 		}
+		// For deferred indexes, we're not finished while the daemon is running
+		if self.deferred_daemon_running.load(Ordering::Relaxed) {
+			return false;
+		}
+		true
 	}
 
 	/// Wait for the builder to finish (both initial build and deferred daemon if applicable)

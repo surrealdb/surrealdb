@@ -457,6 +457,7 @@ impl Command {
 ///
 /// This struct serializes as if it is a surrealdb_core::sql::Value::Object.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
