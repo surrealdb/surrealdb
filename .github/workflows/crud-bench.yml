@@ -89,18 +89,18 @@ jobs:
         with:
           repository: surrealdb/crud-bench
           ref: ${{ env.CRUD_BENCH_REVISION }}
-          path: ../crud-bench
+          path: .github/tools/crud-bench
 
       - name: Setup crud-bench cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
-          workspaces: ../crud-bench
+          workspaces: .github/tools/crud-bench
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build crud-bench
         run: |
-          cd ../crud-bench
+          cd .github/tools/crud-bench
           cargo build --release
 
       - name: Setup Docker (if needed)
@@ -127,7 +127,7 @@ jobs:
       - name: Run benchmark - ${{ matrix.description }}
         timeout-minutes: 30
         run: |
-          cd ../crud-bench
+          cd .github/tools/crud-bench
           ./target/release/crud-bench \
             -d ${{ matrix.database }} \
             ${{ matrix.endpoint }} \
@@ -143,7 +143,7 @@ jobs:
       - name: Collect results
         run: |
           mkdir -p ${{ github.workspace }}/benchmark-results
-          cp ../crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
+          cp .github/tools/crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
           ls -la ${{ github.workspace }}/benchmark-results
 
       - name: Upload benchmark results
