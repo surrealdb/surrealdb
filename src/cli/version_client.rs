@@ -17,6 +17,7 @@ pub(crate) struct ReqwestVersionClient {
 	client: Client,
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn new(timeout: Option<Duration>) -> Result<ReqwestVersionClient, Error> {
 	let mut client = Client::builder();
 	if let Some(timeout) = timeout {

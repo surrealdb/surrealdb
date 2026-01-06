@@ -48,6 +48,7 @@ pub fn add_server_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderV
 }
 
 // Parse a TypedHeader, returning None if the header is missing and an error if the header is invalid.
+#[allow(clippy::result_large_err)]
 pub fn parse_typed_header<H>(
 	header: Result<TypedHeader<H>, TypedHeaderRejection>,
 ) -> Result<Option<String>, Error>

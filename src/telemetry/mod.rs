@@ -79,6 +79,7 @@ impl Default for Builder {
 
 impl Builder {
 	/// Install the tracing dispatcher globally
+	#[allow(clippy::result_large_err)]
 	pub fn init(self) -> Result<Vec<WorkerGuard>, Error> {
 		// Setup logs, tracing, and metrics
 		let (registry, guards) = self.build()?;
@@ -154,6 +155,7 @@ impl Builder {
 	}
 
 	/// Build a tracing dispatcher with the logs and tracer subscriber
+	#[allow(clippy::result_large_err)]
 	pub fn build(
 		&self,
 	) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>), Error> {
@@ -216,6 +218,7 @@ impl Builder {
 	}
 }
 
+#[allow(clippy::result_large_err)]
 pub fn shutdown() -> Result<(), Error> {
 	// Output information to logs
 	trace!("Shutting down telemetry service");
