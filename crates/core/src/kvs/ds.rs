@@ -1810,7 +1810,7 @@ impl Datastore {
 				.await
 			}
 			Err(err) => {
-				if sess.require_new_planner {
+				if sess.planner_strategy == crate::dbs::PlannerStrategy::Pipelined {
 					return Err(DbResultError::InternalError(format!(
 						"New planner required but planning failed: {}",
 						err

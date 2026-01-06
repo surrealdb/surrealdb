@@ -35,10 +35,20 @@ pub struct Session {
 	pub exp: Option<i64>,
 	/// The variables set
 	pub variables: PublicVariables,
-	/// Whether to require the new planner without fallback to compute executor.
-	///
-	/// This is useful for testing to ensure queries use the new execution path.
-	pub require_new_planner: bool,
+	/// Planner strategy to use for the session.
+	pub planner_strategy: PlannerStrategy,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum PlannerStrategy {
+	/// Use the new planner without fallback to compute executor.
+	Pipelined,
+	/// Use the compute executor without trying to use the new planner.
+	Compute,
+	/// Use the best effort planner, which will try to use the new planner if it is available, but
+	/// will fall back to the compute executor if it is not.
+	#[default]
+	BestEffort,
 }
 
 impl Session {
@@ -69,7 +79,7 @@ impl Session {
 	/// Require the new planner without fallback to compute executor
 	/// This is useful for testing to ensure queries use the new execution path
 	pub fn require_new_planner(mut self) -> Session {
-		self.require_new_planner = true;
+		self.planner_strategy = PlannerStrategy::Pipelined;
 		self
 	}
 
@@ -156,7 +166,7 @@ impl Session {
 			rd: Some(rid),
 			exp: None,
 			variables: Default::default(),
-			require_new_planner: false,
+			planner_strategy: PlannerStrategy::default(),
 		}
 	}
 
