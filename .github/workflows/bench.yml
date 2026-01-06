@@ -18,7 +18,7 @@ defaults:
     shell: bash
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.89.0
   BRANCH_NAME: "${{ github.head_ref || github.ref_name }}"
 
 #
@@ -32,7 +32,7 @@ env:
 # 5. Upload the current benchmark results as a new baseline and update the latest baseline for the current branch
 #
 
-permissions:  # added using https://github.com/step-security/secure-repo
+permissions: # added using https://github.com/step-security/secure-repo
   contents: read
 
 jobs:
@@ -98,7 +98,7 @@ jobs:
 
   engines:
     name: Benchmark engines
-    runs-on: [runner-arm64-2xlarge]
+    runs-on: [ runner-arm64-2xlarge ]
     timeout-minutes: 60
     permissions:
       id-token: write

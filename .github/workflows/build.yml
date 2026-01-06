@@ -16,7 +16,7 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.86.0"
+        default: "1.89.0"
         description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
@@ -48,7 +48,7 @@ defaults:
   run:
     shell: bash
 
-permissions: 
+permissions:
   contents: read
 
 jobs:
@@ -108,7 +108,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [docker-builder]
+    needs: [ docker-builder ]
     strategy:
       fail-fast: false
       matrix:
@@ -185,7 +185,7 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [runner-amd64-2xlarge]
+            runner: [ runner-amd64-2xlarge ]
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -229,7 +229,7 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [runner-arm64-2xlarge]
+            runner: [ runner-arm64-2xlarge ]
             file: surreal-${{ inputs.name }}.linux-arm64
             build-step: |
               set -x

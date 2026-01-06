@@ -174,7 +174,7 @@ impl IndexBuilder {
 	}
 
 	/// Start building an index in the background
-	fn start_building(
+	async fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -182,6 +182,7 @@ impl IndexBuilder {
 		sdr: Option<Sender<Result<(), Error>>>,
 	) -> Result<IndexBuilding, Error> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		building.recover_queue().await?;
 		let b = building.clone();
 		spawn(async move {
 			// Ensure that in case of an unexpected exit the building process is declared finished
@@ -245,12 +246,12 @@ impl IndexBuilder {
 						name: e.key().ix.clone(),
 					});
 				}
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ix, sdr).await?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ix, sdr).await?;
 				e.insert(ib);
 			}
 		}
@@ -319,7 +320,8 @@ struct Appending {
 #[non_exhaustive]
 struct PrimaryAppending(u32);
 
-#[derive(Default)]
+#[revisioned(revision = 1)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Default)]
 struct QueueSequences {
 	/// The index of the next appending to be indexed
 	to_index: u32,
@@ -355,6 +357,11 @@ impl QueueSequences {
 		let s = self.to_index;
 		let e = (s + page).min(self.next);
 		s..e
+	}
+
+	fn restore_range(&mut self, min: u32, max: u32) {
+		self.to_index = min;
+		self.next = max.saturating_add(1);
 	}
 }
 
@@ -408,6 +415,31 @@ impl Building {
 		}
 	}
 
+	async fn recover_queue(&self) -> Result<(), Error> {
+		let (ns, db) = self.opt.ns_db()?;
+		let beg = crate::key::index::ia::prefix_beg(ns, db, &self.ix.what, &self.ix.name)?;
+		let end = crate::key::index::ia::prefix_end(ns, db, &self.ix.what, &self.ix.name)?;
+		let mut next = Some(beg..end);
+		let mut min_idx: Option<u32> = None;
+		let mut max_idx: Option<u32> = None;
+		while let Some(rng) = next {
+			let tx = self.new_read_tx().await?;
+			let batch = catch!(tx, tx.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await);
+			next = batch.next;
+			for key in batch.result {
+				let ia = Ia::decode(&key)?;
+				min_idx = Some(min_idx.map_or(ia.i, |current| current.min(ia.i)));
+				max_idx = Some(max_idx.map_or(ia.i, |current| current.max(ia.i)));
+			}
+		}
+		if let Some(max) = max_idx {
+			let min = min_idx.unwrap_or(max);
+			let mut queue = self.queue.write().await;
+			queue.restore_range(min, max);
+		}
+		Ok(())
+	}
+
 	/// Try to consume a document update.
 	/// If the index is currently building, the update is enqueued to be indexed asynchronously.
 	/// If the index is already built and not deferred, the update is ignored and the document can be updated normally.
@@ -445,6 +477,7 @@ impl Building {
 			// If not, we set it
 			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
 		}
+		// Free the queue
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
 	}
