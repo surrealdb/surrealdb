@@ -91,39 +91,12 @@ jobs:
           ref: ${{ env.CRUD_BENCH_REVISION }}
           path: .github/tools/crud-bench
 
-      - name: Copy profile configuration from crud-bench
+      - name: Make crud-bench an independent workspace
         run: |
-          # Use Python with TOML libraries (faster than cargo install)
-          # Note: cargo metadata doesn't include profile configuration
-          pip install -q tomli tomli-w
-          python3 << 'EOF'
-          import sys
-          if sys.version_info >= (3, 11):
-              import tomllib
-          else:
-              import tomli as tomllib
-          import tomli_w
-          from pathlib import Path
-
-          # Read crud-bench's Cargo.toml to extract profiles
-          crud_bench_toml = Path(".github/tools/crud-bench/Cargo.toml").read_text()
-          crud_bench_config = tomllib.loads(crud_bench_toml)
-
-          # Read workspace Cargo.toml
-          workspace_toml_path = Path(".github/tools/Cargo.toml")
-          workspace_config = tomllib.loads(workspace_toml_path.read_text())
-
-          # Copy all [profile.*] sections from crud-bench to workspace
-          if "profile" in crud_bench_config:
-              workspace_config["profile"] = crud_bench_config["profile"]
-              print(f"Copied {len(crud_bench_config['profile'])} profile(s) from crud-bench")
-
-          # Write back to workspace Cargo.toml
-          workspace_toml_path.write_text(tomli_w.dumps(workspace_config))
-
-          print("\n=== Workspace Cargo.toml with profiles ===")
-          print(workspace_toml_path.read_text())
-          EOF
+          # Append empty [workspace] to prevent crud-bench from being
+          # detected as part of the parent SurrealDB workspace
+          echo "" >> .github/tools/crud-bench/Cargo.toml
+          echo "[workspace]" >> .github/tools/crud-bench/Cargo.toml
 
       - name: Setup crud-bench cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
@@ -290,4 +263,3 @@ jobs:
             ${{ github.workspace }}/report.md
             ${{ github.workspace }}/analysis.json
           retention-days: 90
-

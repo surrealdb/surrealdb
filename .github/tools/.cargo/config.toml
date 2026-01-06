@@ -1,2 +1,3 @@
+# Patch crud-bench to use local SurrealDB build from PR
 [patch.crates-io]
-surrealdb = { path = "../../surrealdb/crates/sdk" }
+surrealdb = { path = "../../crates/sdk" }
