@@ -5,7 +5,6 @@ use reblessive::Stk;
 use surrealdb_types::ToSql;
 
 use super::{ParseResult, Parser};
-use crate::iam::Token;
 use crate::sql::lookup::LookupSubject;
 use crate::sql::{Param, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
 use crate::syn::error::bail;

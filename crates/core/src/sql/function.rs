@@ -160,11 +160,8 @@ impl ToSql for FunctionCall {
 				write_sql!(f, fmt, "{m}");
 			}
 			Function::Module(ref m, ref s) => {
-				f.push_str("mod");
-				for s in m.split("::") {
-					f.push_str("::");
-					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
-				}
+				f.push_str("mod::");
+				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(m));
 				if let Some(s) = s {
 					write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(s));
 				}

@@ -1,5 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::CoverStmts;
 use crate::sql::Field;
 use crate::sql::field::{Fields, Selector};
 
@@ -40,10 +41,10 @@ impl ToSql for Output {
 								let has_left_none = expr.has_left_none_null();
 								if has_left_none {
 									f.push('(');
-								}
-								expr.fmt_sql(f, fmt);
-								if has_left_none {
+									expr.fmt_sql(f, fmt);
 									f.push(')');
+								} else {
+									CoverStmts(expr).fmt_sql(f, fmt);
 								}
 								if let Some(alias) = alias {
 									write_sql!(f, fmt, " AS {alias}");

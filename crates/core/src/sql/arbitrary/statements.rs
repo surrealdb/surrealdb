@@ -5,6 +5,7 @@ use crate::sql::arbitrary::{
 	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
 use crate::sql::kind::KindLiteral;
+use crate::sql::statements::SetStatement;
 use crate::sql::statements::alter::{
 	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterNamespaceStatement,
 	AlterSystemStatement,
@@ -13,8 +14,9 @@ use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
 };
 use crate::sql::{
-	AccessType, Base, Data, DefineFieldStatement, DefineIndexStatement, Expr, Index,
-	InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement, View,
+	AccessType, Ast, Base, BinaryOperator, Data, DefineFieldStatement, DefineIndexStatement, Expr,
+	Index, InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement,
+	TopLevelExpr, View,
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {
@@ -335,6 +337,36 @@ impl<'a> arbitrary::Arbitrary<'a> for AlterNamespaceStatement {
 	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		Ok(AlterNamespaceStatement {
 			compact: true,
+		})
+	}
+}
+
+impl<'a> Arbitrary<'a> for Ast {
+	fn size_hint(depth: usize) -> (usize, Option<usize>) {
+		Vec::<TopLevelExpr>::size_hint(depth)
+	}
+
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let mut expressions = Vec::<TopLevelExpr>::arbitrary(u)?;
+		for e in expressions.iter_mut() {
+			if let TopLevelExpr::Expr(Expr::Binary {
+				left,
+				op: BinaryOperator::Equal,
+				right,
+				..
+			}) = e
+			{
+				if let Expr::Param(ref left) = **left {
+					*e = TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
+						name: left.clone().into_string(),
+						kind: None,
+						what: (**right).clone(),
+					})))
+				}
+			}
+		}
+		Ok(Ast {
+			expressions,
 		})
 	}
 }

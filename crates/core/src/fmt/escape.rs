@@ -41,11 +41,23 @@ impl Iterator for Escape<'_> {
 		// Always escape backspace
 		match next {
 			'\0' => {
-				self.pending_buffer[3] = 'u';
-				self.pending_buffer[2] = '{';
-				self.pending_buffer[1] = '0';
-				self.pending_buffer[0] = '}';
-				self.pending_len = 4;
+				self.pending_buffer[0] = '0';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\r' => {
+				self.pending_buffer[0] = 'r';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\n' => {
+				self.pending_buffer[0] = 'n';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\t' => {
+				self.pending_buffer[0] = 't';
+				self.pending_len = 1;
 				Some('\\')
 			}
 			'\u{8}' => {
