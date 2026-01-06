@@ -320,8 +320,6 @@ struct Appending {
 #[non_exhaustive]
 struct PrimaryAppending(u32);
 
-#[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Debug, Copy, Clone, Default)]
 struct QueueSequences {
 	/// The index of the next appending to be indexed
 	to_index: u32,
