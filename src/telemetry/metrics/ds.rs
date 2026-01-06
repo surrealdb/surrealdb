@@ -2,6 +2,10 @@ use opentelemetry::global;
 use std::sync::Arc;
 use surrealdb_core::kvs::Datastore;
 
+/// Registers datastore-specific metrics with the global OpenTelemetry meter.
+///
+/// This function checks if the datastore provides any metrics and, if so,
+/// registers them as observable gauges.
 pub fn register_datastore_metrics(ds: Arc<Datastore>) {
 	if let Some(metrics) = ds.register_metrics() {
 		let meter = global::meter(metrics.name);

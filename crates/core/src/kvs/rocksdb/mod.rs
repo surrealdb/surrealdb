@@ -385,6 +385,7 @@ impl Datastore {
 	const ESTIMATE_TABLE_READERS_MEM: &str = "rocksdb.estimate_table_readers_mem";
 	const CUR_SIZE_ALL_MEM_TABLES: &str = "rocksdb.cur_size_all_mem_tables";
 
+	/// Registers metrics for the RocksDB datastore.
 	pub(crate) fn register_metrics(&self) -> Metrics {
 		Metrics {
 			name: "surrealdb.rocksdb",
@@ -409,6 +410,7 @@ impl Datastore {
 		}
 	}
 
+	/// Collects a specific u64 metric by name from the RocksDB datastore.
 	pub(crate) fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		let metric = match metric {
 			Self::BLOCK_CACHE_USAGE => Some(properties::BLOCK_CACHE_USAGE),
