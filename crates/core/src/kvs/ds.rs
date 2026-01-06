@@ -456,6 +456,7 @@ impl Datastore {
 		match self.transaction_factory.flavor.as_ref() {
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
+			#[allow(unreachable_patterns)]
 			_ => None,
 		}
 	}
@@ -465,6 +466,7 @@ impl Datastore {
 		match self.transaction_factory.flavor.as_ref() {
 			#[cfg(feature = "kv-rocksdb")]
 			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(_metric),
+			#[allow(unreachable_patterns)]
 			_ => None,
 		}
 	}
