@@ -103,6 +103,16 @@ pub(super) struct TransactionFactory {
 	flavor: Arc<DatastoreFlavor>,
 }
 
+pub struct Metrics {
+	pub name: &'static str,
+	pub u64_metrics: Vec<Metric>,
+}
+
+pub struct Metric {
+	pub name: &'static str,
+	pub description: &'static str,
+}
+
 impl TransactionFactory {
 	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
 		Self {
@@ -433,6 +443,20 @@ impl Datastore {
 				cache: Arc::new(DatastoreCache::new()),
 			}
 		})
+	}
+
+	pub fn register_metrics(&self) -> Option<Metrics> {
+		match self.transaction_factory.flavor.as_ref() {
+			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
+			_ => None,
+		}
+	}
+
+	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		match self.transaction_factory.flavor.as_ref() {
+			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(metric),
+			_ => None,
+		}
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.
