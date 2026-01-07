@@ -279,14 +279,15 @@ impl IndexBuilder {
 	) -> Result<ConsumeResult, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		// This is the normal path
 		if let Some(building) = self.indexes.read().await.get(&key) {
+			// And index is currently building, or is a deferred index
 			return building.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		if ix.defer {
+			// After a restart, the defer deamon needs to be restarted
 			let building = match self.indexes.write().await.entry(key) {
-				Entry::Occupied(e) => {
-					return e.get().maybe_consume(ctx, old_values, new_values, rid).await;
-				}
+				Entry::Occupied(e) => e.get().clone(),
 				Entry::Vacant(e) => {
 					let building = Arc::new(Building::new(
 						ctx,
@@ -297,12 +298,13 @@ impl IndexBuilder {
 					building.recover_queue().await?;
 					building.initial_build_complete.store(true, Ordering::Relaxed);
 					e.insert(building.clone());
+					Self::spawn_deferred_daemon(building.clone());
 					building
 				}
 			};
-			Self::spawn_deferred_daemon(building.clone());
 			return building.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
+		// There is no index building process (defer or initial building)
 		Ok(ConsumeResult::Ignored(old_values, new_values))
 	}
 
