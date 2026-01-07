@@ -307,13 +307,13 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
+			order_columns: tree.index_map.order_columns,
 		};
 		match PlanBuilder::build(stm_ctx, p).await? {
-			Plan::SingleIndex(exp, io, rs) => {
+			Plan::SingleIndex(exp, io, rs, is_order) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
-				let is_order = io.is_order();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
 				self.add(doc_ctx.clone(), t.clone(), Some(ir), exe, it, rs);
 				if is_order {
