@@ -268,3 +268,40 @@ pub async fn init<F: RouterFactory>(
 
 	Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use axum::body::Body;
+	use axum::http::{Request, StatusCode};
+	use axum::Extension;
+	use surrealdb_core::dbs::Session;
+	use tower::ServiceExt;
+
+	#[tokio::test]
+	async fn test_sql_endpoint_query_params() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let state = AppState {
+			client_ip: client_ip::ClientIp::None,
+			datastore: ds,
+		};
+
+		let app = sql::router()
+			.layer(Extension(state))
+			.layer(Extension(Session::owner()));
+
+		let response = app
+			.oneshot(
+				Request::builder()
+					.method("POST")
+					.uri("/sql?param1=pizza")
+					.header("accept", "application/json")
+					.body(Body::empty())
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+
+		assert_eq!(response.status(), StatusCode::OK);
+	}
+}
