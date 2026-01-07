@@ -132,4 +132,3 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 		}
 	}
 }
-
