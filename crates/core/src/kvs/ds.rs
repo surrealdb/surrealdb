@@ -131,8 +131,12 @@ pub struct Datastore {
 	surrealism_cache: Arc<SurrealismCache>,
 }
 
+/// Factory for creating transactions with proper clock and backend configuration.
+///
+/// This struct is used to create transactions for operations that need retry logic,
+/// such as HNSW index updates and sequence allocations.
 #[derive(Clone)]
-pub(super) struct TransactionFactory {
+pub(crate) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
@@ -628,6 +632,7 @@ impl Datastore {
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
 		let id = Uuid::new_v4();
+		let sequences = Sequences::new(tf.clone(), id);
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
@@ -637,15 +642,15 @@ impl Datastore {
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
-			index_builder: IndexBuilder::new(tf.clone()),
+			index_stores: IndexStores::new(tf.clone(), sequences.clone()),
+			index_builder: IndexBuilder::new(tf),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(storage)]
 			temporary_directory: None,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets,
-			sequences: Sequences::new(tf, id),
+			sequences,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
@@ -655,6 +660,8 @@ impl Datastore {
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
+		// Create sequences first so it can be shared with IndexStores
+		let sequences = Sequences::new(self.transaction_factory.clone(), self.id);
 		Self {
 			id: self.id,
 			auth_enabled: self.auth_enabled,
@@ -663,7 +670,8 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
+			// Create IndexStores with transaction factory for HNSW retry logic
+			index_stores: IndexStores::new(self.transaction_factory.clone(), sequences.clone()),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
@@ -671,7 +679,7 @@ impl Datastore {
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: self.buckets,
-			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
+			sequences,
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),

@@ -164,6 +164,9 @@ harness = false
 
 [[bench]]
 name = "index_hnsw"
+
+[[bench]]
+name = "index_fulltext"
 harness = false
 
 [[bench]]
