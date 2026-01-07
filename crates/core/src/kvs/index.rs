@@ -202,29 +202,32 @@ impl IndexBuilder {
 			}
 			if b.ix.defer {
 				// If it is a deferred indexing, start the daemon and return
-				let b_daemon = b.clone();
-				spawn(async move {
-					// Ensure that the daemon running flag is properly managed
-					let daemon_guard = DeferredDaemonGuard(b_daemon.clone());
-					b_daemon.deferred_daemon_running.store(true, Ordering::Relaxed);
-					loop {
-						if b_daemon.is_aborted().await {
-							b_daemon.set_status(BuildingStatus::Aborted).await;
-							break;
-						}
-						if let Err(e) = b_daemon.index_appending_loop(None).await {
-							error!("Index appending loop error: {}", e);
-							b_daemon.set_status(BuildingStatus::Error(e.to_string())).await;
-							break;
-						}
-						sleep(Duration::from_millis(100)).await;
-					}
-					drop(daemon_guard);
-				});
+				Self::spawn_deferred_daemon(b.clone());
 			}
 			drop(initial_guard);
 		});
 		Ok(building)
+	}
+
+	fn spawn_deferred_daemon(b_daemon: IndexBuilding) {
+		spawn(async move {
+			// Ensure that the daemon running flag is properly managed
+			let daemon_guard = DeferredDaemonGuard(b_daemon.clone());
+			b_daemon.deferred_daemon_running.store(true, Ordering::Relaxed);
+			loop {
+				if b_daemon.is_aborted().await {
+					b_daemon.set_status(BuildingStatus::Aborted).await;
+					break;
+				}
+				if let Err(e) = b_daemon.index_appending_loop(None).await {
+					error!("Index appending loop error: {}", e);
+					b_daemon.set_status(BuildingStatus::Error(e.to_string())).await;
+					break;
+				}
+				sleep(Duration::from_millis(100)).await;
+			}
+			drop(daemon_guard);
+		});
 	}
 
 	/// Build an index
@@ -268,15 +271,37 @@ impl IndexBuilder {
 	pub(crate) async fn consume(
 		&self,
 		ctx: &Context,
-		(ns, db): (&str, &str),
+		opt: &Options,
 		ix: &DefineIndexStatement,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
+		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(b) = self.indexes.read().await.get(&key) {
-			return b.maybe_consume(ctx, old_values, new_values, rid).await;
+		if let Some(building) = self.indexes.read().await.get(&key) {
+			return building.maybe_consume(ctx, old_values, new_values, rid).await;
+		}
+		if ix.defer {
+			let building = match self.indexes.write().await.entry(key) {
+				Entry::Occupied(e) => {
+					return e.get().maybe_consume(ctx, old_values, new_values, rid).await;
+				}
+				Entry::Vacant(e) => {
+					let building = Arc::new(Building::new(
+						ctx,
+						self.tf.clone(),
+						opt.clone(),
+						Arc::new(ix.clone()),
+					)?);
+					building.recover_queue().await?;
+					building.initial_build_complete.store(true, Ordering::Relaxed);
+					e.insert(building.clone());
+					building
+				}
+			};
+			Self::spawn_deferred_daemon(building.clone());
+			return building.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
 	}
