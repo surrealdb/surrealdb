@@ -405,14 +405,12 @@ async fn bm25_accurate_with_custom_parameters() -> Result<()> {
 	// First result should be blog:1 (shorter doc scores higher with b=1.0)
 	let tmp = res.remove(0).result?;
 	// Parse and check if the id is blog:1
-	if let Value::Array(arr) = &tmp {
-		if let Some(first) = arr.first() {
-			if let Value::Object(obj) = first {
-				let id = obj.get("id").cloned().unwrap_or(Value::None);
-				let expected = syn::value("blog:1").unwrap();
-				assert_eq!(id, expected, "Short doc should rank first with b=1.0");
-			}
-		}
+	if let Value::Array(arr) = &tmp
+		&& let Some(Value::Object(obj)) = arr.first()
+	{
+		let id = obj.get("id").cloned().unwrap_or(Value::None);
+		let expected = syn::value("blog:1").unwrap();
+		assert_eq!(id, expected, "Short doc should rank first with b=1.0");
 	}
 
 	Ok(())
@@ -495,16 +493,14 @@ async fn bm25_multi_term_query() -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let val1 = syn::value("doc:1").unwrap();
 	let val2 = syn::value("doc:2").unwrap();
-	if let Value::Array(arr) = &tmp {
-		if let Some(first) = arr.first() {
-			if let Value::Object(obj) = first {
-				let id = obj.get("id").cloned().unwrap_or(Value::None);
-				assert!(
-					id == val1 || id == val2,
-					"Top result should be doc:1 or doc:2 (docs with both terms)"
-				);
-			}
-		}
+	if let Value::Array(arr) = &tmp
+		&& let Some(Value::Object(obj)) = arr.first()
+	{
+		let id = obj.get("id").cloned().unwrap_or(Value::None);
+		assert!(
+			id == val1 || id == val2,
+			"Top result should be doc:1 or doc:2 (docs with both terms)"
+		);
 	}
 
 	Ok(())
@@ -540,17 +536,17 @@ async fn bm25_and_bm25_accurate_same_ranking() -> Result<()> {
 	let accurate_result = res.remove(0).result?;
 
 	// Extract IDs from results
-	if let Value::Array(arr) = &bm25_result {
-		if let Some(Value::Object(obj)) = arr.first() {
-			let id = obj.get("id").cloned().unwrap_or(Value::None);
-			assert_eq!(id, expected_top, "BM25 top result should be doc:3");
-		}
+	if let Value::Array(arr) = &bm25_result
+		&& let Some(Value::Object(obj)) = arr.first()
+	{
+		let id = obj.get("id").cloned().unwrap_or(Value::None);
+		assert_eq!(id, expected_top, "BM25 top result should be doc:3");
 	}
-	if let Value::Array(arr) = &accurate_result {
-		if let Some(Value::Object(obj)) = arr.first() {
-			let id = obj.get("id").cloned().unwrap_or(Value::None);
-			assert_eq!(id, expected_top, "BM25_ACCURATE top result should be doc:3");
-		}
+	if let Value::Array(arr) = &accurate_result
+		&& let Some(Value::Object(obj)) = arr.first()
+	{
+		let id = obj.get("id").cloned().unwrap_or(Value::None);
+		assert_eq!(id, expected_top, "BM25_ACCURATE top result should be doc:3");
 	}
 
 	// Both should find all 3 documents
