@@ -8,12 +8,17 @@ use surrealdb_types::SurrealValue;
 use super::args::Optional;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
+use crate::api::request::ApiRequest;
 use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::fnc::args::FromPublic;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::val::{Object, Value};
+use crate::val::{Duration, Object, Value};
+
+pub mod req;
+pub mod res;
 
 pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
@@ -74,4 +79,9 @@ pub async fn invoke(
 	} else {
 		Ok(Value::None)
 	}
+}
+
+pub fn timeout((FromPublic(mut req), Optional(timeout)): (FromPublic<ApiRequest>, Optional<Duration>)) -> Result<Value> {
+    req.timeout = timeout.map(Into::into);
+    Ok(convert_public_value_to_internal(req.into_value()))
 }

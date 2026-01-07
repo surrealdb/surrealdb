@@ -9,7 +9,8 @@ use crate::err::Error;
 use crate::rpc::format::Format;
 use crate::types::PublicValue;
 
-#[derive(Debug, SurrealValue)]
+#[derive(Debug, Default, SurrealValue)]
+#[surreal(default)]
 pub struct ApiResponse {
 	pub raw: Option<bool>,
 	pub status: StatusCode,

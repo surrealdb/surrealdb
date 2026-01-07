@@ -1,9 +1,10 @@
 use std::vec::IntoIter;
 
 use anyhow::{Result, bail};
+use surrealdb_types::SurrealValue;
 
 use crate::err::Error;
-use crate::val::Value;
+use crate::val::{Value, convert_value_to_public_value};
 use crate::val::value::{Cast as CastTrait, Coerce};
 
 /// The number of arguments a function takes.
@@ -92,6 +93,24 @@ impl<T: FromArg> FromArg for Optional<T> {
 		}
 		let v = T::from_arg(name, arg)?;
 		Ok(Optional(Some(v)))
+	}
+}
+
+pub struct FromPublic<T>(pub T);
+
+impl<T: SurrealValue> FromArg for FromPublic<T> {
+	fn arity() -> Arity {
+		Arity { 
+			lower: 1,
+			upper: Some(1),
+		}
+	}
+
+	fn from_arg(name: &str, arg: &mut Args) -> Result<Self> {
+		let value = Value::from_arg(name, arg)?;
+		let value = convert_value_to_public_value(value)?;
+		let value: T = value.into_t()?;
+		Ok(FromPublic(value))
 	}
 }
 

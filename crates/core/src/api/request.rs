@@ -1,12 +1,14 @@
 use http::HeaderMap;
-use surrealdb_types::{Duration, SurrealValue, Value};
+use surrealdb_types::SurrealValue;
+use crate::types::{PublicDuration, PublicValue};
 
-#[derive(Clone, SurrealValue)]
+#[derive(Clone, Default, SurrealValue)]
+#[surreal(default)]
 pub struct ApiRequest {
     // Request
-    pub body: Value,
+    pub body: PublicValue,
     pub headers: HeaderMap,
 
     // Processing options
-    pub timeout: Option<Duration>,
+    pub timeout: Option<PublicDuration>,
 }

@@ -13,7 +13,7 @@ pub async fn body(req: &mut ApiRequest, strategy: BodyStrategy) -> Result<()> {
     parser.process().await
 }
 
-struct BodyParser<'a> {
+pub struct BodyParser<'a> {
     mime: Option<Mime>,
     req: &'a mut ApiRequest,
     strategy: BodyStrategy,

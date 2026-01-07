@@ -24,6 +24,12 @@ pub(crate) static PATHS: phf::Map<
 	(PathKind, Option<UniCase<&'static str>>),
 > = phf_map! {
 		UniCase::ascii("api::invoke") => (PathKind::Function, None),
+		UniCase::ascii("api::timeout") => (PathKind::Function, None),
+		UniCase::ascii("api::req::body") => (PathKind::Function, None),
+		UniCase::ascii("api::res::body") => (PathKind::Function, None),
+		UniCase::ascii("api::res::status") => (PathKind::Function, None),
+		UniCase::ascii("api::res::header") => (PathKind::Function, None),
+		UniCase::ascii("api::res::headers") => (PathKind::Function, None),
 		//
 		UniCase::ascii("array::add") => (PathKind::Function, None),
 		UniCase::ascii("array::all") => (PathKind::Function, None),
@@ -600,8 +606,8 @@ impl Parser<'_> {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
 			Some((k, (PathKind::Function, _))) => {
 				// TODO: Move this out of the parser.
-				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
+				if k.to_lowercase().starts_with("api::") && !self.settings.define_api_enabled {
+					bail!("Cannot use the `{k}` method, as the experimental define api capability is not enabled", @span);
 				}
 
 				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))

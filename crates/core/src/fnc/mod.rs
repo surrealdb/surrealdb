@@ -53,6 +53,8 @@ pub async fn run(
 ) -> Result<Value> {
 	if name.eq("sleep")
 		|| name.eq("api::invoke")
+		|| name.eq("api::req::body")
+		|| name.eq("api::res::body")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -156,6 +158,11 @@ pub fn synchronous(
 		name,
 		args,
 		"no such builtin function found",
+		//
+		exp(DefineApi) "api::timeout" => api::timeout,
+		exp(DefineApi) "api::res::status" => api::res::status,
+		exp(DefineApi) "api::res::header" => api::res::header,
+		exp(DefineApi) "api::res::headers" => api::res::headers,
 		//
 		"array::add" => array::add,
 		"array::append" => array::append,
@@ -562,6 +569,8 @@ pub async fn asynchronous(
 		"no such builtin function found",
 		//
 		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
+		exp(DefineApi) "api::req::body" => api::req::body.await,
+		exp(DefineApi) "api::res::body" => api::res::body(ctx).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

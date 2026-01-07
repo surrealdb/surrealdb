@@ -15,7 +15,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{SurrealValue, object};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -2200,7 +2200,12 @@ impl Datastore {
 			}
 		}
 
-		Ok(query_result.finish())
+		let value = PublicValue::from_t(object! {
+			namespace: session.ns.clone(),
+			database: session.db.clone(),
+		});
+
+		Ok(query_result.finish_with_result(Ok(value)))
 	}
 
 	/// Get a db model by name.
