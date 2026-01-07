@@ -181,7 +181,7 @@ impl Transactable for Transaction {
 			None => inner.get(&key)?,
 		};
 		// Return result
-		Ok(res.map(|v| v.to_vec()))
+		Ok(res)
 	}
 
 	/// Insert or update a key in the database.
@@ -411,12 +411,12 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
 				.take(limit as usize)
-				.map(|r| r.map(Key::from).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
 				.take(limit as usize)
-				.map(|r| r.map(Key::from).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -441,13 +441,13 @@ impl Transactable for Transaction {
 				.keys_at_version(beg, end, ts)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map(Key::from).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map(Key::from).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -476,12 +476,12 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
 				.take(limit as usize)
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
 				.take(limit as usize)
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -511,13 +511,13 @@ impl Transactable for Transaction {
 				.range_at_version(beg, end, ts)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
+				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -541,11 +541,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.write().await;
 		// Retrieve the scan range
-		let res = inner
-			.scan_all_versions(beg, end, Some(limit as usize))?
-			.into_iter()
-			.map(|(k, v, ts, del)| (k.to_vec(), v.to_vec(), ts, del))
-			.collect();
+		let res = inner.scan_all_versions(beg, end, Some(limit as usize))?.into_iter().collect();
 		// Return result
 		Ok(res)
 	}

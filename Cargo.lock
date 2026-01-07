@@ -4757,7 +4757,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.110",
@@ -6661,9 +6661,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b25dacdb399a9ec6b67e4b9b626a668b7f4e641d14ad6c5babc3241cb7e2faa"
+checksum = "e1ae89d58a378fa0126e7d41b19e9065c069934c6bbb1800da3db5de6b84974a"
 dependencies = [
  "arc-swap",
  "async-channel",
