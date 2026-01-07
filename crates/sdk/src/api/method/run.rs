@@ -91,6 +91,7 @@ where
 pub trait IntoFn {
 	/// Handles the conversion of the function string
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_fn(self) -> Result<(String, Option<String>)>;
 }
 

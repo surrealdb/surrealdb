@@ -21,6 +21,8 @@ macro_rules! include_tests {
 	};
 }
 
+#[cfg(feature = "kv-rocksdb")]
+mod metrics;
 mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
@@ -101,7 +103,7 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only, metrics);
 }
 
 #[cfg(feature = "kv-surrealkv")]

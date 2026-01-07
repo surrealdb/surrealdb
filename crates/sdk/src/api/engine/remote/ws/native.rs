@@ -586,6 +586,7 @@ pub(crate) async fn run_router(
 }
 
 impl Response {
+	#[allow(clippy::result_large_err)]
 	fn try_from(message: &Message) -> Result<Option<Self>> {
 		match message {
 			Message::Text(text) => {

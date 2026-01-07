@@ -19,6 +19,7 @@ use super::Raw;
 pub trait IntoQuery {
 	/// Converts an input into SQL statements
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_query(self) -> Result<Vec<Statement>>;
 
 	/// Not public API
@@ -215,6 +216,7 @@ where
 {
 	/// Extracts and deserializes a query result from a query response
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn query_result(self, response: &mut QueryResponse) -> Result<Response>;
 
 	/// Extracts the statistics from a query response
@@ -469,6 +471,7 @@ where
 pub trait QueryStream<R> {
 	/// Retrieves the query stream future
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<R>>;
 }
 
