@@ -2,13 +2,15 @@
 
 mod cnf;
 
+use super::KeyEncode;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::ds::{Metric, Metrics};
 use crate::kvs::{Check, Key, Val};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
-	WriteOptions,
+	properties, BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions,
+	LogLevel, OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions,
+	SstFileManager, WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
@@ -17,8 +19,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-
-use super::KeyEncode;
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 use crate::kvs::rocksdb::cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE;
@@ -29,7 +29,6 @@ pub struct Datastore {
 	/// Disk space manager for monitoring space usage and enforcing space limits
 	disk_space_manager: Option<DiskSpaceManager>,
 }
-
 /// Manages disk space monitoring and enforces space limits for the RocksDB datastore.
 ///
 /// This manager tracks SST file space usage and implements a state machine to transition
@@ -378,6 +377,50 @@ impl Datastore {
 		Ok(Datastore {
 			db,
 			disk_space_manager,
+		})
+	}
+
+	const BLOCK_CACHE_USAGE: &str = "rocksdb.block_cache_usage";
+	const BLOCK_CACHE_PINNED_USAGE: &str = "rocksdb.block_cache_pinned_usage";
+	const ESTIMATE_TABLE_READERS_MEM: &str = "rocksdb.estimate_table_readers_mem";
+	const CUR_SIZE_ALL_MEM_TABLES: &str = "rocksdb.cur_size_all_mem_tables";
+
+	/// Registers metrics for the RocksDB datastore.
+	pub(crate) fn register_metrics(&self) -> Metrics {
+		Metrics {
+			name: "surrealdb.rocksdb",
+			u64_metrics: vec![
+				Metric {
+					name: Self::BLOCK_CACHE_USAGE,
+					description: "Returns the memory size for the entries residing in block cache.",
+				},
+				Metric {
+					name: Self::BLOCK_CACHE_PINNED_USAGE,
+					description: "Returns the memory size for the entries being pinned.",
+				},
+				Metric {
+					name: Self::ESTIMATE_TABLE_READERS_MEM,
+					description: "Returns estimated memory used for reading SST tables, excluding memory used in block cache (e.g., filter and index blocks).",
+				},
+				Metric {
+					name: Self::CUR_SIZE_ALL_MEM_TABLES,
+					description: "Returns approximate size of active and unflushed immutable memtables",
+				},
+			],
+		}
+	}
+
+	/// Collects a specific u64 metric by name from the RocksDB datastore.
+	pub(crate) fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		let metric = match metric {
+			Self::BLOCK_CACHE_USAGE => Some(properties::BLOCK_CACHE_USAGE),
+			Self::BLOCK_CACHE_PINNED_USAGE => Some(properties::BLOCK_CACHE_PINNED_USAGE),
+			Self::ESTIMATE_TABLE_READERS_MEM => Some(properties::ESTIMATE_TABLE_READERS_MEM),
+			Self::CUR_SIZE_ALL_MEM_TABLES => Some(properties::CUR_SIZE_ALL_MEM_TABLES),
+			_ => None,
+		};
+		metric.map(|metric| {
+			self.db.property_int_value(metric).unwrap_or_default().unwrap_or_default()
 		})
 	}
 

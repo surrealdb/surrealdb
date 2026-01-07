@@ -1435,6 +1435,7 @@ where
 	}
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_data(data: &CoreValue, error_message: &str) -> crate::Result<()> {
 	match data {
 		CoreValue::Object(_) => Ok(()),

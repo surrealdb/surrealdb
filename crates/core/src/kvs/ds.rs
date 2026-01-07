@@ -103,6 +103,22 @@ pub(super) struct TransactionFactory {
 	flavor: Arc<DatastoreFlavor>,
 }
 
+/// Represents a collection of metrics for a specific datastore flavor.
+pub struct Metrics {
+	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
+	pub name: &'static str,
+	/// A list of u64-based metrics.
+	pub u64_metrics: Vec<Metric>,
+}
+
+/// Represents a single metric with a name and description.
+pub struct Metric {
+	/// The name of the metric.
+	pub name: &'static str,
+	/// A human-readable description of the metric.
+	pub description: &'static str,
+}
+
 impl TransactionFactory {
 	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
 		Self {
@@ -433,6 +449,26 @@ impl Datastore {
 				cache: Arc::new(DatastoreCache::new()),
 			}
 		})
+	}
+
+	/// Registers metrics for the current datastore flavor if supported.
+	pub fn register_metrics(&self) -> Option<Metrics> {
+		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	pub fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
+		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(_metric),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.

@@ -67,6 +67,7 @@ where
 }
 
 /// Convert and simplify the value into JSON
+#[allow(clippy::result_large_err)]
 pub fn simplify<T: Serialize + 'static>(v: T) -> Result<Json, Error> {
 	Ok(sql::to_value(v)?.into())
 }

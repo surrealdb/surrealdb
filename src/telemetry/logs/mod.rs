@@ -8,6 +8,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::Layer;
 
+#[allow(clippy::result_large_err)]
 pub fn file<S>(
 	filter: CustomFilter,
 	file: NonBlocking,
@@ -51,6 +52,7 @@ where
 	}
 }
 
+#[allow(clippy::result_large_err)]
 pub fn output<S>(
 	filter: CustomFilter,
 	stdout: NonBlocking,

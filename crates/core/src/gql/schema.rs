@@ -184,6 +184,7 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
+#[allow(clippy::result_large_err)]
 pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SqlValue::None => GqlValue::Null,
@@ -217,6 +218,7 @@ pub fn sql_value_to_gql_value(v: SqlValue) -> Result<GqlValue, GqlError> {
 	Ok(out)
 }
 
+#[allow(clippy::result_large_err)]
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let (optional, match_kind) = match kind {
 		Kind::Option(op_ty) => (true, *op_ty),
@@ -392,6 +394,7 @@ macro_rules! any_try_kinds {
 	};
 }
 
+#[allow(clippy::result_large_err)]
 pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SqlValue, GqlError> {
 	use crate::syn;
 	match kind {
