@@ -146,8 +146,7 @@ impl<'a> Dc<'a> {
 		ix: IndexId,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
-		let mut beg = prefix.encode_key()?;
-		beg.extend([0; 40]);
+		let beg = prefix.encode_key()?;
 		let mut end = prefix.encode_key()?;
 		end.extend([255; 40]);
 		Ok((beg, end))
@@ -224,7 +223,7 @@ mod tests {
 	fn range() {
 		let tb = TableName::from("testtb");
 		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 		assert_eq!(
 			end,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
