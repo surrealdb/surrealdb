@@ -92,7 +92,8 @@ impl Parser<'_> {
 					version,
 				})
 			}
-			TokenKind::Identifier => {
+			// TODO temp fix to include API here
+			TokenKind::Identifier | t!("API") => {
 				let mut name = self.parse_ident()?;
 				while self.eat(t!("::")) {
 					name.push_str("::");

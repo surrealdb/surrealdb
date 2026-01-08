@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
+use http::header::{ACCEPT, CONTENT_TYPE};
 use http::HeaderMap;
 use reblessive::tree::Stk;
 use surrealdb_types::SurrealValue;
@@ -8,14 +9,12 @@ use surrealdb_types::SurrealValue;
 use super::args::Optional;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
-use crate::api::request::ApiRequest;
 use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::fnc::args::FromPublic;
-use crate::sql::expression::convert_public_value_to_internal;
-use crate::val::{Duration, Object, Value};
+use crate::doc::CursorDoc;
+use crate::val::{Closure, Duration, Object, Value};
 
 pub mod req;
 pub mod res;
@@ -24,7 +23,7 @@ pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
 	(path, Optional(opts)): (String, Optional<Object>),
 ) -> Result<Value> {
-	let (body, method, query, headers) = if let Some(opts) = opts {
+	let (body, method, query, mut headers) = if let Some(opts) = opts {
 		let body = match opts.get("body") {
 			Some(v) => v.to_owned(),
 			_ => Default::default(),
@@ -58,6 +57,15 @@ pub async fn invoke(
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
+	if !headers.contains_key(CONTENT_TYPE) {
+		headers.insert(CONTENT_TYPE, "application/vnd.surrealdb.native".try_into()?);
+	}
+
+	if !headers.contains_key(ACCEPT) {
+		// We'll accept anything, but we prefer native.
+		headers.insert(ACCEPT, "application/vnd.surrealdb.native;q=0.9, */*;q=0.8".try_into()?);
+	}
+
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, method) {
 		let invocation = ApiInvocation {
 			params: params.try_into()?,
@@ -72,7 +80,7 @@ pub async fn invoke(
 			.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(public_body))
 			.await
 		{
-			Ok(Some(v)) => Ok(convert_public_value_to_internal(v.0.into_value())),
+			Ok(Some(v)) => Ok(v.into()),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}
@@ -81,7 +89,16 @@ pub async fn invoke(
 	}
 }
 
-pub fn timeout((FromPublic(mut req), Optional(timeout)): (FromPublic<ApiRequest>, Optional<Duration>)) -> Result<Value> {
-    req.timeout = timeout.map(Into::into);
-    Ok(convert_public_value_to_internal(req.into_value()))
+// TODO can we actually just run the timeout here? 
+// like we chain onto the next middleware and eventually 
+// the matched route, so cant we timeout that invoke of the "next" function
+pub async fn timeout(
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+	(req, next, timeout): (Value, Box<Closure>, Duration)
+) -> Result<Value> {
+    let mut ctx = Context::new_isolated(ctx);
+	ctx.add_timeout(*timeout)?;
+	let ctx = &ctx.freeze();
+    
+	next.invoke(stk, ctx, opt, doc, vec![req]).await
 }

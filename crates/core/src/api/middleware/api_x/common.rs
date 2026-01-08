@@ -12,7 +12,8 @@ pub enum BodyStrategy {
     Cbor,
     Flatbuffers,
     Plain,
-    Bytes
+    Bytes,
+    Native,
 }
 
 pub static APPLICATION_CBOR: LazyLock<Mime> =
@@ -20,3 +21,6 @@ pub static APPLICATION_CBOR: LazyLock<Mime> =
 
 pub static APPLICATION_SDB_FB: LazyLock<Mime> =
     LazyLock::new(|| "application/vnd.surrealdb.flatbuffers".parse().expect("application/vnd.surrealdb.flatbuffers is a valid mime type"));
+
+pub static APPLICATION_SDB_NATIVE: LazyLock<Mime> =
+    LazyLock::new(|| "application/vnd.surrealdb.native".parse().expect("application/vnd.surrealdb.native is a valid mime type"));

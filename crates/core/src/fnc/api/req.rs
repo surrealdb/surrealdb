@@ -1,10 +1,15 @@
 use anyhow::Result;
-use surrealdb_types::SurrealValue;
+use reblessive::tree::Stk;
 
-use crate::{api::{middleware::api_x::{common::BodyStrategy, req::BodyParser}, request::ApiRequest}, fnc::args::FromPublic, sql::expression::convert_public_value_to_internal, val::Value};
+use crate::{api::{middleware::api_x::{common::BodyStrategy, req::BodyParser}, request::ApiRequest}, ctx::FrozenContext, dbs::Options, doc::CursorDoc, fnc::args::{FromPublic, Optional}, val::{Closure, Value}};
 
-pub async fn body((FromPublic(mut req), FromPublic(strategy)): (FromPublic<ApiRequest>, FromPublic<BodyStrategy>)) -> Result<Value> {
+pub async fn body(
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>), 
+    (FromPublic(mut req), next, Optional(strategy)): (FromPublic<ApiRequest>, Box<Closure>, Optional<FromPublic<BodyStrategy>>)
+) -> Result<Value> {
+    let strategy = strategy.map(|x| x.0).unwrap_or_default();
     let mut parser = BodyParser::from((&mut req, strategy));
     parser.process().await?;
-    Ok(convert_public_value_to_internal(req.into_value()))
+
+    next.invoke(stk, ctx, opt, doc, vec![req.into()]).await
 }

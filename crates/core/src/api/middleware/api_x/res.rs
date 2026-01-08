@@ -3,7 +3,7 @@ use std::str::FromStr;
 use http::{header::ACCEPT, HeaderMap, HeaderValue};
 use mime::{Mime, Name, APPLICATION_JSON, APPLICATION_OCTET_STREAM, TEXT_PLAIN};
 
-use crate::api::middleware::api_x::common::{BodyStrategy, APPLICATION_CBOR, APPLICATION_SDB_FB};
+use crate::api::middleware::api_x::common::{APPLICATION_CBOR, APPLICATION_SDB_FB, APPLICATION_SDB_NATIVE, BodyStrategy};
 use std::cmp::Ordering::Equal;
 
 pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Option<BodyStrategy> {
@@ -36,12 +36,16 @@ pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Opti
         BodyStrategy::Bytes => vec![
             (BodyStrategy::Bytes, &APPLICATION_OCTET_STREAM)
         ],
+        BodyStrategy::Native => vec![
+            (BodyStrategy::Native, &*APPLICATION_SDB_NATIVE)
+        ],
         BodyStrategy::Auto => vec![
             (BodyStrategy::Json, &APPLICATION_JSON),
             (BodyStrategy::Cbor, &*APPLICATION_CBOR),
             (BodyStrategy::Flatbuffers, &*APPLICATION_SDB_FB),
             (BodyStrategy::Plain, &TEXT_PLAIN),
             (BodyStrategy::Bytes, &APPLICATION_OCTET_STREAM),
+            (BodyStrategy::Native, &*APPLICATION_SDB_NATIVE),
         ],
     };
 

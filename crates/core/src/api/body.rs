@@ -2,14 +2,9 @@ use std::fmt::Display;
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use http::header::CONTENT_TYPE;
-
-use super::context::InvocationContext;
 use super::err::ApiError;
-use super::invocation::ApiInvocation;
 use crate::err::Error;
 use crate::expr::Bytesize;
-use crate::rpc::format::{cbor, flatbuffers, json};
 use crate::types::PublicValue;
 
 pub enum ApiBody {
@@ -67,49 +62,18 @@ impl ApiBody {
 		}
 	}
 
-	pub(crate) async fn process(
-		self,
-		ctx: &InvocationContext,
-		invocation: &ApiInvocation,
-	) -> Result<PublicValue, Error> {
+	pub(crate) async fn process(self) -> Result<PublicValue, Error> {
 		if let ApiBody::Native(value) = self {
-			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
-			let size = std::mem::size_of_val(&value);
-
-			if size > max.0 as usize {
-				return Err(ApiError::RequestBodyTooLarge(max).into());
-			}
-
-			if ctx.request_body_raw {
-				// Convert value to bytes if raw body is requested
-				match value {
-					PublicValue::Bytes(b) => Ok(PublicValue::Bytes(b)),
-					PublicValue::String(s) => {
-						Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(s.into_bytes())))
-					}
-					_ => Err(Error::ApiError(ApiError::InvalidRequestBody)),
-				}
-			} else {
-				Ok(value)
-			}
+			Ok(value)
 		} else {
-			let bytes = self.stream(ctx.request_body_max).await?;
-
-			if ctx.request_body_raw {
-				Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes)))
-			} else {
-				let content_type =
-					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
-
-				let parsed = match content_type {
-					Some(super::format::JSON) => json::decode(&bytes),
-					Some(super::format::CBOR) => cbor::decode(&bytes),
-					Some(super::format::FLATBUFFERS) => flatbuffers::decode(&bytes),
-					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes))),
-				};
-
-				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
-			}
+			// TODO we need to get a max body size back somehow. Introduction of blob like value? This stream somehow needs to be postponed...
+			// also if such a value would be introduced then this whole enum can be eliminated. body would always just simply be a value
+			// maybe bytes could have two variants, consumed and unconsumed. To the user its simply bytes, but whenever an api request
+			// is processed, the body would be unconsumed bytes, and whenever we get a file, that too could be unconsumed bytes. When the user
+			// actually does something with them, they get consumed, but to the user its always simply just bytes.
+			// we could expose handlebars to describe the "internal state" of the value...
+			let bytes = self.stream(None).await?;
+			Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes)))
 		}
 	}
 }

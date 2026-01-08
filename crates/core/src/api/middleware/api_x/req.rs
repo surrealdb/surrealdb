@@ -3,7 +3,7 @@ use headers::{ContentType, HeaderMapExt};
 use mime::{Mime, APPLICATION_JSON, APPLICATION_OCTET_STREAM, TEXT_PLAIN};
 use surrealdb_types::Value;
 use super::common::{APPLICATION_CBOR, APPLICATION_SDB_FB};
-use crate::api::middleware::api_x::common::BodyStrategy;
+use crate::api::middleware::api_x::common::{APPLICATION_SDB_NATIVE, BodyStrategy};
 use crate::api::request::ApiRequest;
 use crate::kvs::IntoBytes;
 use crate::rpc::format;
@@ -38,6 +38,7 @@ impl<'a> BodyParser<'a> {
             BodyStrategy::Flatbuffers => self.flatbuffers(true),
             BodyStrategy::Plain => self.plain(true),
             BodyStrategy::Bytes => self.bytes(true),
+            BodyStrategy::Native => self.native(true),
             BodyStrategy::Auto => {
                 let Some(mime) = &self.mime else {
                     bail!("missing content type");
@@ -61,6 +62,10 @@ impl<'a> BodyParser<'a> {
 
                 if mime == &APPLICATION_OCTET_STREAM {
                     return self.bytes(false);
+                }
+
+                if mime == &*APPLICATION_SDB_NATIVE {
+                    return self.native(false);
                 }
 
                 bail!("unsupported content type");
@@ -144,6 +149,14 @@ impl<'a> BodyParser<'a> {
         if !self.req.body.is_bytes() {
             bail!("Need binary")
         };
+
+        Ok(())
+    }
+
+    fn native(&self, validate: bool) -> Result<()> {
+        if validate {
+            self.assert_mime(&APPLICATION_SDB_NATIVE)?;
+        }
 
         Ok(())
     }

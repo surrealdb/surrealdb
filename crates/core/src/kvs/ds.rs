@@ -29,7 +29,7 @@ use super::tx::Transaction;
 use super::version::MajorVersion;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
-use crate::api::response::{ApiResponse, ResponseInstruction};
+use crate::api::response::ApiResponse;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
@@ -2240,7 +2240,7 @@ impl Datastore {
 		headers: HeaderMap,
 		query: BTreeMap<String, String>,
 		body: S,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>>
+	) -> Result<Option<ApiResponse>>
 	where
 		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
 			+ Send

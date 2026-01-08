@@ -93,13 +93,14 @@ impl InfoStructure for ApiDefinition {
 
 /// REST API method.
 #[revisioned(revision = 1)]
-#[derive(SurrealValue, Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[surreal(untagged, lowercase)]
 pub enum ApiMethod {
 	/// REST DELETE method.
 	Delete,
 	/// REST GET method.
+	#[default]
 	Get,
 	/// REST PATCH method.
 	Patch,

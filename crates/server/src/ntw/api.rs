@@ -7,14 +7,10 @@ use axum::response::IntoResponse;
 use axum::routing::any;
 use axum::{Extension, Router};
 use futures::StreamExt;
-use http::header::CONTENT_TYPE;
 use surrealdb_core::api::err::ApiError;
-use surrealdb_core::api::response::ResponseInstruction;
 use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
-use surrealdb_core::rpc::RpcError;
-use surrealdb_core::rpc::format::{Format, cbor, flatbuffers, json};
 use surrealdb_types::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -89,78 +85,19 @@ async fn handler(
 		.await
 		.map_err(ResponseError)?;
 
-	let Some((mut res, res_instruction)) = res else {
+	let Some(res) = res else {
 		return Err(NetError::NotFound(url).into());
 	};
 
-	let res_body: Vec<u8> = if !res.body.is_none() {
-		match res_instruction {
-			ResponseInstruction::Raw => match res.body {
-				Value::String(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert(
-						surrealdb_core::api::format::PLAIN
-							.parse()
-							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
-					);
-					v.into_bytes()
-				}
-				Value::Bytes(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert(
-						surrealdb_core::api::format::OCTET_STREAM
-							.parse()
-							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
-					);
-					v.into_inner().to_vec()
-				}
-				v => {
-					return Err(ApiError::InvalidApiResponse(format!(
-						"Expected bytes or string, found {}",
-						v.kind()
-					))
-					.into());
-				}
-			},
-			ResponseInstruction::Format(format) => {
-				if res.headers.contains_key("Content-Type") {
-					return Err(ApiError::InvalidApiResponse(
-						"A Content-Type header was already set while this was not expected".into(),
-					)
-					.into());
-				}
-
-				let (header, val) = match format {
-					Format::Json => (
-						surrealdb_core::api::format::JSON,
-						json::encode(res.body).map_err(|_| RpcError::ParseError)?,
-					),
-					Format::Cbor => (
-						surrealdb_core::api::format::CBOR,
-						cbor::encode(res.body).map_err(|_| RpcError::ParseError)?,
-					),
-					Format::Flatbuffers => (
-						surrealdb_core::api::format::FLATBUFFERS,
-						flatbuffers::encode(&res.body).map_err(|_| RpcError::ParseError)?,
-					),
-					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
-				};
-
-				res.headers.insert(
-					CONTENT_TYPE,
-					header
-						.parse()
-						.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
-				);
-				val
-			}
-			ResponseInstruction::Native => {
-				return Err(ApiError::Unreachable(
-					"Found a native response instruction where this is not supported".into(),
-				)
-				.into());
-			}
+	let res_body = match res.body {
+		Value::None => Vec::new(),
+		Value::Bytes(x) => x.into_inner().to_vec(),
+		_ => {
+			return Err(ApiError::Unreachable(
+				"Found a native response instruction where this is not supported".into(),
+			)
+			.into());
 		}
-	} else {
-		Vec::new()
 	};
 
 	Ok((res.status, res.headers, res_body))

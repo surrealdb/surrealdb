@@ -3,23 +3,24 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 use http::{HeaderName, HeaderValue, StatusCode};
 use http::header::CONTENT_TYPE;
+use reblessive::tree::Stk;
+use crate::api::request::ApiRequest;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::fnc::args::{FromPublic, Optional};
 use crate::rpc::format;
 
 use crate::types::PublicBytes;
-use crate::val::{Bytes, Object};
-use crate::{api::{middleware::api_x::{common::BodyStrategy, res::output_body_strategy}, request::ApiRequest, response::ApiResponse}, ctx::FrozenContext, sql::expression::convert_public_value_to_internal, val::{Value, convert_value_to_public_value}};
+use crate::val::{Bytes, Closure, Object};
+use crate::{api::{middleware::api_x::{common::BodyStrategy, res::output_body_strategy}, response::ApiResponse}, ctx::FrozenContext, sql::expression::convert_public_value_to_internal, val::Value};
 use surrealdb_types::SurrealValue;
 
 pub async fn body(
-    ctx: &FrozenContext,
-    (FromPublic(mut res), Optional(strategy)): (FromPublic<ApiResponse>, Optional<FromPublic<BodyStrategy>>),
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>), 
+    (FromPublic(req), next, Optional(strategy)): (FromPublic<ApiRequest>, Box<Closure>, Optional<FromPublic<BodyStrategy>>),
 ) -> Result<Value> {
-    let req: ApiRequest = if let Some(v) = ctx.value("request") {
-        convert_value_to_public_value(v.clone())?.into_t()?
-    } else {
-        bail!("No $request parameter present");
-    };
+    let res = next.invoke(stk, ctx, opt, doc, vec![req.clone().into()]).await?;
+    let mut res: ApiResponse = res.try_into()?;
 
     let strategy = strategy.map(|x| x.0).unwrap_or_default();
     let Some(strategy) = output_body_strategy(&req.headers, strategy) else {
@@ -48,12 +49,21 @@ pub async fn body(
             res.body = PublicBytes::from(text.into_bytes()).into_value();
             res.headers.insert(CONTENT_TYPE, "text/plain".try_into()?);
         }
+        BodyStrategy::Native => {
+            res.headers.insert(CONTENT_TYPE, "application/vnd.surrealdb.native".try_into()?);
+        }
     }
 
-    Ok(convert_public_value_to_internal(res.into_value()))
+    Ok(res.into())
 }
 
-pub fn status((FromPublic(mut res), status): (FromPublic<ApiResponse>, i64)) -> Result<Value> {
+pub async fn status(
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>), 
+    (req, next, status): (Value, Box<Closure>, i64),
+) -> Result<Value> {
+    let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+    let mut res: ApiResponse = res.try_into()?;
+
     let Ok(status) = u16::try_from(status) else {
         bail!("Invalid status code")
     };
@@ -63,10 +73,16 @@ pub fn status((FromPublic(mut res), status): (FromPublic<ApiResponse>, i64)) -> 
     };
 
     res.status = status;
-    Ok(convert_public_value_to_internal(res.into_value()))
+    Ok(res.into())
 }
 
-pub fn header((FromPublic(mut res), name, Optional(value)): (FromPublic<ApiResponse>, String, Optional<String>)) -> Result<Value> {
+pub async fn header(
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>), 
+    (req, next, name, Optional(value)): (Value, Box<Closure>, String, Optional<String>)
+) -> Result<Value> {
+    let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+    let mut res: ApiResponse = res.try_into()?;
+
     let name: HeaderName = name.parse()?;
     let old = if let Some(value) = value {
         let value: HeaderValue = value.parse()?;
@@ -82,7 +98,12 @@ pub fn header((FromPublic(mut res), name, Optional(value)): (FromPublic<ApiRespo
     }
 }
 
-pub fn headers((FromPublic(mut res), headers): (FromPublic<ApiResponse>, BTreeMap<String, Option<String>>)) -> Result<Value> {
+pub async fn headers(
+    (stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
+    (req, next, headers): (Value, Box<Closure>, BTreeMap<String, Option<String>>)
+) -> Result<Value> {
+    let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+    let mut res: ApiResponse = res.try_into()?;
     let mut old_headers = Object::default();
 
     for (k, value) in headers.into_iter() {
