@@ -90,9 +90,9 @@ impl ToSql for EscapeKey<'_> {
 			f.push('\"');
 			Escape::escape_str(s, '\"').fmt_sql(f, fmt);
 			f.push('\"');
+		} else {
+			f.push_str(s)
 		}
-
-		f.push_str(s)
 	}
 }
 
