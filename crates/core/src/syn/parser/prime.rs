@@ -183,19 +183,19 @@ impl Parser<'_> {
 				let regex = self.next_token_value()?;
 				Expr::Literal(Literal::Regex(regex))
 			}
-			t!("fn") => {
+			t!("fn") if self.peek1().kind == t!("::") => {
 				self.pop_peek();
 				self.parse_custom_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
-			t!("mod") => {
+			t!("mod") if self.peek1().kind == t!("::") => {
 				self.pop_peek();
 				self.parse_module_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
-			t!("silo") => {
+			t!("silo") if self.peek1().kind == t!("::") => {
 				self.pop_peek();
 				self.parse_silo_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
-			t!("ml") => {
+			t!("ml") if self.peek1().kind == t!("::") => {
 				self.pop_peek();
 				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}

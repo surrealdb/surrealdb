@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeIdent, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -136,8 +136,11 @@ impl ToSql for FunctionCall {
 				for (idx, s) in s.split("::").enumerate() {
 					if idx != 0 {
 						f.push_str("::");
+					} else {
+						write_sql!(f, fmt, "{}", EscapeIdent(s));
+						continue;
 					}
-					f.push_str(s);
+					s.fmt_sql(f, fmt);
 				}
 			}
 			Function::Custom(ref s) => {

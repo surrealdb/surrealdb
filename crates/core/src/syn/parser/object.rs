@@ -23,8 +23,15 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!(",")) {
+			// Empty set.
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Expr::Literal(Literal::Set(Vec::new())));
+		}
+
+		if self.eat(t!(";")) {
+			// Empty statement followed by other statements or an empty block.
+			let block = self.parse_block_remaining(stk, start, Vec::new()).await?;
+			return Ok(Expr::Block(Box::new(block)));
 		}
 
 		// Try to parse an object if it can be an object.
@@ -194,10 +201,14 @@ impl Parser<'_> {
 	}
 
 	async fn parse_block_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+		let peek = self.peek().kind;
 		let before = self.recent_span();
 		let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 		let span = before.covers(self.last_span());
-		Self::reject_letless_let(&stmt, span)?;
+		// covered expressions are fine.
+		if peek != t!("(") {
+			Self::reject_letless_let(&stmt, span)?;
+		}
 		Ok(stmt)
 	}
 

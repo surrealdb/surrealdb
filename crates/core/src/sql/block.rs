@@ -1,13 +1,10 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::{Expr, Literal};
+use crate::sql::{BinaryOperator, Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Block(
-	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub(crate) Vec<Expr>,
-);
+pub struct Block(pub(crate) Vec<Expr>);
 
 impl From<Block> for crate::expr::Block {
 	fn from(v: Block) -> Self {
@@ -35,6 +32,13 @@ impl ToSql for Block {
 					fmt.write_indent(f);
 					if let Expr::Literal(Literal::RecordId(_)) = v {
 						write_sql!(f, fmt, "({v})");
+					} else if let Expr::Binary {
+						left,
+						op: BinaryOperator::Equal,
+						..
+					} = v && let Expr::Param(_) = **left
+					{
+						write_sql!(f, fmt, "({v})");
 					} else {
 						v.fmt_sql(f, fmt);
 					}
@@ -52,6 +56,13 @@ impl ToSql for Block {
 					// Non-pretty: compact format
 					f.push_str("{ ");
 					if let Expr::Literal(Literal::RecordId(_)) = v {
+						write_sql!(f, fmt, "({v})");
+					} else if let Expr::Binary {
+						left,
+						op: BinaryOperator::Equal,
+						..
+					} = v && let Expr::Param(_) = **left
+					{
 						write_sql!(f, fmt, "({v})");
 					} else {
 						v.fmt_sql(f, fmt);
@@ -74,6 +85,13 @@ impl ToSql for Block {
 						fmt.write_indent(f);
 						if i == 0
 							&& let Expr::Literal(Literal::RecordId(_)) = v
+						{
+							write_sql!(f, fmt, "({v})");
+						} else if let Expr::Binary {
+							left,
+							op: BinaryOperator::Equal,
+							..
+						} = v && let Expr::Param(_) = **left
 						{
 							write_sql!(f, fmt, "({v})");
 						} else {
@@ -105,7 +123,18 @@ impl ToSql for Block {
 							f.push(';');
 							continue;
 						}
-						v.fmt_sql(f, fmt);
+
+						if let Expr::Binary {
+							left,
+							op: BinaryOperator::Equal,
+							..
+						} = v && let Expr::Param(_) = **left
+						{
+							write_sql!(f, fmt, "({v})");
+						} else {
+							v.fmt_sql(f, fmt);
+						}
+
 						f.push(';');
 					}
 					f.push_str(" }")

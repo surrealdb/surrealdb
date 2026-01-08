@@ -38,6 +38,8 @@ impl ToSql for Output {
 								expr,
 								alias,
 							})) => {
+								// Check for a expression with none on the left like `NONE + 1`
+								// which will be mistaken for the `NONE` clause formatted above.
 								let has_left_none = expr.has_left_none_null();
 								if has_left_none {
 									f.push('(');

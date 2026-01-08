@@ -57,6 +57,52 @@ impl Lexer<'_> {
 		Ok(unsafe { std::str::from_utf8_unchecked(buffer) })
 	}
 
+	/// Unescapes a regex slice.
+	/// Expects a string and the span of that string within the source code where the string
+	/// contains the full string token, including possible prefix digit and qoutes.
+	///
+	/// Note that the string token can contain invalid escape sequences which will be properly
+	/// reported as errors by this function.
+	///
+	/// Returns the actual unescaped value of the regex.
+	///
+	/// Will panic if it is not a regex slice.
+	pub fn unescape_regex_span<'a>(
+		str: &str,
+		span: Span,
+		buffer: &'a mut Vec<u8>,
+	) -> Result<&'a str, SyntaxError> {
+		buffer.clear();
+
+		let mut reader = BytesReader::new(str.as_bytes());
+
+		let Some(b'/') = reader.next() else {
+			panic!("string given to unescape_string_span was not a valid string token")
+		};
+
+		loop {
+			let before = reader.offset();
+			// There must be a next byte as the string token must end in a `"`.
+			let byte = reader.next().expect("Invalid string token");
+			match byte {
+				b'\\' => {
+					if let Some(b'/') = reader.peek() {
+						buffer.push(b'/');
+					} else {
+						Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
+					}
+				}
+				b'/' => break,
+				x => buffer.push(x),
+			}
+		}
+
+		// Safety: The string this was created from was a valid utf-8 string and the code ensures
+		// that only valid sequences are pushed into the buffer meaning that the final buffer is
+		// also a valid utf-8.
+		Ok(unsafe { std::str::from_utf8_unchecked(buffer) })
+	}
+
 	pub(super) fn lex_common_escape_sequence(
 		reader: &mut BytesReader,
 		span: Span,

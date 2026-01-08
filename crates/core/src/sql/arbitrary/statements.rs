@@ -2,7 +2,7 @@ use arbitrary::Arbitrary;
 
 use crate::sql::access_type::{BearerAccess, BearerAccessSubject};
 use crate::sql::arbitrary::{
-	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
+	self, arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
 use crate::sql::kind::KindLiteral;
 use crate::sql::statements::SetStatement;

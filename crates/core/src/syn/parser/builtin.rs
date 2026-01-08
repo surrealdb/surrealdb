@@ -5,6 +5,7 @@ use unicase::UniCase;
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
 use crate::syn::error::{MessageKind, bail};
+use crate::syn::lexer::Lexer;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
@@ -583,6 +584,10 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 impl Parser<'_> {
 	/// Parse a builtin path.
 	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
+		let s = self.lexer.span_str(start);
+		let s = Lexer::unescape_ident_span(s, start, &mut self.unscape_buffer)?;
+		let mut buffer = s.to_owned();
+
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -590,33 +595,35 @@ impl Parser<'_> {
 				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
-			last_span = self.last_span();
+
+			buffer.push_str("::");
+			let s = self.lexer.span_str(peek.span);
+			let s = Lexer::unescape_ident_span(s, peek.span, &mut self.unscape_buffer)?;
+			buffer.push_str(s);
+			last_span = peek.span;
 		}
 
-		let span = start.covers(last_span);
-		let str = self.lexer.span_str(span);
-
-		match PATHS.get_entry(&UniCase::ascii(str)) {
+		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
 			Some((k, (PathKind::Function, _))) => {
 				// TODO: Move this out of the parser.
 				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
+					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @start.covers(last_span));
 				}
 
-				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+				stk.run(|ctx| self.parse_builtin_function(ctx, buffer))
 					.await
 					.map(|x| Expr::FunctionCall(Box::new(x)))
 			}
 			None => {
-				if let Some(suggest) = find_suggestion(str) {
+				if let Some(suggest) = find_suggestion(&buffer) {
 					Err(SyntaxError::new(format_args!(
 						"Invalid function/constant path, did you maybe mean `{suggest}`"
 					))
-					.with_span(span, MessageKind::Error))
+					.with_span(start.covers(last_span), MessageKind::Error))
 				} else {
 					Err(SyntaxError::new("Invalid function/constant path")
-						.with_span(span, MessageKind::Error))
+						.with_span(start.covers(last_span), MessageKind::Error))
 				}
 			}
 		}

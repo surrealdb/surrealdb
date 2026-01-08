@@ -207,8 +207,15 @@ impl TokenValue for surrealdb_types::Regex {
 					// Peeking past `/` can happen when parsing `{/bla`.
 					parser.backup_after(peek.span);
 				}
-				let v = parser.lexer.lex_compound(peek, compound::regex)?.value;
-				Ok(v)
+				let token = parser.lexer.lex_compound(peek, compound::regex)?;
+				let s = parser.lexer.span_str(token.span);
+				let s = Lexer::unescape_regex_span(s, token.span, &mut parser.unscape_buffer)?;
+				match regex::Regex::new(s) {
+					Ok(x) => Ok(surrealdb_types::Regex::from(x)),
+					Err(e) => {
+						bail!("Invalid regex syntax {e}", @token.span);
+					}
+				}
 			}
 			_ => unexpected!(parser, peek, "a regex"),
 		}

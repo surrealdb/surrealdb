@@ -471,7 +471,7 @@ fn idiom_from_expr<'a>(
 					let s = crate::syn::parse_with_settings(
 						s.as_bytes(),
 						crate::syn::ParserSettings {
-							legacy_strands: true,
+							legacy_strands: false,
 							flexible_record_id: true,
 							object_recursion_limit: 10000000,
 							query_recursion_limit: 1000000,
@@ -514,7 +514,7 @@ fn idiom_from_expr<'a>(
 					let s = crate::syn::parse_with_settings(
 						s.as_bytes(),
 						crate::syn::ParserSettings {
-							legacy_strands: true,
+							legacy_strands: false,
 							flexible_record_id: true,
 							object_recursion_limit: 10000000,
 							query_recursion_limit: 1000000,

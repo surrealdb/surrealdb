@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeIdent};
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::LookupKind;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -12,7 +13,7 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param, Part,
+	BinaryOperator, Block, Closure, Constant, Dir, FunctionCall, Idiom, Literal, Mock, Param, Part,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
@@ -192,10 +193,10 @@ impl Expr {
 		match self {
 			Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => true,
 			Expr::Binary {
-				left,
+				left: expr,
 				..
-			} => left.has_left_none_null(),
-			Expr::Postfix {
+			}
+			| Expr::Postfix {
 				expr,
 				..
 			} => expr.has_left_none_null(),
@@ -206,6 +207,52 @@ impl Expr {
 					false
 				}
 			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_minus(&self) -> bool {
+		match self {
+			Expr::Prefix {
+				op: PrefixOperator::Negate,
+				..
+			} => true,
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_minus(),
+			Expr::Literal(Literal::Integer(x)) => x.is_negative(),
+			Expr::Literal(Literal::Float(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::Decimal(x)) => x.is_sign_negative(),
+			Expr::Idiom(x) => {
+				if let Some(x) = x.0.first()
+					&& let Part::Graph(lookup) = x
+					&& let LookupKind::Graph(Dir::Out) = lookup.kind
+				{
+					return true;
+				}
+				false
+			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_idiom(&self) -> bool {
+		match self {
+			Expr::Idiom(_) => true,
+
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_idiom(),
 			_ => false,
 		}
 	}
@@ -394,28 +441,13 @@ impl ToSql for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if let Expr::Literal(Literal::Integer(x)) = expr.as_ref()
-					&& x.is_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if let Expr::Literal(Literal::Decimal(x)) = expr.as_ref()
-					&& x.is_sign_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if let Expr::Literal(Literal::Float(x)) = expr.as_ref()
-					&& x.is_sign_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if expr.needs_parentheses()
+				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-					|| matches!(
-						expr.as_ref(),
-						Expr::Prefix {
-							op: PrefixOperator::Negate,
-							..
-						}
-					) {
+					// We need to avoid `--` from showing up so we need to cover if the expression
+					// has a left minus
+					|| *op == PrefixOperator::Negate && expr.has_left_minus()
+				{
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {
 					write_sql!(f, fmt, "{op}{expr}");
