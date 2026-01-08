@@ -35,10 +35,10 @@ audit-as-crates-io = true
 audit-as-crates-io = false
 
 [policy.surrealdb-types]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.surrealdb-types-derive]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.surrealism]
 audit-as-crates-io = true
