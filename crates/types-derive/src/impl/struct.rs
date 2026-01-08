@@ -2,43 +2,52 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Generics, Ident};
 
-use crate::{Fields, Strategy, With};
+use crate::{CratePath, Fields, Strategy, With};
 
-pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenStream {
+pub fn impl_struct(
+	name: &Ident,
+	generics: &Generics,
+	fields: Fields,
+	crate_path: &CratePath,
+) -> TokenStream {
 	let strategy = Strategy::for_struct();
 	let match_fields = fields.match_fields();
 	let from_ok = quote!(Ok(Self #match_fields));
 
-	let into_value = fields.into_value(&strategy);
-	let from_value = match fields.from_value(&name.to_string(), &strategy, from_ok) {
+	let value_ty = crate_path.value();
+	let kind_ty = crate_path.kind();
+	let conversion_error_ty = crate_path.conversion_error();
+
+	let into_value = fields.into_value(&strategy, crate_path);
+	let from_value = match fields.from_value(&name.to_string(), &strategy, from_ok, crate_path) {
 		With::Map(x) => quote! {
-			if let surrealdb_types::Value::Object(mut map) = value {
+			if let #value_ty::Object(mut map) = value {
 				#x
 			} else {
-				let err = surrealdb_types::ConversionError::from_value(
-					surrealdb_types::Kind::Object,
+				let err = #conversion_error_ty::from_value(
+					#kind_ty::Object,
 					&value
 				);
 				Err(err.into())
 			}
 		},
 		With::Arr(x) => quote! {
-			if let surrealdb_types::Value::Array(mut arr) = value {
+			if let #value_ty::Array(mut arr) = value {
 				#x
 			} else {
-				let err = surrealdb_types::ConversionError::from_value(
-					surrealdb_types::Kind::Array(Box::new(surrealdb_types::Kind::Any), None),
+				let err = #conversion_error_ty::from_value(
+					#kind_ty::Array(Box::new(#kind_ty::Any), None),
 					&value
 				);
 				Err(err.into())
 			}
 		},
 		With::String(x) => quote! {
-			if let surrealdb_types::Value::String(string) = value {
+			if let #value_ty::String(string) = value {
 				#x
 			} else {
-				let err = surrealdb_types::ConversionError::from_value(
-					surrealdb_types::Kind::String,
+				let err = #conversion_error_ty::from_value(
+					#kind_ty::String,
 					&value
 				);
 				Err(err.into())
@@ -47,23 +56,23 @@ pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenSt
 		With::Value(x) => x,
 	};
 
-	let is_value = match fields.is_value(&strategy) {
+	let is_value = match fields.is_value(&strategy, crate_path) {
 		With::Map(x) => quote! {
-			if let surrealdb_types::Value::Object(map) = value {
+			if let #value_ty::Object(map) = value {
 				#x
 			}
 
 			false
 		},
 		With::Arr(x) => quote! {
-			if let surrealdb_types::Value::Array(arr) = value {
+			if let #value_ty::Array(arr) = value {
 				#x
 			}
 
 			false
 		},
 		With::String(x) => quote! {
-			if let surrealdb_types::Value::String(string) = value {
+			if let #value_ty::String(string) = value {
 				#x
 			}
 
@@ -71,7 +80,7 @@ pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenSt
 		},
 		With::Value(x) => x,
 	};
-	let kind_of = fields.kind_of(&strategy);
+	let kind_of = fields.kind_of(&strategy, crate_path);
 
 	let let_fields = if fields.has_fields() {
 		quote!( let Self #match_fields = self; )
@@ -81,24 +90,28 @@ pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenSt
 
 	let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
+	let value_ty = crate_path.value();
+	let kind_ty = crate_path.kind();
+	let anyhow_result = crate_path.anyhow_result();
+
 	quote! {
 		impl #impl_generics SurrealValue for #name #type_generics #where_clause {
-			fn into_value(self) -> surrealdb_types::Value {
+			fn into_value(self) -> #value_ty {
 				#let_fields
 				#into_value
 			}
 
-			fn from_value(value: surrealdb_types::Value) -> surrealdb_types::anyhow::Result<Self> {
+			fn from_value(value: #value_ty) -> #anyhow_result<Self> {
 				#from_value
 			}
 
-			fn is_value(value: &surrealdb_types::Value) -> bool {
+			fn is_value(value: &#value_ty) -> bool {
 				#is_value;
 
 				false
 			}
 
-			fn kind_of() -> surrealdb_types::Kind {
+			fn kind_of() -> #kind_ty {
 				#kind_of
 			}
 		}

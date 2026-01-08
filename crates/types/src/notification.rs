@@ -3,8 +3,6 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-// Needed because we use the SurrealValue derive macro inside the crate which exports it :)
-use crate as surrealdb_types;
 use crate::{SurrealValue, Uuid, Value};
 
 /// The action that caused the notification
@@ -12,6 +10,7 @@ use crate::{SurrealValue, Uuid, Value};
 #[derive(
 	Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, SurrealValue,
 )]
+#[surreal(crate = "crate")]
 #[surreal(untagged, uppercase)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Action {
@@ -52,6 +51,7 @@ impl FromStr for Action {
 
 /// A live query notification.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "crate")]
 #[non_exhaustive]
 pub struct Notification {
 	/// The id of the LIVE query to which this notification belongs

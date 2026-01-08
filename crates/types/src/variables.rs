@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate as surrealdb_types;
 use crate::{Object, SurrealValue, Value};
 
 /// Represents a set of variables that can be used in a query.
 #[derive(Clone, Debug, Default, Eq, PartialEq, SurrealValue, Serialize, Deserialize)]
+#[surreal(crate = "crate")]
 #[serde(transparent)]
 pub struct Variables(BTreeMap<String, Value>);
 

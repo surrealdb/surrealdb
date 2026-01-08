@@ -2,6 +2,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Ident, Type};
 
+use crate::CratePath;
+
 #[derive(Debug)]
 pub struct NamedField {
 	pub ident: Ident,
@@ -31,7 +33,9 @@ impl NamedFields {
 			.collect()
 	}
 
-	pub fn map_retrievals(&self, name: &String) -> Vec<TokenStream2> {
+	pub fn map_retrievals(&self, name: &String, crate_path: &CratePath) -> Vec<TokenStream2> {
+		let anyhow_macro = crate_path.anyhow_macro();
+
 		if self.default {
 			// When default is set, create a default instance and overlay present fields
 			let field_assignments: Vec<TokenStream2> = self
@@ -47,7 +51,7 @@ impl NamedFields {
 						if let Some(field_value) = map.remove(#obj_key) {
 							result.#field_name = <#ty as SurrealValue>::from_value(field_value)
 								.map_err(|e| {
-									surrealdb_types::anyhow::anyhow!(
+									#anyhow_macro!(
 										"Failed to deserialize field '{}' on type '{}': {}",
 										#field_name_str, #name, e
 									)
@@ -74,7 +78,7 @@ impl NamedFields {
 						let field_value = map.remove(#obj_key).unwrap_or_default();
 						let #field_name = <#ty as SurrealValue>::from_value(field_value)
 							.map_err(|e| {
-								surrealdb_types::anyhow::anyhow!(
+								#anyhow_macro!(
 									"Failed to deserialize field '{}' on type '{}': {}",
 									#field_name_str, #name, e
 								)

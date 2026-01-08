@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::sql::{SqlFormat, ToSql};
-// Needed because we use the SurrealValue derive macro inside the crate which exports it :)
-use crate::{self as surrealdb_types};
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
 
 /// The characters which are supported in server record IDs
@@ -19,7 +17,7 @@ pub const ID_CHARS: [char; 36] = [
 	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[surreal(untagged, lowercase)]
+#[surreal(crate = "crate", untagged, lowercase)]
 pub enum RecordIdKey {
 	/// A numeric key
 	Number(i64),

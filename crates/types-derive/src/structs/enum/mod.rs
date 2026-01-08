@@ -4,7 +4,7 @@ use quote::quote;
 use syn::Attribute;
 pub use variant::*;
 
-use crate::{EnumAttributes, Strategy, WithMap};
+use crate::{CratePath, EnumAttributes, Strategy, WithMap};
 
 pub struct Enum {
 	pub attrs: EnumAttributes,
@@ -20,15 +20,16 @@ impl Enum {
 	}
 
 	#[allow(clippy::wrong_self_convention)]
-	pub fn into_value(&self, attrs: &EnumAttributes) -> TokenStream2 {
+	pub fn into_value(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
 		let variants = self
 			.variants
 			.iter()
 			.map(|variant| {
 				let ident = &variant.ident;
 				let fields = variant.fields.match_fields();
-				let into_value =
-					variant.fields.into_value(&Strategy::for_enum(&variant.ident, attrs));
+				let into_value = variant
+					.fields
+					.into_value(&Strategy::for_enum(&variant.ident, attrs), crate_path);
 
 				quote! {
 					Self::#ident #fields => {
@@ -46,7 +47,15 @@ impl Enum {
 	}
 
 	#[allow(clippy::wrong_self_convention)]
-	pub fn from_value(&self, name: &String, attrs: &EnumAttributes) -> TokenStream2 {
+	pub fn from_value(
+		&self,
+		name: &String,
+		attrs: &EnumAttributes,
+		crate_path: &CratePath,
+	) -> TokenStream2 {
+		let value_ty = crate_path.value();
+		let anyhow_macro = crate_path.anyhow_macro();
+
 		let mut with_map = WithMap::new();
 
 		for variant in &self.variants {
@@ -54,13 +63,13 @@ impl Enum {
 			let fields = variant.fields.match_fields();
 			let ok = quote!(return Ok(Self::#ident #fields));
 			let strategy = Strategy::for_enum(&variant.ident, attrs);
-			with_map.push(variant.fields.from_value(&ident.to_string(), &strategy, ok));
+			with_map.push(variant.fields.from_value(&ident.to_string(), &strategy, ok, crate_path));
 		}
 
 		let match_map = match with_map.wants_map() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::Object(mut map) => {
+				#value_ty::Object(mut map) => {
 					#(#x)*
 				}
 			},
@@ -69,7 +78,7 @@ impl Enum {
 		let match_arr = match with_map.wants_arr() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::Array(mut arr) => {
+				#value_ty::Array(mut arr) => {
 					#(#x)*
 				}
 			},
@@ -78,7 +87,7 @@ impl Enum {
 		let match_string = match with_map.wants_string() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::String(string) => {
+				#value_ty::String(string) => {
 					#(#x)*
 				}
 			},
@@ -101,22 +110,24 @@ impl Enum {
 				#match_value
 			};
 
-			Err(surrealdb_types::anyhow::anyhow!("Failed to decode {}, no variants matched", #name))
+			Err(#anyhow_macro!("Failed to decode {}, no variants matched", #name))
 		}
 	}
 
-	pub fn is_value(&self, attrs: &EnumAttributes) -> TokenStream2 {
+	pub fn is_value(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
+		let value_ty = crate_path.value();
+
 		let mut with_map = WithMap::new();
 
 		for variant in &self.variants {
 			let strategy = Strategy::for_enum(&variant.ident, attrs);
-			with_map.push(variant.fields.is_value(&strategy));
+			with_map.push(variant.fields.is_value(&strategy, crate_path));
 		}
 
 		let match_map = match with_map.wants_map() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::Object(map) => {
+				#value_ty::Object(map) => {
 					#(#x)*
 				}
 			},
@@ -125,7 +136,7 @@ impl Enum {
 		let match_arr = match with_map.wants_arr() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::Array(arr) => {
+				#value_ty::Array(arr) => {
 					#(#x)*
 				}
 			},
@@ -134,7 +145,7 @@ impl Enum {
 		let match_string = match with_map.wants_string() {
 			None => quote!(),
 			Some(x) => quote! {
-				surrealdb_types::Value::String(string) => {
+				#value_ty::String(string) => {
 					#(#x)*
 				}
 			},
@@ -161,18 +172,22 @@ impl Enum {
 		}
 	}
 
-	pub fn kind_of(&self, attrs: &EnumAttributes) -> TokenStream2 {
+	pub fn kind_of(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
+		let kind_ty = crate_path.kind();
+
 		let variants = self
 			.variants
 			.iter()
-			.map(|variant| variant.fields.kind_of(&Strategy::for_enum(&variant.ident, attrs)))
+			.map(|variant| {
+				variant.fields.kind_of(&Strategy::for_enum(&variant.ident, attrs), crate_path)
+			})
 			.collect::<Vec<_>>();
 
 		if variants.len() == 1 {
 			variants[0].clone()
 		} else {
 			quote! {
-				surrealdb_types::Kind::Either(vec![#(#variants),*])
+				#kind_ty::Either(vec![#(#variants),*])
 			}
 		}
 	}
