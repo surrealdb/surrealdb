@@ -4,6 +4,14 @@ members = [
     "crates/core",
     "crates/sdk",
     "crates/server",
+    "crates/types",
+    "crates/types-derive",
+    "crates/surrealism/surrealism",
+    "crates/surrealism/surrealism-cli",
+    "crates/surrealism/surrealism-macros",
+    "crates/surrealism/surrealism-runtime",
+    "crates/surrealism/surrealism-types",
+    "crates/surrealism/demo",
     "profiling"
 ]
 
@@ -29,7 +37,15 @@ categories = ["database-implementations", "data-structures", "embedded"]
 # workspace internal dependencies
 surrealdb = { version = "3.0.0-beta", path = "crates/sdk" }
 surrealdb-core = { version = "3.0.0-beta", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "3.0.0-beta", path = "crates/macros" }
 surrealdb-server = { version = "3.0.0-beta", path = "crates/server", default-features = false }
+surrealdb-types = { version = "3.0.0-beta", path = "crates/types" }
+surrealdb-types-derive = { version = "3.0.0-beta", path = "crates/types-derive" }
+surrealism = { version = "0.1", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "0.1", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "0.1", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "0.1", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "0.1", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.4.0"
@@ -47,9 +63,6 @@ revision = { version = "0.16.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealdb-types = { version = "3.0.0-beta.1" }
-surrealdb-types-derive = { version = "3.0.0-beta.1" }
-surrealism-runtime = { version = "0.1.6" }
 surrealkv = "0.16.0"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",

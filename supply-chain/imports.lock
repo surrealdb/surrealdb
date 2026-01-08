@@ -366,6 +366,27 @@ user-id = 64482
 user-login = "akhilles"
 user-name = "Akhil Velagapudi"
 
+[[publisher.cxx]]
+version = "1.0.188"
+when = "2025-11-11"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.cxx-build]]
+version = "1.0.188"
+when = "2025-11-11"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.cxxbridge-macro]]
+version = "1.0.188"
+when = "2025-11-11"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.deflate64]]
 version = "0.1.10"
 when = "2025-10-01"
@@ -637,6 +658,13 @@ when = "2025-04-11"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.link-cplusplus]]
+version = "1.0.12"
+when = "2025-09-06"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.linux-raw-sys]]
 version = "0.4.15"
@@ -984,6 +1012,13 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.scratch]]
+version = "1.0.9"
+when = "2025-08-07"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.scrypt]]
 version = "0.11.0"
 when = "2023-03-05"
@@ -1069,15 +1104,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "3.0.0-beta.1"
-when = "2025-12-17"
+version = "3.0.0-alpha.18"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "3.0.0-beta.1"
-when = "2025-12-17"
+version = "3.0.0-alpha.18"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1104,29 +1139,50 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types]]
-version = "3.0.0-beta.1"
-when = "2025-12-17"
+version = "3.0.0-alpha.18"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types-derive]]
-version = "3.0.0-beta.1"
-when = "2025-12-17"
+version = "3.0.0-alpha.18"
+when = "2025-12-15"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.surrealism]]
+version = "0.1.5"
+when = "2025-12-15"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.surrealism-cli]]
+version = "0.1.5"
+when = "2025-12-15"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.surrealism-macros]]
+version = "0.1.5"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-runtime]]
-version = "0.1.6"
-when = "2025-12-17"
+version = "0.1.5"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-types]]
-version = "0.1.6"
-when = "2025-12-17"
+version = "0.1.5"
+when = "2025-12-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1362,6 +1418,13 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.walrus-macro]]
+version = "0.19.0"
+when = "2021-04-15"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
+
 [[publisher.wasi]]
 version = "0.9.0+wasi-snapshot-preview1"
 when = "2019-12-02"
@@ -1391,10 +1454,24 @@ user-login = "alexcrichton"
 user-name = "Alex Crichton"
 
 [[publisher.wasm-encoder]]
+version = "0.29.0"
+when = "2023-05-26"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
+
+[[publisher.wasm-encoder]]
 version = "0.233.0"
 when = "2025-06-03"
 user-id = 73222
 user-login = "wasmtime-publish"
+
+[[publisher.wasmparser]]
+version = "0.80.2"
+when = "2021-09-30"
+user-id = 1
+user-login = "alexcrichton"
+user-name = "Alex Crichton"
 
 [[publisher.wasmparser]]
 version = "0.233.0"
@@ -1550,9 +1627,23 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
+[[publisher.windows-implement]]
+version = "0.60.2"
+when = "2025-10-06"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
 [[publisher.windows-interface]]
 version = "0.57.0"
 when = "2024-06-07"
+user-id = 64539
+user-login = "kennykerr"
+user-name = "Kenny Kerr"
+
+[[publisher.windows-interface]]
+version = "0.59.3"
+when = "2025-10-06"
 user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
@@ -1907,6 +1998,19 @@ This is a Bytecode Alliance authored crate.
 [[audits.bytecode-alliance.wildcard-audits.wasm-encoder]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-12-11"
+end = "2026-08-21"
+notes = """
+This is a Bytecode Alliance authored crate maintained in the `wasm-tools`
+repository of which I'm one of the primary maintainers and publishers for.
+I am employed by a member of the Bytecode Alliance and plan to continue doing
+so and will actively maintain this crate over time.
+"""
+
+[[audits.bytecode-alliance.wildcard-audits.wasm-encoder]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
 user-id = 73222 # wasmtime-publish
 start = "2023-01-01"
 end = "2026-06-03"
@@ -1914,6 +2018,19 @@ notes = """
 The Bytecode Alliance uses the `wasmtime-publish` crates.io account to automate
 publication of this crate from CI. This repository requires all PRs are reviewed
 by a Bytecode Alliance maintainer and it owned by the Bytecode Alliance itself.
+"""
+
+[[audits.bytecode-alliance.wildcard-audits.wasmparser]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-07-13"
+end = "2026-08-21"
+notes = """
+This is a Bytecode Alliance authored crate maintained in the `wasm-tools`
+repository of which I'm one of the primary maintainers and publishers for.
+I am employed by a member of the Bytecode Alliance and plan to continue doing
+so and will actively maintain this crate over time.
 """
 
 [[audits.bytecode-alliance.wildcard-audits.wasmparser]]
@@ -2976,6 +3093,18 @@ who = "Johan Andersson <opensource@embark-studios.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 notes = "No unsafe usage or ambient capabilities"
+
+[[audits.embark-studios.audits.strum]]
+who = "Johan Andersson <opensource@embark-studios.com>"
+criteria = "safe-to-deploy"
+version = "0.24.1"
+notes = "Tiny layer on top of the proc macro crate, found no unsafe or system usage"
+
+[[audits.embark-studios.audits.strum_macros]]
+who = "Johan Andersson <opensource@embark-studios.com>"
+criteria = "safe-to-deploy"
+version = "0.24.3"
+notes = "Proc macro. No unsafe or added ambient capabilities"
 
 [[audits.embark-studios.audits.tap]]
 who = "Johan Andersson <opensource@embark-studios.com>"
@@ -4243,6 +4372,12 @@ who = "Bobby Holley <bobbyholley@gmail.com>"
 criteria = "safe-to-deploy"
 version = "1.0.7"
 notes = "Simple hasher implementation with no unsafe code."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.foldhash]]
+who = "Erich Gubler <erichdongubler@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.5 -> 0.2.0"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.form_urlencoded]]
