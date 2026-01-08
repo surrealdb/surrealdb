@@ -1226,9 +1226,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73fea8450eea4bac3940448fb7ae50d91f034f941199fcd9d909a5a07aa455f0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi",
  "wasi 0.14.2+wasi-0.2.4",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3083,7 +3085,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb"
-version = "2.3.0"
+version = "2.4.1"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -3092,6 +3094,7 @@ dependencies = [
  "dmp",
  "futures",
  "geo",
+ "getrandom 0.3.2",
  "indexmap 2.8.0",
  "path-clean",
  "pharos",
@@ -3118,7 +3121,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "2.3.0"
+version = "2.4.1"
 dependencies = [
  "addr",
  "affinitypool",
@@ -3148,6 +3151,7 @@ dependencies = [
  "fuzzy-matcher",
  "geo",
  "geo-types",
+ "getrandom 0.3.2",
  "hex",
  "http",
  "ipnet",
