@@ -12,12 +12,12 @@ libfuzzer-sys = { version= "0.4.7", features = ["arbitrary-derive"] }
 tokio = "1.44.2"
 
 [dependencies.surrealdb-core]
-path = "../core"
+path = "../surrealdb/core"
 features = ["kv-mem", "arbitrary"]
 default-features = false
 
 [dependencies.surrealdb-types]
-path = "../types/"
+path = "../surrealdb/types"
 features = ["arbitrary"]
 default-features = false
 
