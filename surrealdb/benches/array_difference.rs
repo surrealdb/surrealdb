@@ -8,7 +8,7 @@ use rand::Rng;
 use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
-// crates/core/src/expr/array.rs
+// surrealdb/core/src/expr/array.rs
 #[allow(clippy::mutable_key_type)]
 fn array_difference(first: Array, other: Array) -> Array {
 	let mut out = Array::with_capacity(first.len() + other.len());

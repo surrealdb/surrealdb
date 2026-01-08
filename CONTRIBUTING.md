@@ -94,7 +94,7 @@ To run all tests manually, use the SurrealDB command-line from your terminal:
 cargo test
 ```
 
-Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/crates/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
+Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
 
 ```toml
 /**

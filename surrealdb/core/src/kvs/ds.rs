@@ -2205,7 +2205,7 @@ impl Datastore {
 
 	/// Get a db model by name.
 	///
-	/// TODO: This should not be public, but it is used in `crates/sdk/src/api/engine/local/mod.rs`.
+	/// TODO: This should not be public, but it is used in `surrealdb/src/api/engine/local/mod.rs`.
 	pub async fn get_db_model(
 		&self,
 		ns: &str,

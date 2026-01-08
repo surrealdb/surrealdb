@@ -217,7 +217,7 @@ mod test {
 			panic!()
 		};
 		assert_eq!(
-			format!("crates/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
+			format!("surrealdb/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
 			msg
 		);
 	}
@@ -229,7 +229,7 @@ mod test {
 			panic!()
 		};
 		assert_eq!(
-			format!("crates/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
+			format!("surrealdb/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
 			msg
 		);
 	}
@@ -241,7 +241,7 @@ mod test {
 			panic!()
 		};
 		assert_eq!(
-			format!("crates/core/src/mac/mod.rs:{}: Found test but expected other", line + 1),
+			format!("surrealdb/core/src/mac/mod.rs:{}: Found test but expected other", line + 1),
 			msg
 		);
 	}
