@@ -24,11 +24,6 @@ on:
         type: boolean
         default: false
         description: "Create a GitHub release"
-      rust-version:
-        required: false
-        type: string
-        default: "1.86"
-        description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
         type: string
@@ -70,8 +65,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-        with:
-          toolchain: ${{ inputs.rust-version }}
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
@@ -195,8 +188,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-        with:
-          toolchain: ${{ inputs.rust-version }}
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -245,8 +236,6 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-        with:
-          toolchain: ${{ inputs.rust-version }}
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -273,7 +262,6 @@ jobs:
       name: ${{ needs.prepare-vars.outputs.name }}
       build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
       release-branch: ${{ needs.prepare-vars.outputs.release-branch }}
-      rust-version: ${{ inputs.rust-version }}
       onnx-version: ${{ inputs.onnx-version }}
       extra-features: ${{ inputs.extra-features }}
       upload: true

@@ -13,11 +13,6 @@ on:
         required: true
         type: string
         description: "Release branch"
-      rust-version:
-        required: false
-        type: string
-        default: "1.86.0"
-        description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
         type: string
@@ -104,7 +99,7 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
-            RUST_VERSION=${{ inputs.rust-version }}
+            RUST_VERSION=1.89
 
   build:
     name: Build ${{ matrix.arch }} binary
@@ -317,7 +312,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
         with:
-          toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
 
       - name: Configure AWS credentials
