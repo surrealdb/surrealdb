@@ -1,13 +1,11 @@
-use std::fmt::Display;
-
-use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query};
 use axum::http::{HeaderMap, Method};
 use axum::response::IntoResponse;
 use axum::routing::any;
 use axum::{Extension, Router};
-use futures::StreamExt;
 use surrealdb_core::api::err::ApiError;
+use surrealdb_core::api::request::ApiRequest;
 use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
@@ -35,9 +33,9 @@ async fn handler(
 	Extension(session): Extension<Session>,
 	Path((ns, db, path)): Path<(String, String, String)>,
 	headers: HeaderMap,
-	Query(query): Query<Params>,
+	Query(Params { inner: query }): Query<Params>,
 	method: Method,
-	body: Body,
+	body: Bytes,
 ) -> Result<impl IntoResponse, ResponseError> {
 	// Format the full URL
 	let url = format!("/api/{ns}/{db}/{path}");
@@ -66,21 +64,29 @@ async fn handler(
 		_ => return Err(NetError::NotFound(url).into()),
 	};
 
+	// TODO we need to get a max body size back somehow. Introduction of blob like value? This stream somehow needs to be postponed...
+	// also if such a value would be introduced then this whole enum can be eliminated. body would always just simply be a value
+	// maybe bytes could have two variants, consumed and unconsumed. To the user its simply bytes, but whenever an api request
+	// is processed, the body would be unconsumed bytes, and whenever we get a file, that too could be unconsumed bytes. When the user
+	// actually does something with them, they get consumed, but to the user its always simply just bytes.
+	// we could expose handlebars to describe the "internal state" of the value...
+	let body = Value::Bytes(body.into());
+
+	let req = ApiRequest {
+		method,
+		headers,
+		body,
+		query,
+		..Default::default()
+	};
+
 	let res = ds
 		.invoke_api_handler(
 			&ns,
 			&db,
 			&path,
 			&session,
-			method,
-			headers,
-			query.inner.clone(),
-			body.into_data_stream().map(|x| {
-				x.map_err(|_| {
-					Box::new(anyhow::anyhow!("Failed to get body"))
-						as Box<dyn Display + Send + Sync>
-				})
-			}),
+			req
 		)
 		.await
 		.map_err(ResponseError)?;

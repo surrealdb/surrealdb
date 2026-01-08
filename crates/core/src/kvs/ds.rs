@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -13,7 +12,6 @@ use anyhow::{Context as _, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
-use http::HeaderMap;
 use reblessive::TreeStack;
 use surrealdb_types::{SurrealValue, object};
 #[cfg(feature = "jwks")]
@@ -27,8 +25,8 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use crate::api::body::ApiBody;
-use crate::api::invocation::ApiInvocation;
+use crate::api::invocation::process_api_request;
+use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
@@ -36,7 +34,7 @@ use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::ctx::Context;
@@ -2229,24 +2227,14 @@ impl Datastore {
 	/// Invoke an API handler.
 	///
 	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
-	#[expect(clippy::too_many_arguments)]
-	pub async fn invoke_api_handler<S>(
+	pub async fn invoke_api_handler(
 		&self,
 		ns: &str,
 		db: &str,
 		path: &str,
 		session: &Session,
-		method: ApiMethod,
-		headers: HeaderMap,
-		query: BTreeMap<String, String>,
-		body: S,
-	) -> Result<Option<ApiResponse>>
-	where
-		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
-			+ Send
-			+ Unpin
-			+ 'static,
-	{
+		mut req: ApiRequest,
+	) -> Result<Option<ApiResponse>> {
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
@@ -2254,14 +2242,9 @@ impl Datastore {
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
+		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
 			Some((api, params)) => {
-				let invocation = ApiInvocation {
-					params: params.try_into()?,
-					method,
-					headers,
-					query,
-				};
+				req.params = params.try_into()?;
 
 				let opt = self.setup_options(session);
 
@@ -2270,7 +2253,7 @@ impl Datastore {
 				ctx.attach_session(session)?;
 				let ctx = &ctx.freeze();
 
-				invocation.invoke_with_transaction(ctx, &opt, api, ApiBody::from_stream(body)).await
+				process_api_request(ctx, &opt, api, req).await
 			}
 			_ => {
 				return Err(anyhow::anyhow!(Error::ApNotFound {
