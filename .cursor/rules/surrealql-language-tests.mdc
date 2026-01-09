@@ -7,7 +7,7 @@ alwaysApply: false
 
 ## Language test structure
 
-All SurrealQL tests are located in [crates/language-tests/tests/](mdc:crates/language-tests/tests/) with the following organization:
+All SurrealQL tests are located in [language-tests/tests/](mdc:language-tests/tests/) with the following organization:
 
 - `parsing/` - Parser and syntax tests
 - `language/` - Core language feature tests
@@ -40,21 +40,21 @@ error = true  # if expecting an error
 
 ## Running language tests
 
-- **Run all tests**: `cd crates/language-tests && cargo run run`
-- **Run specific test**: `cd crates/language-tests && cargo run run -- --test path/to/test.surql`
-- **Update test results**: `cd crates/language-tests && cargo run update`
+- **Run all tests**: `cd language-tests && cargo run run`
+- **Run specific test**: `cd language-tests && cargo run run -- --test path/to/test.surql`
+- **Update test results**: `cd language-tests && cargo run update`
 
 ## Auto-generating test results
 
-- From `crates/language-tests`, run `cargo run run -- --results accept path/to/test.surql` to populate missing `[[test.results]]` blocks
+- From `language-tests`, run `cargo run run -- --results accept path/to/test.surql` to populate missing `[[test.results]]` blocks
 - Review the generated results before committing them; adjust by hand if they do not capture the intent of the test
 - Only use `--results overwrite` after verifying that output changes are expected
-- `--results` flags mirror the guidance in `crates/language-tests/README.md`
+- `--results` flags mirror the guidance in `language-tests/README.md`
 
 ## Bug reproduction tests
 
 For any reported SurrealQL issue, create a reproduction test:
-- File path: `crates/language-tests/tests/reproductions/ISSUE_NUMBER_description.surql`
+- File path: `language-tests/tests/reproductions/ISSUE_NUMBER_description.surql`
 - Include the issue number in the test metadata
 - Use exact SurrealQL from the issue report
 - Test with memory storage for consistency: `memory` or `mem://`
