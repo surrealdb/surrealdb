@@ -558,17 +558,10 @@ impl Parser<'_> {
 		let since = match next.kind {
 			TokenKind::Digits => {
 				self.pop_peek();
-				let int = self.lexer.lex_compound(next, compound::integer)?.value;
+				let int = self.lex_compound(next, compound::integer)?.value;
 				ShowSince::Versionstamp(int)
 			}
 			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),
-			TokenKind::Glued(_) => {
-				// This panic can be upheld within this function, just make sure you don't call
-				// glue here and the `next()` before this peek should eat any glued value.
-				panic!(
-					"A glued number token would truncate the timestamp so no gluing is allowed before this production."
-				);
-			}
 			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};
 

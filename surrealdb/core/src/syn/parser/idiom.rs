@@ -9,7 +9,7 @@ use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::sql::{Dir, Expr, Field, Fields, Idiom, Literal, Lookup, Param, Part};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
-use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::syn::token::{Span, TokenKind, t};
 
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
@@ -106,28 +106,32 @@ impl Parser<'_> {
 					res.push(Part::Graph(lookup))
 				}
 				t!("<") => {
-					let peek = self.peek_whitespace1();
-					if peek.kind == t!("~") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup =
-							stk.run(|stk| self.parse_lookup(stk, LookupKind::Reference)).await?;
+					if let Some(peek) = self.peek_whitespace1() {
+						if peek.kind == t!("~") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup = stk
+								.run(|stk| self.parse_lookup(stk, LookupKind::Reference))
+								.await?;
 
-						res.push(Part::Graph(lookup))
-					} else if peek.kind == t!("-") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup = stk
-							.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::In)))
-							.await?;
-						res.push(Part::Graph(lookup))
-					} else if peek.kind == t!("->") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup = stk
-							.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Both)))
-							.await?;
-						res.push(Part::Graph(lookup))
+							res.push(Part::Graph(lookup))
+						} else if peek.kind == t!("-") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup = stk
+								.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::In)))
+								.await?;
+							res.push(Part::Graph(lookup))
+						} else if peek.kind == t!("->") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup = stk
+								.run(|stk| self.parse_lookup(stk, LookupKind::Graph(Dir::Both)))
+								.await?;
+							res.push(Part::Graph(lookup))
+						} else {
+							break;
+						}
 					} else {
 						break;
 					}
@@ -173,22 +177,26 @@ impl Parser<'_> {
 					res.push(Part::Graph(x))
 				}
 				t!("<") => {
-					let peek = self.peek_whitespace1();
-					if peek.kind == t!("~") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
-						res.push(Part::Graph(lookup))
-					} else if peek.kind == t!("-") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::In)).await?;
-						res.push(Part::Graph(lookup))
-					} else if peek.kind == t!("->") {
-						self.pop_peek();
-						self.pop_peek();
-						let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::Both)).await?;
-						res.push(Part::Graph(lookup))
+					if let Some(peek) = self.peek_whitespace1() {
+						if peek.kind == t!("~") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
+							res.push(Part::Graph(lookup))
+						} else if peek.kind == t!("-") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup = self.parse_lookup(stk, LookupKind::Graph(Dir::In)).await?;
+							res.push(Part::Graph(lookup))
+						} else if peek.kind == t!("->") {
+							self.pop_peek();
+							self.pop_peek();
+							let lookup =
+								self.parse_lookup(stk, LookupKind::Graph(Dir::Both)).await?;
+							res.push(Part::Graph(lookup))
+						} else {
+							break;
+						}
 					} else {
 						break;
 					}
@@ -355,7 +363,7 @@ impl Parser<'_> {
 		}
 
 		// parse ending id.
-		let max = if matches!(self.peek_whitespace().kind, TokenKind::Digits) {
+		let max = if let Some(TokenKind::Digits) = self.peek_whitespace().map(|x| x.kind) {
 			Some(self.next_token_value::<u32>()?)
 		} else {
 			None
@@ -518,7 +526,7 @@ impl Parser<'_> {
 							self.pop_peek();
 							Part::Last
 						}
-						TokenKind::Digits | t!("+") | TokenKind::Glued(Glued::Number) => {
+						TokenKind::Digits | t!("+") => {
 							let number = self.next_token_value::<NumberToken>()?;
 							let expr = match number {
 								NumberToken::Float(x) => Expr::Literal(Literal::Float(x)),
@@ -530,8 +538,9 @@ impl Parser<'_> {
 							Part::Value(expr)
 						}
 						t!("-") => {
-							let peek_digit = self.peek_whitespace1();
-							if let TokenKind::Digits = peek_digit.kind {
+							if let Some(peek_digit) = self.peek_whitespace1()
+								&& let TokenKind::Digits = peek_digit.kind
+							{
 								let span = self.recent_span().covers(peek_digit.span);
 								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index in a basic idiom can't be negative");
 							}
@@ -574,7 +583,7 @@ impl Parser<'_> {
 						}
 						TokenKind::Digits | t!("+") => {
 							let next = self.next();
-							let number = self.lexer.lex_compound(next, compound::numeric)?;
+							let number = self.lex_compound(next, compound::numeric)?;
 							let number = match number.value {
 								Numeric::Duration(_) => {
 									bail!("Unexpected token `duration` expected a number", @number.span );
@@ -587,22 +596,10 @@ impl Parser<'_> {
 							};
 							Part::Value(number)
 						}
-						TokenKind::Glued(Glued::Number) => {
-							let number = self.next_token_value::<NumberToken>()?;
-							let number = match number {
-								NumberToken::Float(f) => Expr::Literal(Literal::Float(f)),
-								NumberToken::Integer(i) => {
-									Expr::Literal(Literal::Integer(i.into_int(self.recent_span())?))
-								}
-								NumberToken::Decimal(decimal) => {
-									Expr::Literal(Literal::Decimal(decimal))
-								}
-							};
-							Part::Value(number)
-						}
 						t!("-") => {
-							let peek_digit = self.peek_whitespace1();
-							if let TokenKind::Digits = peek_digit.kind {
+							if let Some(peek_digit) = self.peek_whitespace1()
+								&& let TokenKind::Digits = peek_digit.kind
+							{
 								let span = self.recent_span().covers(peek_digit.span);
 								bail!("Unexpected token `-` expected $, *, or a number", @span => "index in a local idiom can't be negative");
 							}

@@ -2,16 +2,21 @@ use arbitrary::Arbitrary;
 
 use crate::sql::access_type::{BearerAccess, BearerAccessSubject};
 use crate::sql::arbitrary::{
-	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
+	self, arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
 use crate::sql::kind::KindLiteral;
-use crate::sql::statements::alter::{AlterIndexStatement, AlterKind};
+use crate::sql::statements::SetStatement;
+use crate::sql::statements::alter::{
+	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterNamespaceStatement,
+	AlterSystemStatement,
+};
 use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
 };
 use crate::sql::{
-	AccessType, Base, Data, DefineFieldStatement, DefineIndexStatement, Expr, Index,
-	InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement, View,
+	AccessType, Ast, Base, BinaryOperator, Data, DefineFieldStatement, DefineIndexStatement, Expr,
+	Index, InsertStatement, KillStatement, Kind, Literal, Permission, Permissions, SelectStatement,
+	TopLevelExpr, View,
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {
@@ -168,22 +173,22 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let expr = u.arbitrary()?;
+		let mut expr = u.arbitrary()?;
 
 		let group = if u.arbitrary()? {
-			Some(arb_group(u, &expr)?)
+			Some(arb_group(u, &mut expr)?)
 		} else {
 			None
 		};
 
 		let split = if u.arbitrary()? {
-			Some(arb_splits(u, &expr)?)
+			Some(arb_splits(u, &mut expr)?)
 		} else {
 			None
 		};
 
 		let order = if u.arbitrary()? {
-			Some(arb_order(u, &expr)?)
+			Some(arb_order(u, &mut expr)?)
 		} else {
 			None
 		};
@@ -212,10 +217,10 @@ impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for View {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let expr = u.arbitrary()?;
+		let mut expr = u.arbitrary()?;
 
 		let group = if u.arbitrary()? {
-			Some(arb_group(u, &expr)?)
+			Some(arb_group(u, &mut expr)?)
 		} else {
 			None
 		};
@@ -301,6 +306,66 @@ impl<'a> arbitrary::Arbitrary<'a> for AlterIndexStatement {
 			if_exists: u.arbitrary()?,
 			comment,
 			prepare_remove,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterSystemStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let query_timeout = match u.int_in_range(0u8..=1)? {
+			0 => AlterKind::Drop,
+			1 => AlterKind::Set(u.arbitrary()?),
+			_ => unreachable!(),
+		};
+
+		Ok(AlterSystemStatement {
+			query_timeout,
+			compact: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterDatabaseStatement {
+	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(AlterDatabaseStatement {
+			compact: true,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for AlterNamespaceStatement {
+	fn arbitrary(_: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(AlterNamespaceStatement {
+			compact: true,
+		})
+	}
+}
+
+impl<'a> Arbitrary<'a> for Ast {
+	fn size_hint(depth: usize) -> (usize, Option<usize>) {
+		Vec::<TopLevelExpr>::size_hint(depth)
+	}
+
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let mut expressions = Vec::<TopLevelExpr>::arbitrary(u)?;
+		for e in expressions.iter_mut() {
+			if let TopLevelExpr::Expr(Expr::Binary {
+				left,
+				op: BinaryOperator::Equal,
+				right,
+				..
+			}) = e && let Expr::Param(ref left) = **left
+			{
+				*e = TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
+					name: left.clone().into_string(),
+					kind: None,
+					what: (**right).clone(),
+				})))
+			}
+		}
+
+		Ok(Ast {
+			expressions,
 		})
 	}
 }

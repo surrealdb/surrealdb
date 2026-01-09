@@ -170,24 +170,23 @@ impl Parser<'_> {
 		idiom: &Idiom,
 		idiom_span: Span,
 	) -> ParseResult<()> {
-		let mut found = false;
 		match fields {
 			Fields::Value(field) => {
 				if let Some(alias) = &field.alias
 					&& idiom == alias
 				{
-					found = true;
+					return Ok(());
 				}
 
 				match &field.expr {
 					Expr::Idiom(x) => {
 						if idiom == x {
-							found = true;
+							return Ok(());
 						}
 					}
 					v => {
 						if *idiom == v.to_idiom() {
-							found = true;
+							return Ok(());
 						}
 					}
 				}
@@ -202,21 +201,18 @@ impl Parser<'_> {
 					if let Some(alias) = &field.alias
 						&& idiom == alias
 					{
-						found = true;
-						break;
+						return Ok(());
 					}
 
 					match &field.expr {
 						Expr::Idiom(x) => {
 							if idiom == x {
-								found = true;
-								break;
+								return Ok(());
 							}
 						}
 						v => {
 							if *idiom == v.to_idiom() {
-								found = true;
-								break;
+								return Ok(());
 							}
 						}
 					}
@@ -224,35 +220,32 @@ impl Parser<'_> {
 			}
 		}
 
-		if !found {
-			match kind {
-				MissingKind::Split => {
-					bail!(
-						"Missing split idiom `{:?}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-				MissingKind::Order => {
-					bail!(
-						"Missing order idiom `{}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-				MissingKind::Group => {
-					bail!(
-						"Missing group idiom `{}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-			};
+		match kind {
+			MissingKind::Split => {
+				bail!(
+					"Missing split idiom `{:?}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
+			MissingKind::Order => {
+				bail!(
+					"Missing order idiom `{}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
+			MissingKind::Group => {
+				bail!(
+					"Missing group idiom `{}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
 		};
-		Ok(())
 	}
 
 	pub(crate) fn try_parse_group(

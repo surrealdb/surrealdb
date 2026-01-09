@@ -18,9 +18,6 @@ macro_rules! unexpected {
 				let error = $crate::syn::error::syntax_error!("Unexpected end of file, expected {}",$expected, @__found.span $( $($t)* )?);
 				return Err(error)
 			}
-			$crate::syn::token::TokenKind::WhiteSpace => {
-				$crate::syn::error::bail!("Unexpected whitespace, expected token {} to continue",$expected,  @__found.span$( $($t)* )?)
-			}
 			x => {
 				$crate::syn::error::bail!("Unexpected token `{}`, expected {}",x,$expected, @__found.span$( $($t)* )?)
 			}
@@ -42,34 +39,18 @@ macro_rules! expected {
 	}};
 }
 
-/// Pops the last token, checks if it is the desired glue value and then returns
-/// the value. This will panic if the token was not correct or the value was
-/// already eat, both of which the parser should make sure to uphold.
-macro_rules! pop_glued {
-	($parser:expr_2021, $variant:ident) => {{
-		let token = $parser.pop_peek();
-		debug_assert!(matches!(
-			token.kind,
-			$crate::syn::token::TokenKind::Glued($crate::syn::token::Glued::$variant)
-		));
-		let $crate::syn::parser::GluedValue::$variant(x) =
-			::std::mem::take(&mut $parser.glued_value)
-		else {
-			panic!("Glued value was already taken, while the glue token still in the token buffer.")
-		};
-		x
-	}};
-}
-
 /// A macro for indicating that the parser encountered an token which it didn't
 /// expect.
 macro_rules! expected_whitespace {
 	($parser:expr_2021, $($kind:tt)*) => {{
-		let token: crate::syn::token::Token = $parser.next_whitespace();
-		if let $($kind)* = token.kind{
-			token
+		if let Some(token) = $parser.next_whitespace() {
+			if let $($kind)* = token.kind{
+				token
+			}else{
+				$crate::syn::parser::unexpected!($parser,token, $($kind)*)
+			}
 		}else{
-			$crate::syn::parser::unexpected!($parser,token, $($kind)*)
+			$crate::syn::error::bail!("Unexpected whitespace",@$parser.last_span() => "No whitespace allowed after this token")
 		}
 	}};
 }
@@ -143,6 +124,5 @@ macro_rules! enter_query_recursion {
 }
 
 pub(crate) use {
-	enter_object_recursion, enter_query_recursion, expected, expected_whitespace, pop_glued,
-	unexpected,
+	enter_object_recursion, enter_query_recursion, expected, expected_whitespace, unexpected,
 };

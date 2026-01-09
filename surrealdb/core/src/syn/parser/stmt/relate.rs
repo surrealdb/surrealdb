@@ -105,7 +105,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
-		if self.peek_whitespace1().kind == t!(":") {
+		if let Some(t!(":")) = self.peek_whitespace1().map(|x| x.kind) {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
 			self.parse_ident().map(Expr::Table)

@@ -183,16 +183,17 @@ impl DefineFieldStatement {
 			if let TableType::Relation(ref relation) = tb.table_type {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
-					// The `in` field must be a record type
-					ensure!(
-						kind.is_record(),
-						Error::Thrown("in field on a relation must be a record".into(),)
-					);
+					let Kind::Record(field_kind) = kind else {
+						bail!(Error::Thrown("in field on a relation must be a record".into(),))
+					};
+
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.field_kind.as_ref() {
+					if relation.from.as_ref().map(|x| field_kind != x).unwrap_or(true) {
 						tb.table_type = TableType::Relation(Relation {
-							from: self.field_kind.clone(),
-							..relation.to_owned()
+							from: Some(
+								field_kind.iter().map(|x| x.clone().into_string()).collect(),
+							),
+							..relation.clone()
 						});
 
 						txn.put_tb(ns_name, db_name, &tb).await?;
@@ -215,16 +216,16 @@ impl DefineFieldStatement {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
-					ensure!(
-						kind.is_record(),
-						Error::Thrown("out field on a relation must be a record".into())
-					);
+					let Kind::Record(field_kind) = kind else {
+						bail!(Error::Thrown("in field on a relation must be a record".into(),))
+					};
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref() != self.field_kind.as_ref() {
+					if relation.to.as_ref().map(|x| field_kind != x).unwrap_or(true) {
 						tb.table_type = TableType::Relation(Relation {
-							to: self.field_kind.clone(),
+							to: Some(field_kind.iter().map(|x| x.clone().into_string()).collect()),
 							..relation.clone()
 						});
+
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {

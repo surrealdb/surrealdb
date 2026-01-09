@@ -1,9 +1,8 @@
-use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
-use crate::types::PublicRegex;
 
-pub fn regex(lexer: &mut Lexer, start: Token) -> Result<PublicRegex, SyntaxError> {
+pub fn regex(lexer: &mut Lexer, start: Token) -> Result<(), SyntaxError> {
 	assert_eq!(start.kind, t!("/"), "Invalid start token of regex compound");
 
 	loop {
@@ -25,14 +24,5 @@ pub fn regex(lexer: &mut Lexer, start: Token) -> Result<PublicRegex, SyntaxError
 		}
 	}
 
-	let mut span = lexer.current_span();
-	// the `\`
-	span.len -= 2;
-	span.offset += 1;
-
-	// Safety: We checked the bytes for utf-8 validity so this is sound.
-	let s = unsafe { std::str::from_utf8_unchecked(lexer.span_bytes(span)) };
-
-	let regex = s.parse().map_err(|e| syntax_error!("Invalid regex: {e}", @span))?;
-	Ok(regex)
+	Ok(())
 }

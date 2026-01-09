@@ -216,9 +216,24 @@ impl ToSql for IfelseStatement {
 								f.push('\n');
 								let fmt = fmt.increment();
 								fmt.write_indent(f);
-								write_sql!(f, fmt, "{then}");
+								if let Expr::IfElse(then) = then
+									&& then.bracketed()
+								{
+									write_sql!(f, fmt, "({then})");
+								} else {
+									write_sql!(f, fmt, "{then}");
+								}
 							} else {
-								write_sql!(f, fmt, "IF {} THEN {then}", CoverStmts(cond));
+								write_sql!(f, fmt, "IF {} THEN ", CoverStmts(cond));
+								// Required to avoid confusion about which else if belongs to which
+								// statement.
+								if let Expr::IfElse(then) = then
+									&& then.bracketed()
+								{
+									write_sql!(f, fmt, "({then})");
+								} else {
+									write_sql!(f, fmt, "{then}");
+								}
 							}
 						})
 					}),

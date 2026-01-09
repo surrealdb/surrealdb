@@ -127,9 +127,21 @@ impl ToSql for Literal {
 					for (i, expr) in exprs.iter().enumerate() {
 						if i > 0 {
 							fmt.write_separator(f);
+						} else {
+							if let Expr::Literal(Literal::RecordId(_)) = *expr {
+								f.push('(');
+								expr.fmt_sql(f, fmt);
+								f.push(')');
+								continue;
+							}
 						}
 						CoverStmts(expr).fmt_sql(f, fmt);
 					}
+
+					if exprs.len() == 1 {
+						f.push(',');
+					}
+
 					if fmt.is_pretty() {
 						f.push('\n');
 						// One level less indentation for closing bracket
@@ -141,6 +153,8 @@ impl ToSql for Literal {
 							}
 						}
 					}
+				} else {
+					f.push(',');
 				}
 				f.push('}');
 			}

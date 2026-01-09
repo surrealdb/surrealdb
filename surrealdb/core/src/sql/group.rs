@@ -33,7 +33,10 @@ impl From<crate::expr::Groups> for Groups {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) struct Group(pub(crate) Idiom);
+pub(crate) struct Group(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::basic_idiom))]
+	pub(crate) Idiom,
+);
 
 impl surrealdb_types::ToSql for Group {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {

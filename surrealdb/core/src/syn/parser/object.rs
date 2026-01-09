@@ -6,7 +6,7 @@ use crate::sql::{Block, Expr, Literal};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
-use crate::syn::token::{Glued, Span, TokenKind, t};
+use crate::syn::token::{Span, TokenKind, t};
 
 impl Parser<'_> {
 	/// Parse an production which starts with an `{`
@@ -23,38 +23,81 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!(",")) {
+			// Empty set.
 			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Expr::Literal(Literal::Set(Vec::new())));
 		}
 
-		// Now check first if it can be an object.
-		match self.glue_and_peek1()?.kind {
-			t!(":") => {
-				return self.parse_object(stk, start).await.map(Literal::Object).map(Expr::Literal);
+		if self.eat(t!(";")) {
+			// Empty statement followed by other statements or an empty block.
+			let block = self.parse_block_remaining(stk, start, Vec::new()).await?;
+			return Ok(Expr::Block(Box::new(block)));
+		}
+
+		// Try to parse an object if it can be an object.
+		if let t!("\"")
+		| t!("'")
+		| TokenKind::Identifier
+		| TokenKind::Digits
+		| TokenKind::Keyword(_)
+		| TokenKind::Language(_)
+		| TokenKind::Algorithm(_)
+		| TokenKind::Distance(_)
+		| TokenKind::VectorType(_) = self.peek().kind
+			&& let Some(x) = self
+				.speculate(stk, async |stk, this| {
+					enter_object_recursion!(this = this => {
+						let Ok(key) = this.parse_object_key() else {
+							return Ok(None)
+						};
+
+						if !this.eat(t!(":")){
+							return Ok(None)
+						}
+
+						let value = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
+						let res = vec![ObjectEntry{ key, value }];
+
+						if this.eat(t!(",")){
+							this.parse_object_inner(stk, start, res).await.map(Some)
+						}else{
+							this.expect_closing_delimiter(t!("}"), start)?;
+							Ok(Some(res))
+						}
+					})
+				})
+				.await?
+		{
+			return Ok(Expr::Literal(Literal::Object(x)));
+		}
+
+		let statement_peek = self.peek();
+		// It's either a set or a block.
+		let first_expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+
+		let first_expr_span = statement_peek.span.covers(self.last_span());
+
+		let next = self.peek();
+		match next.kind {
+			t!(",") => {
+				self.pop_peek();
+				let mut exprs = self.parse_set(stk, start).await?;
+				exprs.insert(0, first_expr);
+				Ok(Expr::Literal(Literal::Set(exprs)))
+			}
+			t!("}") => {
+				self.pop_peek();
+				if statement_peek.kind != t!("(") {
+					Self::reject_letless_let(&first_expr, first_expr_span)?;
+				}
+				Ok(Expr::Block(Box::new(Block(vec![first_expr]))))
 			}
 			_ => {
-				// It's either a set or a block.
-				let first_expr = stk.run(|stk| self.parse_block_expr(stk)).await?;
-
-				let next = self.peek();
-				match next.kind {
-					t!(",") => {
-						self.pop_peek();
-						let mut exprs = self.parse_set(stk, start).await?;
-						exprs.insert(0, first_expr);
-						Ok(Expr::Literal(Literal::Set(exprs)))
-					}
-					t!("}") => {
-						self.pop_peek();
-						Ok(Expr::Block(Box::new(Block(vec![first_expr]))))
-					}
-					_ => {
-						self.pop_peek();
-						let block =
-							self.parse_block_remaining(stk, start, vec![first_expr]).await?;
-						Ok(Expr::Block(Box::new(block)))
-					}
+				if statement_peek.kind != t!("(") {
+					Self::reject_letless_let(&first_expr, first_expr_span)?;
 				}
+				let block = self.parse_block_remaining(stk, start, vec![first_expr]).await?;
+				Ok(Expr::Block(Box::new(block)))
 			}
 		}
 	}
@@ -71,16 +114,16 @@ impl Parser<'_> {
 		start: Span,
 	) -> ParseResult<Vec<ObjectEntry>> {
 		enter_object_recursion!(this = self => {
-		   return this.parse_object_inner(stk, start).await;
+			return this.parse_object_inner(stk, start, Vec::new()).await;
 		})
 	}
 
-	async fn parse_object_inner(
+	pub(super) async fn parse_object_inner(
 		&mut self,
 		stk: &mut Stk,
 		start: Span,
+		mut res: Vec<ObjectEntry>,
 	) -> ParseResult<Vec<ObjectEntry>> {
-		let mut res = Vec::new();
 		loop {
 			if self.eat(t!("}")) {
 				return Ok(res);
@@ -102,7 +145,7 @@ impl Parser<'_> {
 
 	pub(crate) async fn parse_set(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
 		enter_object_recursion!(this = self => {
-		   return this.parse_set_inner(stk, start).await;
+			return this.parse_set_inner(stk, start).await;
 		})
 	}
 
@@ -166,10 +209,14 @@ impl Parser<'_> {
 	}
 
 	async fn parse_block_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+		let peek = self.peek().kind;
 		let before = self.recent_span();
 		let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 		let span = before.covers(self.last_span());
-		Self::reject_letless_let(&stmt, span)?;
+		// covered expressions are fine.
+		if peek != t!("(") {
+			Self::reject_letless_let(&stmt, span)?;
+		}
 		Ok(stmt)
 	}
 
@@ -188,20 +235,15 @@ impl Parser<'_> {
 		match token.kind {
 			x if Self::kind_is_keyword_like(x) => {
 				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
+				let str = self.span_str(token.span);
 				Ok(str.to_string())
 			}
 			TokenKind::Identifier => self.parse_ident(),
 			t!("\"") | t!("'") => Ok(self.parse_string_lit()?),
 			TokenKind::Digits => {
 				self.pop_peek();
-				let span = self.lexer.lex_compound(token, compound::number)?.span;
-				let str = self.lexer.span_str(span);
-				Ok(str.to_string())
-			}
-			TokenKind::Glued(Glued::Number) => {
-				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
+				let span = self.lex_compound(token, compound::number)?.span;
+				let str = self.span_str(span);
 				Ok(str.to_string())
 			}
 			_ => unexpected!(self, token, "an object key"),

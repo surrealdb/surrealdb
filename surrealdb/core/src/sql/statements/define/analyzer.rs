@@ -34,10 +34,10 @@ impl ToSql for DefineAnalyzerStatement {
 		write_sql!(f, sql_fmt, "DEFINE ANALYZER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
-			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 		if let Some(ref i) = self.function {
 			f.push_str(" FUNCTION fn");
 			for x in i.split("::") {

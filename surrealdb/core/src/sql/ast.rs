@@ -10,7 +10,6 @@ use crate::sql::statements::{
 use crate::sql::{Expr, Param};
 
 #[derive(Debug, PartialEq, Clone)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ast {
 	pub(crate) expressions: Vec<TopLevelExpr>,
 }

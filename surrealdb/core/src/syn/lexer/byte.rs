@@ -150,7 +150,8 @@ impl Lexer<'_> {
 			b'@' => t!("@"),
 			byte::CR | byte::FF | byte::LF | byte::SP | byte::VT | byte::TAB => {
 				self.eat_whitespace();
-				TokenKind::WhiteSpace
+				self.advance_span();
+				return self.next_token();
 			}
 			b'|' => match self.reader.peek() {
 				Some(b'|') => {
@@ -234,7 +235,8 @@ impl Lexer<'_> {
 				Some(b'-') => {
 					self.reader.next();
 					self.eat_single_line_comment();
-					TokenKind::WhiteSpace
+					self.advance_span();
+					return self.next_token();
 				}
 				Some(b'=') => {
 					self.reader.next();
@@ -269,12 +271,14 @@ impl Lexer<'_> {
 					if let Err(e) = self.eat_multi_line_comment() {
 						return self.invalid_token(e);
 					}
-					TokenKind::WhiteSpace
+					self.advance_span();
+					return self.next_token();
 				}
 				Some(b'/') => {
 					self.reader.next();
 					self.eat_single_line_comment();
-					TokenKind::WhiteSpace
+					self.advance_span();
+					return self.next_token();
 				}
 				_ => t!("/"),
 			},
@@ -331,7 +335,8 @@ impl Lexer<'_> {
 			},
 			b'#' => {
 				self.eat_single_line_comment();
-				TokenKind::WhiteSpace
+				self.advance_span();
+				return self.next_token();
 			}
 			b'`' => return self.lex_surrounded_ident(true),
 			b'"' => {

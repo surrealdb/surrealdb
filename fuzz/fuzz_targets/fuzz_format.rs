@@ -19,7 +19,8 @@ fuzz_target!(|query: Ast| {
 		},
 		async |parser, stk| parser.parse_query(stk).await,
 	);
+
 	if let Err(e) = res {
-		panic!("Failed to format\n{e}\n\nSOURCE:\n{format}");
+		panic!("Failed to parse format\n{e}\n\nSOURCE:\n{format}\nDEBUG:\n{:#?}", query);
 	}
 });

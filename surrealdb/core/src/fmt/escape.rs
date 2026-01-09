@@ -37,16 +37,39 @@ impl Iterator for Escape<'_> {
 			self.pending_len = 1;
 			return Some('\\');
 		}
+
 		// Always escape backspace
-		if next == '\u{8}' {
-			self.pending_buffer[3] = 'u';
-			self.pending_buffer[2] = '{';
-			self.pending_buffer[1] = '8';
-			self.pending_buffer[0] = '}';
-			self.pending_len = 4;
-			return Some('\\');
+		match next {
+			'\0' => {
+				self.pending_buffer[0] = '0';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\r' => {
+				self.pending_buffer[0] = 'r';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\n' => {
+				self.pending_buffer[0] = 'n';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\t' => {
+				self.pending_buffer[0] = 't';
+				self.pending_len = 1;
+				Some('\\')
+			}
+			'\u{8}' => {
+				self.pending_buffer[3] = 'u';
+				self.pending_buffer[2] = '{';
+				self.pending_buffer[1] = '8';
+				self.pending_buffer[0] = '}';
+				self.pending_len = 4;
+				Some('\\')
+			}
+			_ => Some(next),
 		}
-		Some(next)
 	}
 }
 
@@ -126,6 +149,8 @@ impl ToSql for EscapeKey<'_> {
 		if s.is_empty()
 			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
+			|| s == "NaN"
+			|| s == "Infinity"
 		{
 			write_sql!(f, fmt, "\"{}\"", Escape::escape_str(s, '\"'));
 		} else {
@@ -142,6 +167,8 @@ impl ToSql for EscapeRidKey<'_> {
 		if s.is_empty()
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
+			|| s == "Infinity"
+			|| s == "NaN"
 		{
 			write_sql!(f, fmt, "`{}`", Escape::escape_str(s, '`'));
 		} else {

@@ -228,7 +228,6 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => self
-				.lexer
 				.span_str(token.span)
 				.parse::<u32>()
 				.map_err(|e| syntax_error!("Failed to parse model version: {e}", @token.span)),
