@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate as surrealdb_types;
 use crate::sql::{SqlFormat, ToSql};
-use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
+use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value, kind};
 
 /// The characters which are supported in server record IDs
 pub const ID_CHARS: [char; 36] = [
@@ -13,11 +14,8 @@ pub const ID_CHARS: [char; 36] = [
 ///
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
 /// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
-#[derive(
-	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
-)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[surreal(crate = "crate", untagged, lowercase)]
 pub enum RecordIdKey {
 	/// A numeric key
 	Number(i64),
@@ -155,6 +153,51 @@ impl ToSql for RecordIdKey {
 			RecordIdKey::Object(object) => object.fmt_sql(f, fmt),
 			RecordIdKey::Array(array) => array.fmt_sql(f, fmt),
 			RecordIdKey::Range(rid) => rid.fmt_sql(f, fmt),
+		}
+	}
+}
+
+impl SurrealValue for RecordIdKey {
+	fn kind_of() -> crate::Kind {
+		// RecordIdKey can be multiple kinds
+		kind!(number | string | uuid | array | object | range)
+	}
+
+	fn is_value(value: &Value) -> bool {
+		match value {
+			Value::Number(Number::Int(_)) => true,
+			Value::String(_) => true,
+			Value::Uuid(_) => true,
+			Value::Array(_) => true,
+			Value::Object(_) => true,
+			Value::Range(_) => true,
+			_ => false,
+		}
+	}
+
+	fn into_value(self) -> Value {
+		match self {
+			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
+			RecordIdKey::String(s) => Value::String(s),
+			RecordIdKey::Uuid(u) => Value::Uuid(u),
+			RecordIdKey::Array(a) => Value::Array(a),
+			RecordIdKey::Object(o) => Value::Object(o),
+			RecordIdKey::Range(r) => (*r).into_value(),
+		}
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		match value {
+			Value::Number(Number::Int(n)) => Ok(RecordIdKey::Number(n)),
+			Value::String(s) => Ok(RecordIdKey::String(s)),
+			Value::Uuid(u) => Ok(RecordIdKey::Uuid(u)),
+			Value::Array(a) => Ok(RecordIdKey::Array(a)),
+			Value::Object(o) => Ok(RecordIdKey::Object(o)),
+			Value::Range(_) => {
+				let range = RecordIdKeyRange::from_value(value)?;
+				Ok(RecordIdKey::Range(Box::new(range)))
+			}
+			_ => Err(anyhow::anyhow!("Cannot convert {:?} to RecordIdKey", value)),
 		}
 	}
 }
