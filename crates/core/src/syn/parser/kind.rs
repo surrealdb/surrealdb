@@ -6,7 +6,7 @@ use super::mac::unexpected;
 use super::{ParseResult, Parser};
 use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
-use crate::syn::lexer::{Lexer, compound};
+use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Keyword, Span, TokenKind, t};
 use crate::types::PublicDuration;
@@ -73,14 +73,13 @@ impl Parser<'_> {
 			t!("true") => Ok(Kind::Literal(KindLiteral::Bool(true))),
 			t!("false") => Ok(Kind::Literal(KindLiteral::Bool(false))),
 			t!("'") | t!("\"") => {
-				let str = self.lexer.span_str(next.span);
-				let str = Lexer::unescape_string_span(str, next.span, &mut self.unscape_buffer)?;
+				let str = self.unescape_string_span(next.span)?;
 				Ok(Kind::Literal(KindLiteral::String(str.to_owned())))
 			}
 			TokenKind::NaN => Ok(Kind::Literal(KindLiteral::Float(f64::NAN))),
 			TokenKind::Infinity => Ok(Kind::Literal(KindLiteral::Float(f64::INFINITY))),
 			t!("+") | t!("-") => {
-				let compound = self.lexer.lex_compound(next, compound::number)?;
+				let compound = self.lex_compound(next, compound::number)?;
 				let kind = match compound.value {
 					compound::Numeric::Float(f) => KindLiteral::Float(f),
 					compound::Numeric::Integer(int) => {
@@ -92,7 +91,7 @@ impl Parser<'_> {
 				Ok(Kind::Literal(kind))
 			}
 			TokenKind::Digits => {
-				let compound = self.lexer.lex_compound(next, compound::numeric)?;
+				let compound = self.lex_compound(next, compound::numeric)?;
 				let v = match compound.value {
 					compound::Numeric::Integer(x) => {
 						KindLiteral::Integer(x.into_int(compound.span)?)

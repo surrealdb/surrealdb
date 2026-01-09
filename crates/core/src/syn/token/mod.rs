@@ -493,12 +493,5 @@ impl Token {
 	}
 }
 
-/// A token which is mad up of more complex inner parts.
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub struct CompoundToken<T> {
-	pub value: T,
-	pub span: Span,
-}
-
 /// A compound token which lexes a javascript function body.
 pub struct JavaScript;

@@ -43,9 +43,7 @@ impl TokenValue for Param {
 				let mut span = peek.span;
 				span.offset += 1;
 				span.len -= 1;
-				let str = parser.lexer.span_str(span);
-				let ident = Lexer::unescape_ident_span(str, span, &mut parser.unscape_buffer)?;
-				// Safety: Lexer guarentees no null bytes.
+				let ident = parser.unescape_ident_span(span)?;
 				Ok(Param::new(ident.to_owned()))
 			}
 			_ => unexpected!(parser, peek, "a parameter"),
@@ -73,19 +71,16 @@ impl TokenValue for surrealdb_types::Datetime {
 		match token.kind {
 			t!("d\"") | t!("d'") => {
 				parser.pop_peek();
-				let string_source = parser.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(
-					string_source,
-					token.span,
-					&mut parser.unscape_buffer,
-				)?;
+				let str = parser.unescape_string_span(token.span)?;
 
 				// +2 to skip over the `d"`
 				let file = Lexer::lex_datetime(str).map_err(|e| {
 					e.update_spans(|span| {
 						let range = span.to_range();
-						let start = Lexer::escaped_string_offset(string_source, range.start);
-						let end = Lexer::escaped_string_offset(string_source, range.end);
+						let start =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.start);
+						let end =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.end);
 						*span = Span::from_range(
 							(token.span.offset + start)..(token.span.offset + end),
 						);
@@ -105,18 +100,15 @@ impl TokenValue for surrealdb_types::Uuid {
 		match token.kind {
 			t!("u\"") | t!("u'") => {
 				parser.pop_peek();
-				let string_source = parser.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(
-					string_source,
-					token.span,
-					&mut parser.unscape_buffer,
-				)?;
+				let str = parser.unescape_string_span(token.span)?;
 
 				let file = Lexer::lex_uuid(str).map_err(|e| {
 					e.update_spans(|span| {
 						let range = span.to_range();
-						let start = Lexer::escaped_string_offset(string_source, range.start);
-						let end = Lexer::escaped_string_offset(string_source, range.end);
+						let start =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.start);
+						let end =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.end);
 						*span = Span::from_range(
 							(token.span.offset + start)..(token.span.offset + end),
 						);
@@ -140,18 +132,15 @@ impl TokenValue for surrealdb_types::File {
 		match token.kind {
 			t!("f\"") | t!("f'") => {
 				parser.pop_peek();
-				let string_source = parser.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(
-					string_source,
-					token.span,
-					&mut parser.unscape_buffer,
-				)?;
+				let str = parser.unescape_string_span(token.span)?;
 
 				let file = Lexer::lex_file(str).map_err(|e| {
 					e.update_spans(|span| {
 						let range = span.to_range();
-						let start = Lexer::escaped_string_offset(string_source, range.start);
-						let end = Lexer::escaped_string_offset(string_source, range.end);
+						let start =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.start);
+						let end =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.end);
 						*span = Span::from_range(
 							(token.span.offset + start)..(token.span.offset + end),
 						);
@@ -171,18 +160,15 @@ impl TokenValue for surrealdb_types::Bytes {
 		match token.kind {
 			t!("b\"") | t!("b'") => {
 				parser.pop_peek();
-				let string_source = parser.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(
-					string_source,
-					token.span,
-					&mut parser.unscape_buffer,
-				)?;
+				let str = parser.unescape_string_span(token.span)?;
 
 				let bytes = Lexer::lex_bytes(str).map_err(|e| {
 					e.update_spans(|span| {
 						let range = span.to_range();
-						let start = Lexer::escaped_string_offset(string_source, range.start);
-						let end = Lexer::escaped_string_offset(string_source, range.end);
+						let start =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.start);
+						let end =
+							Lexer::escaped_string_offset(parser.span_str(token.span), range.end);
 						*span = Span::from_range(
 							(token.span.offset + start)..(token.span.offset + end),
 						);
@@ -207,9 +193,8 @@ impl TokenValue for surrealdb_types::Regex {
 					// Peeking past `/` can happen when parsing `{/bla`.
 					parser.backup_after(peek.span);
 				}
-				let token = parser.lexer.lex_compound(peek, compound::regex)?;
-				let s = parser.lexer.span_str(token.span);
-				let s = Lexer::unescape_regex_span(s, token.span, &mut parser.unscape_buffer)?;
+				let token = parser.lex_compound(peek, compound::regex)?;
+				let s = parser.unescape_regex_span(token.span)?;
 				match regex::Regex::new(s) {
 					Ok(x) => Ok(surrealdb_types::Regex::from(x)),
 					Err(e) => {
@@ -234,7 +219,7 @@ impl TokenValue for NumberToken {
 		match token.kind {
 			t!("+") | t!("-") | TokenKind::Digits => {
 				parser.pop_peek();
-				let token = parser.lexer.lex_compound(token, compound::number)?;
+				let token = parser.lex_compound(token, compound::number)?;
 				match token.value {
 					compound::Numeric::Float(f) => Ok(NumberToken::Float(f)),
 					compound::Numeric::Integer(x) => Ok(NumberToken::Integer(x)),
@@ -282,8 +267,7 @@ impl Parser<'_> {
 		match token.kind {
 			t!("\"") | t!("'") => {
 				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
-				let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
+				let str = self.unescape_string_span(token.span)?;
 				Ok(str.to_owned())
 			}
 			_ => unexpected!(self, token, "a strand"),
@@ -297,13 +281,10 @@ impl Parser<'_> {
 	pub(crate) fn parse_ident_str(&mut self) -> ParseResult<&str> {
 		let token = self.next();
 		match token.kind {
-			TokenKind::Identifier => {
-				let str = self.lexer.span_str(token.span);
-				Ok(Lexer::unescape_ident_span(str, token.span, &mut self.unscape_buffer)?)
-			}
+			TokenKind::Identifier => self.unescape_ident_span(token.span),
 			x if Self::kind_is_keyword_like(x) => {
 				// Safety: Lexer guarentees no null bytes.
-				Ok(self.lexer.span_str(token.span))
+				Ok(self.span_str(token.span))
 			}
 			_ => {
 				unexpected!(self, token, "an identifier");
@@ -330,14 +311,13 @@ impl Parser<'_> {
 				} else {
 					token.span
 				};
-				Ok(self.lexer.span_str(span).to_owned())
+				Ok(self.span_str(span).to_owned())
 			}
 			TokenKind::Identifier | TokenKind::NaN | TokenKind::Infinity => {
-				let str = self.lexer.span_str(token.span);
-				let str = Lexer::unescape_ident_span(str, token.span, &mut self.unscape_buffer)?;
+				let str = self.unescape_ident_span(token.span)?;
 				Ok(str.to_owned())
 			}
-			x if Self::kind_is_keyword_like(x) => Ok(self.lexer.span_str(token.span).to_owned()),
+			x if Self::kind_is_keyword_like(x) => Ok(self.span_str(token.span).to_owned()),
 			_ => {
 				unexpected!(self, token, "an identifier");
 			}

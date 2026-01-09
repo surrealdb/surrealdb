@@ -1,4 +1,3 @@
-use core::f64;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -78,8 +77,15 @@ impl Parser<'_> {
 					return Ok(PublicValue::Set(PublicSet::new()));
 				}
 
-				if let t!("\"") | t!("'") | TokenKind::Identifier | TokenKind::Digits =
-					self.peek().kind
+				if let t!("\"")
+				| t!("'")
+				| TokenKind::Identifier
+				| TokenKind::Digits
+				| TokenKind::Keyword(_)
+				| TokenKind::Language(_)
+				| TokenKind::Algorithm(_)
+				| TokenKind::Distance(_)
+				| TokenKind::VectorType(_) = self.peek().kind
 					&& let Some(x) = self
 						.speculate(stk, async |stk, this| {
 							let key = this.parse_object_key()?;
@@ -213,7 +219,7 @@ impl Parser<'_> {
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
-				let compound = self.lexer.lex_compound(token, compound::numeric)?;
+				let compound = self.lex_compound(token, compound::numeric)?;
 				match compound.value {
 					Numeric::Duration(x) => PublicValue::Duration(PublicDuration::from(x)),
 					Numeric::Integer(x) => {
@@ -319,7 +325,7 @@ impl Parser<'_> {
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
-				let compound = self.lexer.lex_compound(token, compound::numeric)?;
+				let compound = self.lex_compound(token, compound::numeric)?;
 				match compound.value {
 					Numeric::Duration(x) => Ok(PublicValue::Duration(PublicDuration::from(x))),
 					Numeric::Integer(x) => {
@@ -497,7 +503,7 @@ impl Parser<'_> {
 					_ => {}
 				}
 
-				let digits_str = self.lexer.span_str(digits_token.span);
+				let digits_str = self.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
 					PublicRecordIdKey::Number(number)
 				} else {
@@ -507,7 +513,7 @@ impl Parser<'_> {
 			t!("-") => {
 				self.pop_peek();
 				let token = expected!(self, TokenKind::Digits);
-				if let Ok(number) = self.lexer.lex_compound(token, compound::integer::<u64>) {
+				if let Ok(number) = self.lex_compound(token, compound::integer::<u64>) {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
@@ -532,7 +538,7 @@ impl Parser<'_> {
 				} else {
 					self.pop_peek();
 
-					let digits_str = self.lexer.span_str(peek.span);
+					let digits_str = self.span_str(peek.span);
 					if let Ok(number) = digits_str.parse::<i64>() {
 						PublicRecordIdKey::Number(number)
 					} else {

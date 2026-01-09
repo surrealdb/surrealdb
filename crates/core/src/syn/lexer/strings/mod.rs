@@ -86,10 +86,19 @@ impl Lexer<'_> {
 			let byte = reader.next().expect("Invalid string token");
 			match byte {
 				b'\\' => {
-					if let Some(b'/') = reader.peek() {
-						buffer.push(b'/');
-					} else {
-						Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
+					let Some(c) = reader.next() else {
+						let span = reader.span_since(before).as_within(span);
+						bail!("Invalid escape sequence", @span => "missing escape character")
+					};
+
+					match c {
+						b'0' => buffer.push(b'\0'),
+						b'/' => buffer.push(b'/'),
+						x => {
+							// let the regex crate parse function handle this escape.
+							buffer.push(b'\\');
+							buffer.push(x);
+						}
 					}
 				}
 				b'/' => break,

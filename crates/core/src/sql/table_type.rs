@@ -82,8 +82,8 @@ pub struct Relation {
 impl From<Relation> for crate::catalog::Relation {
 	fn from(v: Relation) -> Self {
 		Self {
-			from: v.from.map(Into::into),
-			to: v.to.map(Into::into),
+			from: v.from,
+			to: v.to,
 			enforced: v.enforced,
 		}
 	}
@@ -92,8 +92,8 @@ impl From<Relation> for crate::catalog::Relation {
 impl From<crate::catalog::Relation> for Relation {
 	fn from(v: crate::catalog::Relation) -> Self {
 		Self {
-			from: v.from.map(Into::into),
-			to: v.to.map(Into::into),
+			from: v.from,
+			to: v.to,
 			enforced: v.enforced,
 		}
 	}

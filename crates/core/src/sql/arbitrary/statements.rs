@@ -354,17 +354,16 @@ impl<'a> Arbitrary<'a> for Ast {
 				op: BinaryOperator::Equal,
 				right,
 				..
-			}) = e
+			}) = e && let Expr::Param(ref left) = **left
 			{
-				if let Expr::Param(ref left) = **left {
-					*e = TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
-						name: left.clone().into_string(),
-						kind: None,
-						what: (**right).clone(),
-					})))
-				}
+				*e = TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
+					name: left.clone().into_string(),
+					kind: None,
+					what: (**right).clone(),
+				})))
 			}
 		}
+
 		Ok(Ast {
 			expressions,
 		})

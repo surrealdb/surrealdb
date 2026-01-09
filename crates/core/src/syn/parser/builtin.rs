@@ -5,7 +5,6 @@ use unicase::UniCase;
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
 use crate::syn::error::{MessageKind, bail};
-use crate::syn::lexer::Lexer;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
@@ -584,8 +583,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 impl Parser<'_> {
 	/// Parse a builtin path.
 	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
-		let s = self.lexer.span_str(start);
-		let s = Lexer::unescape_ident_span(s, start, &mut self.unscape_buffer)?;
+		let s = self.unescape_ident_span(start)?;
 		let mut buffer = s.to_owned();
 
 		let mut last_span = start;
@@ -597,8 +595,7 @@ impl Parser<'_> {
 			self.pop_peek();
 
 			buffer.push_str("::");
-			let s = self.lexer.span_str(peek.span);
-			let s = Lexer::unescape_ident_span(s, peek.span, &mut self.unscape_buffer)?;
+			let s = self.unescape_ident_span(peek.span)?;
 			buffer.push_str(s);
 			last_span = peek.span;
 		}

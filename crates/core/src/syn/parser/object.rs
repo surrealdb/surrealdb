@@ -71,8 +71,11 @@ impl Parser<'_> {
 			return Ok(Expr::Literal(Literal::Object(x)));
 		}
 
+		let statement_peek = self.peek();
 		// It's either a set or a block.
-		let first_expr = stk.run(|stk| self.parse_block_expr(stk)).await?;
+		let first_expr = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
+
+		let first_expr_span = statement_peek.span.covers(self.last_span());
 
 		let next = self.peek();
 		match next.kind {
@@ -84,10 +87,15 @@ impl Parser<'_> {
 			}
 			t!("}") => {
 				self.pop_peek();
+				if statement_peek.kind != t!("(") {
+					Self::reject_letless_let(&first_expr, first_expr_span)?;
+				}
 				Ok(Expr::Block(Box::new(Block(vec![first_expr]))))
 			}
 			_ => {
-				self.pop_peek();
+				if statement_peek.kind != t!("(") {
+					Self::reject_letless_let(&first_expr, first_expr_span)?;
+				}
 				let block = self.parse_block_remaining(stk, start, vec![first_expr]).await?;
 				Ok(Expr::Block(Box::new(block)))
 			}
@@ -227,15 +235,15 @@ impl Parser<'_> {
 		match token.kind {
 			x if Self::kind_is_keyword_like(x) => {
 				self.pop_peek();
-				let str = self.lexer.span_str(token.span);
+				let str = self.span_str(token.span);
 				Ok(str.to_string())
 			}
 			TokenKind::Identifier => self.parse_ident(),
 			t!("\"") | t!("'") => Ok(self.parse_string_lit()?),
 			TokenKind::Digits => {
 				self.pop_peek();
-				let span = self.lexer.lex_compound(token, compound::number)?.span;
-				let str = self.lexer.span_str(span);
+				let span = self.lex_compound(token, compound::number)?.span;
+				let str = self.span_str(span);
 				Ok(str.to_string())
 			}
 			_ => unexpected!(self, token, "an object key"),

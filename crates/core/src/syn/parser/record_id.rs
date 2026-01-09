@@ -251,7 +251,7 @@ impl Parser<'_> {
 					}
 				}
 
-				let digits_str = self.lexer.span_str(digits_token.span);
+				let digits_str = self.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
@@ -262,20 +262,19 @@ impl Parser<'_> {
 			t!("-") => {
 				self.pop_peek();
 				let token = expected!(self, TokenKind::Digits);
-				if let Ok(number) = self.lexer.lex_compound(token, compound::integer::<u64>) {
+				if let Ok(number) = self.lex_compound(token, compound::integer::<u64>) {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
 						Ordering::Less => Ok(RecordIdKeyLit::Number(-(number.value as i64))),
 						Ordering::Equal => Ok(RecordIdKeyLit::Number(i64::MIN)),
 						// Safety: Parser guarentees no null bytes present in string.
-						Ordering::Greater => Ok(RecordIdKeyLit::String(format!(
-							"-{}",
-							self.lexer.span_str(number.span)
-						))),
+						Ordering::Greater => {
+							Ok(RecordIdKeyLit::String(format!("-{}", self.span_str(number.span))))
+						}
 					}
 				} else {
-					let strand = format!("-{}", self.lexer.span_str(token.span));
+					let strand = format!("-{}", self.span_str(token.span));
 					Ok(RecordIdKeyLit::String(strand))
 				}
 			}
@@ -292,7 +291,7 @@ impl Parser<'_> {
 
 				self.pop_peek();
 
-				let digits_str = self.lexer.span_str(token.span);
+				let digits_str = self.span_str(token.span);
 				if let Ok(number) = digits_str.parse::<i64>() {
 					Ok(RecordIdKeyLit::Number(number))
 				} else {
@@ -306,7 +305,7 @@ impl Parser<'_> {
 					expected!(self, t!(")"));
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid))
 				} else {
-					let slice = self.lexer.span_str(token.span);
+					let slice = self.span_str(token.span);
 					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
@@ -316,7 +315,7 @@ impl Parser<'_> {
 					expected!(self, t!(")"));
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Uuid))
 				} else {
-					let slice = self.lexer.span_str(token.span);
+					let slice = self.span_str(token.span);
 					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
@@ -326,7 +325,7 @@ impl Parser<'_> {
 					expected!(self, t!(")"));
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Rand))
 				} else {
-					let slice = self.lexer.span_str(token.span);
+					let slice = self.span_str(token.span);
 					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}

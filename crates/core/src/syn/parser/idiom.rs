@@ -583,7 +583,7 @@ impl Parser<'_> {
 						}
 						TokenKind::Digits | t!("+") => {
 							let next = self.next();
-							let number = self.lexer.lex_compound(next, compound::numeric)?;
+							let number = self.lex_compound(next, compound::numeric)?;
 							let number = match number.value {
 								Numeric::Duration(_) => {
 									bail!("Unexpected token `duration` expected a number", @number.span );

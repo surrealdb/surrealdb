@@ -558,7 +558,7 @@ impl Parser<'_> {
 		let since = match next.kind {
 			TokenKind::Digits => {
 				self.pop_peek();
-				let int = self.lexer.lex_compound(next, compound::integer)?.value;
+				let int = self.lex_compound(next, compound::integer)?.value;
 				ShowSince::Versionstamp(int)
 			}
 			t!("d\"") | t!("d'") => ShowSince::Timestamp(self.next_token_value()?),

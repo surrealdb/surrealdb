@@ -778,7 +778,7 @@ impl DefineTableStatement {
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
 				let val = rel
-					.from
+					.to
 					.as_ref()
 					.map(|x| Kind::Record(x.iter().cloned().map(TableName::new).collect()));
 				txn.set(

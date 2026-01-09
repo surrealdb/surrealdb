@@ -23,7 +23,7 @@ impl Parser<'_> {
 			TokenKind::Infinity => Ok(Expr::Literal(Literal::Float(f64::INFINITY))),
 			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::numeric)?;
+				let value = self.lex_compound(token, compound::numeric)?;
 				self.last_span = value.span;
 				let v = match value.value {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
@@ -99,17 +99,19 @@ impl Parser<'_> {
 			}
 			t!("r\"") | t!("r'") => {
 				self.pop_peek();
-				let source_str = self.lexer.span_str(token.span);
-				let str =
-					Lexer::unescape_string_span(source_str, token.span, &mut self.unscape_buffer)?;
+				let str = self.unescape_string_span(token.span)?;
 				let mut inner_parser = Parser::new(str.as_bytes());
 				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
 					Ok(x) => x,
 					Err(e) => {
 						let e = e.update_spans(|span| {
 							let range = span.to_range();
-							let start = Lexer::escaped_string_offset(source_str, range.start);
-							let end = Lexer::escaped_string_offset(source_str, range.end);
+							let start = Lexer::escaped_string_offset(
+								self.span_str(token.span),
+								range.start,
+							);
+							let end =
+								Lexer::escaped_string_offset(self.span_str(token.span), range.end);
 							*span = Span::from_range(
 								(token.span.offset + start)..(token.span.offset + end),
 							)
@@ -547,8 +549,7 @@ impl Parser<'_> {
 		let token = self.next();
 		assert!(matches!(token.kind, t!("'") | t!("\"")));
 
-		let str = self.lexer.span_str(token.span);
-		let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
+		let str = self.unescape_string_span(token.span)?;
 
 		if let Ok(x) = Lexer::lex_uuid(str) {
 			return Ok(Literal::Uuid(x));
@@ -579,11 +580,11 @@ impl Parser<'_> {
 			}
 		}
 		let token = expected!(self, t!("{"));
-		let mut span = self.lexer.lex_compound(token, compound::javascript)?.span;
+		let mut span = self.lex_compound(token, compound::javascript)?.span;
 		// remove the starting `{` and ending `}`.
 		span.offset += 1;
 		span.len -= 2;
-		let body = self.lexer.span_str(span);
+		let body = self.span_str(span);
 		let receiver = Function::Script(Script(body.to_string()));
 		Ok(FunctionCall {
 			receiver,

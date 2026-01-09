@@ -193,7 +193,7 @@ impl DefineFieldStatement {
 							from: Some(
 								field_kind.iter().map(|x| x.clone().into_string()).collect(),
 							),
-							..relation.to_owned()
+							..relation.clone()
 						});
 
 						txn.put_tb(ns_name, db_name, &tb).await?;
@@ -220,11 +220,12 @@ impl DefineFieldStatement {
 						bail!(Error::Thrown("in field on a relation must be a record".into(),))
 					};
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref().map(|x| field_kind != x).unwrap_or(true) {
+					if relation.to.as_ref().map(|x| field_kind != x).unwrap_or(true) {
 						tb.table_type = TableType::Relation(Relation {
 							to: Some(field_kind.iter().map(|x| x.clone().into_string()).collect()),
 							..relation.clone()
 						});
+
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
 						if let Some(cache) = ctx.get_cache() {

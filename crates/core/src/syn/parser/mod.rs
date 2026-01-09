@@ -67,6 +67,7 @@ use self::token_buffer::TokenBuffer;
 use crate::sql;
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
+use crate::syn::lexer::compound::CompoundToken;
 use crate::syn::token::{Span, Token, TokenKind, t};
 
 mod basic;
@@ -420,6 +421,38 @@ impl<'a> Parser<'a> {
 	/// Parse a single expression.
 	pub(crate) async fn parse_expr(&mut self, stk: &mut Stk) -> ParseResult<sql::Expr> {
 		self.parse_expr_start(stk).await
+	}
+
+	pub fn lex_compound<F, R>(
+		&mut self,
+		start: Token,
+		f: F,
+	) -> Result<CompoundToken<R>, SyntaxError>
+	where
+		F: Fn(&mut Lexer, Token) -> Result<R, SyntaxError>,
+	{
+		let res = self.lexer.lex_compound(start, f)?;
+		self.last_span = res.span;
+		Ok(res)
+	}
+
+	pub fn span_str(&self, span: Span) -> &str {
+		self.lexer.span_str(span)
+	}
+
+	pub fn unescape_ident_span(&mut self, span: Span) -> Result<&str, SyntaxError> {
+		let str = self.lexer.span_str(span);
+		Lexer::unescape_ident_span(str, span, &mut self.unscape_buffer)
+	}
+
+	pub fn unescape_string_span(&mut self, span: Span) -> Result<&str, SyntaxError> {
+		let str = self.lexer.span_str(span);
+		Lexer::unescape_string_span(str, span, &mut self.unscape_buffer)
+	}
+
+	pub fn unescape_regex_span(&mut self, span: Span) -> Result<&str, SyntaxError> {
+		let str = self.lexer.span_str(span);
+		Lexer::unescape_regex_span(str, span, &mut self.unscape_buffer)
 	}
 
 	/// Speculativily parse a branch.

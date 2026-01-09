@@ -116,15 +116,13 @@ impl ToSql for Block {
 					for (i, v) in self.0.iter().enumerate() {
 						if i > 0 {
 							f.push(' ');
-						} else {
-							f.push('(');
-							v.fmt_sql(f, fmt);
-							f.push(')');
-							f.push(';');
-							continue;
 						}
 
-						if let Expr::Binary {
+						if i == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = v
+						{
+							write_sql!(f, fmt, "({v})");
+						} else if let Expr::Binary {
 							left,
 							op: BinaryOperator::Equal,
 							..

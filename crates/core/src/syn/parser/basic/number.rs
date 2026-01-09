@@ -19,7 +19,7 @@ where
 	match token.kind {
 		t!("+") | TokenKind::Digits => {
 			parser.pop_peek();
-			Ok(parser.lexer.lex_compound(token, compound::integer)?.value)
+			Ok(parser.lex_compound(token, compound::integer)?.value)
 		}
 		t!("-") => {
 			bail!("Unexpected token `-`", @token.span => "Only positive integers allowed here")
@@ -36,7 +36,7 @@ where
 	match token.kind {
 		t!("+") | t!("-") | TokenKind::Digits => {
 			parser.pop_peek();
-			Ok(parser.lexer.lex_compound(token, compound::integer)?.value)
+			Ok(parser.lex_compound(token, compound::integer)?.value)
 		}
 		_ => unexpected!(parser, token, "an signed integer"),
 	}
@@ -78,7 +78,7 @@ impl TokenValue for f32 {
 		match token.kind {
 			t!("+") | t!("-") | TokenKind::Digits | TokenKind::NaN | TokenKind::Infinity => {
 				parser.pop_peek();
-				Ok(parser.lexer.lex_compound(token, compound::float)?.value)
+				Ok(parser.lex_compound(token, compound::float)?.value)
 			}
 			_ => unexpected!(parser, token, "a floating point number"),
 		}
@@ -91,7 +91,7 @@ impl TokenValue for f64 {
 		match token.kind {
 			t!("+") | t!("-") | TokenKind::Digits | TokenKind::NaN | TokenKind::Infinity => {
 				parser.pop_peek();
-				Ok(parser.lexer.lex_compound(token, compound::float)?.value)
+				Ok(parser.lex_compound(token, compound::float)?.value)
 			}
 			_ => unexpected!(parser, token, "a floating point number"),
 		}
@@ -104,11 +104,11 @@ impl TokenValue for Numeric {
 		match token.kind {
 			t!("+") | t!("-") => {
 				parser.pop_peek();
-				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+				Ok((parser.lex_compound(token, compound::number))?.value)
 			}
 			TokenKind::Digits => {
 				parser.pop_peek();
-				Ok((parser.lexer.lex_compound(token, compound::numeric))?.value)
+				Ok((parser.lex_compound(token, compound::numeric))?.value)
 			}
 			TokenKind::NaN => {
 				parser.pop_peek();
