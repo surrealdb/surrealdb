@@ -17,7 +17,7 @@ value = "NONE"
 error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
-error = "Database index `item_name_idx` already contains 'ItemA', with record `item:`item:1``"
+error = """Database index `item_name_idx` already contains 'ItemA', with record `item:"item:1"`"""
 
 [[test.results]]
 value = "[]"
