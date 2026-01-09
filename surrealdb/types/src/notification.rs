@@ -3,6 +3,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+#[allow(unused_imports)]
+use crate as surrealdb_types;
 use crate::{SurrealValue, Uuid, Value};
 
 /// The action that caused the notification

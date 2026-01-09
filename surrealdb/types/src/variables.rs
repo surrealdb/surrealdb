@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[allow(unused_imports)]
+use crate as surrealdb_types;
 use crate::{Object, SurrealValue, Value};
 
 /// Represents a set of variables that can be used in a query.
