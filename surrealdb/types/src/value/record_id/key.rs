@@ -164,15 +164,15 @@ impl SurrealValue for RecordIdKey {
 	}
 
 	fn is_value(value: &Value) -> bool {
-		match value {
-			Value::Number(Number::Int(_)) => true,
-			Value::String(_) => true,
-			Value::Uuid(_) => true,
-			Value::Array(_) => true,
-			Value::Object(_) => true,
-			Value::Range(_) => true,
-			_ => false,
-		}
+		matches!(
+			value,
+			Value::Number(Number::Int(_))
+				| Value::String(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Range(_)
+		)
 	}
 
 	fn into_value(self) -> Value {
