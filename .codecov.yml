@@ -24,18 +24,17 @@ component_management:
     - component_id: surrealdb_core
       name: surrealdb-core
       paths:
-        - crates/core/**
+        - surrealdb/core/**
 
     - component_id: surrealdb_types
       name: surrealdb-types
       paths:
-        - crates/types/**
-        - crates/types-derive/**
+        - surrealdb/types/**
 
     - component_id: surrealdb_sdk
       name: surrealdb-sdk
       paths:
-        - crates/sdk/**
+        - surrealdb/**
 
     - component_id: surrealdb_bin
       name: surrealdb-bin

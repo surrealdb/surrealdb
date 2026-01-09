@@ -34,6 +34,27 @@ audit-as-crates-io = true
 [policy.surrealdb-server]
 audit-as-crates-io = false
 
+[policy.surrealdb-types]
+audit-as-crates-io = false
+
+[policy.surrealdb-types-derive]
+audit-as-crates-io = false
+
+[policy.surrealism]
+audit-as-crates-io = true
+
+[policy.surrealism-cli]
+audit-as-crates-io = true
+
+[policy.surrealism-macros]
+audit-as-crates-io = true
+
+[policy.surrealism-runtime]
+audit-as-crates-io = true
+
+[policy.surrealism-types]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -238,6 +259,10 @@ criteria = "safe-to-deploy"
 version = "5.4.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.codespan-reporting]]
+version = "0.13.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.compare]]
 version = "0.0.6"
 criteria = "safe-to-deploy"
@@ -312,6 +337,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crypto-common]]
 version = "0.1.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.cxxbridge-flags]]
+version = "1.0.188"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
@@ -474,6 +503,10 @@ criteria = "safe-to-deploy"
 version = "0.3.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.gimli]]
+version = "0.26.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.globset]]
 version = "0.4.18"
 criteria = "safe-to-run"
@@ -504,6 +537,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.heapless]]
 version = "0.8.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.heck]]
+version = "0.3.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
@@ -1250,6 +1287,10 @@ criteria = "safe-to-deploy"
 version = "2.0.110"
 criteria = "safe-to-deploy"
 
+[[exemptions.syn]]
+version = "2.0.111"
+criteria = "safe-to-deploy"
+
 [[exemptions.sync_wrapper]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
@@ -1430,6 +1471,10 @@ criteria = "safe-to-deploy"
 version = "0.0.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.walrus]]
+version = "0.20.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.wasm-bindgen]]
 version = "0.2.105"
 criteria = "safe-to-deploy"
@@ -1444,6 +1489,18 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen-shared]]
 version = "0.2.105"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-opt]]
+version = "0.116.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-opt-cxx-sys]]
+version = "0.116.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-opt-sys]]
+version = "0.116.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-streams]]
@@ -1488,6 +1545,18 @@ criteria = "safe-to-deploy"
 
 [[exemptions.winapi-x86_64-pc-windows-gnu]]
 version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-core]]
+version = "0.62.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-result]]
+version = "0.4.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.windows-strings]]
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]

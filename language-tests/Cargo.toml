@@ -1,0 +1,50 @@
+[package]
+name = "surrealql-test"
+version = "0.1.0"
+publish = false
+edition = "2024"
+
+[workspace]
+members = []
+
+[features]
+default = []
+backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
+backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
+backend-tikv = ["surrealdb-core/kv-tikv"]
+upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
+
+[dependencies]
+# Crates for running surrealdb.
+surrealdb-core = { path = "../surrealdb/core", default-features = false, features = ["scripting", "kv-mem"] }
+surrealdb-types = { path = "../surrealdb/types" }
+reblessive = { version = "0.4.3" }
+rust_decimal = { version = "1.39.0", features = ["maths", "serde-str"] }
+
+# Used for capturing logs from core
+#tracing = "*"
+#tracing-subscriber = { version = "*", features = ["fmt","ansi"] }
+
+# Error handling
+anyhow = "1.0.100"
+
+# Async utility crates
+tokio = { version = "1.44.2", features = ["full"] }
+futures = "0.3.30"
+
+# Config and cli parsing
+clap = { version = "4.4.11", features = ["cargo"] }
+serde = { version = "1.0.209", features = ["derive"] }
+toml = "0.8.19"
+toml_edit = { version = "0.22", features = ["serde"] }
+semver = "1.0.27"
+
+# Used for formatting output
+base64 = "0.21.5"
+similar = "2.6.0"
+
+# Used for for communicating with the surrealdb server during upgrade tests.
+tokio-tungstenite = { version = "0.28.0", optional = true }
+revision = { version = "0.14.0", optional = true }
+cfg-if = "1.0.0"
+serde_json = "1.0.145"
