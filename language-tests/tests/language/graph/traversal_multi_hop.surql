@@ -5,41 +5,47 @@ imports = ["datasets/graph.surql"]
 [test]
 reason = "Test chained multi-hop graph traversal"
 
+# 0
 [[test.results]]
 value = "[person:dir_platform]"
 
+# 1
 [[test.results]]
 value = "[person:vp_eng]"
 
+# 2
 [[test.results]]
 value = "[person:ceo]"
 
+# 3
 [[test.results]]
 value = "[person:alice, person:bob, person:alice, person:bob, person:lead_infra]"
 
+# 4
 [[test.results]]
 value = "[person:alice, person:charlie, person:dana]"
 
+# 5
 [[test.results]]
 value = "[{ id: person:lead_infra, name: 'Priya Patel', reports_from: ['Alice Zhang', 'Bob Martinez'], reports_to: ['Sarah Kim'] }]"
 */
 
--- Two hops up the management chain
+-- 0: Two hops up the management chain
 person:alice->reports_to->person->reports_to->person;
 
--- Three hops
+-- 1: Three hops
 person:alice->reports_to->person->reports_to->person->reports_to->person;
 
--- Four hops to CEO
+-- 2: Four hops to CEO
 person:alice->reports_to->person->reports_to->person->reports_to->person->reports_to->person;
 
--- Mixed directions: who works on the same projects as alice?
+-- 3: Mixed directions: who works on the same projects as alice?
 person:alice->works_on->project<-works_on<-person;
 
--- Two-hop knows: friends of friends
+-- 4: Two-hop knows: friends of friends
 person:alice->knows->person->knows->person;
 
--- Both directions in same SELECT
+-- 5: Both directions in same SELECT
 SELECT 
     id, 
     name,
