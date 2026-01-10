@@ -1,6 +1,8 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
+# This is set higher just to ensure that the TiKV backend doesn't exceed the timeout.
+timeout = 5000
 
 [test]
 reason = "Test +collect modifier handling cycles gracefully"
