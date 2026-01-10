@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
+timeout = 4000
 
 [test]
 reason = "Test TIMEOUT on graph expressions"
