@@ -75,6 +75,7 @@ a:1->(SELECT id FROM edge:..=3 START 1 LIMIT 1).*;
 -- 7: Computed edge ranges
 LET $num = 10;
 
+-- 8: Setup computed edge data
 {
     CREATE b:1, b:2;
     RELATE b:1->computed_edge:[$num - 5]->b:2;
