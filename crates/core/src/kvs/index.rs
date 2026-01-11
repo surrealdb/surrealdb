@@ -5,6 +5,7 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::index::IndexOperation;
+use crate::key::index::df::Df;
 use crate::key::index::ia::Ia;
 use crate::key::index::ip::Ip;
 use crate::key::thing;
@@ -27,6 +28,7 @@ use std::time::Duration;
 use tokio::spawn;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
+use tracing::warn;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -173,6 +175,37 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Restart deferred indexes after database startup
+	pub(super) async fn restart_deferred_index(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+		tb: &str,
+		ix: &DefineIndexStatement,
+	) -> Result<(), Error> {
+		if !ix.defer {
+			return Ok(());
+		}
+		let (ns, db) = opt.ns_db()?;
+		let tx = ctx.tx();
+		let df = Df::new(ns, db, tb, &ix.name);
+		let key = IndexKey::new(ns, db, df.tb, df.ix);
+		let initial_build_done = match tx.get(df, None).await? {
+			None => false,
+			Some(v) => revision::from_slice::<bool>(&v)?,
+		};
+		let ix = Arc::new(ix.clone());
+		if let Entry::Vacant(e) = self.indexes.write().await.entry(key) {
+			let building = if initial_build_done {
+				self.start_deferred_index(ctx, opt.clone(), ix).await?
+			} else {
+				self.start_building(ctx, opt.clone(), ix, None).await?
+			};
+			e.insert(building);
+		}
+		Ok(())
+	}
+
 	/// Start building an index in the background
 	async fn start_building(
 		&self,
@@ -209,19 +242,32 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
-	fn spawn_deferred_daemon(b_daemon: IndexBuilding) {
+	async fn start_deferred_index(
+		&self,
+		ctx: &Context,
+		opt: Options,
+		ix: Arc<DefineIndexStatement>,
+	) -> Result<IndexBuilding, Error> {
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		building.recover_queue().await?;
+		building.initial_build_complete.store(true, Ordering::Relaxed);
+		Self::spawn_deferred_daemon(building.clone());
+		Ok(building)
+	}
+
+	fn spawn_deferred_daemon(building: IndexBuilding) {
 		spawn(async move {
 			// Ensure that the daemon running flag is properly managed
-			let daemon_guard = DeferredDaemonGuard(b_daemon.clone());
-			b_daemon.deferred_daemon_running.store(true, Ordering::Relaxed);
+			let daemon_guard = DeferredDaemonGuard(building.clone());
+			building.deferred_daemon_running.store(true, Ordering::Relaxed);
 			loop {
-				if b_daemon.is_aborted().await {
-					b_daemon.set_status(BuildingStatus::Aborted).await;
+				if building.is_aborted().await {
+					building.set_status(BuildingStatus::Aborted).await;
 					break;
 				}
-				if let Err(e) = b_daemon.index_appending_loop(None).await {
+				if let Err(e) = building.index_appending_loop(None).await {
 					error!("Index appending loop error: {}", e);
-					b_daemon.set_status(BuildingStatus::Error(e.to_string())).await;
+					building.set_status(BuildingStatus::Error(e.to_string())).await;
 					break;
 				}
 				sleep(Duration::from_millis(100)).await;
@@ -282,26 +328,6 @@ impl IndexBuilder {
 		// This is the normal path
 		if let Some(building) = self.indexes.read().await.get(&key) {
 			// And index is currently building, or is a deferred index
-			return building.maybe_consume(ctx, old_values, new_values, rid).await;
-		}
-		if ix.defer {
-			// After a restart, the defer deamon needs to be restarted
-			let building = match self.indexes.write().await.entry(key) {
-				Entry::Occupied(e) => e.get().clone(),
-				Entry::Vacant(e) => {
-					let building = Arc::new(Building::new(
-						ctx,
-						self.tf.clone(),
-						opt.clone(),
-						Arc::new(ix.clone()),
-					)?);
-					building.recover_queue().await?;
-					building.initial_build_complete.store(true, Ordering::Relaxed);
-					e.insert(building.clone());
-					Self::spawn_deferred_daemon(building.clone());
-					building
-				}
-			};
 			return building.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		// There is no index building process (defer or initial building)
@@ -560,7 +586,12 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
 			let tx = ctx.tx();
-			tx.delp(&key).await?;
+			catch!(tx, tx.delp(&key).await);
+			if self.ix.defer {
+				// We need to know we have started building a deferred index
+				// and that the initial build is not done
+				catch!(tx, tx.set(key, revision::to_vec(&false)?, None).await);
+			}
 			tx.commit().await?;
 		}
 
@@ -589,7 +620,7 @@ impl Building {
 			next = batch.next;
 			// Check there are records
 			if batch.result.is_empty() {
-				// If not, we are with the initial indexing
+				// If not, we are done with the initial indexing
 				break;
 			}
 			// Create a new context with a write transaction
@@ -613,7 +644,20 @@ impl Building {
 		if !self.ix.defer {
 			// Second iteration, we index/remove any records that have been added or removed since the initial indexing
 			self.index_appending_loop(Some(initial_count)).await?;
+		} else {
+			self.set_df_status(true).await?;
 		}
+		Ok(())
+	}
+
+	async fn set_df_status(&self, initial_build_done: bool) -> Result<(), Error> {
+		let (ns, db) = self.opt.ns_db()?;
+		// confirm that the initial build has been successful
+		let key = Df::new(ns, db, &self.ix.what, &self.ix.name);
+		let ctx = self.new_write_tx_ctx().await?;
+		let tx = ctx.tx();
+		catch!(tx, tx.set(key, revision::to_vec(&initial_build_done)?, None).await);
+		tx.commit().await?;
 		Ok(())
 	}
 

@@ -150,6 +150,8 @@ pub enum Category {
 	IndexQueueSequences,
 	/// crate::key::index::iu                /*{ns}*{db}*{tb}+{ix}*iu{uuid}{uuid}{count}
 	IndexCountState,
+	/// crate::key::index::df                /*{ns}*{db}*{tb}+{ix}!df
+	IndexDeferred,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -243,6 +245,7 @@ impl Display for Category {
 			Self::TaskLease => "TaskLease",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::IndexDeferred => "IndexDeferred",
 		};
 		write!(f, "{}", name)
 	}
