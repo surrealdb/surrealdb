@@ -13,6 +13,7 @@ use std::ops::Bound;
 use std::str::FromStr;
 use std::time::Duration;
 
+use chrono::DateTime;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, coord};
 use rust_decimal::Decimal;
 use uuid::Uuid as UuidExt;
@@ -20,16 +21,27 @@ use uuid::Uuid as UuidExt;
 use super::super::*;
 use crate::catalog::record::{Data, Record, RecordType};
 use crate::catalog::schema::base::Base;
+use crate::catalog::{
+	ApiActionDefinition, ApiConfigDefinition, ApiMethod, DatabaseId, IndexId, ModuleDefinition,
+	ModuleExecutable, NamespaceId, NodeLiveQuery, SiloExecutable, SurrealismExecutable, TableId,
+};
+use crate::cf::mutations::{TableMutation, TableMutations};
+use crate::dbs::node::{Node, Timestamp};
 use crate::expr::field::Selector;
 use crate::expr::{
 	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
 	Tokenizer,
 };
 use crate::iam::Auth;
+use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
+use crate::idx::ft::offset::Offset;
+use crate::kvs::index::{Appending, PrimaryAppending};
+use crate::kvs::sequences::{BatchValue, SequenceState};
+use crate::kvs::tasklease::TaskLease;
 use crate::kvs::version::MajorVersion;
 use crate::val::{
 	Array, Bytes, Datetime, Duration as ValDuration, File, Geometry, Number, Object, Range,
-	RecordId, Regex, Set, TableName, Uuid, Value,
+	RecordId, RecordIdKey, Regex, Set, TableName, Uuid, Value,
 };
 
 // ===========================================================================
@@ -884,4 +896,282 @@ pub fn version_1() -> MajorVersion {
 /// Major version 3
 pub fn version_3() -> MajorVersion {
 	MajorVersion::from(3)
+}
+
+// ===========================================================================
+// ApiActionDefinition fixtures
+// ===========================================================================
+
+/// Minimal API action definition
+pub fn api_action_basic() -> ApiActionDefinition {
+	ApiActionDefinition {
+		methods: vec![ApiMethod::Get],
+		action: Expr::Literal(Literal::String("SELECT * FROM users".to_string())),
+		config: ApiConfigDefinition::default(),
+	}
+}
+
+/// API action with multiple methods
+pub fn api_action_multi_method() -> ApiActionDefinition {
+	ApiActionDefinition {
+		methods: vec![ApiMethod::Get, ApiMethod::Post, ApiMethod::Put],
+		action: Expr::Literal(Literal::String("CREATE users CONTENT $body".to_string())),
+		config: ApiConfigDefinition::default(),
+	}
+}
+
+// ===========================================================================
+// ID Type fixtures
+// ===========================================================================
+
+/// IndexId fixture
+pub fn index_id_basic() -> IndexId {
+	IndexId(42)
+}
+
+/// DatabaseId fixture
+pub fn database_id_basic() -> DatabaseId {
+	DatabaseId(123)
+}
+
+/// NamespaceId fixture
+pub fn namespace_id_basic() -> NamespaceId {
+	NamespaceId(456)
+}
+
+/// TableId fixture
+pub fn table_id_basic() -> TableId {
+	TableId(789)
+}
+
+// ===========================================================================
+// ModuleDefinition fixtures
+// ===========================================================================
+
+/// Module with Surrealism executable
+pub fn module_surrealism() -> ModuleDefinition {
+	ModuleDefinition {
+		name: Some("my_module".to_string()),
+		comment: Some("Custom module".to_string()),
+		permissions: Permission::Full,
+		executable: ModuleExecutable::Surrealism(SurrealismExecutable {
+			bucket: "my_bucket".to_string(),
+			key: "module_key".to_string(),
+		}),
+	}
+}
+
+/// Module with Silo executable
+pub fn module_silo() -> ModuleDefinition {
+	ModuleDefinition {
+		name: Some("silo_module".to_string()),
+		comment: None,
+		permissions: Permission::Full,
+		executable: ModuleExecutable::Silo(SiloExecutable {
+			organisation: "org".to_string(),
+			package: "pkg".to_string(),
+			major: 1,
+			minor: 2,
+			patch: 3,
+		}),
+	}
+}
+
+// ===========================================================================
+// NodeLiveQuery fixtures
+// ===========================================================================
+
+/// Minimal node live query
+pub fn node_live_query_basic() -> NodeLiveQuery {
+	NodeLiveQuery {
+		ns: NamespaceId(1),
+		db: DatabaseId(2),
+		tb: TableName::from("users"),
+	}
+}
+
+// ===========================================================================
+// TableMutations fixtures
+// ===========================================================================
+
+/// Table mutations with set operation
+pub fn table_mutations_set() -> TableMutations {
+	let mut mutations = TableMutations::new(TableName::from("users"));
+	let mut obj = Object::default();
+	obj.insert("name".to_string(), Value::String("Alice".to_string()));
+	mutations
+		.1
+		.push(TableMutation::Set(RecordId::new(TableName::from("users"), 1), Value::Object(obj)));
+	mutations
+}
+
+/// Table mutations with delete operation
+pub fn table_mutations_del() -> TableMutations {
+	let mut mutations = TableMutations::new(TableName::from("users"));
+	mutations.1.push(TableMutation::Del(RecordId::new(TableName::from("users"), 1)));
+	mutations
+}
+
+// ===========================================================================
+// Node fixtures
+// ===========================================================================
+
+/// Active node
+pub fn node_active() -> Node {
+	Node::new(
+		UuidExt::nil(),
+		Timestamp {
+			value: 1234567890,
+		},
+		false,
+	)
+}
+
+/// Archived node
+pub fn node_archived() -> Node {
+	Node::new(
+		UuidExt::nil(),
+		Timestamp {
+			value: 9876543210,
+		},
+		true,
+	)
+}
+
+// ===========================================================================
+// TermDocument fixtures
+// ===========================================================================
+
+/// Term document - basic default
+pub fn term_document_basic() -> TermDocument {
+	TermDocument::new(123, vec![Offset::new(1, 2, 3, 4)])
+}
+
+// ===========================================================================
+// DocLengthAndCount fixtures
+// ===========================================================================
+
+/// Document length and count - basic default
+pub fn doc_length_and_count_basic() -> DocLengthAndCount {
+	DocLengthAndCount::new(123, 456)
+}
+
+// ===========================================================================
+// Appending fixtures
+// ===========================================================================
+
+pub fn appending_none() -> Appending {
+	Appending::new(None, None, RecordIdKey::Number(123))
+}
+
+pub fn appending_old_values() -> Appending {
+	Appending::new(
+		Some(vec![Value::String("old value".to_string())]),
+		None,
+		RecordIdKey::Number(123),
+	)
+}
+
+pub fn appending_new_values() -> Appending {
+	Appending::new(
+		None,
+		Some(vec![Value::String("new value".to_string())]),
+		RecordIdKey::Number(123),
+	)
+}
+
+pub fn appending_both() -> Appending {
+	Appending::new(
+		Some(vec![Value::String("old value".to_string())]),
+		Some(vec![Value::String("new value".to_string())]),
+		RecordIdKey::Number(123),
+	)
+}
+
+// ===========================================================================
+// PrimaryAppending fixtures
+// ===========================================================================
+
+pub fn primary_appending_basic() -> PrimaryAppending {
+	PrimaryAppending::new(123)
+}
+
+// ===========================================================================
+// BatchValue fixtures
+// ===========================================================================
+
+pub fn batch_value_basic() -> BatchValue {
+	BatchValue::new(123, uuid::Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap())
+}
+
+// ===========================================================================
+// SequenceState fixtures
+// ===========================================================================
+
+pub fn sequence_state_basic() -> SequenceState {
+	SequenceState::new(123)
+}
+
+// ===========================================================================
+// TaskLease fixtures
+// ===========================================================================
+
+pub fn task_lease_basic() -> TaskLease {
+	TaskLease::new(
+		uuid::Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap(),
+		DateTime::from_str("2026-01-12T12:00:00Z").unwrap(),
+	)
+}
+
+// ===========================================================================
+// RecordId fixtures (explicit)
+// ===========================================================================
+
+/// RecordId with number key
+pub fn recordid_number() -> RecordId {
+	RecordId::new(TableName::from("users"), 123)
+}
+
+/// RecordId with string key
+pub fn recordid_string() -> RecordId {
+	RecordId::new(TableName::from("users"), "abc123".to_string())
+}
+
+/// RecordId with UUID key
+pub fn recordid_uuid() -> RecordId {
+	RecordId::new(TableName::from("users"), Uuid(UuidExt::nil()))
+}
+
+// ===========================================================================
+// RecordIdKey fixtures
+// ===========================================================================
+
+/// RecordIdKey with number
+pub fn recordid_key_number() -> RecordIdKey {
+	RecordIdKey::Number(42)
+}
+
+/// RecordIdKey with string
+pub fn recordid_key_string() -> RecordIdKey {
+	RecordIdKey::String("test_key".to_string())
+}
+
+/// RecordIdKey with UUID
+pub fn recordid_key_uuid() -> RecordIdKey {
+	RecordIdKey::Uuid(Uuid(UuidExt::nil()))
+}
+
+/// RecordIdKey with array
+pub fn recordid_key_array() -> RecordIdKey {
+	RecordIdKey::Array(Array::from(vec![
+		Value::Number(Number::Int(1)),
+		Value::String("a".to_string()),
+	]))
+}
+
+/// RecordIdKey with object
+pub fn recordid_key_object() -> RecordIdKey {
+	let mut obj = Object::default();
+	obj.insert("id".to_string(), Value::Number(Number::Int(123)));
+	RecordIdKey::Object(obj)
 }

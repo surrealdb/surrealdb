@@ -553,28 +553,318 @@ fn version_fixtures() -> TypeFixtures {
 	}
 }
 
+/// Generate all fixtures for ApiActionDefinition
+fn api_action_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "ApiActionDefinition",
+		fixtures: vec![
+			Fixture {
+				name: "API_ACTION_BASIC",
+				description: "minimal API action definition",
+				value: Box::new(fix::api_action_basic()),
+			},
+			Fixture {
+				name: "API_ACTION_MULTI_METHOD",
+				description: "API action with multiple methods",
+				value: Box::new(fix::api_action_multi_method()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for Appending
+fn appending_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "Appending",
+		fixtures: vec![
+			Fixture {
+				name: "APPENDING_NONE",
+				description: "appending with None values",
+				value: Box::new(fix::appending_none()),
+			},
+			Fixture {
+				name: "APPENDING_OLD_VALUES",
+				description: "appending with old values",
+				value: Box::new(fix::appending_old_values()),
+			},
+			Fixture {
+				name: "APPENDING_NEW_VALUES",
+				description: "appending with new values",
+				value: Box::new(fix::appending_new_values()),
+			},
+			Fixture {
+				name: "APPENDING_BOTH",
+				description: "appending with both old and new values",
+				value: Box::new(fix::appending_both()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for PrimaryAppending
+fn primary_appending_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "PrimaryAppending",
+		fixtures: vec![Fixture {
+			name: "PRIMARY_APPENDING_BASIC",
+			description: "primary appending with number value",
+			value: Box::new(fix::primary_appending_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for BatchValue
+fn batch_value_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "BatchValue",
+		fixtures: vec![Fixture {
+			name: "BATCH_VALUE_BASIC",
+			description: "batch value with number value",
+			value: Box::new(fix::batch_value_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for SequenceState
+fn sequence_state_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "SequenceState",
+		fixtures: vec![Fixture {
+			name: "SEQUENCE_STATE_BASIC",
+			description: "sequence state with number value",
+			value: Box::new(fix::sequence_state_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for TaskLease
+fn task_lease_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "TaskLease",
+		fixtures: vec![Fixture {
+			name: "TASK_LEASE_BASIC",
+			description: "task lease with UUID and datetime value",
+			value: Box::new(fix::task_lease_basic()),
+		}],
+	}
+}
+/// Generate all fixtures for ID types
+fn id_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "ID Types",
+		fixtures: vec![
+			Fixture {
+				name: "INDEX_ID_BASIC",
+				description: "IndexId fixture",
+				value: Box::new(fix::index_id_basic()),
+			},
+			Fixture {
+				name: "DATABASE_ID_BASIC",
+				description: "DatabaseId fixture",
+				value: Box::new(fix::database_id_basic()),
+			},
+			Fixture {
+				name: "NAMESPACE_ID_BASIC",
+				description: "NamespaceId fixture",
+				value: Box::new(fix::namespace_id_basic()),
+			},
+			Fixture {
+				name: "TABLE_ID_BASIC",
+				description: "TableId fixture",
+				value: Box::new(fix::table_id_basic()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for ModuleDefinition
+fn module_definition_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "ModuleDefinition",
+		fixtures: vec![
+			Fixture {
+				name: "MODULE_SURREALISM",
+				description: "module with Surrealism executable",
+				value: Box::new(fix::module_surrealism()),
+			},
+			Fixture {
+				name: "MODULE_SILO",
+				description: "module with Silo executable",
+				value: Box::new(fix::module_silo()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for NodeLiveQuery
+fn node_live_query_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "NodeLiveQuery",
+		fixtures: vec![Fixture {
+			name: "NODE_LIVE_QUERY_BASIC",
+			description: "minimal node live query",
+			value: Box::new(fix::node_live_query_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for TableMutations
+fn table_mutations_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "TableMutations",
+		fixtures: vec![
+			Fixture {
+				name: "TABLE_MUTATIONS_SET",
+				description: "table mutations with set operation",
+				value: Box::new(fix::table_mutations_set()),
+			},
+			Fixture {
+				name: "TABLE_MUTATIONS_DEL",
+				description: "table mutations with delete operation",
+				value: Box::new(fix::table_mutations_del()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for Node
+fn node_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "Node",
+		fixtures: vec![
+			Fixture {
+				name: "NODE_ACTIVE",
+				description: "active node",
+				value: Box::new(fix::node_active()),
+			},
+			Fixture {
+				name: "NODE_ARCHIVED",
+				description: "archived node",
+				value: Box::new(fix::node_archived()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for TermDocument
+fn term_document_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "TermDocument",
+		fixtures: vec![Fixture {
+			name: "TERM_DOCUMENT_BASIC",
+			description: "term document with offsets",
+			value: Box::new(fix::term_document_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for DocLengthAndCount
+fn doc_length_and_count_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "DocLengthAndCount",
+		fixtures: vec![Fixture {
+			name: "DOC_LENGTH_AND_COUNT_BASIC",
+			description: "document length and count",
+			value: Box::new(fix::doc_length_and_count_basic()),
+		}],
+	}
+}
+
+/// Generate all fixtures for RecordId
+fn recordid_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "RecordId",
+		fixtures: vec![
+			Fixture {
+				name: "RECORDID_NUMBER",
+				description: "RecordId with number key",
+				value: Box::new(fix::recordid_number()),
+			},
+			Fixture {
+				name: "RECORDID_STRING",
+				description: "RecordId with string key",
+				value: Box::new(fix::recordid_string()),
+			},
+			Fixture {
+				name: "RECORDID_UUID",
+				description: "RecordId with UUID key",
+				value: Box::new(fix::recordid_uuid()),
+			},
+		],
+	}
+}
+
+/// Generate all fixtures for RecordIdKey
+fn recordid_key_fixtures() -> TypeFixtures {
+	TypeFixtures {
+		type_name: "RecordIdKey",
+		fixtures: vec![
+			Fixture {
+				name: "RECORDID_KEY_NUMBER",
+				description: "RecordIdKey with number",
+				value: Box::new(fix::recordid_key_number()),
+			},
+			Fixture {
+				name: "RECORDID_KEY_STRING",
+				description: "RecordIdKey with string",
+				value: Box::new(fix::recordid_key_string()),
+			},
+			Fixture {
+				name: "RECORDID_KEY_UUID",
+				description: "RecordIdKey with UUID",
+				value: Box::new(fix::recordid_key_uuid()),
+			},
+			Fixture {
+				name: "RECORDID_KEY_ARRAY",
+				description: "RecordIdKey with array",
+				value: Box::new(fix::recordid_key_array()),
+			},
+			Fixture {
+				name: "RECORDID_KEY_OBJECT",
+				description: "RecordIdKey with object",
+				value: Box::new(fix::recordid_key_object()),
+			},
+		],
+	}
+}
+
 /// Generate all fixtures and output as Rust code
 fn generate_all_fixtures() -> String {
 	let all_fixtures = vec![
-		namespace_fixtures(),
-		database_fixtures(),
-		table_fixtures(),
-		subscription_fixtures(),
 		access_definition_fixtures(),
 		access_grant_fixtures(),
 		analyzer_fixtures(),
+		api_action_fixtures(),
 		api_fixtures(),
+		appending_fixtures(),
+		batch_value_fixtures(),
 		bucket_fixtures(),
 		config_fixtures(),
+		database_fixtures(),
+		doc_length_and_count_fixtures(),
 		event_fixtures(),
 		field_fixtures(),
 		function_fixtures(),
+		id_fixtures(),
 		index_fixtures(),
 		model_fixtures(),
+		module_definition_fixtures(),
+		namespace_fixtures(),
+		node_fixtures(),
+		node_live_query_fixtures(),
 		param_fixtures(),
-		sequence_fixtures(),
-		user_fixtures(),
+		primary_appending_fixtures(),
 		record_fixtures(),
+		recordid_fixtures(),
+		recordid_key_fixtures(),
+		sequence_fixtures(),
+		sequence_state_fixtures(),
+		subscription_fixtures(),
+		table_fixtures(),
+		table_mutations_fixtures(),
+		task_lease_fixtures(),
+		term_document_fixtures(),
+		user_fixtures(),
 		version_fixtures(),
 	];
 
@@ -628,5 +918,5 @@ fn test_v3_0_0_remains_unchanged() {
 	let v3_0_0 = include_bytes!("v3_0_0.rs");
 	let hash = Sha256::digest(v3_0_0);
 	let hash_str = hex::encode(hash);
-	assert_eq!(hash_str, "2912605ca9e4512a3de9563ce4a0ce787763195cabcbf4c2a866dc2e5208d7c8");
+	assert_eq!(hash_str, "def0c55d4279b9429795f9e2ff443309a8a243c3dc4bf593fd38e0109c6f53f2");
 }

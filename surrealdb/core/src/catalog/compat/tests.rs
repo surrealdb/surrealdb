@@ -8,8 +8,15 @@
 
 use super::super::*;
 use super::{fixtures, v3_0_0 as bytes};
+use crate::cf::TableMutations;
+use crate::dbs::node::Node;
+use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
 use crate::kvs::KVValue;
+use crate::kvs::index::{Appending, PrimaryAppending};
+use crate::kvs::sequences::{BatchValue, SequenceState};
+use crate::kvs::tasklease::TaskLease;
 use crate::kvs::version::MajorVersion;
+use crate::val::{RecordId, RecordIdKey};
 
 /// Macro to generate backwards compatibility tests for a fixture.
 ///
@@ -367,3 +374,174 @@ compat_test!(
 // MajorVersion
 compat_test!(v3_0_0_version_1, MajorVersion, bytes::VERSION_1, fixtures::version_1());
 compat_test!(v3_0_0_version_3, MajorVersion, bytes::VERSION_3, fixtures::version_3());
+
+// ApiActionDefinition
+compat_test!(
+	v3_0_0_api_action_basic,
+	ApiActionDefinition,
+	bytes::API_ACTION_BASIC,
+	fixtures::api_action_basic()
+);
+compat_test!(
+	v3_0_0_api_action_multi_method,
+	ApiActionDefinition,
+	bytes::API_ACTION_MULTI_METHOD,
+	fixtures::api_action_multi_method()
+);
+
+// Appending
+compat_test!(v3_0_0_appending_none, Appending, bytes::APPENDING_NONE, fixtures::appending_none());
+compat_test!(
+	v3_0_0_appending_old_values,
+	Appending,
+	bytes::APPENDING_OLD_VALUES,
+	fixtures::appending_old_values()
+);
+compat_test!(
+	v3_0_0_appending_new_values,
+	Appending,
+	bytes::APPENDING_NEW_VALUES,
+	fixtures::appending_new_values()
+);
+compat_test!(v3_0_0_appending_both, Appending, bytes::APPENDING_BOTH, fixtures::appending_both());
+
+// DocLengthAndCount
+compat_test!(
+	v3_0_0_doc_length_and_count_basic,
+	DocLengthAndCount,
+	bytes::DOC_LENGTH_AND_COUNT_BASIC,
+	fixtures::doc_length_and_count_basic()
+);
+
+// PrimaryAppending
+compat_test!(
+	v3_0_0_primary_appending_basic,
+	PrimaryAppending,
+	bytes::PRIMARY_APPENDING_BASIC,
+	fixtures::primary_appending_basic()
+);
+
+// BatchValue
+compat_test!(
+	v3_0_0_batch_value_basic,
+	BatchValue,
+	bytes::BATCH_VALUE_BASIC,
+	fixtures::batch_value_basic()
+);
+
+// SequenceState
+compat_test!(
+	v3_0_0_sequence_state_basic,
+	SequenceState,
+	bytes::SEQUENCE_STATE_BASIC,
+	fixtures::sequence_state_basic()
+);
+
+// TaskLease
+compat_test!(
+	v3_0_0_task_lease_basic,
+	TaskLease,
+	bytes::TASK_LEASE_BASIC,
+	fixtures::task_lease_basic()
+);
+
+// IDs
+compat_test!(
+	v3_0_0_namespace_id_basic,
+	NamespaceId,
+	bytes::NAMESPACE_ID_BASIC,
+	fixtures::namespace_id_basic()
+);
+compat_test!(
+	v3_0_0_database_id_basic,
+	DatabaseId,
+	bytes::DATABASE_ID_BASIC,
+	fixtures::database_id_basic()
+);
+compat_test!(v3_0_0_table_id_basic, TableId, bytes::TABLE_ID_BASIC, fixtures::table_id_basic());
+compat_test!(v3_0_0_index_id_basic, IndexId, bytes::INDEX_ID_BASIC, fixtures::index_id_basic());
+
+// ModuleDefinition
+compat_test!(
+	v3_0_0_module_definition_surrealism,
+	ModuleDefinition,
+	bytes::MODULE_SURREALISM,
+	fixtures::module_surrealism()
+);
+compat_test!(
+	v3_0_0_module_definition_silo,
+	ModuleDefinition,
+	bytes::MODULE_SILO,
+	fixtures::module_silo()
+);
+
+// NodeLiveQuery
+compat_test!(
+	v3_0_0_node_live_query_basic,
+	NodeLiveQuery,
+	bytes::NODE_LIVE_QUERY_BASIC,
+	fixtures::node_live_query_basic()
+);
+
+// TableMutations
+compat_test!(
+	v3_0_0_table_mutations_set,
+	TableMutations,
+	bytes::TABLE_MUTATIONS_SET,
+	fixtures::table_mutations_set()
+);
+compat_test!(
+	v3_0_0_table_mutations_del,
+	TableMutations,
+	bytes::TABLE_MUTATIONS_DEL,
+	fixtures::table_mutations_del()
+);
+
+// Node
+compat_test!(v3_0_0_node_active, Node, bytes::NODE_ACTIVE, fixtures::node_active());
+compat_test!(v3_0_0_node_archived, Node, bytes::NODE_ARCHIVED, fixtures::node_archived());
+
+// RecordId
+compat_test!(v3_0_0_recordid_number, RecordId, bytes::RECORDID_NUMBER, fixtures::recordid_number());
+compat_test!(v3_0_0_recordid_string, RecordId, bytes::RECORDID_STRING, fixtures::recordid_string());
+compat_test!(v3_0_0_recordid_uuid, RecordId, bytes::RECORDID_UUID, fixtures::recordid_uuid());
+
+// RecordIdKey
+compat_test!(
+	v3_0_0_recordid_key_number,
+	RecordIdKey,
+	bytes::RECORDID_KEY_NUMBER,
+	fixtures::recordid_key_number()
+);
+compat_test!(
+	v3_0_0_recordid_key_string,
+	RecordIdKey,
+	bytes::RECORDID_KEY_STRING,
+	fixtures::recordid_key_string()
+);
+compat_test!(
+	v3_0_0_recordid_key_uuid,
+	RecordIdKey,
+	bytes::RECORDID_KEY_UUID,
+	fixtures::recordid_key_uuid()
+);
+compat_test!(
+	v3_0_0_recordid_key_array,
+	RecordIdKey,
+	bytes::RECORDID_KEY_ARRAY,
+	fixtures::recordid_key_array()
+);
+compat_test!(
+	v3_0_0_recordid_key_object,
+	RecordIdKey,
+	bytes::RECORDID_KEY_OBJECT,
+	fixtures::recordid_key_object()
+);
+
+// TermDocument
+compat_test!(
+	v3_0_0_term_document_basic,
+	TermDocument,
+	bytes::TERM_DOCUMENT_BASIC,
+	fixtures::term_document_basic()
+);
