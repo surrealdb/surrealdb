@@ -726,6 +726,35 @@ impl Datastore {
 		self.expire_nodes().await?;
 		// Remove archived nodes
 		self.remove_nodes().await?;
+		// Restart deferred indexes
+		self.restart_deferred_indexes().await?;
+		// Everything ok
+		Ok(())
+	}
+
+	/// Restart deferred indexes after database startup
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn restart_deferred_indexes(&self) -> Result<(), Error> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Restarting deferred indexes");
+		let tx = Arc::new(self.transaction(Read, Optimistic).await?);
+		let mut ctx = self.setup_ctx()?;
+		ctx.set_transaction(tx.clone());
+		let ctx = ctx.freeze();
+		let sess = Session::owner();
+		for ns in tx.all_ns().await?.iter() {
+			for db in tx.all_db(&ns.name).await?.iter() {
+				let opt = self
+					.setup_options(&sess)
+					.with_ns(Some(Arc::from(ns.name.as_str())))
+					.with_db(Some(Arc::from(db.name.as_str())));
+				for tb in tx.all_tb(&ns.name, &db.name, None).await?.iter() {
+					for ix in tx.all_tb_indexes(&ns.name, &db.name, &tb.name).await?.iter() {
+						self.index_builder.restart_deferred_index(&ctx, &opt, &tb.name, ix).await?;
+					}
+				}
+			}
+		}
 		// Everything ok
 		Ok(())
 	}
