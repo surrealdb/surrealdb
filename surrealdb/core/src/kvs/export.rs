@@ -408,23 +408,21 @@ impl Transaction {
 				String::new()
 			}
 			// If the value is a normal record:
-		} else {
-			if let Some(is_tombstone) = is_tombstone {
-				if is_tombstone {
-					// If the record is a tombstone, format it as a DELETE command.
-					format!("DELETE {}:{};", rid.table, rid.key.to_sql())
-				} else {
-					// If the record is not a tombstone and a version exists, format it as an
-					// INSERT VERSION command.
-					let ts = Utc.timestamp_nanos(version.expect("version should be set") as i64);
-					format!("INSERT {} VERSION d'{:?}';", record.data.as_ref().to_sql(), ts)
-				}
+		} else if let Some(is_tombstone) = is_tombstone {
+			if is_tombstone {
+				// If the record is a tombstone, format it as a DELETE command.
+				format!("DELETE {}:{};", rid.table, rid.key.to_sql())
 			} else {
-				// If no tombstone or version information is provided, push the value to the
-				// records_normal vector.
-				records_normal.push(record.data.as_ref().to_sql());
-				String::new()
+				// If the record is not a tombstone and a version exists, format it as an
+				// INSERT VERSION command.
+				let ts = Utc.timestamp_nanos(version.expect("version should be set") as i64);
+				format!("INSERT {} VERSION d'{:?}';", record.data.as_ref().to_sql(), ts)
 			}
+		} else {
+			// If no tombstone or version information is provided, push the value to the
+			// records_normal vector.
+			records_normal.push(record.data.as_ref().to_sql());
+			String::new()
 		}
 	}
 

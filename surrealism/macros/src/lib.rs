@@ -75,11 +75,17 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 	// Compose tuple type and pattern (single args are passed directly)
 	let (tuple_type, tuple_pattern) = if arg_types.is_empty() {
 		(quote! { () }, quote! { () })
+	} else {
+		(quote! { ( #(#arg_types),*, ) }, quote! { ( #(#arg_patterns),*, ) })
+	};
+
+	/* TODO: This code below had the same body, figure out if this was a bug.
 	} else if arg_types.len() == 1 {
 		(quote! { (#(#arg_types),*,) }, quote! { (#(#arg_patterns),*,) })
 	} else {
 		(quote! { ( #(#arg_types),*, ) }, quote! { ( #(#arg_patterns),*, ) })
 	};
+	*/
 
 	// Return type analysis
 	let (result_type, is_result) = match &fn_sig.output {
