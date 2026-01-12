@@ -224,7 +224,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,storage-rocksdb,http,scripting,jwks,cli",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli",
     "--workspace",
     "--test",
     "cli_integration",
