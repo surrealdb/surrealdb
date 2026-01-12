@@ -165,9 +165,9 @@ impl ToSql for EscapeRidKey<'_> {
 			|| s == "Infinity"
 			|| s == "NaN"
 		{
-			f.push('"');
+			f.push('`');
 			EscapeWriter::escape(f, '`', self.0);
-			f.push('"');
+			f.push('`');
 		} else {
 			f.push_str(s)
 		}
