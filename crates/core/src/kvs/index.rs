@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio::time::sleep;
 use tracing::warn;
 #[cfg(target_family = "wasm")]
@@ -455,6 +455,8 @@ struct Building {
 	initial_build_complete: AtomicBool,
 	/// Whether the deferred daemon is currently running (for deferred indexes only)
 	deferred_daemon_running: AtomicBool,
+	/// Notifier for signaling completion (initial build or daemon shutdown)
+	completion_notify: Notify,
 }
 
 impl Building {
@@ -475,6 +477,7 @@ impl Building {
 			aborted: AtomicBool::new(false),
 			initial_build_complete: AtomicBool::new(false),
 			deferred_daemon_running: AtomicBool::new(false),
+			completion_notify: Notify::new(),
 		})
 	}
 
@@ -856,11 +859,12 @@ impl Building {
 
 	fn is_finished(&self) -> bool {
 		// Check if initial build is complete
-		if !self.initial_build_complete.load(Ordering::Relaxed) {
+		// Use Acquire ordering to synchronize with Release in guards
+		if !self.initial_build_complete.load(Ordering::Acquire) {
 			return false;
 		}
 		// For deferred indexes, we're not finished while the daemon is running
-		if self.deferred_daemon_running.load(Ordering::Relaxed) {
+		if self.deferred_daemon_running.load(Ordering::Acquire) {
 			return false;
 		}
 		true
@@ -868,8 +872,25 @@ impl Building {
 
 	/// Wait for the builder to finish (both initial build and deferred daemon if applicable)
 	async fn wait_for_completion(&self) {
-		while !self.is_finished() {
-			sleep(Duration::from_millis(50)).await;
+		// Fast path: already finished
+		if self.is_finished() {
+			return;
+		}
+		// Wait for notification, but re-check condition after each wake
+		// (handles spurious wakeups and race conditions)
+		loop {
+			// Use notified() future - this registers interest before checking condition
+			let notified = self.completion_notify.notified();
+			// Re-check after registering (avoids race condition)
+			if self.is_finished() {
+				return;
+			}
+			// Wait for notification
+			notified.await;
+			// Check again after being notified
+			if self.is_finished() {
+				return;
+			}
 		}
 	}
 }
@@ -879,7 +900,8 @@ struct InitialBuildGuard(IndexBuilding);
 
 impl Drop for InitialBuildGuard {
 	fn drop(&mut self) {
-		self.0.initial_build_complete.store(true, Ordering::Relaxed);
+		self.0.initial_build_complete.store(true, Ordering::Release);
+		self.0.completion_notify.notify_waiters();
 	}
 }
 
@@ -888,6 +910,7 @@ struct DeferredDaemonGuard(IndexBuilding);
 
 impl Drop for DeferredDaemonGuard {
 	fn drop(&mut self) {
-		self.0.deferred_daemon_running.store(false, Ordering::Relaxed);
+		self.0.deferred_daemon_running.store(false, Ordering::Release);
+		self.0.completion_notify.notify_waiters();
 	}
 }
