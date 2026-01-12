@@ -2,14 +2,18 @@ use std::collections::BTreeMap;
 
 use http::HeaderMap;
 use surrealdb_types::SurrealValue;
-use crate::{catalog::ApiMethod, sql::expression::convert_public_value_to_internal, types::{PublicObject, PublicValue}, val::{Value, convert_value_to_public_value}};
+
+use crate::catalog::ApiMethod;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicObject, PublicValue};
+use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Clone, Default, SurrealValue)]
 #[surreal(default)]
 pub struct ApiRequest {
-    // Request
-    pub body: PublicValue,
-    pub headers: HeaderMap,
+	// Request
+	pub body: PublicValue,
+	pub headers: HeaderMap,
 	pub params: PublicObject,
 	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,

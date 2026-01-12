@@ -13,9 +13,9 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
+use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr;
 use crate::fmt::QuoteStr;
 use crate::sql::expression::convert_public_value_to_internal;
 

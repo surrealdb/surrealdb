@@ -13,20 +13,20 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Block, ClosureExpr, Expr, FlowResultExt, Kind, Param};
+use crate::expr::{ClosureExpr, Expr, FlowResultExt, Kind, Param};
 use crate::fnc::args::Any;
 use crate::val::Value;
 
 pub(crate) type BuiltinClosure = Arc<
-    dyn for<'a> Fn(
-            &'a mut Stk,
-            &'a FrozenContext,
-            &'a Options,
-            Option<&'a CursorDoc>,
-            Any,
-        ) -> Pin<Box<dyn Future<Output = Result<Value>> + 'a>>
-        + Send
-        + Sync
+	dyn for<'a> Fn(
+			&'a mut Stk,
+			&'a FrozenContext,
+			&'a Options,
+			Option<&'a CursorDoc>,
+			Any,
+		) -> Pin<Box<dyn Future<Output = Result<Value>> + 'a>>
+		+ Send
+		+ Sync,
 >;
 
 #[derive(Clone)]
@@ -43,14 +43,18 @@ pub(crate) enum Closure {
 impl std::fmt::Debug for Closure {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Closure::Expr { args, returns, body, captures } => {
-				f.debug_struct("Closure::Expr")
-					.field("args", args)
-					.field("returns", returns)
-					.field("body", body)
-					.field("captures", captures)
-					.finish()
-			}
+			Closure::Expr {
+				args,
+				returns,
+				body,
+				captures,
+			} => f
+				.debug_struct("Closure::Expr")
+				.field("args", args)
+				.field("returns", returns)
+				.field("body", body)
+				.field("captures", captures)
+				.finish(),
 			Closure::Builtin(_) => {
 				f.debug_tuple("Closure::Builtin")
 					// .field("_")
@@ -77,7 +81,14 @@ impl PartialEq for Closure {
 					captures: captures2,
 				},
 			) => args1 == args2 && returns1 == returns2 && body1 == body2 && captures1 == captures2,
-			(Closure::Builtin { .. }, Closure::Builtin { .. }) => {
+			(
+				Closure::Builtin {
+					..
+				},
+				Closure::Builtin {
+					..
+				},
+			) => {
 				// Builtin closures cannot be meaningfully compared
 				false
 			}
@@ -134,7 +145,12 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value> {
 		match self {
-			Closure::Expr { args: arg_spec, returns, body, captures } => {
+			Closure::Expr {
+				args: arg_spec,
+				returns,
+				body,
+				captures,
+			} => {
 				let mut ctx = Context::new_isolated(ctx);
 				ctx.attach_variables(captures.clone())?;
 
@@ -164,7 +180,8 @@ impl Closure {
 				}
 
 				let ctx = ctx.freeze();
-				let result = stk.run(|stk| body.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+				let result =
+					stk.run(|stk| body.compute(stk, &ctx, opt, doc)).await.catch_return()?;
 				if let Some(returns) = &returns {
 					result
 						.coerce_to_kind(returns)
@@ -176,7 +193,7 @@ impl Closure {
 				} else {
 					Ok(result)
 				}
-			},
+			}
 			Closure::Builtin(logic) => {
 				// Wrap args in Any - the builtin function will handle
 				// argument validation and conversion using FromArgs::from_args
@@ -190,8 +207,23 @@ impl Closure {
 
 	pub(crate) fn into_expr(self) -> Expr {
 		match self {
-			Closure::Expr { args, returns, body, .. } => Expr::Closure(Box::new(ClosureExpr { args, returns, body })),
-			Closure::Builtin { .. } => Expr::Closure(Box::new(ClosureExpr { args: vec![], returns: None, body: Expr::Block(Box::new(Block::default())) })),
+			Closure::Expr {
+				args,
+				returns,
+				body,
+				..
+			} => Expr::Closure(Box::new(ClosureExpr {
+				args,
+				returns,
+				body,
+			})),
+			Closure::Builtin {
+				..
+			} => Expr::Closure(Box::new(ClosureExpr {
+				args: vec![],
+				returns: None,
+				body: Expr::Block(Box::default()),
+			})),
 		}
 	}
 }
@@ -199,7 +231,12 @@ impl Closure {
 impl ToSql for Closure {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Closure::Expr { args, returns, body, .. } => {
+			Closure::Expr {
+				args,
+				returns,
+				body,
+				..
+			} => {
 				write_sql!(f, sql_fmt, "|");
 				for (i, (name, kind)) in args.iter().enumerate() {
 					if i > 0 {
@@ -217,7 +254,9 @@ impl ToSql for Closure {
 				}
 				write_sql!(f, sql_fmt, " {}", body);
 			}
-			Closure::Builtin { .. } => {
+			Closure::Builtin {
+				..
+			} => {
 				write_sql!(f, sql_fmt, r#"|| THROW "builtin""#);
 			}
 		}

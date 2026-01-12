@@ -33,7 +33,9 @@ async fn handler(
 	Extension(session): Extension<Session>,
 	Path((ns, db, path)): Path<(String, String, String)>,
 	headers: HeaderMap,
-	Query(Params { inner: query }): Query<Params>,
+	Query(Params {
+		inner: query,
+	}): Query<Params>,
 	method: Method,
 	body: Bytes,
 ) -> Result<impl IntoResponse, ResponseError> {
@@ -64,12 +66,14 @@ async fn handler(
 		_ => return Err(NetError::NotFound(url).into()),
 	};
 
-	// TODO we need to get a max body size back somehow. Introduction of blob like value? This stream somehow needs to be postponed...
-	// also if such a value would be introduced then this whole enum can be eliminated. body would always just simply be a value
-	// maybe bytes could have two variants, consumed and unconsumed. To the user its simply bytes, but whenever an api request
-	// is processed, the body would be unconsumed bytes, and whenever we get a file, that too could be unconsumed bytes. When the user
-	// actually does something with them, they get consumed, but to the user its always simply just bytes.
-	// we could expose handlebars to describe the "internal state" of the value...
+	// TODO we need to get a max body size back somehow. Introduction of blob like value? This
+	// stream somehow needs to be postponed... also if such a value would be introduced then this
+	// whole enum can be eliminated. body would always just simply be a value maybe bytes could
+	// have two variants, consumed and unconsumed. To the user its simply bytes, but whenever an api
+	// request is processed, the body would be unconsumed bytes, and whenever we get a file, that
+	// too could be unconsumed bytes. When the user actually does something with them, they get
+	// consumed, but to the user its always simply just bytes. we could expose handlebars to
+	// describe the "internal state" of the value...
 	let body = Value::Bytes(body.into());
 
 	let req = ApiRequest {
@@ -80,16 +84,7 @@ async fn handler(
 		..Default::default()
 	};
 
-	let res = ds
-		.invoke_api_handler(
-			&ns,
-			&db,
-			&path,
-			&session,
-			req
-		)
-		.await
-		.map_err(ResponseError)?;
+	let res = ds.invoke_api_handler(&ns, &db, &path, &session, req).await.map_err(ResponseError)?;
 
 	let Some(res) = res else {
 		return Err(NetError::NotFound(url).into());

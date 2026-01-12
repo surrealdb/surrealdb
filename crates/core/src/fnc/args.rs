@@ -4,8 +4,8 @@ use anyhow::{Result, bail};
 use surrealdb_types::SurrealValue;
 
 use crate::err::Error;
-use crate::val::{Value, convert_value_to_public_value};
 use crate::val::value::{Cast as CastTrait, Coerce};
+use crate::val::{Value, convert_value_to_public_value};
 
 /// The number of arguments a function takes.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ pub struct FromPublic<T>(pub T);
 
 impl<T: SurrealValue> FromArg for FromPublic<T> {
 	fn arity() -> Arity {
-		Arity { 
+		Arity {
 			lower: 1,
 			upper: Some(1),
 		}
