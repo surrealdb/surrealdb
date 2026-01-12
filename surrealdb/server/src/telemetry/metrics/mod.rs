@@ -1,6 +1,8 @@
 pub mod http;
 pub mod ws;
 
+pub mod ds;
+
 use opentelemetry::metrics::MetricsError;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_sdk::metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector};
