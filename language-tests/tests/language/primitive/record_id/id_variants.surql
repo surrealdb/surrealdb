@@ -17,7 +17,7 @@ error = "Database record `person:100` already exists"
 value = "[{ id: person:`100`, test: 'Two' }]"
 
 [[test.results]]
-error = 'Database record `person:"100"` already exists'
+error = "Database record `person:`100`` already exists"
 
 [[test.results]]
 value = "[{ id: person:100, test: 'One' }, { id: person:`100`, test: 'Two' }]"
