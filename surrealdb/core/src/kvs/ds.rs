@@ -132,6 +132,8 @@ pub struct Datastore {
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
+///
+/// This structure is used to expose datastore-specific metrics to the telemetry system.
 pub struct Metrics {
 	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
 	pub name: &'static str,
@@ -239,9 +241,13 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	async fn shutdown(&self) -> Result<()>;
 
 	/// Registers metrics for the current datastore flavor if supported.
+	///
+	/// This will return a list of available metrics and their descriptions.
 	fn register_metrics(&self) -> Option<Metrics>;
 
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	///
+	/// - `metric`: The name of the metric to collect.
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
 }
 
@@ -704,11 +710,15 @@ impl Datastore {
 	}
 
 	/// Registers metrics for the current datastore flavor if supported.
+	///
+	/// This will return a list of available metrics and their descriptions.
 	pub fn register_metrics(&self) -> Option<Metrics> {
 		self.transaction_factory.register_metrics()
 	}
 
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	///
+	/// - `metric`: The name of the metric to collect.
 	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		self.transaction_factory.collect_u64_metric(metric)
 	}

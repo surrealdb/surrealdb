@@ -251,19 +251,19 @@ impl Datastore {
 			u64_metrics: vec![
 				Metric {
 					name: Self::BLOCK_CACHE_USAGE,
-					description: "Returns the memory size for the entries residing in block cache.",
+					description: "Returns the memory size (in bytes) for the entries residing in block cache.",
 				},
 				Metric {
 					name: Self::BLOCK_CACHE_PINNED_USAGE,
-					description: "Returns the memory size for the entries being pinned.",
+					description: "Returns the memory size (in bytes) for the entries being pinned.",
 				},
 				Metric {
 					name: Self::ESTIMATE_TABLE_READERS_MEM,
-					description: "Returns estimated memory used for reading SST tables, excluding memory used in block cache (e.g., filter and index blocks).",
+					description: "Returns estimated memory size (in bytes) used for reading SST tables, excluding memory used in block cache (e.g., filter and index blocks).",
 				},
 				Metric {
 					name: Self::CUR_SIZE_ALL_MEM_TABLES,
-					description: "Returns approximate size of active and unflushed immutable memtables",
+					description: "Returns approximate size (in bytes) of active and unflushed immutable memtables",
 				},
 			],
 		}
