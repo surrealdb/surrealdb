@@ -139,8 +139,8 @@ impl SlowLog {
 		start: &Instant,
 		stm: &S,
 	) {
-		let elapsed = start.elapsed();
-		if elapsed < self.0.duration {
+		let elapsed = dbg!(start.elapsed());
+		if elapsed < dbg!(self.0.duration) {
 			return;
 		}
 

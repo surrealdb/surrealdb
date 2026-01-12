@@ -1934,7 +1934,7 @@ mod cli_integration {
 		// Check the log is present
 		assert!(stderr.contains("Slow query detected - time: "));
 		assert!(stderr.contains(
-			"s - query: RETURN string::concat(sleep(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+			"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
 		));
 		println!("{stderr}");
 	}
