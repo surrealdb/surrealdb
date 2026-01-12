@@ -482,7 +482,7 @@ category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with specified engine"
 script = """
     #!/bin/bash -ex
-    cd crates/language-tests
+    cd language-tests
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
         cargo build --features ${_TEST_LANG_FEATURES}
     else
