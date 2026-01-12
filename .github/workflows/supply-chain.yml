@@ -8,11 +8,11 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - crates/core/Cargo.toml
-      - crates/server/Cargo.toml
-      - crates/sdk/Cargo.toml
+      - surrealdb/core/Cargo.toml
+      - surrealdb/server/Cargo.toml
+      - surrealdb/Cargo.toml
       - build.rs
-      - crates/sdk/build.rs
+      - surrealdb/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -23,11 +23,11 @@ on:
     paths:
       - Cargo.lock
       - Cargo.toml
-      - crates/core/Cargo.toml
-      - crates/server/Cargo.toml
-      - crates/sdk/Cargo.toml
+      - surrealdb/core/Cargo.toml
+      - surrealdb/server/Cargo.toml
+      - surrealdb/Cargo.toml
       - build.rs
-      - crates/sdk/build.rs
+      - surrealdb/build.rs
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock

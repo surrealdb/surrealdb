@@ -523,7 +523,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/language-tests
+          workspaces: language-tests
           cache-key: lang-${{ matrix.engine }}
 
       - name: Install tools
@@ -549,18 +549,18 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
-            crates/language-tests
+            language-tests
             ./
-          cache-directories: crates/language-tests/.binary-cache
+          cache-directories: language-tests/.binary-cache
 
       - name: Build SurrealQL test tool
         run: |
-          cd crates/language-tests
+          cd language-tests
           cargo build --features upgrade
 
   #    - name: Run SurrealQL test suite
         #run: |
-        #  cd crates/language-tests
+        #  cd language-tests
         #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------

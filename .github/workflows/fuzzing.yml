@@ -30,10 +30,10 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/fuzz
+          workspaces: fuzz
 
       - name: Check fuzzers
-        run: cargo build --manifest-path crates/fuzz/Cargo.toml
+        run: cargo build --manifest-path fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@cafd7a0eb8ecb4e007c56897996a9b65c49c972f # (Actions must be pinned by commit hash) master
