@@ -6,7 +6,7 @@ use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
 use crate::sql::{Expr, Literal, Part};
 
-// TODO: Remove unnessacry newtype.
+// TODO: Remove unnecessary newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[allow(dead_code)]

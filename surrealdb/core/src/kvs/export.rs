@@ -540,7 +540,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		// Initialize vectors to hold normal records and graph edge records.
-		// TODO: these buffer are unnessacry, we just use them to then join into a string.
+		// TODO: these buffer are unnecessary, we just use them to then join into a string.
 		// Just write into a string from the start and you avoid a lot of allocs.
 		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
