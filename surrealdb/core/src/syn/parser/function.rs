@@ -330,7 +330,7 @@ mod test {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("rand::uuid()", out.to_sql());
+		assert_eq!("`rand`::uuid()", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
