@@ -6,12 +6,6 @@ pub fn atleast_one<'a, T: Arbitrary<'a>>(
 	arb_vec1(u, Arbitrary::arbitrary)
 }
 
-pub fn opt_atleast_one<'a, T: Arbitrary<'a>>(
-	u: &mut arbitrary::Unstructured<'a>,
-) -> arbitrary::Result<Option<Vec<T>>> {
-	arb_opt(u, |u| arb_vec1(u, Arbitrary::arbitrary))
-}
-
 /// Generates an arbitrary vector with atleast one element generated from the given closure.
 pub fn arb_vec1<'a, R, F>(
 	u: &mut arbitrary::Unstructured<'a>,
