@@ -199,7 +199,7 @@ impl IndexBuilder {
 			let building = if initial_build_done {
 				self.start_deferred_index(ctx, opt.clone(), ix).await?
 			} else {
-				self.start_building(ctx, opt.clone(), ix, None).await?
+				self.start_building(ctx, opt.clone(), ix, None, true).await?
 			};
 			e.insert(building);
 		}
@@ -213,9 +213,12 @@ impl IndexBuilder {
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
 		sdr: Option<Sender<Result<(), Error>>>,
+		recover_queue: bool,
 	) -> Result<IndexBuilding, Error> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
-		building.recover_queue().await?;
+		if recover_queue {
+			building.recover_queue().await?;
+		};
 		let b = building.clone();
 		spawn(async move {
 			// Ensure that in case of an unexpected exit the initial build is marked as complete
@@ -301,12 +304,12 @@ impl IndexBuilder {
 				// Wait for the old builder to fully stop
 				old_builder.wait_for_completion().await;
 				// Start building the index
-				let ib = self.start_building(ctx, opt, ix, sdr).await?;
+				let ib = self.start_building(ctx, opt, ix, sdr, false).await?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr).await?;
+				let ib = self.start_building(ctx, opt, ix, sdr, false).await?;
 				e.insert(ib);
 			}
 		}
@@ -872,13 +875,9 @@ impl Building {
 
 	/// Wait for the builder to finish (both initial build and deferred daemon if applicable)
 	async fn wait_for_completion(&self) {
-		// Fast path: already finished
-		if self.is_finished() {
-			return;
-		}
 		// Wait for notification, but re-check condition after each wake
 		// (handles spurious wakeups and race conditions)
-		loop {
+		while !self.is_finished() {
 			// Use notified() future - this registers interest before checking condition
 			let notified = self.completion_notify.notified();
 			// Re-check after registering (avoids race condition)
@@ -887,10 +886,6 @@ impl Building {
 			}
 			// Wait for notification
 			notified.await;
-			// Check again after being notified
-			if self.is_finished() {
-				return;
-			}
 		}
 	}
 }
