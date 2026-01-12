@@ -67,7 +67,7 @@ pub async fn iam_run_case(
 
 	// Check datastore state first
 	{
-		let mut resp = ds.execute(check, &owner_sess, None).await.unwrap();
+		let mut resp = dbg!(ds.execute(check, &owner_sess, None).await.unwrap());
 		assert_eq!(
 			resp.len(),
 			1,

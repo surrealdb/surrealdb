@@ -188,11 +188,9 @@ impl DefineFieldStatement {
 					};
 
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.from.as_ref().map(|x| field_kind != x).unwrap_or(true) {
+					if *field_kind != relation.from {
 						tb.table_type = TableType::Relation(Relation {
-							from: Some(
-								field_kind.iter().map(|x| x.clone().into_string()).collect(),
-							),
+							from: field_kind.iter().map(|x| x.clone().into_string()).collect(),
 							..relation.clone()
 						});
 
@@ -220,9 +218,9 @@ impl DefineFieldStatement {
 						bail!(Error::Thrown("in field on a relation must be a record".into(),))
 					};
 					// Add the TYPE to the DEFINE TABLE statement
-					if relation.to.as_ref().map(|x| field_kind != x).unwrap_or(true) {
+					if *field_kind != relation.to {
 						tb.table_type = TableType::Relation(Relation {
-							to: Some(field_kind.iter().map(|x| x.clone().into_string()).collect()),
+							to: field_kind.iter().map(|x| x.clone().into_string()).collect(),
 							..relation.clone()
 						});
 

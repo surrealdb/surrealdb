@@ -20,18 +20,18 @@ impl ToSql for TableType {
 			}
 			TableType::Relation(rel) => {
 				write_sql!(f, sql_fmt, " RELATION");
-				if let Some(kind) = &rel.from {
+				if !rel.from.is_empty() {
 					f.push_str(" IN ");
-					for (idx, k) in kind.iter().enumerate() {
+					for (idx, k) in rel.from.iter().enumerate() {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
 						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k))
 					}
 				}
-				if let Some(kind) = &rel.to {
+				if !rel.to.is_empty() {
 					f.push_str(" OUT ");
-					for (idx, k) in kind.iter().enumerate() {
+					for (idx, k) in rel.to.iter().enumerate() {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
@@ -72,10 +72,10 @@ impl From<crate::catalog::TableType> for TableType {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Relation {
-	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::opt_atleast_one))]
-	pub from: Option<Vec<String>>,
-	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::opt_atleast_one))]
-	pub to: Option<Vec<String>>,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub from: Vec<String>,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub to: Vec<String>,
 	pub enforced: bool,
 }
 

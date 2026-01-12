@@ -758,10 +758,8 @@ impl DefineTableStatement {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
-				let val = rel
-					.from
-					.as_ref()
-					.map(|x| Kind::Record(x.iter().cloned().map(TableName::new).collect()));
+				let val =
+					Some(Kind::Record(rel.from.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {
@@ -777,10 +775,7 @@ impl DefineTableStatement {
 			// Set the `out` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
-				let val = rel
-					.to
-					.as_ref()
-					.map(|x| Kind::Record(x.iter().cloned().map(TableName::new).collect()));
+				let val = Some(Kind::Record(rel.to.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {

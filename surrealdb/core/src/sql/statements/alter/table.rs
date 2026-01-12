@@ -45,18 +45,18 @@ impl ToSql for AlterTableStatement {
 				}
 				TableType::Relation(rel) => {
 					write_sql!(f, fmt, " RELATION");
-					if let Some(kind) = &rel.from {
+					if !rel.from.is_empty() {
 						f.push_str(" IN ");
-						for (idx, k) in kind.iter().enumerate() {
+						for (idx, k) in rel.from.iter().enumerate() {
 							if idx != 0 {
 								f.push_str(" | ");
 							}
 							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
-					if let Some(kind) = &rel.to {
+					if !rel.to.is_empty() {
 						f.push_str(" OUT ");
-						for (idx, k) in kind.iter().enumerate() {
+						for (idx, k) in rel.to.iter().enumerate() {
 							if idx != 0 {
 								f.push_str(" | ");
 							}

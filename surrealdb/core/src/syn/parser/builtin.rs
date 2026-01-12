@@ -584,7 +584,7 @@ impl Parser<'_> {
 	/// Parse a builtin path.
 	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
 		let s = self.unescape_ident_span(start)?;
-		let mut buffer = s.to_owned();
+		let mut buffer = s.to_lowercase();
 
 		let mut last_span = start;
 		while self.eat(t!("::")) {
@@ -596,7 +596,12 @@ impl Parser<'_> {
 
 			buffer.push_str("::");
 			let s = self.unescape_ident_span(peek.span)?;
-			buffer.push_str(s);
+			buffer.reserve(s.len());
+			for c in s.chars() {
+				for l in c.to_lowercase() {
+					buffer.push(l);
+				}
+			}
 			last_span = peek.span;
 		}
 

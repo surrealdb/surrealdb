@@ -156,7 +156,7 @@ impl ToSql for EscapeKey<'_> {
 
 pub struct EscapeRidKey<'a>(pub &'a str);
 impl ToSql for EscapeRidKey<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or are all character digits?
 		if s.is_empty()

@@ -105,7 +105,11 @@ impl Parser<'_> {
 						})
 						.await?
 				{
-					return Ok(PublicValue::Object(x));
+					if let Some(x) = PublicGeometry::try_from_object(&x) {
+						return Ok(PublicValue::Geometry(x));
+					} else {
+						return Ok(PublicValue::Object(x));
+					}
 				}
 
 				// It must be a set: `{1, 2, 3}` or `{value}`

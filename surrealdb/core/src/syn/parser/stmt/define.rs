@@ -1587,21 +1587,19 @@ impl Parser<'_> {
 
 	pub fn parse_relation_schema(&mut self) -> ParseResult<table_type::Relation> {
 		let mut res = table_type::Relation {
-			from: None,
-			to: None,
+			from: Vec::new(),
+			to: Vec::new(),
 			enforced: false,
 		};
 		loop {
 			match self.peek_kind() {
 				t!("FROM") | t!("IN") => {
 					self.pop_peek();
-					let from = self.parse_tables()?;
-					res.from = Some(from);
+					res.from = self.parse_tables()?;
 				}
 				t!("TO") | t!("OUT") => {
 					self.pop_peek();
-					let to = self.parse_tables()?;
-					res.to = Some(to);
+					res.to = self.parse_tables()?;
 				}
 				_ => break,
 			}
