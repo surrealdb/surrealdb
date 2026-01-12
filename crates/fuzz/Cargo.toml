@@ -17,7 +17,7 @@ features = ["kv-mem", "arbitrary"]
 default-features = false
 
 [dependencies.surrealdb-types]
-version = "=3.0.0-beta.1"
+version = "3.0.0-beta.1"
 features = ["arbitrary"]
 default-features = false
 

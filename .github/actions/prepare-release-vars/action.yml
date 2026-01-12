@@ -36,10 +36,13 @@ runs:
       run: |
         set -x
 
-        version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
-        echo "version=${version}" >> $GITHUB_OUTPUT
+        cargo_version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
 
         if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
+          # Nightly release - compute version based on main's version
+          nightly_version=$(./.github/scripts/compute-nightly-version.sh "$cargo_version")
+          echo "version=${nightly_version}" >> $GITHUB_OUTPUT
+
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
           rev=$(git rev-parse --short HEAD)
           build_metadata=${date}.${rev}
@@ -48,10 +51,12 @@ runs:
           echo "pre-release=true" >> $GITHUB_OUTPUT
           echo "release-name=nightly" >> $GITHUB_OUTPUT
         else
-          echo "name=v${version}" >> $GITHUB_OUTPUT
-          if [[ $version == *"-"* ]]; then
+          # Versioned release - use version from Cargo.toml
+          echo "version=${cargo_version}" >> $GITHUB_OUTPUT
+          echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
+          if [[ $cargo_version == *"-"* ]]; then
             echo "pre-release=true" >> $GITHUB_OUTPUT
-            suffix=$(echo $version | tr "-" "\n" | sed -n 2p)
+            suffix=$(echo $cargo_version | tr "-" "\n" | sed -n 2p)
             release_name=$(echo $suffix | tr "." "\n" | sed -n 1p)
             echo "release-name=${release_name}" >> $GITHUB_OUTPUT
           else

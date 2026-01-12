@@ -11,6 +11,10 @@ inputs:
   name:
     description: 'The name of output'
     required: true
+  version-override:
+    description: 'Version override (for nightly builds)'
+    required: false
+    default: ''
   build-metadata:
     description: 'Build metadata'
     required: false
@@ -74,6 +78,7 @@ runs:
     - name: Build binary
       shell: bash
       env:
+        SURREAL_BUILD_VERSION: ${{ inputs.version-override }}
         SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
       run: |
         set -x
