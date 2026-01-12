@@ -19,6 +19,8 @@ mod table;
 mod view;
 
 #[cfg(test)]
+mod compat;
+#[cfg(test)]
 mod test;
 
 pub(crate) use access::*;
