@@ -1,10 +1,23 @@
 [workspace]
+resolver = "3"
 members = [
-    ".",
-    "crates/core",
-    "crates/sdk",
-    "crates/server",
-    "profiling"
+	# Root package
+	".",
+	# SurrealDB crates
+	"surrealdb",
+	"surrealdb/core",
+	"surrealdb/server",
+	"surrealdb/types",
+	"surrealdb/types/derive",
+	# Surrealism crates
+	"surrealism",
+	"surrealism/cli",
+	"surrealism/demo",
+	"surrealism/macros",
+	"surrealism/runtime",
+	"surrealism/types",
+	# Other
+	"profiling",
 ]
 
 [workspace.package]
@@ -27,9 +40,16 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "3.0.0-beta", path = "crates/sdk" }
-surrealdb-core = { version = "3.0.0-beta", path = "crates/core", default-features = false }
-surrealdb-server = { version = "3.0.0-beta", path = "crates/server", default-features = false }
+surrealdb = { version = "3.0.0-beta", path = "surrealdb" }
+surrealdb-core = { version = "3.0.0-beta", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-features = false }
+surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
+surrealism = { version = "0.1", path = "surrealism" }
+surrealism-cli = { version = "0.1", path = "surrealism/cli" }
+surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.1", path = "surrealism/runtime" }
+surrealism-types = { version = "0.1", path = "surrealism/types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.4.0"
@@ -47,10 +67,7 @@ revision = { version = "0.16.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealdb-types = { version = "3.0.0-beta.1" }
-surrealdb-types-derive = { version = "3.0.0-beta.1" }
-surrealism-runtime = { version = "0.1.6" }
-surrealkv = "0.16.0"
+surrealkv = "0.17.0"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }

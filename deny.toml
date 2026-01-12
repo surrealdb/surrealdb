@@ -57,7 +57,9 @@ yanked = "warn"
 # - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
 # - for RUSTSEC-2025-0134, rustls-pemfile is unmaintained (archived) but pulled in transitively
 #   by tonic and axum-server. Upstream crates need to migrate to rustls-pki-types.
-ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0118", "RUSTSEC-2025-0134"]
+# - for RUSTSEC-2025-0141, bincode is unmaintained but considered complete and stable at v1.3.3.
+#   Plan migration to wincode, postcard, bitcode, or rkyv in future. Also need surrealmx to update.
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0118", "RUSTSEC-2025-0134", "RUSTSEC-2025-0141"]
 
 # --------------------------------------------------
 # LICENSES

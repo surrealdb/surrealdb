@@ -8,9 +8,9 @@ alwaysApply: true
 
 ## 1. Verify expected behavior first
 - Read the issue description completely and think about the submitted issue
-- Check existing language tests in `crates/language-tests/tests/` that relate to the reported functionality
+- Check existing language tests in `language-tests/tests/` that relate to the reported functionality
 - If related to or referencing SurrealQL, look for relevant test cases in `.surql` files
-- If related to the Rust SDK, the API, or the network interface, check tests in `crates/sdk/tests/` and `tests/` for similar usage patterns
+- If related to the Rust SDK, the API, or the network interface, check tests in `surrealdb/tests/` and `tests/` for similar usage patterns
 - Search for similar functionality patterns in the codebase to understand intended behavior
 - Consult SurrealQL documentation at https://surrealdb.com/docs or existing examples before assuming something is broken
 
@@ -30,8 +30,8 @@ alwaysApply: true
 
 ## 4. Create reproduction test (for SurrealQL/core issues)
 - If the issue involves SurrealQL queries or core database functionality, create a reproduction test file, regardless of whether it is a bug or not
-- Create file: `crates/language-tests/tests/reproductions/ISSUENUMBER_short_summary.surql`
-- Follow the format specified in `crates/language-tests/README.md`:
+- Create file: `language-tests/tests/reproductions/ISSUENUMBER_short_summary.surql`
+- Follow the format specified in `language-tests/README.md`:
   - Use test comments with TOML configuration (`/**` or `//!`)
   - You can use the `--results accept` arguments to automatically generate the database output
   - Include `[test]` section with `reason` and `issue` number
