@@ -245,6 +245,9 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
+	/// Start a deferred index that has already completed its initial build.
+	/// This is used when restarting the server to resume deferred index processing.
+	/// The method recovers the queue state and spawns the deferred daemon.
 	async fn start_deferred_index(
 		&self,
 		ctx: &Context,
@@ -258,6 +261,9 @@ impl IndexBuilder {
 		Ok(building)
 	}
 
+	/// Spawn the background daemon for a deferred index.
+	/// The daemon continuously processes queued document updates in a loop,
+	/// indexing them asynchronously. It runs until the index is aborted or an error occurs.
 	fn spawn_deferred_daemon(building: IndexBuilding) {
 		spawn(async move {
 			// Ensure that the daemon running flag is properly managed
@@ -463,6 +469,7 @@ struct Building {
 }
 
 impl Building {
+	/// Create a new building process for the given index definition.
 	fn new(
 		ctx: &Context,
 		tf: TransactionFactory,
@@ -562,20 +569,24 @@ impl Building {
 		Ok(ConsumeResult::Enqueued)
 	}
 
+	/// Create a new index appending key for the given sequence number.
 	fn new_ia_key(&self, i: u32) -> Result<Ia<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
 	}
 
+	/// Create a new index primary appending key for the given document ID.
 	fn new_ip_key(&self, id: Id) -> Result<Ip<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
+	/// Create a new read-only transaction.
 	async fn new_read_tx(&self) -> Result<Transaction, Error> {
 		self.tf.transaction(TransactionType::Read, Optimistic).await
 	}
 
+	/// Create a new context with a write transaction.
 	async fn new_write_tx_ctx(&self) -> Result<Context, Error> {
 		let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?.into();
 		let mut ctx = MutableContext::new(&self.ctx);
@@ -656,6 +667,9 @@ impl Building {
 		Ok(())
 	}
 
+	/// Persist the deferred index status to storage.
+	/// This records whether the initial build phase has completed, allowing
+	/// the index to be properly restored after a server restart.
 	async fn set_df_status(&self, initial_build_done: bool) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		// confirm that the initial build has been successful
@@ -860,6 +874,10 @@ impl Building {
 		}
 	}
 
+	/// Check if the building process has fully completed.
+	/// For regular indexes, this returns true once the initial build is done.
+	/// For deferred indexes, this returns true only after both the initial build
+	/// and the deferred daemon have stopped.
 	fn is_finished(&self) -> bool {
 		// Check if initial build is complete
 		// Use Acquire ordering to synchronize with Release in guards
