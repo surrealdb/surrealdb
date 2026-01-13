@@ -164,6 +164,16 @@ pub(crate) struct BatchValue {
 }
 impl_kv_value_revisioned!(BatchValue);
 
+impl BatchValue {
+	#[cfg(test)]
+	pub(crate) fn new(to: i64, owner: Uuid) -> Self {
+		Self {
+			to,
+			owner,
+		}
+	}
+}
+
 /// Tracks the next available ID for a specific node in a sequence.
 ///
 /// Each node maintains its own `SequenceState` which tracks the next ID it will
@@ -176,6 +186,15 @@ pub(crate) struct SequenceState {
 	next: i64,
 }
 impl_kv_value_revisioned!(SequenceState);
+
+impl SequenceState {
+	#[cfg(test)]
+	pub(crate) fn new(next: i64) -> Self {
+		Self {
+			next,
+		}
+	}
+}
 
 impl Sequences {
 	pub(super) fn new(tf: TransactionFactory, nid: Uuid) -> Self {
