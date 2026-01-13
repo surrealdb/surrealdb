@@ -51,8 +51,18 @@ pub(crate) struct TermDocument {
 
 impl_kv_value_revisioned!(TermDocument);
 
+impl TermDocument {
+	#[cfg(test)]
+	pub(crate) fn new(f: TermFrequency, o: Vec<Offset>) -> Self {
+		Self {
+			f,
+			o,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 /// Tracks document length and count statistics for the index
 pub(crate) struct DocLengthAndCount {
 	/// The total length of all documents in the index
@@ -61,6 +71,16 @@ pub(crate) struct DocLengthAndCount {
 	doc_count: i64,
 }
 impl_kv_value_revisioned!(DocLengthAndCount);
+
+impl DocLengthAndCount {
+	#[cfg(test)]
+	pub(crate) fn new(total_docs_length: i128, doc_count: i64) -> Self {
+		Self {
+			total_docs_length,
+			doc_count,
+		}
+	}
+}
 
 /// Represents the terms in a search query and their associated document sets
 pub(in crate::idx) struct QueryTerms {

@@ -10,7 +10,7 @@ use crate::kvs::KVValue;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct Offset {
+pub(crate) struct Offset {
 	pub(super) index: u32,
 	// Start position of the original term
 	pub(super) start: Position,
@@ -21,7 +21,7 @@ pub(super) struct Offset {
 }
 
 impl Offset {
-	pub(super) fn new(index: u32, start: Position, gen_start: Position, end: Position) -> Self {
+	pub(crate) fn new(index: u32, start: Position, gen_start: Position, end: Position) -> Self {
 		Self {
 			index,
 			start,
