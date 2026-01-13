@@ -2,7 +2,7 @@ use http::{HeaderMap, StatusCode};
 use surrealdb_types::SurrealValue;
 
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::{PublicValue, PublicObject};
+use crate::types::{PublicObject, PublicValue};
 use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Debug, Default, SurrealValue)]

@@ -5,8 +5,8 @@ use crate::fnc::script::modules::impl_module_def;
 
 pub struct Package;
 
-mod res;
 mod req;
+mod res;
 
 impl_module_def!(
 	Package,

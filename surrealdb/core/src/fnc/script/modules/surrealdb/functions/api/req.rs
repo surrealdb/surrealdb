@@ -6,7 +6,7 @@ use crate::fnc::script::modules::impl_module_def;
 pub struct Package;
 
 impl_module_def!(
-    Package,
-    "api::req",
-    "body" => fut Async,
+	Package,
+	"api::req",
+	"body" => fut Async,
 );
