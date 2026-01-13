@@ -263,17 +263,19 @@ jobs:
           git commit -m "Add benchmark results for ${{ github.sha }}" || true
           git push origin benchmark-results || true
 
-      - name: Read report
-        id: report
+      - name: Prepare PR comment
+        if: github.event_name == 'pull_request'
         run: |
           if [ -f ${{ github.workspace }}/report.md ]; then
-            # Use a unique delimiter that won't appear in the report
-            DELIMITER="BENCHMARK_REPORT_END_$(date +%s)"
-            echo "report<<$DELIMITER" >> $GITHUB_OUTPUT
-            cat ${{ github.workspace }}/report.md >> $GITHUB_OUTPUT
-            echo "$DELIMITER" >> $GITHUB_OUTPUT
+            # Append workflow link to the report
+            echo "" >> ${{ github.workspace }}/report.md
+            echo "---" >> ${{ github.workspace }}/report.md
+            echo "<sub>Benchmark run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>" >> ${{ github.workspace }}/report.md
           else
-            echo "report=No benchmark report generated" >> $GITHUB_OUTPUT
+            # Create a fallback report if analysis failed
+            echo "## 🔍 CRUD Benchmark Results" > ${{ github.workspace }}/report.md
+            echo "" >> ${{ github.workspace }}/report.md
+            echo "⚠️ Benchmark analysis failed. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." >> ${{ github.workspace }}/report.md
           fi
 
       - name: Comment on PR
@@ -281,11 +283,7 @@ jobs:
         uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            ${{ steps.report.outputs.report }}
-
-            ---
-            <sub>Benchmark run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>
+          body-path: ${{ github.workspace }}/report.md
 
       - name: Upload analysis results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
