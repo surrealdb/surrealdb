@@ -6496,7 +6496,6 @@ dependencies = [
  "env_logger",
  "ext-sort",
  "fastnum",
- "flatbuffers",
  "flate2",
  "fst",
  "futures",

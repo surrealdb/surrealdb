@@ -118,7 +118,6 @@ ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
 fastnum.workspace = true
-flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
