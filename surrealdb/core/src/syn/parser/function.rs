@@ -8,7 +8,8 @@ use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
-		let fnc = match self.peek_kind() {
+		let peek = self.peek();
+		let fnc = match peek.kind {
 			t!("fn") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
@@ -92,9 +93,16 @@ impl Parser<'_> {
 					version,
 				})
 			}
-			// TODO temp fix to include API here
-			TokenKind::Identifier | t!("API") => {
+			TokenKind::Identifier => {
 				let mut name = self.parse_ident()?;
+				while self.eat(t!("::")) {
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?)
+				}
+				Function::Normal(name)
+			}
+			x if Self::kind_is_keyword_like(x) => {
+				let mut name = self.lexer.span_str(peek.span).to_string();
 				while self.eat(t!("::")) {
 					name.push_str("::");
 					name.push_str(self.parse_ident_str()?)

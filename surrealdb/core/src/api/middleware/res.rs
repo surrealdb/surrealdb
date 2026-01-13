@@ -5,7 +5,7 @@ use http::header::ACCEPT;
 use http::{HeaderMap, HeaderValue};
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM, Mime, Name, TEXT_PLAIN};
 
-use crate::api::middleware::api_x::common::{
+use crate::api::middleware::common::{
 	APPLICATION_CBOR, APPLICATION_SDB_FB, APPLICATION_SDB_NATIVE, BodyStrategy,
 };
 
@@ -162,8 +162,8 @@ mod tests {
 	use http::HeaderMap;
 	use http::header::ACCEPT;
 
-	use crate::api::middleware::api_x::common::BodyStrategy;
-	use crate::api::middleware::api_x::res::output_body_strategy;
+	use crate::api::middleware::common::BodyStrategy;
+	use crate::api::middleware::res::output_body_strategy;
 
 	macro_rules! case {
 		($in:ident => None, $header:expr) => {{

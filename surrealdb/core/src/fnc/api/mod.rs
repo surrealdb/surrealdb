@@ -35,7 +35,6 @@ pub async fn invoke(
 	}
 
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
-		// TODO should find_definition just return PublicObject in the first place?
 		req.params = params.try_into()?;
 		match process_api_request_with_stack(stk, ctx, opt, api, req).await {
 			Ok(Some(v)) => Ok(v.into()),
@@ -47,9 +46,6 @@ pub async fn invoke(
 	}
 }
 
-// TODO can we actually just run the timeout here?
-// like we chain onto the next middleware and eventually
-// the matched route, so cant we timeout that invoke of the "next" function
 pub async fn timeout(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, timeout): (Value, Box<Closure>, Duration),

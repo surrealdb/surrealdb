@@ -1,8 +1,8 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::api::middleware::api_x::common::BodyStrategy;
-use crate::api::middleware::api_x::req::BodyParser;
+use crate::api::middleware::common::BodyStrategy;
+use crate::api::middleware::req::BodyParser;
 use crate::api::request::ApiRequest;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;

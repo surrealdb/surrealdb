@@ -6,8 +6,8 @@ use http::{HeaderName, HeaderValue, StatusCode};
 use reblessive::tree::Stk;
 use surrealdb_types::SurrealValue;
 
-use crate::api::middleware::api_x::common::BodyStrategy;
-use crate::api::middleware::api_x::res::output_body_strategy;
+use crate::api::middleware::common::BodyStrategy;
+use crate::api::middleware::res::output_body_strategy;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::ctx::FrozenContext;

@@ -4,7 +4,7 @@ use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM, Mime, TEXT_PLAIN};
 use surrealdb_types::Value;
 
 use super::common::{APPLICATION_CBOR, APPLICATION_SDB_FB};
-use crate::api::middleware::api_x::common::{APPLICATION_SDB_NATIVE, BodyStrategy};
+use crate::api::middleware::common::{APPLICATION_SDB_NATIVE, BodyStrategy};
 use crate::api::request::ApiRequest;
 use crate::kvs::IntoBytes;
 use crate::rpc::format;
