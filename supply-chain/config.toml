@@ -119,10 +119,6 @@ criteria = "safe-to-deploy"
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.async_io_stream]]
-version = "0.3.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.axum]]
 version = "0.6.20"
 criteria = "safe-to-deploy"
@@ -899,14 +895,6 @@ criteria = "safe-to-deploy"
 version = "0.6.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.pharos]]
-version = "0.5.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.pkg-config]]
-version = "0.3.31"
-criteria = "safe-to-deploy"
-
 [[exemptions.plotters]]
 version = "0.3.7"
 criteria = "safe-to-deploy"
@@ -1187,10 +1175,6 @@ criteria = "safe-to-deploy"
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.send_wrapper]]
-version = "0.6.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_html_form]]
 version = "0.2.8"
 criteria = "safe-to-deploy"
@@ -1285,10 +1269,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
 version = "2.0.110"
-criteria = "safe-to-deploy"
-
-[[exemptions.syn]]
-version = "2.0.111"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
@@ -1471,10 +1451,6 @@ criteria = "safe-to-deploy"
 version = "2.1.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.utf-8]]
-version = "0.7.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.version_check]]
 version = "0.9.5"
 criteria = "safe-to-deploy"
@@ -1593,10 +1569,6 @@ criteria = "safe-to-run"
 
 [[exemptions.writeable]]
 version = "0.6.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.ws_stream_wasm]]
-version = "0.7.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.wyz]]
