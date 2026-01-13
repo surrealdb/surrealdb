@@ -28,18 +28,55 @@ class BenchmarkAnalyzer:
 	"""Analyzes benchmark results and detects performance regressions."""
 
 	def __init__(self, results_dir: Path, historical_days: int = 30, regression_threshold: float = 0.15):
-		self.results_dir = results_dir
+		# Resolve to absolute path to prevent directory traversal
+		self.results_dir = results_dir.resolve()
 		self.historical_days = historical_days
 		self.regression_threshold = regression_threshold
 		self.current_results = {}
 		self.historical_results = []
+
+	@staticmethod
+	def _validate_output_path(file_path: Path) -> Path:
+		"""
+		Validate and sanitize an output file path to prevent path traversal attacks.
+
+		Returns the resolved absolute path if safe, raises ValueError otherwise.
+		"""
+		# Resolve to absolute path
+		resolved = file_path.resolve()
+
+		# Get the current working directory
+		cwd = Path.cwd().resolve()
+
+		# Ensure the output path is within or relative to the current working directory
+		# This prevents writing to sensitive system directories
+		try:
+			resolved.relative_to(cwd)
+		except ValueError:
+			# If we can't make it relative to cwd, it's outside our workspace
+			raise ValueError(
+				f"Output path {file_path} is outside the current working directory. "
+				f"This is not allowed for security reasons."
+			)
+
+		# Ensure parent directory exists or can be created
+		resolved.parent.mkdir(parents=True, exist_ok=True)
+
+		return resolved
 
 	def load_current_results(self) -> Dict:
 		"""Load current benchmark results from JSON files."""
 		results = {}
 		for json_file in self.results_dir.glob("*.json"):
 			try:
-				with open(json_file, 'r') as f:
+				# Resolve to absolute path and verify it's within results_dir
+				# This prevents path traversal and symlink attacks
+				resolved_file = json_file.resolve()
+				if not str(resolved_file).startswith(str(self.results_dir)):
+					print(f"Warning: Skipping {json_file} (outside results directory)", file=sys.stderr)
+					continue
+
+				with open(resolved_file, 'r') as f:
 					data = json.load(f)
 					config_name = json_file.stem.replace('result-', '')
 					results[config_name] = self._parse_benchmark_data(data)
@@ -86,6 +123,9 @@ class BenchmarkAnalyzer:
 	def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
 		"""Load historical benchmark results from the benchmark-results branch."""
 		historical = []
+		# Resolve to absolute path to prevent directory traversal
+		benchmark_results_dir = benchmark_results_dir.resolve()
+
 		if not benchmark_results_dir.exists():
 			return historical
 
@@ -96,12 +136,24 @@ class BenchmarkAnalyzer:
 				continue
 
 			try:
+				# Validate date_dir is within benchmark_results_dir
+				resolved_date_dir = date_dir.resolve()
+				if not str(resolved_date_dir).startswith(str(benchmark_results_dir)):
+					print(f"Warning: Skipping {date_dir} (outside results directory)", file=sys.stderr)
+					continue
+
 				dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d")
 				if dir_date < cutoff_date:
 					break
 
 				for json_file in date_dir.glob("*.json"):
-					with open(json_file, 'r') as f:
+					# Validate json_file is within date_dir
+					resolved_file = json_file.resolve()
+					if not str(resolved_file).startswith(str(resolved_date_dir)):
+						print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
+						continue
+
+					with open(resolved_file, 'r') as f:
 						data = json.load(f)
 						config_name = json_file.stem.split('-')[0]
 						historical.append({
@@ -342,12 +394,16 @@ class BenchmarkAnalyzer:
 
 	def run(self, output_file: Path, json_output_file: Optional[Path] = None):
 		"""Run the full analysis and generate reports."""
+		# Validate output paths to prevent path traversal attacks
+		safe_output_file = self._validate_output_path(output_file)
+		safe_json_output_file = self._validate_output_path(json_output_file) if json_output_file else None
+
 		# Load current results
 		self.current_results = self.load_current_results()
 
 		if not self.current_results:
 			print("No benchmark results found", file=sys.stderr)
-			with open(output_file, 'w') as f:
+			with open(safe_output_file, 'w') as f:
 				f.write("## 🔍 CRUD Benchmark Results\n\n")
 				f.write("⚠️ No benchmark results found. Benchmarks may have failed.\n")
 			return
@@ -367,21 +423,21 @@ class BenchmarkAnalyzer:
 		report = self.generate_report(regressions)
 
 		# Write markdown report
-		with open(output_file, 'w') as f:
+		with open(safe_output_file, 'w') as f:
 			f.write(report)
 
-		print(f"Report written to {output_file}")
+		print(f"Report written to {safe_output_file}")
 
 		# Write JSON output
-		if json_output_file:
+		if safe_json_output_file:
 			output_data = {
 				'timestamp': datetime.now().isoformat(),
 				'current_results': self.current_results,
 				'regressions': regressions
 			}
-			with open(json_output_file, 'w') as f:
+			with open(safe_json_output_file, 'w') as f:
 				json.dump(output_data, f, indent=2)
-			print(f"JSON output written to {json_output_file}")
+			print(f"JSON output written to {safe_json_output_file}")
 
 
 def main():
