@@ -2,11 +2,7 @@
 name = "surreal"
 publish = false
 edition = "2021"
-<<<<<<< HEAD
 version = "2.5.0"
-=======
-version = "2.4.1"
->>>>>>> 9117d9eb0 (Fix the build and prepare v2.4.1 release (#6729))
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
@@ -15,13 +11,8 @@ members = ["./","crates/core", "crates/sdk"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-<<<<<<< HEAD
 surrealdb-core = { version = "=2.5.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
 surrealdb = { version = "=2.5.0", package = "surrealdb", path = "./crates/sdk" }
-=======
-surrealdb-core = { version = "=2.4.1", package = "surrealdb-core", path = "./crates/core", default-features = false }
-surrealdb = { version = "=2.4.1", package = "surrealdb", path = "./crates/sdk" }
->>>>>>> 9117d9eb0 (Fix the build and prepare v2.4.1 release (#6729))
 
 # External surreal crates
 surrealcs = { version = "0.4.4" }
