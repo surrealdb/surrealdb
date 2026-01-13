@@ -1,0 +1,153 @@
+/**
+[test]
+reason = "Test custom user-defined middleware functions with proper signatures and behavior"
+
+# 0
+[[test.results]]
+value = "NONE"
+
+# 1
+[[test.results]]
+value = "NONE"
+
+# 2
+[[test.results]]
+value = "{ body: { modified: true, original: 'test' }, headers: { 'x-modified': 'true' }, status: 200 }"
+
+# 3
+[[test.results]]
+value = "NONE"
+
+# 4
+[[test.results]]
+value = "NONE"
+
+# 5
+[[test.results]]
+value = "{ body: { count: 2 }, headers: {}, status: 200 }"
+
+# 6
+[[test.results]]
+value = "NONE"
+
+# 7
+[[test.results]]
+value = "NONE"
+
+# 8
+[[test.results]]
+value = "{ body: { message: 'original message', prefix: 'PREFIX: original message' }, headers: {}, status: 200 }"
+
+# 9
+[[test.results]]
+value = "NONE"
+
+# 10
+[[test.results]]
+value = "NONE"
+
+# 11
+[[test.results]]
+error = "An error occurred: Custom middleware error"
+
+[env.capabilities]
+allow-experimental = ["define_api"]
+
+*/
+
+# 0 - Custom middleware that modifies request before next()
+DEFINE FUNCTION fn::add_request_field($req: object, $next: function) {
+    LET $req = SELECT *, (SELECT *, true AS modified FROM ONLY $req.body) AS body FROM ONLY $req;
+    RETURN $next($req);
+};
+
+# 1
+DEFINE API "/custom_request"
+    FOR get
+        MIDDLEWARE
+            fn::add_request_field()
+        THEN {
+            RETURN {
+                status: 200,
+                headers: {
+                    "x-modified": <string> $request.body.modified
+                },
+                body: $request.body
+            };
+        };
+
+# 2
+api::invoke("/custom_request", {
+    body: {
+        original: "test"
+    }
+});
+
+# 3 - Custom middleware that modifies response after next()
+DEFINE FUNCTION fn::increment_count($req: object, $next: function) {
+    LET $res = $next($req);
+    LET $res = SELECT *, (SELECT *, ($res.body.count + 1) AS count FROM ONLY $res.body) AS body FROM ONLY $res;
+    RETURN $res;
+};
+
+# 4
+DEFINE API "/custom_response"
+    FOR get
+        MIDDLEWARE
+            fn::increment_count()
+        THEN {
+            RETURN {
+                status: 200,
+                body: {
+                    count: 1
+                }
+            };
+        };
+
+# 5
+api::invoke("/custom_response");
+
+# 6 - Custom middleware with additional parameters
+DEFINE FUNCTION fn::add_prefix($req: object, $next: function, $prefix: string) {
+    LET $res = $next($req);
+    LET $res = SELECT *, (SELECT *, ($prefix + ": " + $res.body.message) AS prefix FROM ONLY $res.body) AS body FROM ONLY $res;
+    RETURN $res;
+};
+
+# 7
+DEFINE API "/custom_with_args"
+    FOR get
+        MIDDLEWARE
+            fn::add_prefix("PREFIX")
+        THEN {
+            RETURN {
+                status: 200,
+                body: {
+                    message: "original message"
+                }
+            };
+        };
+
+# 8
+api::invoke("/custom_with_args");
+
+# 9 - Custom middleware that throws an error
+DEFINE FUNCTION fn::error_middleware($req: object, $next: function) {
+    THROW "Custom middleware error";
+};
+
+# 10
+DEFINE API "/custom_error"
+    FOR get
+        MIDDLEWARE
+            fn::error_middleware()
+        THEN {
+            RETURN {
+                status: 200,
+                body: {}
+            };
+        };
+
+# 11
+api::invoke("/custom_error");
+

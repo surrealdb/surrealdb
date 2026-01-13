@@ -102,11 +102,14 @@ impl Parser<'_> {
 				Function::Normal(name)
 			}
 			x if Self::kind_is_keyword_like(x) => {
+				self.pop_peek();
 				let mut name = self.lexer.span_str(peek.span).to_string();
+
 				while self.eat(t!("::")) {
 					name.push_str("::");
 					name.push_str(self.parse_ident_str()?)
 				}
+				
 				Function::Normal(name)
 			}
 			_ => unexpected!(self, self.peek(), "a function name"),

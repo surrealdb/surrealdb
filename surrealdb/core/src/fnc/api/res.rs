@@ -17,7 +17,7 @@ use crate::fnc::args::{FromPublic, Optional};
 use crate::rpc::format;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicBytes;
-use crate::val::{Bytes, Closure, Object, Value};
+use crate::val::{Bytes, Closure, Value};
 
 pub async fn body(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
@@ -94,18 +94,14 @@ pub async fn header(
 	let mut res: ApiResponse = res.try_into()?;
 
 	let name: HeaderName = name.parse()?;
-	let old = if let Some(value) = value {
+	if let Some(value) = value {
 		let value: HeaderValue = value.parse()?;
 		res.headers.insert(name, value)
 	} else {
 		res.headers.remove(name)
 	};
 
-	if let Some(old) = old {
-		Ok(Value::from(old.to_str()?))
-	} else {
-		Ok(Value::None)
-	}
+	Ok(res.into())
 }
 
 pub async fn headers(
@@ -114,21 +110,16 @@ pub async fn headers(
 ) -> Result<Value> {
 	let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
 	let mut res: ApiResponse = res.try_into()?;
-	let mut old_headers = Object::default();
 
 	for (k, value) in headers {
 		let name: HeaderName = k.parse()?;
-		let old = if let Some(value) = value {
+		if let Some(value) = value {
 			let value: HeaderValue = value.parse()?;
 			res.headers.insert(name, value)
 		} else {
 			res.headers.remove(name)
 		};
-
-		if let Some(old) = old {
-			old_headers.insert(k, Value::from(old.to_str()?));
-		}
 	}
 
-	Ok(Value::Object(old_headers))
+	Ok(res.into())
 }
