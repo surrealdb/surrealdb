@@ -73,12 +73,12 @@ The workflow tests three SurrealDB configurations:
 
 Each configuration runs with:
 
-- **Samples:** 5,000 operations per CRUD operation
-- **Clients:** 8 concurrent clients
-- **Threads:** 16 threads per client
+- **Samples:** 10,000 operations per CRUD operation
+- **Clients:** 12 concurrent clients
+- **Threads:** 48 threads per client
 - **Order:** Randomized key generation (`-r` flag)
 
-These parameters balance test duration (~5 minutes per config) with statistical significance.
+These parameters balance test duration with statistical significance while providing high concurrency stress testing.
 
 ## Operations Tested
 
@@ -215,7 +215,7 @@ cd crud-bench
 cargo build --release
 
 # Run benchmark against embedded SurrealDB
-./target/release/crud-bench -d surrealdb -e memory -s 5000 -c 8 -t 16 -r
+./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -r
 
 # Results will be in result*.json files
 ```
@@ -300,8 +300,8 @@ If the Python analysis script fails:
 
 If benchmarks take too long:
 
-- Reduce sample count: Change `-s 5000` to `-s 2500` or `-s 1000`
-- Reduce concurrency: Change `-c 8 -t 16` to lower values
+- Reduce sample count: Change `-s 10000` to `-s 5000` or `-s 2500`
+- Reduce concurrency: Change `-c 12 -t 48` to lower values like `-c 8 -t 16`
 - Skip configurations: Comment out matrix entries in `crud-bench.yml`
 
 ## Performance Baseline Initialization

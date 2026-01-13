@@ -410,7 +410,7 @@ def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
 		report.append(f"\n- **Baseline:** Rolling {self.historical_days}-day median")
 		report.append(f"- **Regression threshold:** {self.regression_threshold * 100}% performance degradation")
 		report.append("- **Significance test:** Z-test at 95% confidence level")
-		report.append("- **Benchmark parameters:** 5,000 samples, 8 clients, 16 threads")
+		report.append("- **Benchmark parameters:** 10,000 samples, 12 clients, 48 threads")
 		report.append("</details>")
 
 		return "\n".join(report)
