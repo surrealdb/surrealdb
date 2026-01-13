@@ -165,20 +165,24 @@ class BenchmarkAnalyzer:
 		for plural_key, singular_key in operation_map.items():
 			if plural_key in data:
 				op_data = data[plural_key]
-				# Debug: show what keys are in the operation data
-				print(f"  {plural_key} keys: {list(op_data.keys())}", file=sys.stderr)
-				print(f"  {plural_key} full data: {json.dumps(op_data, indent=2)}", file=sys.stderr)
+				
+				# crud-bench stores latencies in microseconds, we convert to nanoseconds
+				# crud-bench uses 'ops' for throughput, 'q50/q95/q99' for percentiles, 'mean' for average
+				elapsed_data = op_data.get('elapsed', {})
+				total_time_ms = (elapsed_data.get('secs', 0) * 1000) + (elapsed_data.get('nanos', 0) / 1_000_000)
 				
 				metrics[singular_key] = {
-					'throughput': op_data.get('throughput', 0),
-					'total_time_ms': op_data.get('total_time_ms', 0),
-					'avg_time_ns': op_data.get('avg_time_ns', 0),
-					'p50_ns': op_data.get('p50_ns', 0),
-					'p95_ns': op_data.get('p95_ns', 0),
-					'p99_ns': op_data.get('p99_ns', 0),
+					'throughput': op_data.get('ops', 0),  # crud-bench uses 'ops' for operations per second
+					'total_time_ms': total_time_ms,
+					'avg_time_ns': op_data.get('mean', 0) * 1000,  # Convert µs to ns
+					'p50_ns': op_data.get('q50', 0) * 1000,  # Convert µs to ns
+					'p95_ns': op_data.get('q95', 0) * 1000,  # Convert µs to ns
+					'p99_ns': op_data.get('q99', 0) * 1000,  # Convert µs to ns
 					'samples': op_data.get('samples', 0)
 				}
-				print(f"  {singular_key}: throughput={metrics[singular_key]['throughput']:.0f} ops/s, samples={metrics[singular_key]['samples']}", file=sys.stderr)
+				print(f"  {singular_key}: {self.format_throughput(metrics[singular_key]['throughput'])}, "
+				      f"p50={self.format_latency(metrics[singular_key]['p50_ns'])}, "
+				      f"samples={metrics[singular_key]['samples']}", file=sys.stderr)
 
 		# Extract scan metrics
 		if 'scans' in data:
