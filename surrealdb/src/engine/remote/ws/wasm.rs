@@ -5,12 +5,11 @@ use std::time::Duration;
 use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
-use pharos::{Channel, Events, Observable, ObserveConfig};
 use tokio::sync::{RwLock, watch};
+use tokio_tungstenite_wasm::{Message, WebSocketStream, connect_with_protocols};
 use wasm_bindgen_futures::spawn_local;
 use wasmtimer::tokio as time;
 use wasmtimer::tokio::MissedTickBehavior;
-use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{
 	HandleResult, PATH, PING_INTERVAL, SessionState, WsMessage, create_ping_message,
@@ -25,8 +24,8 @@ use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
 use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
-type MessageStream = SplitStream<WsStream>;
-type MessageSink = SplitSink<WsStream, Message>;
+type MessageStream = SplitStream<WebSocketStream>;
+type MessageSink = SplitSink<WebSocketStream, Message>;
 type Sessions = HashMap<uuid::Uuid, std::result::Result<Arc<SessionState>, SessionError>>;
 
 // ============================================================================
@@ -35,7 +34,7 @@ type Sessions = HashMap<uuid::Uuid, std::result::Result<Arc<SessionState>, Sessi
 
 impl WsMessage for Message {
 	fn binary(payload: Vec<u8>) -> Self {
-		Message::Binary(payload)
+		Message::Binary(payload.into())
 	}
 
 	fn as_binary(&self) -> Option<&[u8]> {
@@ -53,6 +52,7 @@ impl WsMessage for Message {
 		match self {
 			Message::Text(_) => "text message",
 			Message::Binary(_) => "binary message",
+			Message::Close(_) => "close message",
 		}
 	}
 }
@@ -132,32 +132,18 @@ impl RouterState {
 // Router
 // ============================================================================
 
-async fn router_reconnect(
-	state: &RouterState,
-	events: &mut Events<WsEvent>,
-	endpoint: &Endpoint,
-	capacity: usize,
-) {
+async fn router_reconnect(state: &RouterState, endpoint: &Endpoint) {
 	loop {
 		trace!("Reconnecting...");
-		match WsMeta::connect(&endpoint.url, vec!["flatbuffers"]).await {
-			Ok((mut meta, stream)) => {
-				let (new_sink, new_stream) = stream.split();
+
+		// Build WebSocket URL with flatbuffers protocol negotiation
+		let ws_url = endpoint.url.as_str();
+
+		match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+			Ok(socket) => {
+				let (new_sink, new_stream) = socket.split();
 				state.update_connection(new_sink, new_stream).await;
-				*events = {
-					let result = match capacity {
-						0 => meta.observe(ObserveConfig::default()).await,
-						capacity => meta.observe(Channel::Bounded(capacity).into()).await,
-					};
-					match result {
-						Ok(events) => events,
-						Err(error) => {
-							trace!("{error}");
-							time::sleep(Duration::from_secs(1)).await;
-							continue;
-						}
-					}
-				};
+
 				// Replay state for ALL sessions
 				for (session_id, session_result) in state.sessions.to_vec() {
 					if let Ok(session_state) = session_result {
@@ -179,14 +165,15 @@ async fn router_reconnect(
 
 pub(crate) async fn run_router(
 	endpoint: Endpoint,
-	capacity: usize,
+	_capacity: usize,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
 	session_rx: Receiver<SessionId>,
 ) {
-	// Connect to the WebSocket server
-	let (mut ws_meta, socket) = match WsMeta::connect(&endpoint.url, vec!["flatbuffers"]).await {
-		Ok(pair) => pair,
+	// Connect to the WebSocket server with flatbuffers protocol negotiation
+	let ws_url = endpoint.url.as_str();
+	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
+		Ok(socket) => socket,
 		Err(error) => {
 			conn_tx.send(Err(Error::Ws(error.to_string()).into())).await.ok();
 			return;
@@ -194,20 +181,6 @@ pub(crate) async fn run_router(
 	};
 
 	let ping: Message = create_ping_message();
-
-	let mut events = {
-		let result = match capacity {
-			0 => ws_meta.observe(ObserveConfig::default()).await,
-			capacity => ws_meta.observe(Channel::Bounded(capacity).into()).await,
-		};
-		match result {
-			Ok(events) => events,
-			Err(error) => {
-				conn_tx.send(Err(Error::Ws(error.to_string()).into())).await.ok();
-				return;
-			}
-		}
-	};
 
 	// Signal successful connection
 	if conn_tx.send(Ok(())).await.is_err() {
@@ -261,54 +234,41 @@ pub(crate) async fn run_router(
 					).await {
 						HandleResult::Ok => {}
 						HandleResult::Disconnected => {
-							router_reconnect(&state, &mut events, &endpoint, capacity).await;
+							router_reconnect(&state, &endpoint).await;
 							continue 'router;
 						}
 					}
 				}
 				result = async { state.stream.write().await.next().await }.fuse() => {
-					let Some(message) = result else {
-						router_reconnect(&state, &mut events, &endpoint, capacity).await;
-						continue 'router;
-					};
-
-					match handle_response::<Message, _, _>(
-						&message, &state.sessions, &state.sink
-					).await {
-						HandleResult::Ok => continue,
-						HandleResult::Disconnected => {
-							router_reconnect(&state, &mut events, &endpoint, capacity).await;
+					match result {
+						Some(Ok(message)) => {
+							match handle_response::<Message, _, _>(
+								&message, &state.sessions, &state.sink
+							).await {
+								HandleResult::Ok => continue,
+								HandleResult::Disconnected => {
+									router_reconnect(&state, &endpoint).await;
+									continue 'router;
+								}
+							}
+						}
+						Some(Err(error)) => {
+							trace!("WebSocket error: {error}");
+							router_reconnect(&state, &endpoint).await;
 							continue 'router;
 						}
-					}
-				}
-				event = events.next().fuse() => {
-					let Some(event) = event else {
-						continue;
-					};
-					match event {
-						WsEvent::Error => {
-							trace!("connection errored");
-							router_reconnect(&state, &mut events, &endpoint, capacity).await;
+						None => {
+							trace!("WebSocket stream ended");
+							router_reconnect(&state, &endpoint).await;
 							continue 'router;
 						}
-						WsEvent::WsErr(error) => {
-							trace!("{error}");
-						}
-						WsEvent::Closed(..) => {
-							reset_sessions(&state.sessions).await;
-							trace!("connection closed");
-							router_reconnect(&state, &mut events, &endpoint, capacity).await;
-							continue 'router;
-						}
-						_ => {}
 					}
 				}
 				_ = pinger.next().fuse() => {
 					trace!("Pinging the server");
 					if let Err(error) = state.sink.write().await.send(ping.clone()).await {
 						trace!("failed to ping the server; {error:?}");
-						router_reconnect(&state, &mut events, &endpoint, capacity).await;
+						router_reconnect(&state, &endpoint).await;
 						continue 'router;
 					}
 				}
