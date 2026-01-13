@@ -82,7 +82,7 @@ impl ToSql for Data {
 			Self::ContentExpression(v) => {
 				write_sql!(f, sql_fmt, "CONTENT {v}");
 			}
-			Self::SingleExpression(v) => v.fmt_sql(f, sql_fmt),
+			Self::SingleExpression(v) => CoverStmts(v).fmt_sql(f, sql_fmt),
 			Self::ValuesExpression(v) => {
 				f.push('(');
 				if let Some(first) = v.first() {

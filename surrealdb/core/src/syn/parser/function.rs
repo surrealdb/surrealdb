@@ -240,7 +240,6 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => self
-				.lexer
 				.span_str(token.span)
 				.parse::<u32>()
 				.map_err(|e| syntax_error!("Failed to parse model version: {e}", @token.span)),
@@ -343,7 +342,7 @@ mod test {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("rand::uuid()", out.to_sql());
+		assert_eq!("`rand`::uuid()", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};

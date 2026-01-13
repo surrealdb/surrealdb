@@ -589,6 +589,9 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 impl Parser<'_> {
 	/// Parse a builtin path.
 	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
+		let s = self.unescape_ident_span(start)?;
+		let mut buffer = s.to_lowercase();
+
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -596,33 +599,39 @@ impl Parser<'_> {
 				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
-			last_span = self.last_span();
+
+			buffer.push_str("::");
+			let s = self.unescape_ident_span(peek.span)?;
+			buffer.reserve(s.len());
+			for c in s.chars() {
+				for l in c.to_lowercase() {
+					buffer.push(l);
+				}
+			}
+			last_span = peek.span;
 		}
 
-		let span = start.covers(last_span);
-		let str = self.lexer.span_str(span);
-
-		match PATHS.get_entry(&UniCase::ascii(str)) {
+		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
 			Some((k, (PathKind::Function, _))) => {
 				// TODO: Move this out of the parser.
 				if k.to_lowercase().starts_with("api::") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `{k}` method, as the experimental define api capability is not enabled", @span);
+					bail!("Cannot use the `{k}` method, as the experimental define api capability is not enabled", @start.covers(last_span));
 				}
 
-				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+				stk.run(|ctx| self.parse_builtin_function(ctx, buffer))
 					.await
 					.map(|x| Expr::FunctionCall(Box::new(x)))
 			}
 			None => {
-				if let Some(suggest) = find_suggestion(str) {
+				if let Some(suggest) = find_suggestion(&buffer) {
 					Err(SyntaxError::new(format_args!(
 						"Invalid function/constant path, did you maybe mean `{suggest}`"
 					))
-					.with_span(span, MessageKind::Error))
+					.with_span(start.covers(last_span), MessageKind::Error))
 				} else {
 					Err(SyntaxError::new("Invalid function/constant path")
-						.with_span(span, MessageKind::Error))
+						.with_span(start.covers(last_span), MessageKind::Error))
 				}
 			}
 		}

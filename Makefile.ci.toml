@@ -547,13 +547,14 @@ run_task = { name = [
 category = "CI - WORKSPACE TESTS"
 description = "Run workspace library tests"
 command = "cargo"
+env = { SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
 args = [
     "nextest",
     "run",
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks",
     "--workspace",
     "--",
     "--skip", "api_integration",

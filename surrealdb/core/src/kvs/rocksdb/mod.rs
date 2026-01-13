@@ -17,13 +17,14 @@ use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use memory_manager::MemoryManager;
 use rocksdb::{
 	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
-	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions, properties,
 };
 use tokio::sync::Mutex;
 
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
+use crate::kvs::ds::{Metric, Metrics};
 use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
@@ -235,6 +236,50 @@ impl Datastore {
 			disk_space_manager,
 			background_flusher,
 			commit_coordinator,
+		})
+	}
+
+	const BLOCK_CACHE_USAGE: &str = "rocksdb.block_cache_usage";
+	const BLOCK_CACHE_PINNED_USAGE: &str = "rocksdb.block_cache_pinned_usage";
+	const ESTIMATE_TABLE_READERS_MEM: &str = "rocksdb.estimate_table_readers_mem";
+	const CUR_SIZE_ALL_MEM_TABLES: &str = "rocksdb.cur_size_all_mem_tables";
+
+	/// Registers metrics for the RocksDB datastore.
+	pub(crate) fn register_metrics(&self) -> Metrics {
+		Metrics {
+			name: "surrealdb.rocksdb",
+			u64_metrics: vec![
+				Metric {
+					name: Self::BLOCK_CACHE_USAGE,
+					description: "Returns the memory size (in bytes) for the entries residing in block cache.",
+				},
+				Metric {
+					name: Self::BLOCK_CACHE_PINNED_USAGE,
+					description: "Returns the memory size (in bytes) for the entries being pinned.",
+				},
+				Metric {
+					name: Self::ESTIMATE_TABLE_READERS_MEM,
+					description: "Returns estimated memory size (in bytes) used for reading SST tables, excluding memory used in block cache (e.g., filter and index blocks).",
+				},
+				Metric {
+					name: Self::CUR_SIZE_ALL_MEM_TABLES,
+					description: "Returns approximate size (in bytes) of active and unflushed immutable memtables",
+				},
+			],
+		}
+	}
+
+	/// Collects a specific u64 metric by name from the RocksDB datastore.
+	pub(crate) fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		let metric = match metric {
+			Self::BLOCK_CACHE_USAGE => Some(properties::BLOCK_CACHE_USAGE),
+			Self::BLOCK_CACHE_PINNED_USAGE => Some(properties::BLOCK_CACHE_PINNED_USAGE),
+			Self::ESTIMATE_TABLE_READERS_MEM => Some(properties::ESTIMATE_TABLE_READERS_MEM),
+			Self::CUR_SIZE_ALL_MEM_TABLES => Some(properties::CUR_SIZE_ALL_MEM_TABLES),
+			_ => None,
+		};
+		metric.map(|metric| {
+			self.db.property_int_value(metric).unwrap_or_default().unwrap_or_default()
 		})
 	}
 

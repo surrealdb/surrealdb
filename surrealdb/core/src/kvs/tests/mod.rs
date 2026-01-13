@@ -22,6 +22,9 @@ macro_rules! include_tests {
 	};
 }
 
+#[cfg(feature = "kv-rocksdb")]
+mod metrics;
+
 mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
@@ -134,6 +137,7 @@ mod rocksdb {
 		multiwriter_same_keys_conflict,
 		reverse_iterator,
 		read_and_deletion_only,
+		metrics
 	);
 }
 

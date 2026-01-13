@@ -141,14 +141,14 @@ impl ToSql for JwtAccess {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match &self.verify {
 			JwtAccessVerify::Key(v) => {
-				write_sql!(f, sql_fmt, "ALGORITHM {} KEY {}", v.alg, v.key);
+				write_sql!(f, sql_fmt, "ALGORITHM {} KEY {}", v.alg, CoverStmts(&v.key));
 			}
 			JwtAccessVerify::Jwks(v) => {
-				write_sql!(f, sql_fmt, "URL {}", v.url);
+				write_sql!(f, sql_fmt, "URL {}", CoverStmts(&v.url));
 			}
 		}
 		if let Some(iss) = &self.issue {
-			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", iss.key);
+			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", CoverStmts(&iss.key));
 		}
 	}
 }

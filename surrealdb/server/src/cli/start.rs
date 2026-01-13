@@ -19,6 +19,7 @@ use crate::cnf::LOGO;
 use crate::dbs::StartCommandDbsOptions;
 use crate::ntw::RouterFactory;
 use crate::ntw::client_ip::ClientIp;
+use crate::telemetry::metrics::ds::register_datastore_metrics;
 use crate::{dbs, env, ntw};
 
 #[derive(Args, Debug)]
@@ -238,6 +239,8 @@ pub async fn init<
 	let canceller = CancellationToken::new();
 	// Start the datastore
 	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	// Register datastore metrics
+	register_datastore_metrics(datastore.clone());
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Build and run the HTTP server using the provided RouterFactory implementation

@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeIdent, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,8 +142,11 @@ impl ToSql for FunctionCall {
 				for (idx, s) in s.split("::").enumerate() {
 					if idx != 0 {
 						f.push_str("::");
+					} else {
+						write_sql!(f, fmt, "{}", EscapeIdent(s));
+						continue;
 					}
-					f.push_str(s);
+					s.fmt_sql(f, fmt);
 				}
 			}
 			Function::Custom(ref s) => {
@@ -166,11 +169,8 @@ impl ToSql for FunctionCall {
 				write_sql!(f, fmt, "{m}");
 			}
 			Function::Module(ref m, ref s) => {
-				f.push_str("mod");
-				for s in m.split("::") {
-					f.push_str("::");
-					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
-				}
+				f.push_str("mod::");
+				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(m));
 				if let Some(s) = s {
 					write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(s));
 				}

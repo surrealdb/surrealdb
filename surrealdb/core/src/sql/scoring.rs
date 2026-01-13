@@ -5,7 +5,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Scoring {
 	Bm {
 		k1: f32,
