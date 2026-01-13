@@ -103,6 +103,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DELETE") => TokenKind::Keyword(Keyword::Delete),
 	UniCase::ascii("DESCENDING") => TokenKind::Keyword(Keyword::Descending),
 	UniCase::ascii("DESC") => TokenKind::Keyword(Keyword::Descending),
+	UniCase::ascii("DEFER") => TokenKind::Keyword(Keyword::Defer),
 	UniCase::ascii("DIFF") => TokenKind::Keyword(Keyword::Diff),
 	UniCase::ascii("DIMENSION") => TokenKind::Keyword(Keyword::Dimension),
 	UniCase::ascii("DISTANCE") => TokenKind::Keyword(Keyword::Distance),

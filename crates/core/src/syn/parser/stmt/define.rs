@@ -1274,11 +1274,18 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				t!("DEFER") => {
+					self.pop_peek();
+					res.defer = true;
+				}
 				_ => break,
 			}
 		}
 		if matches!(res.index, Index::Count) && !res.cols.is_empty() {
 			bail!("Cannot create a count index with fields");
+		}
+		if matches!(res.index, Index::Uniq) && res.defer {
+			bail!("Unique index does not support DEFER.");
 		}
 		Ok(res)
 	}
