@@ -34,7 +34,7 @@ impl FileStore {
 		}
 	}
 
-	/// Parse a URL into FileStoreOptions
+	/// Parse a URL into FileStoreOption
 	pub async fn parse_url(url_str: &str) -> Result<Option<FileStoreOptions>, Error> {
 		let Ok(url) = Url::parse(url_str) else {
 			return Ok(None);

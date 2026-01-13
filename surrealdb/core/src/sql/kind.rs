@@ -5,7 +5,7 @@ use std::hash;
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Float, Fmt, QuoteStr};
+use crate::fmt::{EscapeKwFreeIdent, EscapeObjectKey, Float, Fmt, QuoteStr};
 use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -560,11 +560,12 @@ impl ToSql for KindLiteral {
 						f,
 						fmt,
 						"{}",
-						Fmt::pretty_comma_separated(
-							o.iter().map(|args| Fmt::new(args, |(k, v), f, fmt| {
-								write_sql!(f, fmt, "{}: {}", EscapeKey(k), v)
-							})),
-						)
+						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+							args,
+							|(k, v), f, fmt| {
+								write_sql!(f, fmt, "{}: {}", EscapeObjectKey(k), v)
+							}
+						)),)
 					);
 				}
 				if fmt.is_pretty() {

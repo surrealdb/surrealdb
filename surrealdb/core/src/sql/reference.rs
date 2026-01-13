@@ -1,3 +1,4 @@
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,7 +23,7 @@ impl surrealdb_types::ToSql for ReferenceDeleteStrategy {
 			ReferenceDeleteStrategy::Unset => f.push_str("UNSET"),
 			ReferenceDeleteStrategy::Custom(v) => {
 				f.push_str("THEN ");
-				v.fmt_sql(f, fmt);
+				CoverStmts(v).fmt_sql(f, fmt);
 			}
 		}
 	}

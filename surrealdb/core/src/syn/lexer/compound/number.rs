@@ -1,4 +1,3 @@
-use core::f64;
 use std::borrow::Cow;
 use std::num::{ParseFloatError, ParseIntError};
 use std::str::FromStr;

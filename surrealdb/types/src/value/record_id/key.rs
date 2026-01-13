@@ -144,11 +144,11 @@ impl PartialEq<Value> for RecordIdKey {
 
 impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		use crate::utils::escape::EscapeRid;
+		use crate::utils::escape::EscapeRecordKey;
 
 		match self {
 			RecordIdKey::Number(n) => n.fmt_sql(f, fmt),
-			RecordIdKey::String(v) => EscapeRid(v).fmt_sql(f, fmt),
+			RecordIdKey::String(v) => EscapeRecordKey(v).fmt_sql(f, fmt),
 			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f, fmt),
 			RecordIdKey::Object(object) => object.fmt_sql(f, fmt),
 			RecordIdKey::Array(array) => array.fmt_sql(f, fmt),

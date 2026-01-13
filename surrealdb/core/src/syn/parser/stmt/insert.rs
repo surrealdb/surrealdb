@@ -73,6 +73,13 @@ impl Parser<'_> {
 			.speculate(stk, async |stk, this| {
 				this.pop_peek();
 
+				// Some keywords can actually also align with plain idioms, for example `DELETE[1]`
+				// This should not be parsed as an idiom.
+				if Self::kind_starts_statement(this.peek().kind){
+					return Ok(None);
+				}
+
+
 				// If the first value fails to match a idiom, it could still be a valid normal
 				// expression so retry in this case.
 				let Ok(first) = this.parse_plain_idiom(stk).await else {
