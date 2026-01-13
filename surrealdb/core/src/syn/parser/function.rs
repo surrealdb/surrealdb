@@ -109,7 +109,7 @@ impl Parser<'_> {
 					name.push_str("::");
 					name.push_str(self.parse_ident_str()?)
 				}
-				
+
 				Function::Normal(name)
 			}
 			_ => unexpected!(self, self.peek(), "a function name"),
