@@ -82,7 +82,14 @@ class BenchmarkAnalyzer:
 		return json_path.stem.replace('result-', '')
 
 	def load_current_results(self) -> Dict:
-		"""Load current benchmark results from JSON files."""
+		"""
+		Load current benchmark results from JSON files.
+
+		Security Note: This method reads files from the user-specified results_dir.
+		The validation ensures files are ONLY read from within this directory, preventing
+		path traversal attacks via symlinks or relative paths. The user explicitly controls
+		which directory to read from via the --results-dir CLI argument.
+		"""
 		results = {}
 		for json_file in self.results_dir.glob("*.json"):
 			try:
@@ -91,10 +98,12 @@ class BenchmarkAnalyzer:
 				resolved_file = json_file.resolve(strict=True)
 
 				# Use is_relative_to for secure path validation (Python 3.9+)
+				# Only read files that are confirmed to be within results_dir
 				if not resolved_file.is_relative_to(self.results_dir):
 					print(f"Warning: Skipping {json_file} (outside results directory)", file=sys.stderr)
 					continue
 
+				# SAFE: resolved_file has been validated to be within self.results_dir
 				with open(resolved_file, 'r') as f:
 					data = json.load(f)
 					config_name = self._extract_config_name(json_file)
@@ -140,7 +149,12 @@ class BenchmarkAnalyzer:
 		return metrics
 
 	def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
-		"""Load historical benchmark results from the benchmark-results branch."""
+		"""
+		Load historical benchmark results from the benchmark-results branch.
+
+		Security Note: Reads files from the benchmark-results Git branch directory.
+		Validates all paths are within benchmark_results_dir to prevent path traversal.
+		"""
 		historical = []
 		# Resolve to absolute path to prevent directory traversal
 		benchmark_results_dir = benchmark_results_dir.resolve()
@@ -172,10 +186,12 @@ class BenchmarkAnalyzer:
 					resolved_file = json_file.resolve(strict=True)
 
 					# Use is_relative_to for secure path validation (Python 3.9+)
+					# Only read files that are confirmed to be within the date directory
 					if not resolved_file.is_relative_to(resolved_date_dir):
 						print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
 						continue
 
+					# SAFE: resolved_file has been validated to be within resolved_date_dir
 					with open(resolved_file, 'r') as f:
 						data = json.load(f)
 						config_name = self._extract_config_name(json_file)
