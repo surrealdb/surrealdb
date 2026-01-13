@@ -1,4 +1,3 @@
 # Patch crud-bench to use local SurrealDB build from PR
-# Paths are relative to where cargo is invoked (.github/tools/crud-bench)
 [patch.crates-io]
-surrealdb = { path = "../../../surrealdb" }
+surrealdb = { path = "../../surrealdb" }
