@@ -25,11 +25,27 @@ impl Display for TableType {
 			}
 			TableType::Relation(rel) => {
 				f.write_str(" RELATION")?;
-				if let Some(kind) = &rel.from {
-					write!(f, " IN {kind}")?;
+				if let Some(Kind::Record(kind)) = &rel.from {
+					if !kind.is_empty() {
+						write!(f, " IN ")?;
+						for (idx, i) in kind.iter().enumerate() {
+							if idx != 0 {
+								f.write_str(" | ")?;
+							}
+							i.fmt(f)?;
+						}
+					}
 				}
-				if let Some(kind) = &rel.to {
-					write!(f, " OUT {kind}")?;
+				if let Some(Kind::Record(kind)) = &rel.to {
+					if !kind.is_empty() {
+						write!(f, " OUT ")?;
+						for (idx, i) in kind.iter().enumerate() {
+							if idx != 0 {
+								f.write_str(" | ")?;
+							}
+							i.fmt(f)?;
+						}
+					}
 				}
 				if rel.enforced {
 					write!(f, " ENFORCED")?;
