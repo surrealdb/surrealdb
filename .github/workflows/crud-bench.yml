@@ -98,6 +98,30 @@ jobs:
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Align SurrealDB version with crud-bench
+        run: |
+          # Extract the surrealdb version that crud-bench expects
+          EXPECTED_VERSION=$(grep -A 1 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
+          echo "crud-bench expects surrealdb version: $EXPECTED_VERSION"
+
+          # Get current version
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          echo "Current workspace version: $CURRENT_VERSION"
+
+          if [ "$EXPECTED_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "Updating workspace and internal crate versions to $EXPECTED_VERSION"
+
+            # Update workspace package version
+            sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$EXPECTED_VERSION\"/" Cargo.toml
+
+            # Update all internal surrealdb-* dependency versions in workspace.dependencies
+            sed -i "s/surrealdb\([a-z-]*\) = { version = \"$CURRENT_VERSION\"/surrealdb\1 = { version = \"$EXPECTED_VERSION\"/g" Cargo.toml
+
+            echo "Updated Cargo.toml workspace and dependency versions"
+          else
+            echo "Versions already match, no changes needed"
+          fi
+
       - name: Build crud-bench
         run: |
           cd .github/tools/crud-bench
