@@ -8,7 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: { parsed: { name: 'test', value: 42 } }, headers: {}, status: 200 }"
+value = "{ body: { parsed: { name: 'test', value: 42 } }, context: {  }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -16,7 +16,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
-value = "{ body: { parsed: 'abc' }, headers: {}, status: 200 }"
+value = "{ body: { parsed: 'abc' }, context: {  }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
@@ -32,7 +32,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
-value = "{ body: { parsed: 'plain text content' }, headers: {}, status: 200 }"
+value = "{ body: { parsed: 'plain text content' }, context: {  }, headers: {}, status: 200 }"
 
 # 8
 [[test.results]]
@@ -49,7 +49,7 @@ value = "NONE"
 
 # 11
 [[test.results]]
-value = "{ body: { parsed: { native: 'format' } }, headers: {}, status: 200 }"
+value = "{ body: { parsed: { native: 'format' } }, context: {  }, headers: {}, status: 200 }"
 
 # 12
 [[test.results]]
@@ -57,11 +57,11 @@ value = "NONE"
 
 # 13
 [[test.results]]
-value = "{ body: { parsed: { auto: 'json' } }, headers: {}, status: 200 }"
+value = "{ body: { parsed: { auto: 'json' } }, context: {  }, headers: {}, status: 200 }"
 
 # 14
 [[test.results]]
-value = "{ body: { parsed: b'736F6D652064617461' }, headers: {}, status: 200 }"
+value = "{ body: { parsed: b'736F6D652064617461' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

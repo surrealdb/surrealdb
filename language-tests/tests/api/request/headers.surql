@@ -8,7 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: { 'user-agent': 'test-agent', 'x-custom': 'value' }, headers: {}, status: 200 }"
+value = "{ body: { 'user-agent': 'test-agent', 'x-custom': 'value' }, context: {  }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -16,7 +16,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
-value = "{ body: { 'content-type': 'application/json', 'authorization': 'Bearer token123' }, headers: {}, status: 200 }"
+value = "{ body: { 'content-type': 'application/json', 'authorization': 'Bearer token123' }, context: {  }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]

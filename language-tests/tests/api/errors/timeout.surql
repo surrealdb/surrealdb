@@ -12,7 +12,7 @@ error = "The query was not executed because it exceeded the timeout: 1ns"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { completed: true }, headers: {}, status: 200 }"
+value = "{ body: { completed: true }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"

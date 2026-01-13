@@ -17,6 +17,7 @@ pub struct ApiRequest {
 	pub params: PublicObject,
 	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,
+	pub context: PublicObject,
 }
 
 impl TryFrom<Value> for ApiRequest {

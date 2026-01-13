@@ -2,7 +2,7 @@ use http::{HeaderMap, StatusCode};
 use surrealdb_types::SurrealValue;
 
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::PublicValue;
+use crate::types::{PublicValue, PublicObject};
 use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Debug, Default, SurrealValue)]
@@ -11,6 +11,7 @@ pub struct ApiResponse {
 	pub status: StatusCode,
 	pub body: PublicValue,
 	pub headers: HeaderMap,
+	pub context: PublicObject,
 }
 
 impl TryFrom<Value> for ApiResponse {

@@ -8,7 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: { path: '/test/:colon' }, headers: {}, status: 200 }"
+value = "{ body: { path: '/test/:colon' }, context: {  }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -16,7 +16,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
-value = "{ body: { path: '/star/*star' }, headers: {}, status: 200 }"
+value = "{ body: { path: '/star/*star' }, context: {  }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
@@ -24,7 +24,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: { path: '/both/:colon/*star' }, headers: {}, status: 200 }"
+value = "{ body: { path: '/both/:colon/*star' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

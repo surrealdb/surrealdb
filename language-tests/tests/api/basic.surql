@@ -6,19 +6,19 @@ reason = "Test basic API definition, invocation, and response structure"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { message: 'Hello, World!' }, headers: {}, status: 200 }"
+value = "{ body: { message: 'Hello, World!' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { data: 'test' }, headers: { 'content-type': 'application/json' }, status: 201 }"
+value = "{ body: { data: 'test' }, context: {  }, headers: { 'content-type': 'application/json' }, status: 201 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { default: 'status' }, headers: {}, status: 200 }"
+value = "{ body: { default: 'status' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

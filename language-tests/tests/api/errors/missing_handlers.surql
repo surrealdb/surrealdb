@@ -12,7 +12,7 @@ value = "NONE"
 
 # 2
 [[test.results]]
-value = "{ body: { handler: 'get' }, headers: {}, status: 200 }"
+value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
 
 # 3
 [[test.results]]

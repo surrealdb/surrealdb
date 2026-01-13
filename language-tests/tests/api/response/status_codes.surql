@@ -6,37 +6,37 @@ reason = "Test HTTP status code handling"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, headers: {}, status: 200 }"
+value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, headers: {}, status: 201 }"
+value = "{ body: {}, context: {  }, headers: {}, status: 201 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, headers: {}, status: 400 }"
+value = "{ body: {}, context: {  }, headers: {}, status: 400 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, headers: {}, status: 404 }"
+value = "{ body: {}, context: {  }, headers: {}, status: 404 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, headers: {}, status: 500 }"
+value = "{ body: {}, context: {  }, headers: {}, status: 500 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { original: 200 }, headers: {}, status: 404 }"
+value = "{ body: { original: 200 }, context: {  }, headers: {}, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

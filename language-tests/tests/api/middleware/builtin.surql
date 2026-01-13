@@ -8,7 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: { parsed: { name: 'test', value: 42 } }, headers: {}, status: 200 }"
+value = "{ body: { parsed: { name: 'test', value: 42 } }, context: {  }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -25,7 +25,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: { original: 200 }, headers: {}, status: 404 }"
+value = "{ body: { original: 200 }, context: {  }, headers: {}, status: 404 }"
 
 # 6
 [[test.results]]
@@ -33,7 +33,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
-value = "{ body: { test: 'data' }, headers: { 'x-custom': 'value' }, status: 200 }"
+value = "{ body: { test: 'data' }, context: {  }, headers: { 'x-custom': 'value' }, status: 200 }"
 
 # 8
 [[test.results]]
@@ -41,7 +41,7 @@ value = "NONE"
 
 # 9
 [[test.results]]
-value = "{ body: { test: 'data' }, headers: { 'header1': 'value1', 'header2': 'value2' }, status: 200 }"
+value = "{ body: { test: 'data' }, context: {  }, headers: { 'header1': 'value1', 'header2': 'value2' }, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

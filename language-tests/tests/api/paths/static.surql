@@ -6,13 +6,13 @@ reason = "Test static path matching - exact matching required"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { path: '/test' }, headers: {}, status: 200 }"
+value = "{ body: { path: '/test' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { path: '/api/users' }, headers: {}, status: 200 }"
+value = "{ body: { path: '/api/users' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
