@@ -105,14 +105,17 @@ class BenchmarkAnalyzer:
 	def load_current_results(self) -> Dict:
 		"""
 		Load current benchmark results from JSON files.
-
+		
 		Security Note: This method reads files from the user-specified results_dir.
 		The validation ensures files are ONLY read from within this directory, preventing
 		path traversal attacks via symlinks or relative paths. The user explicitly controls
 		which directory to read from via the --results-dir CLI argument.
 		"""
 		results = {}
-		for json_file in self.results_dir.glob("*.json"):
+		json_files = list(self.results_dir.glob("*.json"))
+		print(f"Found {len(json_files)} JSON files in {self.results_dir}", file=sys.stderr)
+		
+		for json_file in json_files:
 			try:
 				# Validate and resolve path - returns None if outside results_dir
 				safe_path = self._validate_and_resolve_input_path(json_file, self.results_dir)
@@ -121,16 +124,31 @@ class BenchmarkAnalyzer:
 					continue
 
 				# safe_path is guaranteed to be within self.results_dir
+				print(f"Loading {json_file.name}...", file=sys.stderr)
 				with open(safe_path, 'r') as f:
 					data = json.load(f)
 					config_name = self._extract_config_name(json_file)
-					results[config_name] = self._parse_benchmark_data(data)
+					parsed = self._parse_benchmark_data(data)
+					
+					# Debug: Check if we got any operations
+					ops_found = [op for op in ['create', 'read', 'update', 'delete'] 
+					             if parsed.get(op, {}).get('throughput', 0) > 0]
+					print(f"  Config: {config_name}, Operations found: {ops_found or 'none'}", file=sys.stderr)
+					
+					results[config_name] = parsed
 			except Exception as e:
 				print(f"Warning: Failed to parse {json_file}: {e}", file=sys.stderr)
+				import traceback
+				traceback.print_exc(file=sys.stderr)
+		
+		print(f"Loaded {len(results)} configurations", file=sys.stderr)
 		return results
 
 	def _parse_benchmark_data(self, data: Dict) -> Dict:
 		"""Parse crud-bench JSON output and extract key metrics."""
+		# Debug: Print top-level keys to understand the JSON structure
+		print(f"  JSON top-level keys: {list(data.keys())}", file=sys.stderr)
+		
 		metrics = {
 			'create': {},
 			'read': {},
@@ -158,6 +176,7 @@ class BenchmarkAnalyzer:
 					'p99_ns': op_data.get('p99_ns', 0),
 					'samples': op_data.get('samples', 0)
 				}
+				print(f"    {op}: throughput={metrics[op]['throughput']}, samples={metrics[op]['samples']}", file=sys.stderr)
 
 		# Extract scan metrics
 		if 'scans' in data:
