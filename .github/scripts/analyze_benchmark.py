@@ -72,6 +72,27 @@ class BenchmarkAnalyzer:
 		return resolved
 
 	@staticmethod
+	def _validate_and_resolve_input_path(file_path: Path, base_dir: Path) -> Optional[Path]:
+		"""
+		Validate and resolve an input file path to prevent path traversal attacks.
+
+		Returns the resolved path if it's within base_dir, None otherwise.
+		This is the security boundary for reading user-controlled paths.
+		"""
+		try:
+			# Resolve both paths to absolute canonical form
+			resolved_file = file_path.resolve(strict=True)
+			resolved_base = base_dir.resolve(strict=True)
+
+			# Verify the resolved path is within the allowed base directory
+			if not resolved_file.is_relative_to(resolved_base):
+				return None
+
+			return resolved_file
+		except (OSError, ValueError):
+			return None
+
+	@staticmethod
 	def _extract_config_name(json_path: Path) -> str:
 		"""
 		Extract configuration name from benchmark result filename.
@@ -93,18 +114,14 @@ class BenchmarkAnalyzer:
 		results = {}
 		for json_file in self.results_dir.glob("*.json"):
 			try:
-				# Resolve to absolute path and verify it's within results_dir
-				# This prevents path traversal and symlink attacks
-				resolved_file = json_file.resolve(strict=True)
-
-				# Use is_relative_to for secure path validation (Python 3.9+)
-				# Only read files that are confirmed to be within results_dir
-				if not resolved_file.is_relative_to(self.results_dir):
+				# Validate and resolve path - returns None if outside results_dir
+				safe_path = self._validate_and_resolve_input_path(json_file, self.results_dir)
+				if safe_path is None:
 					print(f"Warning: Skipping {json_file} (outside results directory)", file=sys.stderr)
 					continue
 
-				# SAFE: resolved_file has been validated to be within self.results_dir
-				with open(resolved_file, 'r') as f:
+				# safe_path is guaranteed to be within self.results_dir
+				with open(safe_path, 'r') as f:
 					data = json.load(f)
 					config_name = self._extract_config_name(json_file)
 					results[config_name] = self._parse_benchmark_data(data)
@@ -170,10 +187,8 @@ class BenchmarkAnalyzer:
 
 			try:
 				# Validate date_dir is within benchmark_results_dir
-				resolved_date_dir = date_dir.resolve(strict=True)
-
-				# Use is_relative_to for secure path validation (Python 3.9+)
-				if not resolved_date_dir.is_relative_to(benchmark_results_dir):
+				safe_date_dir = self._validate_and_resolve_input_path(date_dir, benchmark_results_dir)
+				if safe_date_dir is None:
 					print(f"Warning: Skipping {date_dir} (outside results directory)", file=sys.stderr)
 					continue
 
@@ -182,17 +197,14 @@ class BenchmarkAnalyzer:
 					break
 
 				for json_file in date_dir.glob("*.json"):
-					# Validate json_file is within date_dir
-					resolved_file = json_file.resolve(strict=True)
-
-					# Use is_relative_to for secure path validation (Python 3.9+)
-					# Only read files that are confirmed to be within the date directory
-					if not resolved_file.is_relative_to(resolved_date_dir):
+					# Validate json_file is within the validated date directory
+					safe_file = self._validate_and_resolve_input_path(json_file, safe_date_dir)
+					if safe_file is None:
 						print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
 						continue
 
-					# SAFE: resolved_file has been validated to be within resolved_date_dir
-					with open(resolved_file, 'r') as f:
+					# safe_file is guaranteed to be within safe_date_dir
+					with open(safe_file, 'r') as f:
 						data = json.load(f)
 						config_name = self._extract_config_name(json_file)
 						historical.append({
