@@ -8,13 +8,13 @@ value = "{{ foo: 1 }, { foo: 2 }}"
 value = "{ person: NONE }"
 
 [[test.results]]
-value = "{{,}, {1,}, {1, 2, 3}, {2,}, {{5,}, {{3, 4}}}}"
+value = "{{,}, {1,}, {1, 2, 3}, {2,}, {{5,}, {{3, 4},}}}"
 
 [[test.results]]
 value = "{{ foo: 1 }, { foo: 2 }, { foo: 3 }}"
 
 [[test.results]]
-value = "{{ foo: 2 }}"
+value = "{{ foo: 2 },}"
 
 [[test.results]]
 error = "Incorrect arguments for function set::contains(). Argument 1 was the wrong type. Expected `set` but found `{ person: NONE }`"

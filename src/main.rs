@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 // This binary delegates to the library entrypoint so both binary and
 // embedded use-cases share the same runtime bootstrap and initialization.
 #![allow(deprecated)]

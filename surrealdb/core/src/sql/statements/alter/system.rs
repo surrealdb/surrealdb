@@ -4,7 +4,6 @@ use crate::sql::Expr;
 use crate::sql::statements::alter::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER SYSTEM`.
 ///
 /// Supported operations:

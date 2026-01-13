@@ -58,7 +58,7 @@ impl ToSql for DefineUserStatement {
 		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		match self.pass_type {
-			PassType::Unset => write_sql!(f, fmt, " PASSHASH \"\" "),
+			PassType::Unset => {}
 			PassType::Hash(ref x) => write_sql!(f, fmt, " PASSHASH {}", QuoteStr(x)),
 			PassType::Password(ref x) => write_sql!(f, fmt, " PASSWORD {}", QuoteStr(x)),
 		}

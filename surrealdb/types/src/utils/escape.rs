@@ -1,51 +1,72 @@
-use std::str::Chars;
+use std::fmt::{Display, Write};
 
 use crate::{SqlFormat, ToSql};
 
-#[derive(Clone)]
-pub struct Escape<'a> {
-	chars: Chars<'a>,
-	pending: Option<char>,
+pub struct EscapeWriter<W> {
 	escape_char: char,
+	writer: W,
 }
 
-impl<'a> Escape<'a> {
-	pub fn escape_str(s: &'a str, escape_char: char) -> Self {
-		Escape {
-			chars: s.chars(),
-			pending: None,
-			escape_char,
+impl<'a> EscapeWriter<&'a mut String> {
+	fn escape<D: Display + ?Sized>(into: &'a mut String, escape: char, display: &D) {
+		Self {
+			escape_char: escape,
+			writer: into,
 		}
+		.write(display)
+	}
+
+	fn write<D: Display + ?Sized>(&mut self, display: &D) {
+		let _ = self.write_fmt(format_args!("{display}"));
 	}
 }
 
-impl Iterator for Escape<'_> {
-	type Item = char;
-
-	fn next(&mut self) -> Option<char> {
-		if let Some(x) = self.pending.take() {
-			return Some(x);
+impl<W: Write> Write for EscapeWriter<W> {
+	fn write_str(&mut self, s: &str) -> std::fmt::Result {
+		for c in s.chars() {
+			self.write_char(c)?;
 		}
-		let next = self.chars.next()?;
-		if next == self.escape_char || next == '\\' {
-			self.pending = Some(next);
-			return Some('\\');
-		}
-		Some(next)
+		Ok(())
 	}
-}
 
-impl ToSql for Escape<'_> {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		for x in self.clone() {
-			f.push(x);
+	fn write_char(&mut self, c: char) -> std::fmt::Result {
+		match c {
+			'\0' => {
+				self.writer.write_str("\\0")?;
+			}
+			'\r' => {
+				self.writer.write_str("\\r")?;
+			}
+			'\t' => {
+				self.writer.write_str("\\t")?;
+			}
+			'\n' => {
+				self.writer.write_str("\\n")?;
+			}
+			// backspace
+			'\x08' => {
+				self.writer.write_str("\\u{8}")?;
+			}
+			// Form feed
+			'\x0C' => {
+				self.writer.write_str("\\f")?;
+			}
+			'\\' => {
+				self.writer.write_str("\\\\")?;
+			}
+			x if x == self.escape_char => {
+				self.writer.write_char('\\')?;
+				self.writer.write_char(x)?;
+			}
+			_ => self.writer.write_char(c)?,
 		}
+		Ok(())
 	}
 }
 
 pub struct QuoteStr<'a>(pub &'a str);
 impl ToSql for QuoteStr<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		let quote = if s.contains('\'') {
 			'\"'
@@ -54,7 +75,7 @@ impl ToSql for QuoteStr<'_> {
 		};
 
 		f.push(quote);
-		Escape::escape_str(s, quote).fmt_sql(f, fmt);
+		EscapeWriter::escape(f, quote, self.0);
 		f.push(quote);
 	}
 }
@@ -62,7 +83,7 @@ impl ToSql for QuoteStr<'_> {
 /// Escapes identifiers for use in SQON (SQL Object Notation).
 pub struct EscapeSqonIdent<'a>(pub &'a str);
 impl ToSql for EscapeSqonIdent<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		// Not a keyword, any non 'normal' characters or does it start with a digit?
 		if s.is_empty()
@@ -70,7 +91,7 @@ impl ToSql for EscapeSqonIdent<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			f.push('`');
-			Escape::escape_str(s, '`').fmt_sql(f, fmt);
+			EscapeWriter::escape(f, '`', self.0);
 			f.push('`');
 		} else {
 			f.push_str(s)
@@ -78,9 +99,9 @@ impl ToSql for EscapeSqonIdent<'_> {
 	}
 }
 
-pub struct EscapeKey<'a>(pub &'a str);
-impl ToSql for EscapeKey<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+pub struct EscapeObjectKey<'a>(pub &'a str);
+impl ToSql for EscapeObjectKey<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or does the key start with a digit?
 		if s.is_empty()
@@ -88,7 +109,7 @@ impl ToSql for EscapeKey<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			f.push('\"');
-			Escape::escape_str(s, '\"').fmt_sql(f, fmt);
+			EscapeWriter::escape(f, '"', self.0);
 			f.push('\"');
 		} else {
 			f.push_str(s)
@@ -96,9 +117,9 @@ impl ToSql for EscapeKey<'_> {
 	}
 }
 
-pub struct EscapeRid<'a>(pub &'a str);
-impl ToSql for EscapeRid<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+pub struct EscapeRecordKey<'a>(pub &'a str);
+impl ToSql for EscapeRecordKey<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or are all character digits?
 		if s.is_empty()
@@ -107,7 +128,7 @@ impl ToSql for EscapeRid<'_> {
 		{
 			// Always use backticks for display (not brackets)
 			f.push('`');
-			Escape::escape_str(s, '`').fmt_sql(f, fmt);
+			EscapeWriter::escape(f, '`', self.0);
 			f.push('`');
 		} else {
 			f.push_str(s)
