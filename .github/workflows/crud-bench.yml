@@ -138,9 +138,9 @@ jobs:
           ./target/release/crud-bench \
             -d ${{ matrix.database }} \
             ${{ matrix.endpoint }} \
-            -s 5000 \
-            -c 8 \
-            -t 16 \
+            -s 10000 \
+            -c 12 \
+            -t 48 \
             -r \
             -n ${{ matrix.config }}
         env:
