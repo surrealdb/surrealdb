@@ -165,6 +165,10 @@ class BenchmarkAnalyzer:
 		for plural_key, singular_key in operation_map.items():
 			if plural_key in data:
 				op_data = data[plural_key]
+				# Debug: show what keys are in the operation data
+				print(f"  {plural_key} keys: {list(op_data.keys())}", file=sys.stderr)
+				print(f"  {plural_key} full data: {json.dumps(op_data, indent=2)}", file=sys.stderr)
+				
 				metrics[singular_key] = {
 					'throughput': op_data.get('throughput', 0),
 					'total_time_ms': op_data.get('total_time_ms', 0),
@@ -174,7 +178,7 @@ class BenchmarkAnalyzer:
 					'p99_ns': op_data.get('p99_ns', 0),
 					'samples': op_data.get('samples', 0)
 				}
-				print(f"  {singular_key}: {metrics[singular_key]['throughput']:.0f} ops/s, {metrics[singular_key]['samples']} samples", file=sys.stderr)
+				print(f"  {singular_key}: throughput={metrics[singular_key]['throughput']:.0f} ops/s, samples={metrics[singular_key]['samples']}", file=sys.stderr)
 
 		# Extract scan metrics
 		if 'scans' in data:
@@ -264,7 +268,11 @@ class BenchmarkAnalyzer:
 
 		for config, metrics in self.current_results.items():
 			for operation in ['create', 'read', 'update', 'delete']:
-				if operation not in metrics:
+				if operation not in metrics or not metrics[operation]:
+					continue
+
+				# Skip if no samples were collected (benchmark didn't run)
+				if not metrics[operation].get('samples'):
 					continue
 
 				current_throughput = metrics[operation].get('throughput', 0)
@@ -436,10 +444,15 @@ class BenchmarkAnalyzer:
 			report.append(f"\n#### {config}\n")
 
 			for operation in ['create', 'read', 'update', 'delete']:
-				if operation not in metrics or not metrics[operation].get('throughput'):
+				# Skip if operation wasn't initialized (not in metrics) or has no data (empty dict)
+				if operation not in metrics or not metrics[operation]:
 					continue
 
 				op_data = metrics[operation]
+				# Skip if no samples were collected (benchmark didn't run for this operation)
+				if not op_data.get('samples'):
+					continue
+
 				report.append(f"\n**{operation.capitalize()}**")
 				report.append(f"- Throughput: {self.format_throughput(op_data['throughput'])}")
 				report.append(f"- Latency P50: {self.format_latency(op_data['p50_ns'])}")
