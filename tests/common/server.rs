@@ -325,7 +325,7 @@ pub async fn start_server(
 				continue;
 			}
 
-			if run(&format!("isready --conn http://{addr}")).output().is_ok() {
+			if run(&format!("isready --endpoint http://{addr}")).output().is_ok() {
 				info!("Server ready!");
 				return Ok((addr, server));
 			}
