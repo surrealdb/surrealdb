@@ -44,8 +44,6 @@ impl SyntaxError {
 	where
 		T: Display,
 	{
-		//println!("{}", std::backtrace::Backtrace::force_capture());
-
 		let diagnostic = Diagnostic {
 			kind: DiagnosticKind::Cause(message.to_string()),
 			next: None,

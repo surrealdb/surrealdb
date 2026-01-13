@@ -215,7 +215,7 @@ impl DefineFieldStatement {
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
 					let Kind::Record(field_kind) = kind else {
-						bail!(Error::Thrown("in field on a relation must be a record".into(),))
+						bail!(Error::Thrown("out field on a relation must be a record".into(),))
 					};
 					// Add the TYPE to the DEFINE TABLE statement
 					if *field_kind != relation.to {
