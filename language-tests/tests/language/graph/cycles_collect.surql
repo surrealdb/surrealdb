@@ -1,8 +1,10 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
-# This is set higher just to ensure that the TiKV backend doesn't exceed the timeout.
-timeout = 20000
+timeout = 2000
+# TiKV backend needs more time due to network latency
+timeout-tikv = 20000
+context-timeout-tikv = 4000
 
 [test]
 reason = "Test +collect modifier handling cycles gracefully"
@@ -35,4 +37,3 @@ SELECT name, @.{..3}(->knows->person).name AS network FROM person:alice, person:
 
 -- 3: Combine bounded depth with collect for safety
 person:alice.{..10+collect}->knows->person;
-

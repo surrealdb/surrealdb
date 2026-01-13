@@ -1,8 +1,10 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
-# This is set higher just to ensure that the TiKV backend doesn't exceed the timeout.
-timeout = 20000
+timeout = 2000
+# TiKV backend needs more time due to network latency
+timeout-tikv = 20000
+context-timeout-tikv = 4000
 
 [test]
 reason = "Test TIMEOUT on graph expressions"
