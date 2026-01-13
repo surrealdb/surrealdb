@@ -281,7 +281,7 @@ impl Collectable {
 				generate: Some(v),
 				rid: None,
 				ir: None,
-				val: Operable::Relate(f, Default::default(), w, None),
+				val: Operable::Relate(f, Default::default(), w, o.map(|v| v.into())),
 			},
 			(true, RelateThrough::RecordId(v)) => Processable {
 				doc_ctx: DocumentContext::NsDbTbCtx(doc_ctx),
