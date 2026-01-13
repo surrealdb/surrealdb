@@ -1364,7 +1364,15 @@ version = "0.26.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
+version = "0.26.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.tokio-tungstenite]]
 version = "0.28.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tokio-tungstenite-wasm]]
+version = "0.6.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-util]]
@@ -1421,6 +1429,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.trait-variant]]
 version = "0.1.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.tungstenite]]
+version = "0.26.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
