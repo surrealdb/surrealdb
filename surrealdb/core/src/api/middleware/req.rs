@@ -1,9 +1,10 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use headers::{ContentType, HeaderMapExt};
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM, Mime, TEXT_PLAIN};
 use surrealdb_types::Value;
 
 use super::common::{APPLICATION_CBOR, APPLICATION_SDB_FB};
+use crate::api::err::ApiError;
 use crate::api::middleware::common::{APPLICATION_SDB_NATIVE, BodyStrategy};
 use crate::api::request::ApiRequest;
 use crate::kvs::IntoBytes;
@@ -42,7 +43,7 @@ impl<'a> BodyParser<'a> {
 			BodyStrategy::Native => self.native(true),
 			BodyStrategy::Auto => {
 				let Some(mime) = &self.mime else {
-					bail!("missing content type");
+					return Err(ApiError::MissingContentType.into());
 				};
 
 				if mime == &APPLICATION_JSON {
@@ -69,7 +70,7 @@ impl<'a> BodyParser<'a> {
 					return self.native(false);
 				}
 
-				bail!("unsupported content type");
+				Err(ApiError::UnsupportedContentType(mime.to_string()).into())
 			}
 		}
 	}
@@ -80,7 +81,7 @@ impl<'a> BodyParser<'a> {
 
 	fn assert_mime(&self, mime: &Mime) -> Result<()> {
 		if !self.is_mime(mime) {
-			bail!("Expected Content-Type to be {mime}")
+			Err(ApiError::InvalidContentType(mime.to_string()).into())
 		} else {
 			Ok(())
 		}
@@ -92,10 +93,11 @@ impl<'a> BodyParser<'a> {
 		}
 
 		let Value::Bytes(ref bytes) = self.req.body else {
-			bail!("Need binary")
+			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
-		self.req.body = format::json::decode(bytes.as_slice())?;
+		self.req.body =
+			format::json::decode(bytes.as_slice()).map_err(|_| ApiError::BodyDecodeFailure)?;
 
 		Ok(())
 	}
@@ -106,10 +108,11 @@ impl<'a> BodyParser<'a> {
 		}
 
 		let Value::Bytes(ref bytes) = self.req.body else {
-			bail!("Need binary")
+			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
-		self.req.body = format::cbor::decode(bytes.as_slice())?;
+		self.req.body =
+			format::cbor::decode(bytes.as_slice()).map_err(|_| ApiError::BodyDecodeFailure)?;
 
 		Ok(())
 	}
@@ -120,10 +123,11 @@ impl<'a> BodyParser<'a> {
 		}
 
 		let Value::Bytes(ref bytes) = self.req.body else {
-			bail!("Need binary")
+			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
-		self.req.body = format::flatbuffers::decode(bytes.as_slice())?;
+		self.req.body = format::flatbuffers::decode(bytes.as_slice())
+			.map_err(|_| ApiError::BodyDecodeFailure)?;
 
 		Ok(())
 	}
@@ -134,7 +138,7 @@ impl<'a> BodyParser<'a> {
 		}
 
 		let Value::Bytes(ref bytes) = self.req.body else {
-			bail!("Need binary")
+			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
 		self.req.body = Value::String(String::from_utf8_lossy(bytes.as_slice()).to_string());
@@ -148,8 +152,8 @@ impl<'a> BodyParser<'a> {
 		}
 
 		if !self.req.body.is_bytes() {
-			bail!("Need binary")
-		};
+			return Err(ApiError::RequestBodyNotBinary.into());
+		}
 
 		Ok(())
 	}

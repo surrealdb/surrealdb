@@ -3705,7 +3705,6 @@ dependencies = [
  "dmp",
  "ext-sort",
  "fastnum",
- "flatbuffers",
  "fst",
  "futures",
  "fuzzy-matcher",

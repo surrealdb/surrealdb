@@ -24,7 +24,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-error = "Failed to decode fb value"
+error = "Failed to decode the request body"
 
 # 6
 [[test.results]]
