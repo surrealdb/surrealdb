@@ -68,6 +68,7 @@ keyword! {
 	Define => "DEFINE",
 	Delete => "DELETE",
 	Descending => "DESCENDING",
+	Defer => "DEFER",
 	Diff => "DIFF",
 	Dimension => "DIMENSION",
 	Distance => "DISTANCE",
