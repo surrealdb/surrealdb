@@ -131,6 +131,24 @@ pub struct Datastore {
 	surrealism_cache: Arc<SurrealismCache>,
 }
 
+/// Represents a collection of metrics for a specific datastore flavor.
+///
+/// This structure is used to expose datastore-specific metrics to the telemetry system.
+pub struct Metrics {
+	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
+	pub name: &'static str,
+	/// A list of u64-based metrics.
+	pub u64_metrics: Vec<Metric>,
+}
+
+/// Represents a single metric with a name and description.
+pub struct Metric {
+	/// The name of the metric.
+	pub name: &'static str,
+	/// A human-readable description of the metric.
+	pub description: &'static str,
+}
+
 #[derive(Clone)]
 pub(super) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
@@ -179,6 +197,16 @@ impl TransactionFactory {
 			},
 		))
 	}
+
+	/// Registers metrics for the current datastore flavor if supported.
+	fn register_metrics(&self) -> Option<Metrics> {
+		self.builder.register_metrics()
+	}
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		self.builder.collect_u64_metric(metric)
+	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -211,6 +239,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 
 	/// Perform any backend-specific shutdown/cleanup.
 	async fn shutdown(&self) -> Result<()>;
+
+	/// Registers metrics for the current datastore flavor if supported.
+	///
+	/// This will return a list of available metrics and their descriptions.
+	fn register_metrics(&self) -> Option<Metrics>;
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	///
+	/// - `metric`: The name of the metric to collect.
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -486,6 +524,26 @@ impl TransactionBuilder for DatastoreFlavor {
 		})
 	}
 
+	/// Registers metrics for the current datastore flavor if supported.
+	fn register_metrics(&self) -> Option<Metrics> {
+		match self {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		match self {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(metric),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
 	async fn shutdown(&self) -> Result<()> {
 		match self {
 			#[cfg(feature = "kv-mem")]
@@ -649,6 +707,20 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
+	}
+
+	/// Registers metrics for the current datastore flavor if supported.
+	///
+	/// This will return a list of available metrics and their descriptions.
+	pub fn register_metrics(&self) -> Option<Metrics> {
+		self.transaction_factory.register_metrics()
+	}
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	///
+	/// - `metric`: The name of the metric to collect.
+	pub fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		self.transaction_factory.collect_u64_metric(metric)
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with
