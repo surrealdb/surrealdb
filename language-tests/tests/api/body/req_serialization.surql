@@ -24,7 +24,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: { parsed: 'plain text content' }, headers: {}, status: 200 }"
+error = "Failed to decode fb value"
 
 # 6
 [[test.results]]
@@ -32,8 +32,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
-match = "type::is_bytes($result.body.parsed) AND $result.status == 200"
-error = false
+value = "{ body: { parsed: 'plain text content' }, headers: {}, status: 200 }"
 
 # 8
 [[test.results]]
@@ -41,7 +40,8 @@ value = "NONE"
 
 # 9
 [[test.results]]
-value = "{ body: { parsed: { native: 'format' } }, headers: {}, status: 200 }"
+match = "type::is_bytes($result.body.parsed) AND $result.status == 200"
+error = false
 
 # 10
 [[test.results]]
@@ -49,9 +49,17 @@ value = "NONE"
 
 # 11
 [[test.results]]
-value = "{ body: { parsed: { auto: 'json' } }, headers: {}, status: 200 }"
+value = "{ body: { parsed: { native: 'format' } }, headers: {}, status: 200 }"
 
 # 12
+[[test.results]]
+value = "NONE"
+
+# 13
+[[test.results]]
+value = "{ body: { parsed: { auto: 'json' } }, headers: {}, status: 200 }"
+
+# 14
 [[test.results]]
 value = "{ body: { parsed: b'736F6D652064617461' }, headers: {}, status: 200 }"
 
@@ -106,7 +114,31 @@ api::invoke("/body/cbor", {
     body: encoding::cbor::encode('abc')
 });
 
-# 4 - Plain text strategy
+# 4 - Flatbuffers strategy (note: requires valid flatbuffers-encoded data)
+# Since flatbuffers encoding is not available in SurrealQL, we test error handling
+DEFINE API "/body/flatbuffers"
+    FOR post
+        MIDDLEWARE
+            api::req::body("flatbuffers")
+        THEN {
+            RETURN {
+                status: 200,
+                body: {
+                    parsed: $request.body
+                }
+            };
+        };
+
+# 5 - Invalid flatbuffers data should error
+api::invoke("/body/flatbuffers", {
+    method: "post",
+    headers: {
+        "content-type": "application/vnd.surrealdb.flatbuffers"
+    },
+    body: <bytes>'invalid_flatbuffers_data'
+});
+
+# 6 - Plain text strategy
 DEFINE API "/body/plain"
     FOR post
         MIDDLEWARE
@@ -120,7 +152,7 @@ DEFINE API "/body/plain"
             };
         };
 
-# 5
+# 7
 api::invoke("/body/plain", {
     method: "post",
     headers: {
@@ -129,7 +161,7 @@ api::invoke("/body/plain", {
     body: <bytes>'plain text content'
 });
 
-# 6 - Bytes strategy
+# 8 - Bytes strategy
 DEFINE API "/body/bytes"
     FOR post
         MIDDLEWARE
@@ -143,7 +175,7 @@ DEFINE API "/body/bytes"
             };
         };
 
-# 7
+# 9
 api::invoke("/body/bytes", {
     method: "post",
     headers: {
@@ -152,7 +184,7 @@ api::invoke("/body/bytes", {
     body: <bytes>'raw bytes'
 });
 
-# 8 - Native strategy
+# 10 - Native strategy
 DEFINE API "/body/native"
     FOR post
         MIDDLEWARE
@@ -166,7 +198,7 @@ DEFINE API "/body/native"
             };
         };
 
-# 9
+# 11
 api::invoke("/body/native", {
     method: "post",
     headers: {
@@ -177,7 +209,7 @@ api::invoke("/body/native", {
     }
 });
 
-# 10 - Auto strategy (Content-Type based)
+# 12 - Auto strategy (Content-Type based)
 DEFINE API "/body/auto"
     FOR post
         MIDDLEWARE
@@ -191,7 +223,7 @@ DEFINE API "/body/auto"
             };
         };
 
-# 11
+# 13
 api::invoke("/body/auto", {
     method: "post",
     headers: {
@@ -200,7 +232,7 @@ api::invoke("/body/auto", {
     body: <bytes>'{"auto":"json"}'
 });
 
-# 12 - Auto strategy without Content-Type (may not error, just parse as native)
+# 14 - Auto strategy without Content-Type (may not error, just parse as native)
 api::invoke("/body/auto", {
     method: "post",
     body: <bytes>'some data'

@@ -26,7 +26,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'text/plain' AND $result.status == 200"
+match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'application/vnd.surrealdb.flatbuffers' AND $result.status == 200"
 error = false
 
 # 6
@@ -35,7 +35,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
-match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'application/octet-stream' AND $result.status == 200"
+match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'text/plain' AND $result.status == 200"
 error = false
 
 # 8
@@ -43,6 +43,15 @@ error = false
 value = "NONE"
 
 # 9
+[[test.results]]
+match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'application/octet-stream' AND $result.status == 200"
+error = false
+
+# 10
+[[test.results]]
+value = "NONE"
+
+# 11
 [[test.results]]
 value = "{ body: { native: 'format' }, headers: { 'content-type': 'application/vnd.surrealdb.native' }, status: 200 }"
 
@@ -85,7 +94,24 @@ DEFINE API "/res/cbor"
 # 3
 api::invoke("/res/cbor");
 
-# 4 - Plain text strategy
+# 4 - Flatbuffers strategy
+DEFINE API "/res/flatbuffers"
+    FOR get
+        MIDDLEWARE
+            api::res::body("flatbuffers")
+        THEN {
+            RETURN {
+                status: 200,
+                body: {
+                    data: "test"
+                }
+            };
+        };
+
+# 5
+api::invoke("/res/flatbuffers");
+
+# 6 - Plain text strategy
 DEFINE API "/res/plain"
     FOR get
         MIDDLEWARE
@@ -97,10 +123,10 @@ DEFINE API "/res/plain"
             };
         };
 
-# 5
+# 7
 api::invoke("/res/plain");
 
-# 6 - Bytes strategy
+# 8 - Bytes strategy
 DEFINE API "/res/bytes"
     FOR get
         MIDDLEWARE
@@ -112,10 +138,10 @@ DEFINE API "/res/bytes"
             };
         };
 
-# 7
+# 9
 api::invoke("/res/bytes");
 
-# 8 - Native strategy
+# 10 - Native strategy
 DEFINE API "/res/native"
     FOR get
         MIDDLEWARE
@@ -129,6 +155,6 @@ DEFINE API "/res/native"
             };
         };
 
-# 9
+# 11
 api::invoke("/res/native");
 
