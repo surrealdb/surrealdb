@@ -124,31 +124,22 @@ class BenchmarkAnalyzer:
 					continue
 
 				# safe_path is guaranteed to be within self.results_dir
-				print(f"Loading {json_file.name}...", file=sys.stderr)
 				with open(safe_path, 'r') as f:
 					data = json.load(f)
 					config_name = self._extract_config_name(json_file)
+					print(f"Loading {config_name}...", file=sys.stderr)
 					parsed = self._parse_benchmark_data(data)
-					
-					# Debug: Check if we got any operations
-					ops_found = [op for op in ['create', 'read', 'update', 'delete'] 
-					             if parsed.get(op, {}).get('throughput', 0) > 0]
-					print(f"  Config: {config_name}, Operations found: {ops_found or 'none'}", file=sys.stderr)
-					
 					results[config_name] = parsed
 			except Exception as e:
 				print(f"Warning: Failed to parse {json_file}: {e}", file=sys.stderr)
 				import traceback
 				traceback.print_exc(file=sys.stderr)
 		
-		print(f"Loaded {len(results)} configurations", file=sys.stderr)
+		print(f"Loaded {len(results)} configurations with benchmark data", file=sys.stderr)
 		return results
 
 	def _parse_benchmark_data(self, data: Dict) -> Dict:
 		"""Parse crud-bench JSON output and extract key metrics."""
-		# Debug: Print top-level keys to understand the JSON structure
-		print(f"  JSON top-level keys: {list(data.keys())}", file=sys.stderr)
-		
 		metrics = {
 			'create': {},
 			'read': {},
@@ -162,12 +153,19 @@ class BenchmarkAnalyzer:
 		if 'metadata' in data:
 			metrics['metadata'] = data['metadata']
 
-		# Extract operation metrics
-		operations = ['create', 'read', 'update', 'delete']
-		for op in operations:
-			if op in data:
-				op_data = data[op]
-				metrics[op] = {
+		# crud-bench uses plural keys (creates, reads, updates, deletes)
+		# Map plural to singular for consistency with our analysis
+		operation_map = {
+			'creates': 'create',
+			'reads': 'read',
+			'updates': 'update',
+			'deletes': 'delete'
+		}
+		
+		for plural_key, singular_key in operation_map.items():
+			if plural_key in data:
+				op_data = data[plural_key]
+				metrics[singular_key] = {
 					'throughput': op_data.get('throughput', 0),
 					'total_time_ms': op_data.get('total_time_ms', 0),
 					'avg_time_ns': op_data.get('avg_time_ns', 0),
@@ -176,7 +174,7 @@ class BenchmarkAnalyzer:
 					'p99_ns': op_data.get('p99_ns', 0),
 					'samples': op_data.get('samples', 0)
 				}
-				print(f"    {op}: throughput={metrics[op]['throughput']}, samples={metrics[op]['samples']}", file=sys.stderr)
+				print(f"  {singular_key}: {metrics[singular_key]['throughput']:.0f} ops/s, {metrics[singular_key]['samples']} samples", file=sys.stderr)
 
 		# Extract scan metrics
 		if 'scans' in data:

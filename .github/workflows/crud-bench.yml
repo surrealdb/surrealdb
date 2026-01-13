@@ -278,12 +278,23 @@ jobs:
             echo "⚠️ Benchmark analysis failed. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." >> ${{ github.workspace }}/report.md
           fi
 
+      - name: Find existing comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: find_comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## 🔍 CRUD Benchmark Results'
+
       - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body-path: ${{ github.workspace }}/report.md
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          edit-mode: replace
 
       - name: Upload analysis results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
