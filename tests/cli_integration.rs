@@ -340,8 +340,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access root info");
 		{
-			let args =
-				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -354,8 +355,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access namespace info");
 		{
-			let args =
-				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -368,8 +370,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access database info");
 		{
-			let args =
-				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -487,7 +490,8 @@ mod cli_integration {
 
 		info!("* Pass database auth level without specifying database");
 		{
-			let args = format!("sql --endpoint http://{addr} --ns {ns} --auth-level database {creds}");
+			let args =
+				format!("sql --endpoint http://{addr} --ns {ns} --auth-level database {creds}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output();
@@ -620,8 +624,9 @@ mod cli_integration {
 
 		info!("* Create access methods with identical names at ROOT, NS and DB levels");
 		{
-			let args =
-				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}"
+			);
 			let _ = common::run(&args)
 				.input(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
                                                 DEFINE ACCESS {ac} ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '{key}';
@@ -632,8 +637,9 @@ mod cli_integration {
 
 		info!("* Create record that will be used as record user for authentication");
 		{
-			let args =
-				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}"
+			);
 			let _ = common::run(&args)
 				.input(format!("CREATE {record_user};").as_str())
 				.output()
@@ -642,7 +648,8 @@ mod cli_integration {
 
 		info!("* Pass root token and access root info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -655,7 +662,8 @@ mod cli_integration {
 
 		info!("* Pass root token and access namespace info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -668,7 +676,8 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access database info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -681,7 +690,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access root info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -694,7 +704,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access namespace info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -707,7 +718,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access database info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -720,7 +732,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access root info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -733,7 +746,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access namespace info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -746,7 +760,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access database info");
 		{
-			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -962,8 +977,9 @@ mod cli_integration {
 			let (addr, mut server) =
 				common::start_server_with_import_file(&import_file).await.unwrap();
 			// Verify that the file has been imported correctly.
-			let args =
-				format!("sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let args = format!(
+				"sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}"
+			);
 			let output = common::run(&args).input("INFO FOR NAMESPACE").output().expect("success");
 			assert!(output.contains(r#"DEFINE USER test ON NAMESPACE PASSHASH"#));
 			let args = format!(
@@ -993,8 +1009,9 @@ mod cli_integration {
 			}
 			// Verify that no data has been created on the datastore.
 			let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
-			let args =
-				format!("sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let args = format!(
+				"sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}"
+			);
 			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
 			assert!(!output.contains(r#"DEFINE USER test ON ROOT PASSHASH"#));
 			server.finish().unwrap();
@@ -1893,7 +1910,8 @@ mod cli_integration {
 	async fn double_create() {
 		info!("* check only one output created");
 		{
-			let args = "sql --endpoint memory --ns test --db test --pretty --hide-welcome".to_string();
+			let args =
+				"sql --endpoint memory --ns test --db test --pretty --hide-welcome".to_string();
 			let output = common::run(&args)
 				.input("let $a = create foo;\n")
 				.input("select * from foo;\n")
