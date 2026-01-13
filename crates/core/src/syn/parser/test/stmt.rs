@@ -1983,7 +1983,7 @@ fn parse_define_index() {
 			DOC_LENGTHS_CACHE 6
 			POSTINGS_CACHE 7
 			TERMS_CACHE 8
-			HIGHLIGHTS"#
+			HIGHLIGHTS DEFER"#
 	)
 	.unwrap();
 
@@ -2015,7 +2015,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: true,
 		}))
 	);
 
@@ -2032,7 +2033,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false,
 		}))
 	);
 
@@ -2057,7 +2059,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false,
 		}))
 	);
 
@@ -2084,7 +2087,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false
 		}))
 	);
 }
