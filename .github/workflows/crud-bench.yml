@@ -223,10 +223,23 @@ jobs:
 
       - name: Fetch historical benchmark data
         run: |
-          git fetch origin benchmark-results:benchmark-results || echo "No benchmark-results branch yet"
-          git checkout benchmark-results || git checkout --orphan benchmark-results
-          git checkout ${{ github.sha }} -- .github/scripts/analyze_benchmark.py || true
-          git checkout ${{ github.event.pull_request.base.sha || 'main' }} || true
+          # Save the analysis script from the current PR
+          mkdir -p /tmp/benchmark-scripts
+          cp .github/scripts/analyze_benchmark.py /tmp/benchmark-scripts/
+
+          # Try to fetch and checkout the benchmark-results branch for historical data
+          if git fetch origin benchmark-results:benchmark-results 2>/dev/null; then
+            git checkout benchmark-results
+            echo "✓ Loaded benchmark-results branch with historical data"
+          else
+            echo "ℹ No benchmark-results branch yet - this is the first run"
+            # Create empty results directory for first run
+            mkdir -p results
+          fi
+
+          # Restore the analysis script from the PR (ensures we use the PR's version)
+          mkdir -p .github/scripts
+          cp /tmp/benchmark-scripts/analyze_benchmark.py .github/scripts/
 
       - name: Run analysis
         id: analysis
