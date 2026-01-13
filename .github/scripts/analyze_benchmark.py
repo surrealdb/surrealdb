@@ -4,6 +4,8 @@ Analyze CRUD benchmark results and generate performance regression reports.
 
 This script parses crud-bench JSON output, compares against historical baselines,
 and generates markdown reports with statistical analysis.
+
+Requires Python 3.9+ for secure path validation using pathlib.is_relative_to()
 """
 
 import argparse
@@ -14,6 +16,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import statistics
+
+# Ensure Python 3.9+ for secure path validation
+if sys.version_info < (3, 9):
+	print("Error: Python 3.9 or higher is required for secure path validation", file=sys.stderr)
+	sys.exit(1)
 
 try:
 	import numpy as np
@@ -64,6 +71,16 @@ class BenchmarkAnalyzer:
 
 		return resolved
 
+	@staticmethod
+	def _extract_config_name(json_path: Path) -> str:
+		"""
+		Extract configuration name from benchmark result filename.
+
+		Expected format: result-<config>.json (e.g., result-memory.json)
+		Returns: <config> (e.g., 'memory', 'rocksdb', 'embedded')
+		"""
+		return json_path.stem.replace('result-', '')
+
 	def load_current_results(self) -> Dict:
 		"""Load current benchmark results from JSON files."""
 		results = {}
@@ -71,14 +88,16 @@ class BenchmarkAnalyzer:
 			try:
 				# Resolve to absolute path and verify it's within results_dir
 				# This prevents path traversal and symlink attacks
-				resolved_file = json_file.resolve()
-				if not str(resolved_file).startswith(str(self.results_dir)):
+				resolved_file = json_file.resolve(strict=True)
+
+				# Use is_relative_to for secure path validation (Python 3.9+)
+				if not resolved_file.is_relative_to(self.results_dir):
 					print(f"Warning: Skipping {json_file} (outside results directory)", file=sys.stderr)
 					continue
 
 				with open(resolved_file, 'r') as f:
 					data = json.load(f)
-					config_name = json_file.stem.replace('result-', '')
+					config_name = self._extract_config_name(json_file)
 					results[config_name] = self._parse_benchmark_data(data)
 			except Exception as e:
 				print(f"Warning: Failed to parse {json_file}: {e}", file=sys.stderr)
@@ -120,51 +139,55 @@ class BenchmarkAnalyzer:
 
 		return metrics
 
-	def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
-		"""Load historical benchmark results from the benchmark-results branch."""
-		historical = []
-		# Resolve to absolute path to prevent directory traversal
-		benchmark_results_dir = benchmark_results_dir.resolve()
+def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
+	"""Load historical benchmark results from the benchmark-results branch."""
+	historical = []
+	# Resolve to absolute path to prevent directory traversal
+	benchmark_results_dir = benchmark_results_dir.resolve()
 
-		if not benchmark_results_dir.exists():
-			return historical
+	if not benchmark_results_dir.exists():
+		return historical
 
-		cutoff_date = datetime.now() - timedelta(days=self.historical_days)
+	cutoff_date = datetime.now() - timedelta(days=self.historical_days)
 
-		for date_dir in sorted(benchmark_results_dir.glob("*"), reverse=True):
-			if not date_dir.is_dir():
+	for date_dir in sorted(benchmark_results_dir.glob("*"), reverse=True):
+		if not date_dir.is_dir():
+			continue
+
+		try:
+			# Validate date_dir is within benchmark_results_dir
+			resolved_date_dir = date_dir.resolve(strict=True)
+
+			# Use is_relative_to for secure path validation (Python 3.9+)
+			if not resolved_date_dir.is_relative_to(benchmark_results_dir):
+				print(f"Warning: Skipping {date_dir} (outside results directory)", file=sys.stderr)
 				continue
 
-			try:
-				# Validate date_dir is within benchmark_results_dir
-				resolved_date_dir = date_dir.resolve()
-				if not str(resolved_date_dir).startswith(str(benchmark_results_dir)):
-					print(f"Warning: Skipping {date_dir} (outside results directory)", file=sys.stderr)
+			dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d")
+			if dir_date < cutoff_date:
+				break
+
+			for json_file in date_dir.glob("*.json"):
+				# Validate json_file is within date_dir
+				resolved_file = json_file.resolve(strict=True)
+
+				# Use is_relative_to for secure path validation (Python 3.9+)
+				if not resolved_file.is_relative_to(resolved_date_dir):
+					print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
 					continue
 
-				dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d")
-				if dir_date < cutoff_date:
-					break
+				with open(resolved_file, 'r') as f:
+					data = json.load(f)
+					config_name = self._extract_config_name(json_file)
+					historical.append({
+						'date': dir_date,
+						'config': config_name,
+						'metrics': self._parse_benchmark_data(data)
+					})
+		except Exception as e:
+			print(f"Warning: Failed to parse historical data from {date_dir}: {e}", file=sys.stderr)
 
-				for json_file in date_dir.glob("*.json"):
-					# Validate json_file is within date_dir
-					resolved_file = json_file.resolve()
-					if not str(resolved_file).startswith(str(resolved_date_dir)):
-						print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
-						continue
-
-					with open(resolved_file, 'r') as f:
-						data = json.load(f)
-						config_name = json_file.stem.split('-')[0]
-						historical.append({
-							'date': dir_date,
-							'config': config_name,
-							'metrics': self._parse_benchmark_data(data)
-						})
-			except Exception as e:
-				print(f"Warning: Failed to parse historical data from {date_dir}: {e}", file=sys.stderr)
-
-		return historical
+	return historical
 
 	def calculate_baseline(self, config: str, operation: str, metric: str) -> Optional[Tuple[float, float]]:
 		"""Calculate baseline median and stddev for a specific metric."""
