@@ -134,8 +134,8 @@ impl ToSql for EscapeKwFreeIdent<'_> {
 	}
 }
 
-pub struct EscapeKey<'a>(pub &'a str);
-impl ToSql for EscapeKey<'_> {
+pub struct EscapeObjectKey<'a>(pub &'a str);
+impl ToSql for EscapeObjectKey<'_> {
 	fn fmt_sql(&self, f: &mut String, _: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or does the key start with a digit?
@@ -146,7 +146,7 @@ impl ToSql for EscapeKey<'_> {
 			|| s == "Infinity"
 		{
 			f.push('"');
-			EscapeWriter::escape(f, '`', self.0);
+			EscapeWriter::escape(f, '"', self.0);
 			f.push('"');
 		} else {
 			f.push_str(s);

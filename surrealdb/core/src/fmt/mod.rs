@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::fmt::Display;
 
 pub use escape::{
-	EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRidKey, QuoteStr,
+	EscapeIdent, EscapeKwFreeIdent, EscapeKwIdent, EscapeObjectKey, EscapeRidKey, QuoteStr,
 };
 use surrealdb_types::{SqlFormat, ToSql};
 

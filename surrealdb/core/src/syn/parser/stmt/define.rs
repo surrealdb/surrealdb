@@ -1098,7 +1098,9 @@ impl Parser<'_> {
 							}
 							t!("M") => {
 								self.pop_peek();
-								m = Some(self.next_token_value()?);
+								let v = self.next_token_value()?;
+								let span = self.last_span();
+								m = Some((v, span));
 							}
 							t!("EFC") => {
 								self.pop_peek();
@@ -1118,11 +1120,15 @@ impl Parser<'_> {
 						}
 					}
 
-					let m = m.unwrap_or(12u8);
-					// TODO: @Emmanuel please look at what to do if `m` is larger then 127.,
-					// previously m0 would overflow, currently I am just limiting it to u8::MAX
-					// but I am not sure if that is the correct thing to do, maybe we should error
-					// if `m` is larger then 127 and no `m0` is specified?
+					let m = if let Some((m, span)) = m {
+						if m > 127 {
+							bail!("Invalid value for HNSW parameter `M`", @span => "`M` cannot be larger then 127")
+						}
+						m
+					} else {
+						12u8
+					};
+
 					let m0 = m0.unwrap_or(m.saturating_mul(2));
 					let ml = ml.unwrap_or((1.0 / (m as f64).ln()).into());
 					res.index = Index::Hnsw(HnswParams {

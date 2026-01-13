@@ -3,7 +3,7 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmts, EscapeKey, Float, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeObjectKey, Float, QuoteStr};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -176,7 +176,7 @@ impl ToSql for Literal {
 							f,
 							fmt,
 							"{}: {}",
-							EscapeKey(&entry.key),
+							EscapeObjectKey(&entry.key),
 							CoverStmts(&entry.value)
 						);
 					}
@@ -461,6 +461,6 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 
 impl ToSql for ObjectEntry {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "{}: {}", EscapeKey(&self.key), self.value);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(&self.key), self.value);
 	}
 }

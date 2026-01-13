@@ -99,8 +99,8 @@ impl ToSql for EscapeSqonIdent<'_> {
 	}
 }
 
-pub struct EscapeKey<'a>(pub &'a str);
-impl ToSql for EscapeKey<'_> {
+pub struct EscapeObjectKey<'a>(pub &'a str);
+impl ToSql for EscapeObjectKey<'_> {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or does the key start with a digit?
@@ -117,8 +117,8 @@ impl ToSql for EscapeKey<'_> {
 	}
 }
 
-pub struct EscapeRid<'a>(pub &'a str);
-impl ToSql for EscapeRid<'_> {
+pub struct EscapeRecordKey<'a>(pub &'a str);
+impl ToSql for EscapeRecordKey<'_> {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		let s = self.0;
 		// Any non 'normal' characters or are all character digits?
