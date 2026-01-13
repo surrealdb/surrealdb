@@ -267,9 +267,11 @@ jobs:
         id: report
         run: |
           if [ -f ${{ github.workspace }}/report.md ]; then
-            echo "report<<EOF" >> $GITHUB_OUTPUT
+            # Use a unique delimiter that won't appear in the report
+            DELIMITER="BENCHMARK_REPORT_END_$(date +%s)"
+            echo "report<<$DELIMITER" >> $GITHUB_OUTPUT
             cat ${{ github.workspace }}/report.md >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            echo "$DELIMITER" >> $GITHUB_OUTPUT
           else
             echo "report=No benchmark report generated" >> $GITHUB_OUTPUT
           fi
