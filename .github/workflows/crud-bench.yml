@@ -101,7 +101,7 @@ jobs:
       - name: Align SurrealDB version with crud-bench
         run: |
           # Extract the surrealdb version that crud-bench expects
-          EXPECTED_VERSION=$(grep -A 1 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
+          EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
           echo "crud-bench expects surrealdb version: $EXPECTED_VERSION"
 
           # Get current version
