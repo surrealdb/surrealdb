@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
 
@@ -61,6 +61,12 @@ pub async fn invoke(
 	let mut req = req.map(|x| x.0).unwrap_or_default();
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
+
+	if !path.starts_with('/') {
+		// align behaviour with the path provided in DEFINE API statement
+		bail!("The string could not be parsed into a path: Segment should start with /");
+	}
+
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 	if !req.headers.contains_key(CONTENT_TYPE) {
