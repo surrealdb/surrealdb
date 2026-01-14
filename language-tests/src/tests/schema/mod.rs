@@ -96,6 +96,18 @@ pub struct TestEnv {
 	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
+	/// Backend-specific timeout overrides (in milliseconds).
+	/// These take precedence over the base `timeout` when running on the corresponding backend.
+	pub timeout_tikv: Option<BoolOr<u64>>,
+	pub timeout_rocksdb: Option<BoolOr<u64>>,
+	pub timeout_surrealkv: Option<BoolOr<u64>>,
+
+	/// Backend-specific context timeout overrides (in milliseconds).
+	/// These take precedence over the base `context_timeout` when running on the corresponding backend.
+	pub context_timeout_tikv: Option<BoolOr<u64>>,
+	pub context_timeout_rocksdb: Option<BoolOr<u64>>,
+	pub context_timeout_surrealkv: Option<BoolOr<u64>>,
+
 	/// Specifies which backends this test should run on.
 	/// If empty, the test runs on all backends.
 	/// If specified, the test only runs when the selected backend is in this list.
@@ -131,11 +143,43 @@ impl TestEnv {
 		}
 	}
 
-	pub fn timeout(&self) -> Option<u64> {
+	/// Returns the timeout for this test in milliseconds.
+	/// If a backend-specific timeout is set and matches the current backend, it takes precedence.
+	/// Falls back to the base timeout, defaulting to 1000ms.
+	pub fn timeout(&self, backend: Option<&str>) -> Option<u64> {
+		// Check for backend-specific override first
+		let override_timeout = match backend {
+			Some("tikv") => self.timeout_tikv,
+			Some("rocksdb") => self.timeout_rocksdb,
+			Some("surrealkv") => self.timeout_surrealkv,
+			_ => None,
+		};
+
+		if let Some(t) = override_timeout {
+			return t.into_value(1000);
+		}
+
+		// Fall back to base timeout
 		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
-	pub fn context_timeout(&self) -> Option<u64> {
+	/// Returns the context timeout for this test in milliseconds.
+	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
+	/// Falls back to the base context_timeout, defaulting to 1000ms.
+	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
+		// Check for backend-specific override first
+		let override_timeout = match backend {
+			Some("tikv") => self.context_timeout_tikv,
+			Some("rocksdb") => self.context_timeout_rocksdb,
+			Some("surrealkv") => self.context_timeout_surrealkv,
+			_ => None,
+		};
+
+		if let Some(t) = override_timeout {
+			return t.into_value(1000);
+		}
+
+		// Fall back to base context_timeout
 		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 

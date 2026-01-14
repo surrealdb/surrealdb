@@ -30,6 +30,7 @@ pub struct TestTaskContext {
 	pub testset: TestSet,
 	pub ds: Permit,
 	pub result: Sender<(TestId, TestTaskResult)>,
+	pub backend: Backend,
 }
 
 fn try_collect_reports<W: io::Write>(
@@ -207,6 +208,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			testset: subset.clone(),
 			result: res_send.clone(),
 			ds,
+			backend,
 		};
 		let future = async move {
 			let name = context.testset[context.id].path.as_str().to_owned();
@@ -315,13 +317,19 @@ pub async fn grade_task(
 pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let config = &context.testset[context.id].config;
 	let capabilities = core_capabilities_from_test_config(config);
+	let backend_str = context.backend.to_string();
 
 	let context_timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| x.context_timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
+		.map(|x| {
+			x.context_timeout(Some(&backend_str))
+				.map(Duration::from_millis)
+				.unwrap_or(Duration::MAX)
+		})
 		.unwrap_or(Duration::from_secs(3));
 
+	let backend = context.backend;
 	let res = context
 		.ds
 		.with(
@@ -329,7 +337,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 				ds.with_capabilities(capabilities)
 					.with_query_timeout(Some(context_timeout_duration))
 			},
-			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
+			async |ds| run_test_with_dbs(context.id, &context.testset, ds, backend).await,
 		)
 		.await;
 
@@ -348,8 +356,10 @@ async fn run_test_with_dbs(
 	id: TestId,
 	set: &TestSet,
 	dbs: &mut Datastore,
+	backend: Backend,
 ) -> Result<TestTaskResult> {
 	let config = &set[id].config;
+	let backend_str = backend.to_string();
 
 	let mut session = util::session_from_test_config(config);
 
@@ -366,7 +376,11 @@ async fn run_test_with_dbs(
 	let timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
+		.map(|x| {
+			x.timeout(Some(&backend_str))
+				.map(Duration::from_millis)
+				.unwrap_or(Duration::MAX)
+		})
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
