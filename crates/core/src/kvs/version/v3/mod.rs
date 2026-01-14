@@ -9,17 +9,23 @@ pub use pass::{MigratorPass, PassState};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Severity {
-	MightBreak,
+	// Breakage only happens in edge cases.
+	UnlikelyBreak,
+	// Will only break in some situations.
+	CanBreak,
+	// Pretty much guarenteed to break on any usage.
 	WillBreak,
-	BreakingResolution,
+	// Can be automatically fixed.
+	Resolution,
 }
 
 impl Severity {
 	pub fn as_str(&self) -> &str {
 		match self {
-			Severity::MightBreak => "might_break",
+			Severity::UnlikelyBreak => "unlikely_break",
+			Severity::CanBreak => "can_break",
 			Severity::WillBreak => "will_break",
-			Severity::BreakingResolution => "breaking_resolution",
+			Severity::Resolution => "resolution",
 		}
 	}
 }
@@ -27,12 +33,28 @@ impl Severity {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum IssueKind {
 	IncompatibleFuture,
+	AllIdiom,
+	FieldIdiomFollowed,
+	FunctionLogicalAnd,
+	FunctionLogicalOr,
+	FunctionMathSqrt,
+	FunctionMathMin,
+	FunctionMathMax,
+	MockValue,
 }
 
 impl IssueKind {
 	pub fn as_str(&self) -> &str {
 		match *self {
 			Self::IncompatibleFuture => "incompatible future",
+			Self::AllIdiom => "all idiom",
+			Self::FieldIdiomFollowed => "field idiom followed",
+			Self::FunctionLogicalAnd => "function logical_and",
+			Self::FunctionLogicalOr => "function logical_or",
+			Self::FunctionMathSqrt => "function math::sqrt",
+			Self::FunctionMathMin => "function math::min",
+			Self::FunctionMathMax => "function math::max",
+			Self::MockValue => "mock value",
 		}
 	}
 }

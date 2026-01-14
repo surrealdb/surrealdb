@@ -5,10 +5,13 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::key::thing;
 use crate::kvs::version::v3::{MigrationIssue, MigratorPass, PassState};
-use crate::kvs::KeyDecode;
+use crate::kvs::{KeyDecode, KeyEncode as _};
 use crate::sql::visit::Visitor;
 use crate::sql::{Base, Value};
 use std::fmt::Write;
+
+/// The number of records we load per batch for checking the migration.
+const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
 
 pub async fn diagnose(
 	(ctx, opts): (&Context, &Options),
@@ -82,7 +85,7 @@ async fn diagnose_ns(
 async fn diagnose_ns_db(
 	ctx: &Context,
 	opts: &Options,
-	_probe: bool,
+	probe: bool,
 	ns: &str,
 	db: &str,
 	issues: &mut Vec<MigrationIssue>,
@@ -124,33 +127,57 @@ async fn diagnose_ns_db(
 			}
 		}
 
-		let begin = thing::prefix(ns, db, &t.name)?;
+		let mut begin = thing::prefix(ns, db, &t.name)?;
 		let end = thing::suffix(ns, db, &t.name)?;
-		let r = tx.scan(begin..end, *MIGRATION_TABLE_PROBE_COUNT, None).await?;
-		for (k, v) in r {
-			let k = thing::Thing::decode(&k)?;
-			let len = path.len();
-			write!(path, "/record/{}", k.id).expect("Writing into a string cannot fail");
+		let mut count = if probe {
+			*MIGRATION_TABLE_PROBE_COUNT
+		} else {
+			usize::MAX
+		};
 
-			let v = revision::from_slice::<Value>(&v)?;
+		while count != 0 {
+			let limit = (RECORD_CHECK_BATCH_SIZE as usize).min(count) as u32;
 
-			{
-				let mut pass = MigratorPass::new(
-					issues,
-					export,
-					path,
-					PassState {
-						breaking_futures: true,
-						..PassState::default()
-					},
-				);
-				let _ = pass.visit_value(&v);
-				for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
-					let _ = pass.visit_define_field(f);
-				}
+			let r = tx.scan(begin.as_slice()..end.as_slice(), limit, None).await?;
+
+			if r.is_empty() {
+				break;
 			}
 
-			path.truncate(len);
+			let last = r.len() - 1;
+			for (idx, (k, v)) in r.into_iter().enumerate() {
+				let k = thing::Thing::decode(&k)?;
+				let len = path.len();
+				write!(path, "/record/{}", k.id).expect("Writing into a string cannot fail");
+
+				let v = revision::from_slice::<Value>(&v)?;
+
+				{
+					let mut pass = MigratorPass::new(
+						issues,
+						export,
+						path,
+						PassState {
+							breaking_futures: true,
+							..PassState::default()
+						},
+					);
+					let _ = pass.visit_value(&v);
+					for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
+						let _ = pass.visit_define_field(f);
+					}
+				}
+
+				if idx == last {
+					begin.clear();
+					k.encode_into(&mut begin)?;
+					begin.push(0xff);
+				}
+
+				path.truncate(len);
+			}
+
+			count -= limit as usize;
 		}
 
 		path.truncate(len);

@@ -174,5 +174,5 @@ pub static SURREALDB_USER_AGENT: LazyLock<String> =
 	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
 
 /// Specifies how many concurrent jobs can be buffered in the worker channel.
-pub static MIGRATION_TABLE_PROBE_COUNT: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_MIGRATION_TABLE_PROBE_COUNT", u32, 1024);
+pub static MIGRATION_TABLE_PROBE_COUNT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MIGRATION_TABLE_PROBE_COUNT", usize, 1024);

@@ -101,6 +101,7 @@ impl fmt::Write for PassWriter<'_> {
 #[derive(Clone, Copy, Default)]
 pub struct PassState {
 	pub breaking_futures: bool,
+	pub mock_allowed: bool,
 	pub _tmp: (),
 }
 
@@ -149,6 +150,108 @@ impl<'a> MigratorPass<'a> {
 		let r = fc(self);
 		self.state = old_state;
 		r
+	}
+
+	fn check_function(&mut self, range: std::ops::Range<Location>, name: &str, _args: &[Value]) {
+		match name {
+			"array::logical_and" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function array::logical_and, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalAnd,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"array::logical_or" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function array::logical_or, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"array::range" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::CanBreak,
+					error: "Found use of function array::range, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::sqrt" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::sqrt, this function now returns `NaN` when called with a negative number".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::min" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::min, this function now return `Infinity` when called with an empty array".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::max" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::max, this function now returns `-Infinity` when called with an empty array".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			_ => {}
+		}
 	}
 }
 
@@ -1369,7 +1472,13 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						this.w.write_str(",")?;
 					}
-					this.visit_value(v)?;
+					this.with_state(
+						|s| PassState {
+							mock_allowed: true,
+							..s
+						},
+						|this| this.visit_value(v),
+					)?;
 				}
 
 				if let Some(d) = c.data.as_ref() {
@@ -1512,17 +1621,18 @@ impl Visitor for MigratorPass<'_> {
 			| Value::Bytes(_)
 			| Value::Table(_)
 			| Value::Geometry(_)
-			| Value::Param(_)
 			| Value::Regex(_)
 			| Value::Constant(_) => {
 				write!(self.w, "{value}")
 			}
 
+			Value::Mock(_) => value.visit(self),
+
 			Value::Array(_)
+			| Value::Param(_)
 			| Value::Object(_)
 			| Value::Thing(_)
 			| Value::Idiom(_)
-			| Value::Mock(_)
 			| Value::Cast(_)
 			| Value::Block(_)
 			| Value::Range(_)
@@ -1534,7 +1644,13 @@ impl Visitor for MigratorPass<'_> {
 			| Value::Query(_)
 			| Value::Model(_)
 			| Value::Closure(_)
-			| Value::Refs(_) => value.visit(self),
+			| Value::Refs(_) => self.with_state(
+				|s| PassState {
+					mock_allowed: false,
+					..s
+				},
+				|this| value.visit(this),
+			),
 		}
 	}
 
@@ -1642,6 +1758,7 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_function(&mut self, f: &Function) -> Result<(), Self::Error> {
 		match f {
 			Function::Normal(s, e) => {
+				let before = self.w.location();
 				write!(self.w, "{}(", v3_function_name(s))?;
 				for (idx, e) in e.iter().enumerate() {
 					if idx != 0 {
@@ -1649,7 +1766,10 @@ impl Visitor for MigratorPass<'_> {
 					}
 					self.visit_value(e)?;
 				}
-				self.w.write_char(')')
+				self.w.write_char(')')?;
+				let after = self.w.location();
+				self.check_function(before..after, s, e);
+				Ok(())
 			}
 			Function::Custom(s, e) => {
 				write!(self.w, "fn::{s}(")?;
@@ -1761,14 +1881,37 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_mock(&mut self, m: &Mock) -> Result<(), Self::Error> {
+		let before = self.w.location();
 		match m {
 			Mock::Count(t, c) => {
-				write!(self.w, "|{}:{}|", EscapeIdent(t), c)
+				write!(self.w, "|{}:{}|", EscapeIdent(t), c)?;
 			}
 			Mock::Range(t, from, to) => {
-				write!(self.w, "|{}:{}..={}|", EscapeIdent(t), from, to)
+				write!(self.w, "|{}:{}..={}|", EscapeIdent(t), from, to)?;
 			}
 		}
+
+		if !self.state.mock_allowed {
+			let after = self.w.location();
+
+			self.issues.push(MigrationIssue {
+				severity: Severity::UnlikelyBreak,
+				error: "Found usage of mock value outside of CREATE or SELECT statement"
+					.to_string(),
+				details: String::new(),
+				kind: IssueKind::MockValue,
+				origin: self.path.clone(),
+				error_location: Some(Snippet::from_source_location_range(
+					self.w.flush_source(),
+					before..after,
+					None,
+					MessageKind::Error,
+				)),
+				resolution: None,
+			})
+		}
+
+		Ok(())
 	}
 
 	fn visit_number(&mut self, n: &Number) -> Result<(), Self::Error> {
@@ -1833,7 +1976,8 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_param(&mut self, p: &Param) -> Result<(), Self::Error> {
-		write!(self.w, "{p}")
+		write!(self.w, "{p}")?;
+		Ok(())
 	}
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
@@ -1853,8 +1997,36 @@ impl Visitor for MigratorPass<'_> {
 				}
 			}
 			_ => {
+				let mut last_field = None;
 				for p in idiom.0.iter() {
+					let prev_field = last_field;
+					if matches!(p, Part::Field(_)) {
+						last_field = Some(self.w.location());
+					} else {
+						last_field = None
+					}
+
 					self.visit_part(p)?;
+
+					if let Some(field) = prev_field {
+						if last_field.is_none() {
+							let after = self.w.location();
+							self.issues.push(MigrationIssue {
+							severity: Severity::CanBreak,
+							error: "Found usage of an idiom with a field followed by another idiom part".to_string(),
+							details: String::new(),
+							kind: IssueKind::FieldIdiomFollowed,
+							origin: self.path.clone(),
+							error_location: Some(Snippet::from_source_location_range(
+								self.w.flush_source(),
+								field..after,
+								None,
+								MessageKind::Error,
+							)),
+							resolution: None,
+						})
+						}
+					}
 				}
 			}
 		}
@@ -1864,8 +2036,24 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
 		match part {
 			Part::All => {
-				// NOTE: Possibly use `[*]` for old behavior in 3.0 and export as that instead.
-				self.w.write_str(".*")?
+				let before = self.w.location();
+				self.w.write_str(".*")?;
+				let after = self.w.location();
+
+				self.issues.push(MigrationIssue {
+					severity: Severity::CanBreak,
+					error: "Found usage of all idiom `.*` behavior of which has changed when used on an array or object".to_string(),
+					details: String::new(),
+					kind: IssueKind::AllIdiom,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						before..after,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
 			}
 			Part::Where(value) => {
 				self.w.write_str("[? ")?;
@@ -2091,7 +2279,13 @@ impl Visitor for MigratorPass<'_> {
 				expr,
 				alias,
 			} => {
-				self.visit_value(expr)?;
+				self.with_state(
+					|s| PassState {
+						mock_allowed: false,
+						..s
+					},
+					|this| this.visit_value(expr),
+				)?;
 				if let Some(alias) = alias {
 					self.w.write_str(" AS ")?;
 					self.visit_idiom(alias)?;
