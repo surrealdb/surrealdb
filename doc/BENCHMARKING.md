@@ -63,11 +63,67 @@ You can test a different crud-bench version without changing the workflow:
 
 ## Benchmark Configurations
 
-The workflow tests three SurrealDB configurations:
+The workflow tests multiple SurrealDB configurations:
 
-1. **Memory:** SurrealDB with in-memory storage engine (`surrealdb-memory`)
-2. **RocksDB:** SurrealDB with RocksDB persistent storage (`surrealdb-rocksdb`)
-3. **Embedded:** SurrealDB embedded SDK with in-memory storage
+### Networked Benchmarks
+These benchmarks test SurrealDB as a server using the binary built from your PR:
+1. **Memory:** SurrealDB server with in-memory storage (`surrealdb-memory`)
+2. **RocksDB:** SurrealDB server with RocksDB persistent storage (`surrealdb-rocksdb`)
+3. **SurrealKV:** SurrealDB server with SurrealKV storage (`surrealdb-surrealkv`)
+
+### Embedded Benchmarks
+These benchmarks test the SurrealDB SDK embedded in the benchmark tool using Cargo patching:
+1. **Embedded Memory:** SurrealDB SDK with in-memory storage (`surrealdb` + `-e memory`)
+2. **Embedded RocksDB:** SurrealDB SDK with RocksDB storage (`surrealdb` + `-e rocksdb`)
+3. **Embedded SurrealKV:** SurrealDB SDK with SurrealKV storage (`surrealdb` + `-e surrealkv`)
+
+### Other Database Engines
+The workflow also benchmarks:
+- **SurrealKV:** Direct SurrealKV storage engine (embedded, no network endpoint)
+- **SurrealMX:** SurrealMX storage engine (embedded, no network endpoint)
+
+**All benchmarks use code from your PR** - networked benchmarks use the compiled binary, while embedded benchmarks use the SDK via Cargo patching.
+
+### Customizing Network Endpoints
+
+Networked SurrealDB benchmarks require an `endpoint` field to specify the connection URL. The `endpoint` field is **optional** for benchmarks that don't use network connections:
+
+```yaml
+# Networked benchmark - requires endpoint
+- name: memory
+  database: surrealdb-memory
+  endpoint: ws://localhost:8000
+  description: SurrealDB with in-memory storage
+
+# HTTP variant (for testing REST API performance)
+- name: memory-http
+  database: surrealdb-memory
+  endpoint: http://localhost:8000
+  description: SurrealDB with in-memory storage (HTTP)
+
+# Embedded benchmark - requires endpoint to specify storage
+- name: embedded-memory
+  database: surrealdb
+  endpoint: memory
+  description: SurrealDB embedded with in-memory storage
+
+# Local database - no endpoint needed
+- name: surrealkv
+  database: surrealkv
+  description: SurrealKV
+```
+
+**How endpoints are used:**
+- **Networked SurrealDB** (`surrealdb-*`): Connection URL (e.g., `ws://localhost:8000`, `http://localhost:8000`)
+  - Default if omitted: `ws://127.0.0.1:8000`
+- **Embedded SurrealDB** (`surrealdb`): Storage engine specification (e.g., `memory`, `rocksdb:~/data`)
+  - Default if omitted: `ws://127.0.0.1:8000` (not useful for embedded mode, so always specify!)
+- **SurrealKV/SurrealMX**: Not used (these are local embedded databases)
+
+This flexibility allows you to:
+- Compare WebSocket vs HTTP performance for networked benchmarks
+- Test different storage engines for embedded benchmarks
+- Benchmark remote endpoints if needed
 
 ## Benchmark Parameters
 
@@ -334,6 +390,24 @@ During initialization, focus on:
    - Runs statistical analysis
    - Posts PR comment with results
    - Stores results to `benchmark-results` branch (main only)
+
+### How PR Code is Used
+
+The workflow ensures all benchmarks test your PR's code through two mechanisms:
+
+#### Networked Benchmarks (surrealdb-memory, surrealdb-rocksdb, surrealdb-surrealkv)
+1. The workflow builds the SurrealDB binary from your PR
+2. For networked configurations, it starts a local SurrealDB server using this binary
+3. crud-bench connects to this local server via `ws://localhost:8000`
+4. The server runs entirely from your PR's code
+
+#### Embedded Benchmarks (embedded-memory, embedded-rocksdb, embedded-surrealkv)
+1. The workflow uses Cargo patching (`.github/tools/.cargo/config.toml`)
+2. This patches the `surrealdb` dependency in crud-bench to use your local SDK code
+3. When crud-bench builds, it links against your PR's surrealdb SDK
+4. The embedded benchmarks run entirely from your PR's code
+
+Both approaches ensure apples-to-apples comparison: all benchmarks test the same PR code, just in different deployment modes (server vs embedded).
 
 ### Analysis Script
 
