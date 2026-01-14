@@ -47,7 +47,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/status/200"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -58,7 +58,7 @@ api::invoke("/status/200");
 DEFINE API "/status/201"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 201,
                 body: {}
             };
@@ -69,7 +69,7 @@ api::invoke("/status/201");
 DEFINE API "/status/400"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 400,
                 body: {}
             };
@@ -80,7 +80,7 @@ api::invoke("/status/400");
 DEFINE API "/status/404"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 404,
                 body: {}
             };
@@ -91,7 +91,7 @@ api::invoke("/status/404");
 DEFINE API "/status/500"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 500,
                 body: {}
             };
@@ -105,7 +105,7 @@ DEFINE API "/status/middleware"
         MIDDLEWARE
             api::res::status(404)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     original: 200

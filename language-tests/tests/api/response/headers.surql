@@ -45,7 +45,7 @@ DEFINE API "/header/single"
         MIDDLEWARE
             api::res::header("x-custom", "value")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: null
             };
@@ -63,7 +63,7 @@ DEFINE API "/header/multiple"
                 "header2": "value2"
             })
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: null
             };
@@ -80,7 +80,7 @@ DEFINE API "/header/remove"
                 "to-remove": NONE
             })
         THEN {
-            RETURN {
+            {
                 status: 200,
                 headers: {
                     "to-remove": "should-be-removed"
@@ -96,7 +96,7 @@ api::invoke("/header/remove");
 DEFINE API "/header/return"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 headers: {
                     "from-return": "return"

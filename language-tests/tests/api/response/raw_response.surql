@@ -37,7 +37,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/raw/bytes"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 raw: true,
                 body: <bytes>'raw bytes response'
@@ -51,7 +51,7 @@ api::invoke("/raw/bytes");
 DEFINE API "/raw/string"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 raw: true,
                 body: "raw string response"
@@ -65,7 +65,7 @@ api::invoke("/raw/string");
 DEFINE API "/raw/with_content_type"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 raw: true,
                 headers: {

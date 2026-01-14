@@ -8,7 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 # 2
 [[test.results]]
@@ -20,7 +20,7 @@ value = "NONE"
 
 # 4
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 # 5
 [[test.results]]
@@ -39,7 +39,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/no_handler"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "get"
@@ -61,7 +61,7 @@ api::invoke("/no_handler", {
 DEFINE API "/no_fallback"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -78,7 +78,7 @@ DEFINE API "/invalid_middleware"
         MIDDLEWARE
             fn::nonexistent()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

@@ -23,7 +23,7 @@ allow-experimental = ["define_api"]
 DEFINE API "missing_slash"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -33,7 +33,7 @@ DEFINE API "missing_slash"
 DEFINE API ""
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -43,7 +43,7 @@ DEFINE API ""
 DEFINE API "/valid"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -52,7 +52,7 @@ DEFINE API "/valid"
 DEFINE API "/also/valid"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

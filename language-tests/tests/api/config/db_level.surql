@@ -48,21 +48,21 @@ allow-experimental = ["define_api"]
 */
 
 # 0 - Helper function to track middleware
-DEFINE FUNCTION fn::db_middleware($req: object, $next: function) {
+DEFINE FUNCTION fn::db_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS db_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 1
-DEFINE FUNCTION fn::route_middleware($req: object, $next: function) {
+DEFINE FUNCTION fn::route_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS route_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 2
-DEFINE FUNCTION fn::method_middleware($req: object, $next: function) {
+DEFINE FUNCTION fn::method_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS method_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -75,7 +75,7 @@ DEFINE CONFIG API MIDDLEWARE fn::db_middleware();
 DEFINE API "/db_only"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -90,7 +90,7 @@ DEFINE API "/db_and_route"
         MIDDLEWARE
             fn::route_middleware()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -105,7 +105,7 @@ DEFINE API "/db_and_method"
         MIDDLEWARE
             fn::method_middleware()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

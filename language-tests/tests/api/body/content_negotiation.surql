@@ -49,7 +49,7 @@ DEFINE API "/negotiate/auto"
         MIDDLEWARE
             api::res::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     data: "json"
@@ -70,7 +70,7 @@ DEFINE API "/negotiate/plain"
         MIDDLEWARE
             api::res::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: "plain text"
             };
@@ -89,7 +89,7 @@ DEFINE API "/negotiate/q"
         MIDDLEWARE
             api::res::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     data: "json"

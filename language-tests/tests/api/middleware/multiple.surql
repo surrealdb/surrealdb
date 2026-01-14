@@ -60,42 +60,42 @@ allow-experimental = ["define_api"]
 */
 
 # 0 - Helper functions for multiple middleware
-DEFINE FUNCTION fn::db_middleware1($req: object, $next: function) {
+DEFINE FUNCTION fn::db_middleware1($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS db1 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 1
-DEFINE FUNCTION fn::db_middleware2($req: object, $next: function) {
+DEFINE FUNCTION fn::db_middleware2($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS db2 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 2
-DEFINE FUNCTION fn::route_middleware1($req: object, $next: function) {
+DEFINE FUNCTION fn::route_middleware1($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS route1 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 3
-DEFINE FUNCTION fn::route_middleware2($req: object, $next: function) {
+DEFINE FUNCTION fn::route_middleware2($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS route2 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 4
-DEFINE FUNCTION fn::method_middleware1($req: object, $next: function) {
+DEFINE FUNCTION fn::method_middleware1($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS method1 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
 };
 
 # 5
-DEFINE FUNCTION fn::method_middleware2($req: object, $next: function) {
+DEFINE FUNCTION fn::method_middleware2($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, true AS method2 FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -107,7 +107,7 @@ DEFINE CONFIG API MIDDLEWARE fn::db_middleware1(), fn::db_middleware2();
 DEFINE API "/multiple/db"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -123,7 +123,7 @@ DEFINE API "/multiple/route"
             fn::route_middleware1(),
             fn::route_middleware2()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -139,7 +139,7 @@ DEFINE API "/multiple/method"
             fn::method_middleware1(),
             fn::method_middleware2()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

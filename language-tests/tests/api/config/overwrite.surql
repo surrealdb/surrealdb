@@ -38,7 +38,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/overwrite_test"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     version: "first"
@@ -52,7 +52,7 @@ api::invoke("/overwrite_test");
 DEFINE API "/overwrite_test"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     version: "second"
@@ -64,7 +64,7 @@ DEFINE API "/overwrite_test"
 DEFINE API OVERWRITE "/overwrite_test"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     version: "second"
@@ -78,7 +78,7 @@ api::invoke("/overwrite_test");
 DEFINE API IF NOT EXISTS "/if_not_exists"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     version: "first"
@@ -92,7 +92,7 @@ api::invoke("/if_not_exists");
 DEFINE API IF NOT EXISTS "/if_not_exists"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     version: "second"

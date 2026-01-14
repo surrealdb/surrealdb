@@ -35,7 +35,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/query"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     query: $request.query
@@ -55,7 +55,7 @@ api::invoke("/query", {
 DEFINE API "/query/multiple"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     query: $request.query
@@ -75,7 +75,7 @@ api::invoke("/query/multiple", {
 DEFINE API "/query/empty"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     query: $request.query

@@ -29,7 +29,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/hello"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "Hello, World!"
@@ -44,7 +44,7 @@ api::invoke("/hello");
 DEFINE API "/create"
     FOR post
         THEN {
-            RETURN {
+            {
                 status: 201,
                 headers: {
                     "content-type": "application/json"
@@ -63,7 +63,7 @@ api::invoke("/create", {
 DEFINE API "/default"
     FOR get
         THEN {
-            RETURN {
+            {
                 body: {
                     default: "status"
                 }

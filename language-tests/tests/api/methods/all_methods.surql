@@ -47,10 +47,10 @@ allow-experimental = ["define_api"]
 DEFINE API "/method/get"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };
@@ -63,10 +63,10 @@ api::invoke("/method/get", {
 DEFINE API "/method/post"
     FOR post
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };
@@ -79,10 +79,10 @@ api::invoke("/method/post", {
 DEFINE API "/method/put"
     FOR put
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };
@@ -95,10 +95,10 @@ api::invoke("/method/put", {
 DEFINE API "/method/patch"
     FOR patch
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };
@@ -111,10 +111,10 @@ api::invoke("/method/patch", {
 DEFINE API "/method/delete"
     FOR delete
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };
@@ -127,10 +127,10 @@ api::invoke("/method/delete", {
 DEFINE API "/method/trace"
     FOR trace
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
-                    method: string::lowercase($request.method)
+                    method: $request.method
                 }
             };
         };

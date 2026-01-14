@@ -24,7 +24,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 # 6
 [[test.results]]
@@ -43,7 +43,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/test/*rest"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     rest: $request.params.rest
@@ -58,7 +58,7 @@ api::invoke("/test/segment1");
 DEFINE API "/api/*path"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     rest: $request.params.path
@@ -73,7 +73,7 @@ api::invoke("/api/v1/users/123");
 DEFINE API "/empty/*rest"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     rest: $request.params.rest
@@ -88,7 +88,7 @@ api::invoke("/empty");
 DEFINE API "/custom/*path"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: $request.params.path

@@ -56,7 +56,7 @@ allow-experimental = ["define_api"]
 */
 
 # 0 - Custom middleware that modifies request before next()
-DEFINE FUNCTION fn::add_request_field($req: object, $next: function) {
+DEFINE FUNCTION fn::add_request_field($req: object, $next: function) -> object {
     LET $req = SELECT *, (SELECT *, true AS modified FROM ONLY $req.body) AS body FROM ONLY $req;
     RETURN $next($req);
 };
@@ -67,7 +67,7 @@ DEFINE API "/custom_request"
         MIDDLEWARE
             fn::add_request_field()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 headers: {
                     "x-modified": <string> $request.body.modified
@@ -84,7 +84,7 @@ api::invoke("/custom_request", {
 });
 
 # 3 - Custom middleware that modifies response after next()
-DEFINE FUNCTION fn::increment_count($req: object, $next: function) {
+DEFINE FUNCTION fn::increment_count($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, ($res.body.count + 1) AS count FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -96,7 +96,7 @@ DEFINE API "/custom_response"
         MIDDLEWARE
             fn::increment_count()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     count: 1
@@ -108,7 +108,7 @@ DEFINE API "/custom_response"
 api::invoke("/custom_response");
 
 # 6 - Custom middleware with additional parameters
-DEFINE FUNCTION fn::add_prefix($req: object, $next: function, $prefix: string) {
+DEFINE FUNCTION fn::add_prefix($req: object, $next: function, $prefix: string) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, ($prefix + ": " + $res.body.message) AS prefix FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -120,7 +120,7 @@ DEFINE API "/custom_with_args"
         MIDDLEWARE
             fn::add_prefix("PREFIX")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "original message"
@@ -132,7 +132,7 @@ DEFINE API "/custom_with_args"
 api::invoke("/custom_with_args");
 
 # 9 - Custom middleware that throws an error
-DEFINE FUNCTION fn::error_middleware($req: object, $next: function) {
+DEFINE FUNCTION fn::error_middleware($req: object, $next: function) -> object {
     THROW "Custom middleware error";
 };
 
@@ -142,7 +142,7 @@ DEFINE API "/custom_error"
         MIDDLEWARE
             fn::error_middleware()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

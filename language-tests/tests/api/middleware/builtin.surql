@@ -54,7 +54,7 @@ DEFINE API "/parse_json"
         MIDDLEWARE
             api::req::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -77,7 +77,7 @@ DEFINE API "/serialize_json"
         MIDDLEWARE
             api::res::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "Hello"
@@ -94,7 +94,7 @@ DEFINE API "/override_status"
         MIDDLEWARE
             api::res::status(404)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     original: 200
@@ -111,7 +111,7 @@ DEFINE API "/add_header"
         MIDDLEWARE
             api::res::header("x-custom", "value")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     test: "data"
@@ -131,7 +131,7 @@ DEFINE API "/add_headers"
                 "header2": "value2"
             })
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     test: "data"

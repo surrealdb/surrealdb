@@ -74,7 +74,7 @@ DEFINE API "/body/json"
         MIDDLEWARE
             api::req::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -97,7 +97,7 @@ DEFINE API "/body/cbor"
         MIDDLEWARE
             api::req::body("cbor")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -121,7 +121,7 @@ DEFINE API "/body/flatbuffers"
         MIDDLEWARE
             api::req::body("flatbuffers")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -144,7 +144,7 @@ DEFINE API "/body/plain"
         MIDDLEWARE
             api::req::body("plain")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -167,7 +167,7 @@ DEFINE API "/body/bytes"
         MIDDLEWARE
             api::req::body("bytes")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -190,7 +190,7 @@ DEFINE API "/body/native"
         MIDDLEWARE
             api::req::body("native")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body
@@ -215,7 +215,7 @@ DEFINE API "/body/auto"
         MIDDLEWARE
             api::req::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     parsed: $request.body

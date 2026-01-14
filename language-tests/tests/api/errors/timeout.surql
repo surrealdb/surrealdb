@@ -32,7 +32,7 @@ DEFINE API "/timeout/short"
             api::timeout(1ns)
         THEN {
             CREATE something;
-            RETURN {
+            {
                 status: 200,
                 body: {
                     completed: true
@@ -48,7 +48,7 @@ DEFINE API "/timeout/long"
         MIDDLEWARE
             api::timeout(1s)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     completed: true
@@ -65,7 +65,7 @@ DEFINE API "/timeout/medium"
             api::timeout(10ms)
         THEN {
             SLEEP 100ms;
-            RETURN {
+            {
                 status: 200,
                 body: {
                     completed: true

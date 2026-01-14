@@ -21,14 +21,15 @@ DEFINE API "/exceeds_timeout"
             api::timeout(1ns)
         THEN {
             sleep 1s;
+            {}
         };
 
-api::invoke("exceeds_timeout");
+api::invoke("/exceeds_timeout");
 
 DEFINE API "missing_slash"
     FOR get 
         THEN {
-            RETURN {
+            {
                 status: 200,
                 headers: {}
             }

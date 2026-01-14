@@ -15,13 +15,13 @@ value = "NONE"
 value = "{ body: { path: '/api/users' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
@@ -32,7 +32,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/test"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: "/test"
@@ -46,7 +46,7 @@ api::invoke("/test");
 DEFINE API "/api/users"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: "/api/users"

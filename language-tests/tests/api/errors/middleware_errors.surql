@@ -21,7 +21,7 @@ DEFINE API "/middleware/nonexistent"
         MIDDLEWARE
             fn::nonexistent()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

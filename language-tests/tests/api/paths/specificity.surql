@@ -38,7 +38,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/users/specific"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     matched: "fixed"
@@ -50,7 +50,7 @@ DEFINE API "/users/specific"
 DEFINE API "/users/:id"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     matched: "dynamic"
@@ -62,7 +62,7 @@ DEFINE API "/users/:id"
 DEFINE API "/users/*rest"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     matched: "rest"
@@ -83,7 +83,7 @@ api::invoke("/users/123/posts");
 DEFINE API "/api/v1/users/:id"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     matched: "more_specific"
@@ -94,7 +94,7 @@ DEFINE API "/api/v1/users/:id"
 DEFINE API "/api/*path"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     matched: "less_specific"

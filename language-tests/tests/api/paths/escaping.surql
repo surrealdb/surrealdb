@@ -35,7 +35,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/test/\\:colon"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: "/test/:colon"
@@ -50,7 +50,7 @@ api::invoke("/test/:colon");
 DEFINE API "/star/\\*star"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: "/star/*star"
@@ -65,7 +65,7 @@ api::invoke("/star/*star");
 DEFINE API "/both/\\:colon/\\*star"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     path: "/both/:colon/*star"

@@ -36,7 +36,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/headers"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     "user-agent": $request.headers["user-agent"],
@@ -57,7 +57,7 @@ api::invoke("/headers", {
 DEFINE API "/headers/multiple"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     "content-type": $request.headers["content-type"],
@@ -78,7 +78,7 @@ api::invoke("/headers/multiple", {
 DEFINE API "/headers/empty"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     headers: $request.headers

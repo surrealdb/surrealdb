@@ -9,7 +9,7 @@ value = "NONE"
 value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
-value = '''{ "/commented": "DEFINE API '/commented' FOR any PERMISSIONS FULL THEN { RETURN { status: 200, body: {  } } } COMMENT 'This is a test API'" }'''
+value = '''{ "/commented": "DEFINE API '/commented' FOR any PERMISSIONS FULL THEN { { status: 200, body: {  } } } COMMENT 'This is a test API'" }'''
 
 [env.capabilities]
 allow-experimental = ["define_api"]
@@ -20,7 +20,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/commented"
     FOR any
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };

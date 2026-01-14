@@ -43,7 +43,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/fallback_only"
     FOR any
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "fallback"
@@ -60,7 +60,7 @@ api::invoke("/fallback_only", {
 DEFINE API "/fallback_with_get"
     FOR any
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "fallback"
@@ -69,7 +69,7 @@ DEFINE API "/fallback_with_get"
         }
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "get"
@@ -88,7 +88,7 @@ api::invoke("/fallback_with_get", {
 });
 
 # 5 - Fallback with middleware
-DEFINE FUNCTION fn::fallback_middleware($req: object, $next: function) {
+DEFINE FUNCTION fn::fallback_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, "fallback_mw" AS middleware FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -99,7 +99,7 @@ DEFINE API "/fallback_middleware"
         MIDDLEWARE
             fn::fallback_middleware()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "fallback"

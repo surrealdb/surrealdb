@@ -64,19 +64,17 @@ allow-experimental = ["define_api"]
 */
 
 # 0 - Middleware that sets request context
-DEFINE FUNCTION fn::set_request_context($req: object, $next: function) {
-    LET $context = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $context = SELECT *, 'set' AS middleware1 FROM ONLY $context;
+DEFINE FUNCTION fn::set_request_context($req: object, $next: function) -> object {
+    LET $context = SELECT *, 'set' AS middleware1 FROM ONLY $req.context ?? {};
     LET $req = SELECT *, $context AS context FROM ONLY $req;
     RETURN $next($req);
 };
 
 # 1 - Middleware that reads response context and adds to it
-DEFINE FUNCTION fn::read_response_context($req: object, $next: function) {
+DEFINE FUNCTION fn::read_response_context($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $responseContext = IF type::is_object($res.context) THEN $res.context ELSE {} END;
-    LET $responseContext = SELECT *, 'read' AS middleware4 FROM ONLY $responseContext;
-    LET $res = SELECT *, $responseContext AS context FROM ONLY $res;
+    LET $context = SELECT *, 'read' AS middleware4 FROM ONLY $res.context ?? {};
+    LET $res = SELECT *, $context AS context FROM ONLY $res;
     RETURN $res;
 };
 
@@ -87,12 +85,12 @@ DEFINE API "/context/test"
             fn::set_request_context(),
             fn::read_response_context()
         THEN {
-            LET $requestContext = IF type::is_object($request.context) THEN $request.context ELSE {} END;
             LET $body = {
                 message: "Hello",
-                requestContext: $requestContext
+                requestContext: $request.context ?? {},
             };
-            RETURN {
+
+            {
                 status: 200,
                 body: $body,
                 context: {
@@ -105,19 +103,20 @@ DEFINE API "/context/test"
 api::invoke("/context/test");
 
 # 3 - Test: Initial context from request
-DEFINE FUNCTION fn::add_to_request_context($req: object, $next: function) {
-    LET $context = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $context = SELECT *, 'added' AS middleware1 FROM ONLY $context;
+DEFINE FUNCTION fn::add_to_request_context($req: object, $next: function) -> object {
+    LET $context = SELECT *, 'added' AS middleware1 FROM ONLY $req.context ?? {};
     LET $req = SELECT *, $context AS context FROM ONLY $req;
     RETURN $next($req);
 };
 
-DEFINE FUNCTION fn::read_response_and_add_to_body($req: object, $next: function) {
+DEFINE FUNCTION fn::read_response_and_add_to_body($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $requestContext = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $responseContext = IF type::is_object($res.context) THEN $res.context ELSE {} END;
-    LET $body = IF type::is_object($res.body) THEN $res.body ELSE {} END;
-    LET $body = SELECT *, $requestContext AS requestContext, $responseContext AS responseContext FROM ONLY $body;
+    LET $body = SELECT 
+        *, 
+        $req.context ?? {} AS requestContext, 
+        $res.context ?? {} AS responseContext 
+    FROM ONLY $res.body ?? {};
+
     LET $res = SELECT *, $body AS body FROM ONLY $res;
     RETURN $res;
 };
@@ -128,7 +127,7 @@ DEFINE API "/context/initial"
             fn::add_to_request_context(),
             fn::read_response_and_add_to_body()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "Test"
@@ -148,41 +147,41 @@ api::invoke("/context/initial", {
 });
 
 # 5 - Test: Context chaining through multiple middleware
-DEFINE FUNCTION fn::context_step1($req: object, $next: function) {
-    LET $context = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $context = SELECT *, 'value1' AS step1 FROM ONLY $context;
+DEFINE FUNCTION fn::context_step1($req: object, $next: function) -> object {
+    LET $context = SELECT *, 'value1' AS step1 FROM ONLY $req.context ?? {};
     LET $req = SELECT *, $context AS context FROM ONLY $req;
     RETURN $next($req);
 };
 
-DEFINE FUNCTION fn::context_step2($req: object, $next: function) {
-    LET $context = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $context = SELECT *, 'value2' AS step2 FROM ONLY $context;
+DEFINE FUNCTION fn::context_step2($req: object, $next: function) -> object {
+    LET $context = SELECT *, 'value2' AS step2 FROM ONLY $req.context ?? {};
     LET $req = SELECT *, $context AS context FROM ONLY $req;
+
     LET $res = $next($req);
-    LET $resContext = IF type::is_object($res.context) THEN $res.context ELSE {} END;
-    LET $resContext = SELECT *, 'value2' AS step2 FROM ONLY $resContext;
-    LET $res = SELECT *, $resContext AS context FROM ONLY $res;
+    LET $context = SELECT *, 'value2' AS step2 FROM ONLY $res.context ?? {};
+    LET $res = SELECT *, $context AS context FROM ONLY $res;
+
     RETURN $res;
 };
 
-DEFINE FUNCTION fn::context_step3($req: object, $next: function) {
-    LET $context = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $context = SELECT *, 'value3' AS step3 FROM ONLY $context;
+DEFINE FUNCTION fn::context_step3($req: object, $next: function) -> object {
+    LET $context = SELECT *, 'value3' AS step3 FROM ONLY $req.context ?? {};
     LET $req = SELECT *, $context AS context FROM ONLY $req;
+
     LET $res = $next($req);
-    LET $resContext = IF type::is_object($res.context) THEN $res.context ELSE {} END;
-    LET $resContext = SELECT *, 'value3' AS step3 FROM ONLY $resContext;
-    LET $res = SELECT *, $resContext AS context FROM ONLY $res;
+    LET $context = SELECT *, 'value3' AS step3 FROM ONLY $res.context ?? {};
+    LET $res = SELECT *, $context AS context FROM ONLY $res;
+
     RETURN $res;
 };
 
-DEFINE FUNCTION fn::context_final($req: object, $next: function) {
+DEFINE FUNCTION fn::context_final($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $requestContext = IF type::is_object($req.context) THEN $req.context ELSE {} END;
-    LET $responseContext = IF type::is_object($res.context) THEN $res.context ELSE {} END;
-    LET $body = IF type::is_object($res.body) THEN $res.body ELSE {} END;
-    LET $body = SELECT *, $requestContext AS requestContext, $responseContext AS responseContext FROM ONLY $body;
+    LET $body = SELECT 
+        *, 
+        $req.context ?? {} AS requestContext, 
+        $res.context ?? {} AS responseContext 
+    FROM ONLY $res.body ?? {};
     LET $res = SELECT *, $body AS body FROM ONLY $res;
     RETURN $res;
 };
@@ -195,7 +194,7 @@ DEFINE API "/context/chain"
             fn::context_step3(),
             fn::context_final()
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "Chain"

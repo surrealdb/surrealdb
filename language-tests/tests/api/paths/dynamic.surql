@@ -28,11 +28,11 @@ value = "{ body: { id: 789 }, headers: {}, context: {  }, status: 200 }"
 
 # 6
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 # 7
 [[test.results]]
-value = "NONE"
+value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
@@ -43,7 +43,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/users/:id"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     id: $request.params.id
@@ -58,7 +58,7 @@ api::invoke("/users/123");
 DEFINE API "/users/:id/posts/:postId"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     id: $request.params.id,
@@ -74,7 +74,7 @@ api::invoke("/users/456/posts/abc");
 DEFINE API "/items/:id<number>"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     id: $request.params.id

@@ -66,7 +66,7 @@ DEFINE API "/res/json"
         MIDDLEWARE
             api::res::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     message: "Hello"
@@ -83,7 +83,7 @@ DEFINE API "/res/cbor"
         MIDDLEWARE
             api::res::body("cbor")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     data: "test"
@@ -100,7 +100,7 @@ DEFINE API "/res/flatbuffers"
         MIDDLEWARE
             api::res::body("flatbuffers")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     data: "test"
@@ -117,7 +117,7 @@ DEFINE API "/res/plain"
         MIDDLEWARE
             api::res::body("plain")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: "plain text"
             };
@@ -132,7 +132,7 @@ DEFINE API "/res/bytes"
         MIDDLEWARE
             api::res::body("bytes")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: <bytes>'raw bytes'
             };
@@ -147,7 +147,7 @@ DEFINE API "/res/native"
         MIDDLEWARE
             api::res::body("native")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     native: "format"

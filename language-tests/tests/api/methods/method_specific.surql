@@ -39,7 +39,7 @@ allow-experimental = ["define_api"]
 DEFINE API "/multi_method"
     FOR get
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "get"
@@ -48,7 +48,7 @@ DEFINE API "/multi_method"
         }
     FOR post
         THEN {
-            RETURN {
+            {
                 status: 201,
                 body: {
                     handler: "post"
@@ -67,7 +67,7 @@ api::invoke("/multi_method", {
 });
 
 # 3 - Method-specific middleware
-DEFINE FUNCTION fn::method_middleware($req: object, $next: function, $name: string) {
+DEFINE FUNCTION fn::method_middleware($req: object, $next: function, $name: string) -> object {
     LET $res = $next($req);
     LET $res = SELECT *, (SELECT *, $name AS middleware FROM ONLY $res.body) AS body FROM ONLY $res;
     RETURN $res;
@@ -79,7 +79,7 @@ DEFINE API "/method_middleware"
         MIDDLEWARE
             fn::method_middleware("get_mw")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {
                     handler: "get"
@@ -90,7 +90,7 @@ DEFINE API "/method_middleware"
         MIDDLEWARE
             fn::method_middleware("post_mw")
         THEN {
-            RETURN {
+            {
                 status: 201,
                 body: {
                     handler: "post"

@@ -41,9 +41,8 @@ allow-experimental = ["define_api"]
 
 # 0 - Helper function to track middleware execution order
 DEFINE FUNCTION fn::track_middleware($req: object, $next: function, $name: string) {
-    LET $order = IF type::is_array($req.body.order) THEN $req.body.order ELSE [] END;
-    LET $order = array::append($order, $name);
-    LET $body = IF $req.body == NONE THEN { order: $order } ELSE SELECT *, $order AS order FROM ONLY $req.body END;
+    LET $order = array::append($req.body.order ?? [], $name);
+    LET $body = SELECT *, $order AS order FROM ONLY $req.body ?? {};
     LET $req = SELECT *, $body AS body FROM ONLY $req;
     RETURN $next($req);
 };

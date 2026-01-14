@@ -97,7 +97,7 @@ DEFINE API "/status/invalid-low"
         MIDDLEWARE
             api::res::status(99)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -112,7 +112,7 @@ DEFINE API "/status/invalid-high"
         MIDDLEWARE
             api::res::status(600)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -127,7 +127,7 @@ DEFINE API "/status/invalid-negative"
         MIDDLEWARE
             api::res::status(-1)
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -142,7 +142,7 @@ DEFINE API "/header/invalid-name"
         MIDDLEWARE
             api::res::header("invalid header name", "value")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -157,7 +157,7 @@ DEFINE API "/header/injection-crlf"
         MIDDLEWARE
             api::res::header("X-Test", "test\r\nvalue")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -172,7 +172,7 @@ DEFINE API "/header/injection-newline"
         MIDDLEWARE
             api::res::header("X-Test", "test\nvalue")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: {}
             };
@@ -188,7 +188,7 @@ DEFINE API "/body/missing-ctype"
         MIDDLEWARE
             api::req::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: $request.body
             };
@@ -201,7 +201,7 @@ DEFINE API "/body/missing-ctype-json"
         MIDDLEWARE
             api::req::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: $request.body
             };
@@ -220,7 +220,7 @@ DEFINE API "/body/unsupported-ctype"
         MIDDLEWARE
             api::req::body("auto")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: $request.body
             };
@@ -241,7 +241,7 @@ DEFINE API "/output/no-strategy"
         MIDDLEWARE
             api::res::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: { message: "test" }
             };
@@ -260,7 +260,7 @@ DEFINE API "/body/not-binary"
         MIDDLEWARE
             api::req::body("json")
         THEN {
-            RETURN {
+            {
                 status: 200,
                 body: $request.body
             };
