@@ -200,7 +200,7 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 			let mut fn_args = vec![Value::from(req), Value::Closure(Box::new(next.clone()))];
 			fn_args.extend(def.args);
 
-			// Each middleware should execute in an isolated context to prevent cross-contamination 
+			// Each middleware should execute in an isolated context to prevent cross-contamination
 			// between middleware calls, besides passed context objects
 			let ctx = Context::new_isolated(ctx).freeze();
 			let opt = opt.clone();

@@ -85,18 +85,18 @@ pub async fn invoke(
 		match process_api_request_with_stack(stk, ctx, opt, api, req).await {
 			Ok(Some(v)) => Ok(v.into()),
 			Err(e) => Err(e),
-			_ => Ok(
-				ApiResponse {
-					status: StatusCode::NOT_FOUND,
-					..Default::default()
-				}.into()
-			)
+			_ => Ok(ApiResponse {
+				status: StatusCode::NOT_FOUND,
+				..Default::default()
+			}
+			.into()),
 		}
 	} else {
 		Ok(ApiResponse {
 			status: StatusCode::NOT_FOUND,
 			..Default::default()
-		}.into())
+		}
+		.into())
 	}
 }
 
