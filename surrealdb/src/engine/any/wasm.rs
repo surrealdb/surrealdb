@@ -156,7 +156,6 @@ impl conn::Sealed for Any {
 						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
 						spawn_local(engine::remote::ws::wasm::run_router(
 							endpoint,
-							capacity,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),

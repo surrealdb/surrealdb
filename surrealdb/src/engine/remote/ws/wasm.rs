@@ -77,13 +77,7 @@ impl conn::Sealed for super::Client {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(
-				address,
-				capacity,
-				conn_tx,
-				route_rx,
-				session_clone.receiver.clone(),
-			));
+			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
 			conn_rx.recv().await??;
 
@@ -165,7 +159,6 @@ async fn router_reconnect(state: &RouterState, endpoint: &Endpoint) {
 
 pub(crate) async fn run_router(
 	endpoint: Endpoint,
-	_capacity: usize,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
 	session_rx: Receiver<SessionId>,
