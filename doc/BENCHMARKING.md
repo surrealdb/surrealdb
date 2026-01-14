@@ -269,8 +269,8 @@ For more reliable comparisons, consider:
 
 Check the workflow logs for:
 
-- **Docker issues:** Ensure Docker is available on the runner
 - **Build failures:** SurrealDB binary failed to compile
+- **Server startup issues:** SurrealDB server failed to start or become ready
 - **Timeout:** Benchmark took longer than 45 minutes (rare)
 
 ### Analysis Script Errors
