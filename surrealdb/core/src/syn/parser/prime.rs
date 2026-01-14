@@ -537,7 +537,13 @@ impl Parser<'_> {
 			@peek.span => "This is a reserved keyword here and can't be an identifier");
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
-		Ok(res)
+
+		// Ensure that `((..).a).b` is broken up into seperate idioms.
+		if self.peek_continues_idiom() {
+			self.parse_remaining_value_idiom(stk, vec![Part::Start(res)]).await
+		} else {
+			Ok(res)
+		}
 	}
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
