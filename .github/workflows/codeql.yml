@@ -15,6 +15,11 @@ on:
     branches:
       - main
       - releases/**
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   schedule:
     # Run weekly on Sunday at 3:00 AM UTC
     - cron: "0 3 * * 0"
