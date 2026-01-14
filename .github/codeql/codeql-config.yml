@@ -1,0 +1,36 @@
+# CodeQL configuration for SurrealDB
+#
+# This configuration optimizes CodeQL analysis for Rust by:
+# - Excluding test directories to reduce analysis time
+# - Excluding generated code and build artifacts
+# - Excluding fuzzing and benchmarking code which may contain intentional patterns
+
+name: "SurrealDB CodeQL Config"
+
+# Paths to exclude from analysis
+paths-ignore:
+  # Test directories
+  - "**/tests/**"
+  - "**/test/**"
+  - "**/benches/**"
+  - "language-tests/**"
+  - "tests/**"
+  - "fuzz/**"
+  - "profiling/**"
+
+  # Build artifacts and generated code
+  - "target/**"
+
+  # Documentation and images
+  - "doc/**"
+  - "img/**"
+
+  # Packaging and deployment
+  - "pkg/**"
+  - "docker/**"
+
+# Use the default query suites plus security-extended for thorough security analysis
+query-filters:
+  - exclude:
+      # Exclude experimental queries that may produce noisy results
+      tags contain: experimental
