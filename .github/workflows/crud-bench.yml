@@ -49,35 +49,70 @@ jobs:
   # ----------------------------------------
 
   crud-benchmark:
-    name: CRUD Benchmark (${{ matrix.config }})
+    name: CRUD Benchmark (${{ matrix.name }})
     runs-on: [runner-amd64-large]
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - config: memory
+          # SurrealDB + Memory
+          - name: memory
             database: surrealdb-memory
-            endpoint: ""
-            description: "SurrealDB with in-memory storage"
-          - config: rocksdb
+            description: SurrealDB with in-memory storage
+          # SurrealDB + RocksDB
+          - name: rocksdb
             database: surrealdb-rocksdb
-            endpoint: ""
-            description: "SurrealDB with RocksDB storage"
-          - config: embedded
+            description: SurrealDB with RocksDB storage
+          # SurrealDB + SurrealKV
+          - name: surrealkv
+            database: surrealdb-surrealkv
+            description: SurrealDB with SurrealKV storage
+            skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
+          # SurrealDB Memory Engine
+          - name: embedded-memory
             database: surrealdb
-            endpoint: "-e memory"
-            description: "SurrealDB embedded with in-memory storage"
+            endpoint: -e memory
+            description: SurrealDB embedded with in-memory storage
+          # SurrealDB RocksDB Engine
+          - name: embedded-rocksdb
+            database: surrealdb
+            endpoint: -e rocksdb:~/crud-bench
+            description: SurrealDB embedded with RocksDB storage
+          # SurrealDB SurrealKV Engine
+          - name: embedded-surrealkv
+            database: surrealdb
+            endpoint: -e surrealkv:~/crud-bench
+            description: SurrealDB embedded with SurrealKV storage
+            skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
+          # SurrealKV
+          - name: surrealkv
+            database: surrealkv
+            description: SurrealKV
+          # SurrealMX
+          - name: surrealmx
+            database: surrealmx
+            description: SurrealMX
+
     steps:
+      - name: Skip if matrix.skipped is set
+        if: matrix.skipped
+        run: |
+          echo "⏭️ Skipping benchmark: ${{ matrix.skipped }}"
+          exit 0
+
       - name: Checkout sources
+        if: ${{ !matrix.skipped }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup environment
+        if: ${{ !matrix.skipped }}
         uses: ./.github/actions/setup-environment
         with:
           save-cache: false
 
       - name: Build SurrealDB binary
+        if: ${{ !matrix.skipped }}
         run: |
           cargo build --release
           mkdir -p ${{ github.workspace }}/bin
@@ -85,6 +120,7 @@ jobs:
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Checkout crud-bench repository
+        if: ${{ !matrix.skipped }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: surrealdb/crud-bench
@@ -92,6 +128,7 @@ jobs:
           path: .github/tools/crud-bench
 
       - name: Setup crud-bench cache
+        if: ${{ !matrix.skipped }}
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: .github/tools/crud-bench
@@ -99,6 +136,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Align SurrealDB version with crud-bench
+        if: ${{ !matrix.skipped }}
         run: |
           # Extract the surrealdb version that crud-bench expects
           EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
@@ -123,16 +161,19 @@ jobs:
           fi
 
       - name: Build crud-bench
+        if: ${{ !matrix.skipped }}
         run: |
           cd .github/tools/crud-bench
           cargo build --release
 
       - name: Setup Docker (if needed)
+        if: ${{ !matrix.skipped }}
         run: |
           docker --version
           docker ps
 
       - name: Clean up environment
+        if: ${{ !matrix.skipped }}
         run: |
           rm -rf ~/crud-bench-data
           mkdir -p ~/crud-bench-data
@@ -142,6 +183,7 @@ jobs:
           docker volume prune --all --force || true
 
       - name: Optimize system
+        if: ${{ !matrix.skipped }}
         run: |
           sync
           ulimit -n 65536 || true
@@ -149,6 +191,7 @@ jobs:
           ulimit -l unlimited || true
 
       - name: Run benchmark - ${{ matrix.description }}
+        if: ${{ !matrix.skipped }}
         timeout-minutes: 30
         run: |
           cd .github/tools/crud-bench
@@ -159,21 +202,23 @@ jobs:
             -c 12 \
             -t 48 \
             -r \
-            -n ${{ matrix.config }}
+            -n ${{ matrix.name }}
         env:
           SURREALDB_USER: root
           SURREALDB_PASS: root
 
       - name: Collect results
+        if: ${{ !matrix.skipped }}
         run: |
           mkdir -p ${{ github.workspace }}/benchmark-results
           cp .github/tools/crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
           ls -la ${{ github.workspace }}/benchmark-results
 
       - name: Upload benchmark results
+        if: ${{ !matrix.skipped }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-results-${{ matrix.config }}
+          name: benchmark-results-${{ matrix.name }}
           path: ${{ github.workspace }}/benchmark-results/*.json
           retention-days: 30
 
