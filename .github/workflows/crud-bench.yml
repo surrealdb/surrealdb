@@ -168,12 +168,6 @@ jobs:
           cd .github/tools/crud-bench
           cargo build
 
-      - name: Setup Docker (if needed)
-        if: ${{ !matrix.skipped }}
-        run: |
-          docker --version
-          docker ps
-
       - name: Clean up environment
         if: ${{ !matrix.skipped }}
         run: |
@@ -181,8 +175,6 @@ jobs:
           mkdir -p ~/crud-bench-data
           chmod 777 ~/crud-bench-data
           rm -f result*.json result*.html result*.csv
-          docker container prune --force || true
-          docker volume prune --all --force || true
 
       - name: Optimize system
         if: ${{ !matrix.skipped }}
@@ -277,12 +269,6 @@ jobs:
             kill $(cat /tmp/surrealdb.pid) 2>/dev/null || true
             rm /tmp/surrealdb.pid
           fi
-
-          # Docker cleanup
-          docker container kill crud-bench &>/dev/null || true
-          docker container rm crud-bench &>/dev/null || true
-          docker container prune --force || true
-          docker volume prune --all --force || true
 
   # ----------------------------------------
   # Analyze results and report
