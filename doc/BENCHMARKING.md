@@ -1,10 +1,10 @@
 # Performance Benchmark Workflow
 
-This document explains the automated CRUD performance benchmark workflow that runs on every pull request to detect performance regressions.
+This document explains the automated CRUD performance benchmark workflow that runs on every pull request.
 
 ## Overview
 
-The benchmark workflow (`crud-bench.yml`) automatically runs CRUD benchmarks using [crud-bench](https://github.com/surrealdb/crud-bench) to detect performance regressions in SurrealDB. It compares current performance against a 30-day historical baseline and posts warnings as PR comments when significant regressions are detected.
+The benchmark workflow (`crud-bench.yml`) automatically runs CRUD benchmarks using [crud-bench](https://github.com/surrealdb/crud-bench) to measure SurrealDB performance. It posts the results as PR comments for review.
 
 ## Workflow Triggers
 
@@ -159,32 +159,15 @@ For each operation, the following metrics are captured:
 - **Total time:** Complete operation duration
 - **Sample count:** Number of operations performed
 
-## Regression Detection
+## Performance Analysis
 
-### Baseline Calculation
+The workflow measures the following for each benchmark configuration:
 
-The analysis script compares current results against a 30-day rolling baseline:
+- **Throughput:** Operations per second for each CRUD operation
+- **Latency percentiles:** P50, P95, and P99 latencies
+- **Sample count:** Number of operations performed
 
-1. Fetches historical results from the `benchmark-results` branch
-2. Calculates median and standard deviation for each metric
-3. Uses the last 30 days of data from the `main` branch
-
-### Regression Threshold
-
-A performance regression is flagged when:
-
-- **Throughput drops by >15%** compared to the 30-day median
-- The difference is statistically significant (Z-test at 95% confidence)
-
-### Statistical Significance
-
-The analysis uses a Z-test to determine if observed differences are statistically significant:
-
-```
-z = (current - baseline) / stddev
-```
-
-A z-score > 1.96 indicates significance at the 95% confidence level.
+Results are posted as a PR comment for manual review and comparison.
 
 ## Result Reporting
 
@@ -192,62 +175,33 @@ A z-score > 1.96 indicates significance at the 95% confidence level.
 
 After benchmarks complete, the workflow posts a comment on the PR with:
 
-- **Summary Table:** Status, current vs baseline performance for each config/operation
-- **Performance Warnings:** Detailed list of detected regressions with percentage changes
-- **Performance Improvements:** List of operations that got faster
-- **Detailed Metrics:** Expandable section with full latency percentiles
-- **Methodology:** How the analysis was performed
-
-### Status Indicators
-
-- ✅ **Green Check:** No regression, stable performance
-- ⚠️ **Yellow Warning:** Performance regression detected
-- 🚀 **Rocket:** Performance improvement detected
-- ℹ️ **Info:** No baseline data available (first run)
+- **Summary Table:** Throughput and latency percentiles for each config/operation
+- **Detailed Metrics:** Expandable section with full metrics including average latency and total time
+- **Methodology:** How the benchmarks were run
 
 ### Example Report
 
 ```markdown
 ## 🔍 CRUD Benchmark Results
 
-### ⚠️ Performance Regressions Detected
+### Summary
 
-| Configuration | Operation | Status | Current | Baseline | Change |
-|--------------|-----------|--------|---------|----------|--------|
-| memory | Create | ✅ | 125k ops/s | 123k ops/s | +1.6% |
-| rocksdb | Create | ⚠️ | 38k ops/s | 45k ops/s | -15.6% |
-| embedded | Read | 🚀 | 185k ops/s | 175k ops/s | +5.7% |
-
-### ⚠️ Performance Warnings
-- **rocksdb - Create:** 15.6% slower than 30-day median (38k ops/s vs 45k ops/s) (statistically significant)
+| Configuration | Operation | Throughput | P50 Latency | P95 Latency | P99 Latency | Samples |
+|--------------|-----------|------------|-------------|-------------|-------------|---------|
+| memory | Create | 125k ops/s | 8.2μs | 12.5μs | 18.3μs | 10000 |
+| memory | Read | 185k ops/s | 5.4μs | 8.1μs | 11.2μs | 10000 |
+| rocksdb | Create | 38k ops/s | 26.3μs | 45.2μs | 68.5μs | 10000 |
+| rocksdb | Read | 52k ops/s | 19.1μs | 32.8μs | 48.9μs | 10000 |
 ```
 
-## Historical Data Storage
+## Result Artifacts
 
-### Storage Location
+Benchmark results are stored as GitHub Actions artifacts:
 
-Historical benchmark results are stored in the `benchmark-results` branch in this repository.
+- **Current results:** Individual JSON files for each configuration (30 days retention)
+- **Analysis report:** Markdown and JSON files with the full analysis (90 days retention)
 
-### Structure
-
-```
-benchmark-results/
-  ├── index.json
-  ├── README.md
-  └── results/
-      ├── 2026-01-05/
-      │   ├── abc123-memory.json
-      │   ├── abc123-rocksdb.json
-      │   └── abc123-embedded.json
-      └── 2026-01-06/
-          └── ...
-```
-
-### Retention Policy
-
-- Results are stored indefinitely
-- Only results from `main` branch are stored
-- PR results are not stored (only compared against historical data)
+These can be downloaded from the workflow run for further analysis or comparison.
 
 ## Manually Running Benchmarks
 
@@ -278,53 +232,36 @@ cargo build --release
 
 ## Interpreting Results
 
-### What is a Regression?
+### Understanding the Metrics
 
-A regression occurs when performance decreases significantly compared to the historical baseline:
+- **Throughput:** Higher is better - measures how many operations can be performed per second
+- **Latency P50 (median):** Half of operations complete faster than this time
+- **Latency P95:** 95% of operations complete faster than this time
+- **Latency P99:** 99% of operations complete faster than this time
 
-- **Throughput regression:** Operations per second decreases by >15%
-- **Latency regression:** Operation time increases by >15%
+### What to Look For
 
-### When to Investigate
+Review the results to:
 
-You should investigate when:
+1. **Verify expected performance:** Check that performance aligns with expectations for your changes
+2. **Compare configurations:** See how different storage engines perform
+3. **Identify anomalies:** Look for unexpectedly low throughput or high latency
+4. **Review across operations:** Check if changes affect specific CRUD operations more than others
 
-1. **Multiple operations regress** in the same configuration
-2. **Regression is statistically significant** (marked in report)
-3. **Regression is consistent** across multiple commits
-4. **Regression affects production-critical paths** (e.g., read operations)
+### Variability
 
-### Benign Regressions
+Benchmark results can vary due to:
 
-Some regressions may be acceptable:
+- **CI runner variance:** Different runners may have different performance characteristics
+- **System load:** Background processes can affect timing
+- **Network overhead:** For networked benchmarks, network conditions matter
+- **Warmup effects:** First runs may be slower than subsequent runs
 
-- **Intentional tradeoffs:** Improved safety at cost of speed
-- **One-time spikes:** Random variance in CI environment (rare with 5K samples)
-- **Minor regressions:** <5% changes that fall within noise
-- **Temporary regressions:** Partially implemented optimizations
+For more reliable comparisons, consider:
 
-### False Positives
-
-False positives can occur due to:
-
-- **Insufficient baseline data:** Less than 7 days of history
-- **Environmental variance:** Different CI runner performance
-- **Incomplete warmup:** First runs after cold start
-
-If you suspect a false positive, manually re-run the benchmark.
-
-## Adjusting Thresholds
-
-To adjust the regression detection threshold, edit the analysis script:
-
-```python
-# In .github/scripts/analyze_benchmark.py
-analyzer = BenchmarkAnalyzer(
-    results_dir=args.results_dir,
-    historical_days=30,  # Change lookback period
-    regression_threshold=0.15  # Change threshold (0.15 = 15%)
-)
-```
+- Running benchmarks multiple times
+- Comparing against your local development environment
+- Looking at trends across multiple commits rather than single runs
 
 ## Troubleshooting
 
@@ -336,21 +273,13 @@ Check the workflow logs for:
 - **Build failures:** SurrealDB binary failed to compile
 - **Timeout:** Benchmark took longer than 45 minutes (rare)
 
-### No Historical Data
-
-On the first run or after resetting the `benchmark-results` branch:
-
-- Results will show "No baseline data available"
-- After ~7 days of data, comparisons become meaningful
-- After 30 days, the full baseline window is available
-
 ### Analysis Script Errors
 
 If the Python analysis script fails:
 
-1. Check that numpy and scipy are installed
-2. Verify JSON format matches expected crud-bench output
-3. Check for corrupted historical data files
+1. Verify JSON format matches expected crud-bench output
+2. Check that result files were generated by crud-bench
+3. Review workflow logs for parsing errors
 
 ### Benchmarks are Slow
 
@@ -359,20 +288,6 @@ If benchmarks take too long:
 - Reduce sample count: Change `-s 10000` to `-s 5000` or `-s 2500`
 - Reduce concurrency: Change `-c 12 -t 48` to lower values like `-c 8 -t 16`
 - Skip configurations: Comment out matrix entries in `crud-bench.yml`
-
-## Performance Baseline Initialization
-
-For the first 7-30 days after enabling this workflow:
-
-1. **Days 1-7:** Not enough data for reliable baselines
-2. **Days 7-30:** Baselines are available but may be noisy
-3. **Day 30+:** Full 30-day rolling baseline provides stable comparison
-
-During initialization, focus on:
-
-- Detecting **major regressions** (>30% drops)
-- Building intuition for normal variance
-- Watching for systematic trends
 
 ## Architecture
 
@@ -385,11 +300,11 @@ During initialization, focus on:
    - Uploads JSON results as artifacts
 
 2. **analyze-and-report**
-   - Downloads benchmark results
-   - Fetches historical data from `benchmark-results` branch
-   - Runs statistical analysis
+   - Downloads benchmark results from all matrix jobs
+   - Parses and analyzes the results
+   - Generates markdown and JSON reports
    - Posts PR comment with results
-   - Stores results to `benchmark-results` branch (main only)
+   - Uploads analysis artifacts
 
 ### How PR Code is Used
 
@@ -414,8 +329,7 @@ Both approaches ensure apples-to-apples comparison: all benchmarks test the same
 The Python script (`.github/scripts/analyze_benchmark.py`) handles:
 
 - Parsing crud-bench JSON output
-- Loading historical data
-- Statistical calculations (median, stddev, z-tests)
+- Formatting metrics for display
 - Markdown report generation
 - JSON output for debugging
 
@@ -423,13 +337,14 @@ The Python script (`.github/scripts/analyze_benchmark.py`) handles:
 
 Potential improvements to consider:
 
+- **Historical Data Storage:** Store results in a database for trend analysis and regression detection
 - **Trend Visualization:** Graphs showing performance over time
-- **Flamegraphs:** CPU profiling for regressions
+- **Flamegraphs:** CPU profiling for performance analysis
 - **Memory Profiling:** Track memory usage alongside performance
 - **Custom Benchmarks:** Allow PRs to specify custom benchmark configs
 - **Benchmark Dashboard:** GitHub Pages site with historical trends
-- **Alerting:** Slack/Discord notifications for critical regressions
-- **Comparison Mode:** Compare PR against specific commits
+- **Comparison Mode:** Compare PR against specific commits or branches
+- **Automated Regression Detection:** Statistical analysis to flag performance regressions
 
 ## References
 
