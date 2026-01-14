@@ -113,8 +113,8 @@ jobs:
         with:
           save-cache: false
 
-      - name: Build SurrealDB binary
-        if: ${{ !matrix.skipped }}
+      - name: Build SurrealDB binary (for networked benchmarks)
+        if: ${{ !matrix.skipped && startsWith(matrix.database, 'surrealdb-') }}
         run: |
           cargo build
           mkdir -p ${{ github.workspace }}/bin
