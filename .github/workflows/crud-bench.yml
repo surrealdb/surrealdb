@@ -56,33 +56,36 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # SurrealDB + Memory
+          # SurrealDB + Memory (WebSocket)
           - name: memory
             database: surrealdb-memory
+            endpoint: ws://localhost:8000
             description: SurrealDB with in-memory storage
-          # SurrealDB + RocksDB
+          # SurrealDB + RocksDB (WebSocket)
           - name: rocksdb
             database: surrealdb-rocksdb
+            endpoint: ws://localhost:8000
             description: SurrealDB with RocksDB storage
-          # SurrealDB + SurrealKV
+          # SurrealDB + SurrealKV (WebSocket)
           - name: surrealkv
             database: surrealdb-surrealkv
+            endpoint: ws://localhost:8000
             description: SurrealDB with SurrealKV storage
             skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
-          # SurrealDB Memory Engine
+          # SurrealDB Memory Engine (Embedded)
           - name: embedded-memory
             database: surrealdb
-            endpoint: -e memory
+            endpoint: memory
             description: SurrealDB embedded with in-memory storage
-          # SurrealDB RocksDB Engine
+          # SurrealDB RocksDB Engine (Embedded)
           - name: embedded-rocksdb
             database: surrealdb
-            endpoint: -e rocksdb:~/crud-bench
+            endpoint: rocksdb:~/crud-bench
             description: SurrealDB embedded with RocksDB storage
-          # SurrealDB SurrealKV Engine
+          # SurrealDB SurrealKV Engine (Embedded)
           - name: embedded-surrealkv
             database: surrealdb
-            endpoint: -e surrealkv:~/crud-bench
+            endpoint: surrealkv:~/crud-bench
             description: SurrealDB embedded with SurrealKV storage
             skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
           # SurrealKV
@@ -190,19 +193,61 @@ jobs:
           ulimit -u unlimited || true
           ulimit -l unlimited || true
 
+      - name: Start local SurrealDB server (for networked benchmarks)
+        if: ${{ !matrix.skipped && startsWith(matrix.database, 'surrealdb-') }}
+        run: |
+          mkdir -p ~/surrealdb-data
+
+          # Start SurrealDB in the background using the PR's binary
+          case "${{ matrix.database }}" in
+            surrealdb-memory)
+              echo "Starting SurrealDB with in-memory storage..."
+              ;;
+            surrealdb-rocksdb)
+              echo "Starting SurrealDB with RocksDB storage..."
+              ;;
+            surrealdb-surrealkv)
+              echo "Starting SurrealDB with SurrealKV storage..."
+              ;;
+          esac
+
+          surreal start --log error --user root --pass root ${{ matrix.endpoint }} &
+
+          # Store the PID for cleanup
+          echo $! > /tmp/surrealdb.pid
+          echo "SurrealDB started with PID $(cat /tmp/surrealdb.pid)"
+
+          # Wait for server to be ready
+          echo "Waiting for SurrealDB to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✓ SurrealDB is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "✗ SurrealDB failed to start"
+              exit 1
+            fi
+            sleep 1
+          done
+
       - name: Run benchmark - ${{ matrix.description }}
         if: ${{ !matrix.skipped }}
         timeout-minutes: 30
         run: |
           cd .github/tools/crud-bench
-          ./target/release/crud-bench \
-            -d ${{ matrix.database }} \
-            ${{ matrix.endpoint }} \
-            -s 10000 \
-            -c 12 \
-            -t 48 \
-            -r \
-            -n ${{ matrix.name }}
+          
+          # Build the command with optional endpoint
+          CMD="./target/release/crud-bench -d ${{ matrix.database }}"
+          
+          if [ -n "${{ matrix.endpoint }}" ]; then
+            CMD="$CMD --endpoint ${{ matrix.endpoint }}"
+          fi
+          
+          CMD="$CMD -s 10000 -c 12 -t 48 -r -n ${{ matrix.name }}"
+          
+          # Execute the benchmark
+          eval $CMD
         env:
           SURREALDB_USER: root
           SURREALDB_PASS: root
@@ -225,6 +270,14 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
+          # Kill local SurrealDB server if it was started
+          if [ -f /tmp/surrealdb.pid ]; then
+            echo "Stopping local SurrealDB server..."
+            kill $(cat /tmp/surrealdb.pid) 2>/dev/null || true
+            rm /tmp/surrealdb.pid
+          fi
+
+          # Docker cleanup
           docker container kill crud-bench &>/dev/null || true
           docker container rm crud-bench &>/dev/null || true
           docker container prune --force || true
