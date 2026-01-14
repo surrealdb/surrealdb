@@ -87,14 +87,14 @@ pub async fn invoke(
 			Err(e) => Err(e),
 			_ => Ok(
 				ApiResponse {
-					status: StatusCode::OK,
+					status: StatusCode::NOT_FOUND,
 					..Default::default()
 				}.into()
 			)
 		}
 	} else {
 		Ok(ApiResponse {
-			status: StatusCode::OK,
+			status: StatusCode::NOT_FOUND,
 			..Default::default()
 		}.into())
 	}
