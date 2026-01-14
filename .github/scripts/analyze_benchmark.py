@@ -1,46 +1,33 @@
 #!/usr/bin/env python3
 """
-Analyze CRUD benchmark results and generate performance regression reports.
+Analyze CRUD benchmark results and generate performance reports.
 
-This script parses crud-bench JSON output, compares against historical baselines,
-and generates markdown reports with statistical analysis.
+This script parses crud-bench JSON output and generates markdown reports.
 
 Requires Python 3.9+ for secure path validation using pathlib.is_relative_to()
 """
 
 import argparse
 import json
-import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-import statistics
+from typing import Dict, Optional
+
 
 # Ensure Python 3.9+ for secure path validation
 if sys.version_info < (3, 9):
 	print("Error: Python 3.9 or higher is required for secure path validation", file=sys.stderr)
 	sys.exit(1)
 
-try:
-	import numpy as np
-	from scipy import stats
-	HAS_SCIPY = True
-except ImportError:
-	print("Warning: scipy not available, using basic statistics", file=sys.stderr)
-	HAS_SCIPY = False
-
 
 class BenchmarkAnalyzer:
-	"""Analyzes benchmark results and detects performance regressions."""
+	"""Analyzes benchmark results and generates reports."""
 
-	def __init__(self, results_dir: Path, historical_days: int = 30, regression_threshold: float = 0.15):
+	def __init__(self, results_dir: Path):
 		# Resolve to absolute path to prevent directory traversal
 		self.results_dir = results_dir.resolve()
-		self.historical_days = historical_days
-		self.regression_threshold = regression_threshold
 		self.current_results = {}
-		self.historical_results = []
 
 	@staticmethod
 	def _validate_output_path(file_path: Path) -> Path:
@@ -105,7 +92,7 @@ class BenchmarkAnalyzer:
 	def load_current_results(self) -> Dict:
 		"""
 		Load current benchmark results from JSON files.
-		
+
 		Security Note: This method reads files from the user-specified results_dir.
 		The validation ensures files are ONLY read from within this directory, preventing
 		path traversal attacks via symlinks or relative paths. The user explicitly controls
@@ -114,7 +101,7 @@ class BenchmarkAnalyzer:
 		results = {}
 		json_files = list(self.results_dir.glob("*.json"))
 		print(f"Found {len(json_files)} JSON files in {self.results_dir}", file=sys.stderr)
-		
+
 		for json_file in json_files:
 			try:
 				# Validate and resolve path - returns None if outside results_dir
@@ -134,7 +121,7 @@ class BenchmarkAnalyzer:
 				print(f"Warning: Failed to parse {json_file}: {e}", file=sys.stderr)
 				import traceback
 				traceback.print_exc(file=sys.stderr)
-		
+
 		print(f"Loaded {len(results)} configurations with benchmark data", file=sys.stderr)
 		return results
 
@@ -161,16 +148,16 @@ class BenchmarkAnalyzer:
 			'updates': 'update',
 			'deletes': 'delete'
 		}
-		
+
 		for plural_key, singular_key in operation_map.items():
 			if plural_key in data:
 				op_data = data[plural_key]
-				
+
 				# crud-bench stores latencies in microseconds, we convert to nanoseconds
 				# crud-bench uses 'ops' for throughput, 'q50/q95/q99' for percentiles, 'mean' for average
 				elapsed_data = op_data.get('elapsed', {})
 				total_time_ms = (elapsed_data.get('secs', 0) * 1000) + (elapsed_data.get('nanos', 0) / 1_000_000)
-				
+
 				metrics[singular_key] = {
 					'throughput': op_data.get('ops', 0),  # crud-bench uses 'ops' for operations per second
 					'total_time_ms': total_time_ms,
@@ -189,159 +176,6 @@ class BenchmarkAnalyzer:
 			metrics['scans'] = data['scans']
 
 		return metrics
-
-	def load_historical_results(self, benchmark_results_dir: Path) -> List[Dict]:
-		"""
-		Load historical benchmark results from the benchmark-results branch.
-
-		Security Note: Reads files from the benchmark-results Git branch directory.
-		Validates all paths are within benchmark_results_dir to prevent path traversal.
-		"""
-		historical = []
-		# Resolve to absolute path to prevent directory traversal
-		benchmark_results_dir = benchmark_results_dir.resolve()
-
-		if not benchmark_results_dir.exists():
-			return historical
-
-		cutoff_date = datetime.now() - timedelta(days=self.historical_days)
-
-		for date_dir in sorted(benchmark_results_dir.glob("*"), reverse=True):
-			if not date_dir.is_dir():
-				continue
-
-			try:
-				# Validate date_dir is within benchmark_results_dir
-				safe_date_dir = self._validate_and_resolve_input_path(date_dir, benchmark_results_dir)
-				if safe_date_dir is None:
-					print(f"Warning: Skipping {date_dir} (outside results directory)", file=sys.stderr)
-					continue
-
-				dir_date = datetime.strptime(date_dir.name, "%Y-%m-%d")
-				if dir_date < cutoff_date:
-					break
-
-				for json_file in date_dir.glob("*.json"):
-					# Validate json_file is within the validated date directory
-					safe_file = self._validate_and_resolve_input_path(json_file, safe_date_dir)
-					if safe_file is None:
-						print(f"Warning: Skipping {json_file} (outside date directory)", file=sys.stderr)
-						continue
-
-					# safe_file is guaranteed to be within safe_date_dir
-					with open(safe_file, 'r') as f:
-						data = json.load(f)
-						config_name = self._extract_config_name(json_file)
-						historical.append({
-							'date': dir_date,
-							'config': config_name,
-							'metrics': self._parse_benchmark_data(data)
-						})
-			except Exception as e:
-				print(f"Warning: Failed to parse historical data from {date_dir}: {e}", file=sys.stderr)
-
-		return historical
-
-	def calculate_baseline(self, config: str, operation: str, metric: str) -> Optional[Tuple[float, float]]:
-		"""Calculate baseline median and stddev for a specific metric."""
-		values = []
-		for result in self.historical_results:
-			if result['config'] == config:
-				op_data = result['metrics'].get(operation, {})
-				if metric in op_data:
-					values.append(op_data[metric])
-
-		if not values:
-			return None
-
-		median = statistics.median(values)
-		if len(values) > 1:
-			stddev = statistics.stdev(values)
-		else:
-			stddev = 0
-
-		return median, stddev
-
-	def detect_regressions(self) -> Dict:
-		"""Detect performance regressions by comparing current vs historical."""
-		regressions = {
-			'detected': [],
-			'improvements': [],
-			'stable': []
-		}
-
-		for config, metrics in self.current_results.items():
-			for operation in ['create', 'read', 'update', 'delete']:
-				if operation not in metrics or not metrics[operation]:
-					continue
-
-				# Skip if no samples were collected (benchmark didn't run)
-				if not metrics[operation].get('samples'):
-					continue
-
-				current_throughput = metrics[operation].get('throughput', 0)
-				if current_throughput == 0:
-					continue
-
-				baseline = self.calculate_baseline(config, operation, 'throughput')
-				if not baseline:
-					regressions['stable'].append({
-						'config': config,
-						'operation': operation,
-						'status': 'no_baseline',
-						'current_throughput': current_throughput
-					})
-					continue
-
-				baseline_throughput, stddev = baseline
-				if baseline_throughput == 0:
-					continue
-
-				change_pct = ((current_throughput - baseline_throughput) / baseline_throughput) * 100
-
-				# Detect regression (performance degradation)
-				if change_pct < -(self.regression_threshold * 100):
-					significance = self._test_significance(
-						current_throughput,
-						baseline_throughput,
-						stddev
-					)
-					regressions['detected'].append({
-						'config': config,
-						'operation': operation,
-						'current_throughput': current_throughput,
-						'baseline_throughput': baseline_throughput,
-						'change_pct': change_pct,
-						'significant': significance
-					})
-				# Detect improvement
-				elif change_pct > (self.regression_threshold * 100):
-					regressions['improvements'].append({
-						'config': config,
-						'operation': operation,
-						'current_throughput': current_throughput,
-						'baseline_throughput': baseline_throughput,
-						'change_pct': change_pct
-					})
-				else:
-					regressions['stable'].append({
-						'config': config,
-						'operation': operation,
-						'current_throughput': current_throughput,
-						'baseline_throughput': baseline_throughput,
-						'change_pct': change_pct
-					})
-
-		return regressions
-
-	def _test_significance(self, current: float, baseline: float, stddev: float) -> bool:
-		"""Test if the difference is statistically significant."""
-		if stddev == 0:
-			return abs(current - baseline) > 0
-
-		# Simple z-test for significance
-		z_score = abs(current - baseline) / stddev
-		return z_score > 1.96  # 95% confidence level
 
 	def format_throughput(self, throughput: float) -> str:
 		"""Format throughput value for display."""
@@ -363,88 +197,53 @@ class BenchmarkAnalyzer:
 		else:
 			return f"{latency_ns:.0f}ns"
 
-	def generate_report(self, regressions: Dict) -> str:
+	def generate_report(self) -> str:
 		"""Generate markdown report."""
 		report = []
 		report.append("## 🔍 CRUD Benchmark Results\n")
 
-		# Overall status
-		if regressions['detected']:
-			report.append("### ⚠️ Performance Regressions Detected\n")
-		else:
-			report.append("### ✅ No Performance Regressions Detected\n")
-
 		# Summary table
 		report.append("### Summary\n")
-		report.append("| Configuration | Operation | Status | Current | Baseline | Change |")
-		report.append("|--------------|-----------|--------|---------|----------|--------|")
+		report.append("| Configuration | Operation | Throughput | P50 Latency | P95 Latency | P99 Latency | Samples |")
+		report.append("|--------------|-----------|------------|-------------|-------------|-------------|---------|")
 
-		# Sort by config and operation
+		# Collect all results
 		all_results = []
-		for item in regressions['detected']:
-			all_results.append(('⚠️', item))
-		for item in regressions['stable']:
-			if item.get('baseline_throughput'):
-				all_results.append(('✅', item))
-			else:
-				all_results.append(('ℹ️', item))
-		for item in regressions['improvements']:
-			all_results.append(('🚀', item))
+		for config, metrics in sorted(self.current_results.items()):
+			for operation in ['create', 'read', 'update', 'delete']:
+				if operation not in metrics or not metrics[operation]:
+					continue
 
-		for status, item in all_results:
+				op_data = metrics[operation]
+				# Skip if no samples were collected (benchmark didn't run for this operation)
+				if not op_data.get('samples'):
+					continue
+
+				all_results.append({
+					'config': config,
+					'operation': operation,
+					'data': op_data
+				})
+
+		# Generate table rows
+		for item in all_results:
 			config = item['config']
 			operation = item['operation'].capitalize()
-			current = self.format_throughput(item['current_throughput'])
+			data = item['data']
 
-			if item.get('baseline_throughput'):
-				baseline = self.format_throughput(item['baseline_throughput'])
-				change_pct = item['change_pct']
-				if change_pct > 0:
-					change = f"+{change_pct:.1f}%"
-				else:
-					change = f"{change_pct:.1f}%"
-			else:
-				baseline = "N/A"
-				change = "N/A"
+			throughput = self.format_throughput(data['throughput'])
+			p50 = self.format_latency(data['p50_ns'])
+			p95 = self.format_latency(data['p95_ns'])
+			p99 = self.format_latency(data['p99_ns'])
+			samples = data['samples']
 
-			report.append(f"| {config} | {operation} | {status} | {current} | {baseline} | {change} |")
-
-		# Detailed regression warnings
-		if regressions['detected']:
-			report.append("\n### ⚠️ Performance Warnings\n")
-			for item in regressions['detected']:
-				config = item['config']
-				operation = item['operation'].capitalize()
-				change_pct = abs(item['change_pct'])
-				current = self.format_throughput(item['current_throughput'])
-				baseline = self.format_throughput(item['baseline_throughput'])
-
-				sig_marker = " (statistically significant)" if item.get('significant') else ""
-				report.append(
-					f"- **{config} - {operation}:** {change_pct:.1f}% slower than {self.historical_days}-day median "
-					f"({current} vs {baseline}){sig_marker}"
-				)
-
-		# Improvements
-		if regressions['improvements']:
-			report.append("\n### 🚀 Performance Improvements\n")
-			for item in regressions['improvements']:
-				config = item['config']
-				operation = item['operation'].capitalize()
-				change_pct = item['change_pct']
-				current = self.format_throughput(item['current_throughput'])
-				baseline = self.format_throughput(item['baseline_throughput'])
-
-				report.append(
-					f"- **{config} - {operation}:** {change_pct:.1f}% faster than {self.historical_days}-day median "
-					f"({current} vs {baseline})"
-				)
+			report.append(f"| {config} | {operation} | {throughput} | {p50} | {p95} | {p99} | {samples} |")
 
 		# Detailed metrics
 		report.append("\n<details>")
 		report.append("<summary>📊 Detailed Metrics</summary>\n")
 
-		for config, metrics in self.current_results.items():
+		for config, metrics in sorted(self.current_results.items()):
 			report.append(f"\n#### {config}\n")
 
 			for operation in ['create', 'read', 'update', 'delete']:
@@ -459,9 +258,11 @@ class BenchmarkAnalyzer:
 
 				report.append(f"\n**{operation.capitalize()}**")
 				report.append(f"- Throughput: {self.format_throughput(op_data['throughput'])}")
+				report.append(f"- Average Latency: {self.format_latency(op_data['avg_time_ns'])}")
 				report.append(f"- Latency P50: {self.format_latency(op_data['p50_ns'])}")
 				report.append(f"- Latency P95: {self.format_latency(op_data['p95_ns'])}")
 				report.append(f"- Latency P99: {self.format_latency(op_data['p99_ns'])}")
+				report.append(f"- Total Time: {op_data['total_time_ms']:.0f}ms")
 				report.append(f"- Samples: {op_data['samples']}")
 
 		report.append("\n</details>")
@@ -469,10 +270,9 @@ class BenchmarkAnalyzer:
 		# Methodology
 		report.append("\n<details>")
 		report.append("<summary>ℹ️ Methodology</summary>\n")
-		report.append(f"\n- **Baseline:** Rolling {self.historical_days}-day median")
-		report.append(f"- **Regression threshold:** {self.regression_threshold * 100}% performance degradation")
-		report.append("- **Significance test:** Z-test at 95% confidence level")
-		report.append("- **Benchmark parameters:** 10,000 samples, 12 clients, 48 threads")
+		report.append("\n- **Benchmark parameters:** 10,000 samples, 12 clients, 48 threads")
+		report.append("- **Benchmarking tool:** [crud-bench](https://github.com/surrealdb/crud-bench)")
+		report.append("- **Metrics:** Throughput (ops/s), Latency percentiles (P50/P95/P99)")
 		report.append("</details>")
 
 		return "\n".join(report)
@@ -493,19 +293,8 @@ class BenchmarkAnalyzer:
 				f.write("⚠️ No benchmark results found. Benchmarks may have failed.\n")
 			return
 
-		# Load historical results
-		historical_dir = Path("results")
-		if historical_dir.exists():
-			self.historical_results = self.load_historical_results(historical_dir)
-			print(f"Loaded {len(self.historical_results)} historical data points", file=sys.stderr)
-		else:
-			print("No historical data available yet", file=sys.stderr)
-
-		# Detect regressions
-		regressions = self.detect_regressions()
-
 		# Generate report
-		report = self.generate_report(regressions)
+		report = self.generate_report()
 
 		# Write markdown report
 		with open(safe_output_file, 'w') as f:
@@ -517,8 +306,7 @@ class BenchmarkAnalyzer:
 		if safe_json_output_file:
 			output_data = {
 				'timestamp': datetime.now().isoformat(),
-				'current_results': self.current_results,
-				'regressions': regressions
+				'results': self.current_results
 			}
 			with open(safe_json_output_file, 'w') as f:
 				json.dump(output_data, f, indent=2)
@@ -527,7 +315,7 @@ class BenchmarkAnalyzer:
 
 def main():
 	parser = argparse.ArgumentParser(
-		description="Analyze CRUD benchmark results and detect performance regressions"
+		description="Analyze CRUD benchmark results"
 	)
 	parser.add_argument(
 		"--results-dir",
@@ -546,26 +334,10 @@ def main():
 		type=Path,
 		help="Output JSON file with detailed analysis"
 	)
-	parser.add_argument(
-		"--historical-days",
-		type=int,
-		default=30,
-		help="Number of days of historical data to compare against (default: 30)"
-	)
-	parser.add_argument(
-		"--regression-threshold",
-		type=float,
-		default=0.15,
-		help="Regression threshold as a decimal (default: 0.15 = 15%%)"
-	)
 
 	args = parser.parse_args()
 
-	analyzer = BenchmarkAnalyzer(
-		results_dir=args.results_dir,
-		historical_days=args.historical_days,
-		regression_threshold=args.regression_threshold
-	)
+	analyzer = BenchmarkAnalyzer(results_dir=args.results_dir)
 
 	try:
 		analyzer.run(args.output, args.json_output)
@@ -578,4 +350,3 @@ def main():
 
 if __name__ == "__main__":
 	main()
-
