@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use http::StatusCode;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
 
@@ -6,6 +7,7 @@ use super::args::Optional;
 use crate::api::format as api_format;
 use crate::api::invocation::process_api_request_with_stack;
 use crate::api::request::ApiRequest;
+use crate::api::response::ApiResponse;
 use crate::catalog::ApiDefinition;
 use crate::catalog::providers::ApiProvider;
 use crate::ctx::{Context, FrozenContext};
@@ -83,10 +85,18 @@ pub async fn invoke(
 		match process_api_request_with_stack(stk, ctx, opt, api, req).await {
 			Ok(Some(v)) => Ok(v.into()),
 			Err(e) => Err(e),
-			_ => Ok(Value::None),
+			_ => Ok(
+				ApiResponse {
+					status: StatusCode::OK,
+					..Default::default()
+				}.into()
+			)
 		}
 	} else {
-		Ok(Value::None)
+		Ok(ApiResponse {
+			status: StatusCode::OK,
+			..Default::default()
+		}.into())
 	}
 }
 
