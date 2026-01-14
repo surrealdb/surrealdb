@@ -143,8 +143,6 @@ papaya = "0.2.3"
 parking_lot = "0.12.3"
 path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
-## TODO: Look at dependency, 3 year old, unmaintained, no license specified.
-pharos = "0.5.3"
 phf = "0.11.2"
 pin-project-lite = "0.2.13"
 quick_cache = "0.6.12"
@@ -186,7 +184,7 @@ url = "2.5.0"
 uuid = "1.17.0"
 wasm-bindgen-futures = "0.4.39"
 wasmtimer = { version = "0.2.0", default-features = false }
-ws_stream_wasm = "0.7.4"
+tokio-tungstenite-wasm = "0.6.0"
 
 # used only in dev-dependencies
 criterion = "0.5.1"
