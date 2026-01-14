@@ -193,6 +193,9 @@ impl KeyConflictChecker {
 	}
 }
 
+/// The number of records we load per batch for checking the migration.
+const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
+
 pub async fn diagnose(
 	(ctx, opts): (&Context, &Options),
 	(probe,): (Option<bool>,),

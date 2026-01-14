@@ -33,7 +33,10 @@ impl Severity {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum IssueKind {
 	IncompatibleFuture,
+<<<<<<< HEAD
 	StoredClosure,
+=======
+>>>>>>> 94d43003f (Add more migration checks)
 	AllIdiom,
 	FieldIdiomFollowed,
 	FunctionLogicalAnd,
@@ -42,14 +45,20 @@ pub enum IssueKind {
 	FunctionMathMin,
 	FunctionMathMax,
 	MockValue,
+<<<<<<< HEAD
 	NumberKeyOrdering,
+=======
+>>>>>>> 94d43003f (Add more migration checks)
 }
 
 impl IssueKind {
 	pub fn as_str(&self) -> &str {
 		match *self {
 			Self::IncompatibleFuture => "incompatible future",
+<<<<<<< HEAD
 			Self::StoredClosure => "stored closure",
+=======
+>>>>>>> 94d43003f (Add more migration checks)
 			Self::AllIdiom => "all idiom",
 			Self::FieldIdiomFollowed => "field idiom followed",
 			Self::FunctionLogicalAnd => "function logical_and",
@@ -58,7 +67,10 @@ impl IssueKind {
 			Self::FunctionMathMin => "function math::min",
 			Self::FunctionMathMax => "function math::max",
 			Self::MockValue => "mock value",
+<<<<<<< HEAD
 			Self::NumberKeyOrdering => "number key ordering",
+=======
+>>>>>>> 94d43003f (Add more migration checks)
 		}
 	}
 }
