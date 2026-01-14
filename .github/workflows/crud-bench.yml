@@ -195,22 +195,24 @@ jobs:
       - name: Start local SurrealDB server (for networked benchmarks)
         if: ${{ !matrix.skipped && startsWith(matrix.database, 'surrealdb-') }}
         run: |
-          mkdir -p ~/surrealdb-data
 
           # Start SurrealDB in the background using the PR's binary
           case "${{ matrix.database }}" in
             surrealdb-memory)
               echo "Starting SurrealDB with in-memory storage..."
+              surreal start --user root --pass root memory &
               ;;
             surrealdb-rocksdb)
               echo "Starting SurrealDB with RocksDB storage..."
+              mkdir -p ~/surrealdb-data
+              surreal start --user root --pass root rocksdb:~/surrealdb-data &
               ;;
             surrealdb-surrealkv)
               echo "Starting SurrealDB with SurrealKV storage..."
+              mkdir -p ~/surrealdb-data
+              surreal start --user root --pass root surrealkv:~/surrealdb-data &
               ;;
           esac
-
-          surreal start --log error --user root --pass root ${{ matrix.endpoint }} &
 
           # Store the PID for cleanup
           echo $! > /tmp/surrealdb.pid
