@@ -116,9 +116,9 @@ jobs:
       - name: Build SurrealDB binary
         if: ${{ !matrix.skipped }}
         run: |
-          cargo build --release
+          cargo build
           mkdir -p ${{ github.workspace }}/bin
-          cp target/release/surreal ${{ github.workspace }}/bin/
+          cp target/debug/surreal ${{ github.workspace }}/bin/
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Checkout crud-bench repository
@@ -166,7 +166,7 @@ jobs:
         if: ${{ !matrix.skipped }}
         run: |
           cd .github/tools/crud-bench
-          cargo build --release
+          cargo build
 
       - name: Setup Docker (if needed)
         if: ${{ !matrix.skipped }}
@@ -237,7 +237,7 @@ jobs:
           cd .github/tools/crud-bench
           
           # Build the command with optional endpoint
-          CMD="./target/release/crud-bench -d ${{ matrix.database }}"
+          CMD="./target/debug/crud-bench -d ${{ matrix.database }}"
           
           if [ -n "${{ matrix.endpoint }}" ]; then
             CMD="$CMD --endpoint ${{ matrix.endpoint }}"
