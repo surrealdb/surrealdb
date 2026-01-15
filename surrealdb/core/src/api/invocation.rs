@@ -145,10 +145,18 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 				stk.run(move |stk| {
 					let ctx_frozen = ctx_frozen.clone();
 					let opt = opt.clone();
-					async move { action_expr.compute(stk, &ctx_frozen, &opt, doc.as_ref()).await }
+					async move { 
+						action_expr
+							.compute(stk, &ctx_frozen, &opt, doc.as_ref())
+							.await
+							.catch_return()
+
+							// Ensure that the next middleware receives a proper api response object
+							.and_then(ApiResponse::try_from)
+							.map(Value::from)
+					}
 				})
 				.await
-				.catch_return()
 			})
 		},
 	))
@@ -207,10 +215,16 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 			let doc = doc.cloned();
 			Box::pin(async {
 				stk.run(move |stk| async move {
-					function.compute(stk, &ctx, &opt, doc.as_ref(), fn_args).await
+					function
+						.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
+						.await
+						.catch_return()
+
+						// Ensure that the next middleware receives a proper api response object
+						.and_then(ApiResponse::try_from)
+						.map(Value::from)
 				})
 				.await
-				.catch_return()
 			})
 		},
 	))

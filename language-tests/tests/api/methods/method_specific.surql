@@ -69,8 +69,7 @@ api::invoke("/multi_method", {
 # 3 - Method-specific middleware
 DEFINE FUNCTION fn::method_middleware($req: object, $next: function, $name: string) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, $name AS middleware FROM ONLY $res.body) AS body FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { body: $res.body + { middleware: $name } };
 };
 
 # 4

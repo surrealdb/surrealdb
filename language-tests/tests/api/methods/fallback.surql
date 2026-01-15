@@ -90,8 +90,7 @@ api::invoke("/fallback_with_get", {
 # 5 - Fallback with middleware
 DEFINE FUNCTION fn::fallback_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, "fallback_mw" AS middleware FROM ONLY $res.body) AS body FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { body: $res.body + { middleware: 'fallback_mw' } };
 };
 
 DEFINE API "/fallback_middleware"

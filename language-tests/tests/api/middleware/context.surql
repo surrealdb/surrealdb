@@ -65,17 +65,14 @@ allow-experimental = ["define_api"]
 
 # 0 - Middleware that sets request context
 DEFINE FUNCTION fn::set_request_context($req: object, $next: function) -> object {
-    LET $context = SELECT *, 'set' AS middleware1 FROM ONLY $req.context ?? {};
-    LET $req = SELECT *, $context AS context FROM ONLY $req;
+    LET $req = $req + { context: $req.context + { middleware1: 'set' } };
     RETURN $next($req);
 };
 
 # 1 - Middleware that reads response context and adds to it
 DEFINE FUNCTION fn::read_response_context($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $context = SELECT *, 'read' AS middleware4 FROM ONLY $res.context ?? {};
-    LET $res = SELECT *, $context AS context FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { context: $res.context + { middleware4: 'read' } };
 };
 
 # 2 - Test: Request and response context
@@ -104,20 +101,17 @@ api::invoke("/context/test");
 
 # 3 - Test: Initial context from request
 DEFINE FUNCTION fn::add_to_request_context($req: object, $next: function) -> object {
-    LET $context = SELECT *, 'added' AS middleware1 FROM ONLY $req.context ?? {};
-    LET $req = SELECT *, $context AS context FROM ONLY $req;
+    LET $req = $req + { context: $req.context + { middleware1: 'added' } };
     RETURN $next($req);
 };
 
 DEFINE FUNCTION fn::read_response_and_add_to_body($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $body = SELECT 
-        *, 
-        $req.context ?? {} AS requestContext, 
-        $res.context ?? {} AS responseContext 
-    FROM ONLY $res.body ?? {};
+    LET $res = $res + { body: $res.body + {
+        requestContext: $req.context ?? {},
+        responseContext: $res.context ?? {},
+    } };
 
-    LET $res = SELECT *, $body AS body FROM ONLY $res;
     RETURN $res;
 };
 
@@ -148,41 +142,31 @@ api::invoke("/context/initial", {
 
 # 5 - Test: Context chaining through multiple middleware
 DEFINE FUNCTION fn::context_step1($req: object, $next: function) -> object {
-    LET $context = SELECT *, 'value1' AS step1 FROM ONLY $req.context ?? {};
-    LET $req = SELECT *, $context AS context FROM ONLY $req;
+    LET $req = $req + { context: $req.context + { step1: 'value1' } };
     RETURN $next($req);
 };
 
 DEFINE FUNCTION fn::context_step2($req: object, $next: function) -> object {
-    LET $context = SELECT *, 'value2' AS step2 FROM ONLY $req.context ?? {};
-    LET $req = SELECT *, $context AS context FROM ONLY $req;
+    LET $req = $req + { context: $req.context + { step2: 'value2' } };
 
     LET $res = $next($req);
-    LET $context = SELECT *, 'value2' AS step2 FROM ONLY $res.context ?? {};
-    LET $res = SELECT *, $context AS context FROM ONLY $res;
-
-    RETURN $res;
+    RETURN $res + { context: $res.context + { step2: 'value2' } };
 };
 
 DEFINE FUNCTION fn::context_step3($req: object, $next: function) -> object {
-    LET $context = SELECT *, 'value3' AS step3 FROM ONLY $req.context ?? {};
-    LET $req = SELECT *, $context AS context FROM ONLY $req;
+    LET $req = $req + { context: $req.context + { step3: 'value3' } };
 
     LET $res = $next($req);
-    LET $context = SELECT *, 'value3' AS step3 FROM ONLY $res.context ?? {};
-    LET $res = SELECT *, $context AS context FROM ONLY $res;
-
-    RETURN $res;
+    RETURN $res + { context: $res.context + { step3: 'value3' } };
 };
 
 DEFINE FUNCTION fn::context_final($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $body = SELECT 
-        *, 
-        $req.context ?? {} AS requestContext, 
-        $res.context ?? {} AS responseContext 
-    FROM ONLY $res.body ?? {};
-    LET $res = SELECT *, $body AS body FROM ONLY $res;
+    LET $res = $res + { body: $res.body + {
+        requestContext: $req.context ?? {},
+        responseContext: $res.context ?? {},
+    } };
+    
     RETURN $res;
 };
 

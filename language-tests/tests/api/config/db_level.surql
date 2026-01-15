@@ -50,22 +50,19 @@ allow-experimental = ["define_api"]
 # 0 - Helper function to track middleware
 DEFINE FUNCTION fn::db_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, true AS db_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { body: $res.body + { db_middleware: true } };
 };
 
 # 1
 DEFINE FUNCTION fn::route_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, true AS route_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { body: $res.body + { route_middleware: true } };
 };
 
 # 2
 DEFINE FUNCTION fn::method_middleware($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, true AS method_middleware FROM ONLY $res.body) AS body FROM ONLY $res;
-    RETURN $res;
+    RETURN $res + { body: $res.body + { method_middleware: true } };
 };
 
 # 3 - Database-level middleware

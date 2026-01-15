@@ -57,7 +57,7 @@ allow-experimental = ["define_api"]
 
 # 0 - Custom middleware that modifies request before next()
 DEFINE FUNCTION fn::add_request_field($req: object, $next: function) -> object {
-    LET $req = SELECT *, (SELECT *, true AS modified FROM ONLY $req.body) AS body FROM ONLY $req;
+    LET $req = $req + { body: $req.body + { modified: true } };
     RETURN $next($req);
 };
 
@@ -86,7 +86,7 @@ api::invoke("/custom_request", {
 # 3 - Custom middleware that modifies response after next()
 DEFINE FUNCTION fn::increment_count($req: object, $next: function) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, ($res.body.count + 1) AS count FROM ONLY $res.body) AS body FROM ONLY $res;
+    LET $res = $res + { body: $res.body + { count: $res.body.count + 1 } };
     RETURN $res;
 };
 
@@ -110,7 +110,7 @@ api::invoke("/custom_response");
 # 6 - Custom middleware with additional parameters
 DEFINE FUNCTION fn::add_prefix($req: object, $next: function, $prefix: string) -> object {
     LET $res = $next($req);
-    LET $res = SELECT *, (SELECT *, ($prefix + ": " + $res.body.message) AS prefix FROM ONLY $res.body) AS body FROM ONLY $res;
+    LET $res = $res + { body: $res.body + { prefix: $prefix + ": " + $res.body.message } };
     RETURN $res;
 };
 
