@@ -20,61 +20,33 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
-      - name: Check team membership and label community PRs
+      - name: Label community PRs
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1 (Actions must be pinned by commit hash)
         with:
           script: |
-            const pr = context.payload.pull_request;
-            const author = pr.user.login;
-            const { owner, repo } = context.repo;
+            // Core team members - update this list when team membership changes
+            const CORE_TEAM = [
+              'arriqaaq',
+              'delskayne',
+              'dhghomon',
+              'emmanuel-keller',
+              'kearfy',
+              'mumoshu',
+              'rushmorem',
+              'ssttuu',
+              'tobiemh',
+            ];
 
+            const author = context.payload.pull_request.user.login;
             console.log('PR Author:', author);
-            console.log('PR Number:', pr.number);
-            console.log('PR Draft:', pr.draft);
 
-            // Team configuration
-            const ORG = 'surrealdb';
-            const TEAM_SLUG = 'surrealdb';
-
-            // Check if the author is a member of the core team
-            let isTeamMember = false;
-            try {
-              const response = await github.rest.teams.getMembershipForUserInOrg({
-                org: ORG,
-                team_slug: TEAM_SLUG,
-                username: author,
+            if (!CORE_TEAM.includes(author)) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['community'],
               });
-              // If we get here without an error, the user is a team member
-              isTeamMember = response.data.state === 'active';
-              console.log(`Team membership check: ${author} is ${isTeamMember ? 'an active' : 'not an active'} member of ${ORG}/${TEAM_SLUG}`);
-            } catch (error) {
-              if (error.status === 404) {
-                // User is not a member of the team
-                console.log(error);
-                console.log(`${author} is not a member of ${ORG}/${TEAM_SLUG}`);
-                isTeamMember = false;
-              } else {
-                // Log the error but don't fail the workflow
-                console.log(`Error checking team membership: ${error.message}`);
-                console.log('Unable to verify team membership, skipping label application');
-                return;
-              }
-            }
-
-            // If the author is not a team member, add the "community" label
-            if (!isTeamMember) {
-              console.log(`Adding "community" label to PR #${pr.number}`);
-              try {
-                await github.rest.issues.addLabels({
-                  owner: owner,
-                  repo: repo,
-                  issue_number: pr.number,
-                  labels: ['community'],
-                });
-                console.log('Successfully added "community" label');
-              } catch (error) {
-                console.log(`Error adding label: ${error.message}`);
-              }
+              console.log(`Added "community" label for ${author}`);
             } else {
-              console.log(`Skipping label - ${author} is a core team member`);
+              console.log(`Skipping - ${author} is a core team member`);
             }
