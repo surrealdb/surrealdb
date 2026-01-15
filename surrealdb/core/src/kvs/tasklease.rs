@@ -175,16 +175,19 @@ impl LeaseHandler {
 			.tf
 			.transaction(TransactionType::Read, LockType::Optimistic, self.sequences.clone())
 			.await?;
-		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
+		let res = if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
 			// If the lease hasn't expired yet, return the lease object
 			if l.expiration > t {
 				// Return the lease object which contains owner information
-				return Ok(Some(l));
+				Some(l)
+			} else {
+				None
 			}
-			// If we reach here, the lease exists but has expired
-		}
-		// If we reach here, either no lease exists or it has expired
-		Ok(None)
+		} else {
+			None
+		};
+		tx.cancel().await?;
+		Ok(res)
 	}
 
 	/// Attempts to acquire a new lease for the current node.

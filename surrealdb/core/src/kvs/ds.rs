@@ -1167,13 +1167,16 @@ impl Datastore {
 		let archived = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
+			txn.cancel().await?;
 			// Filter the archived nodes
 			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
 		// Fetch all namespaces
 		let nss = {
 			let txn = self.transaction(Read, Optimistic).await?;
-			catch!(txn, txn.all_ns().await)
+			let res = catch!(txn, txn.all_ns().await);
+			txn.cancel().await?;
+			res
 		};
 		// Loop over all namespaces
 		for ns in nss.iter() {
@@ -1182,7 +1185,9 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				catch!(txn, txn.all_db(ns.namespace_id).await)
+				let res = catch!(txn, txn.all_db(ns.namespace_id).await);
+				txn.cancel().await?;
+				res
 			};
 			// Loop over all databases
 			for db in dbs.iter() {
@@ -1191,7 +1196,9 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await)
+					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
+					txn.cancel().await?;
+					res
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
@@ -2082,9 +2089,9 @@ impl Datastore {
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			let res = txn.export(&ns, &db, cfg, chn).await;
+			txn.cancel().await?;
+			res
 		})
 	}
 

@@ -500,7 +500,9 @@ impl Building {
 				// Check if the index has been decommissioned
 				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
 				// Get the next batch of records
-				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
+				let res = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
+				tx.cancel().await?;
+				res
 			};
 			// Set the next scan range
 			next = batch.next;
