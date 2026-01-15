@@ -26,7 +26,6 @@ impl SleepStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
 		// Is there a timeout?
 		if let Some(t) = ctx.timeout() {
-			println!("{t:?} - {:?}", self.duration.0);
 			timeout(t, self.sleep()).await?;
 		} else {
 			self.sleep().await;

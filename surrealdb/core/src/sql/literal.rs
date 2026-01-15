@@ -3,7 +3,7 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{CoverStmts, EscapeKey, Float, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeObjectKey, Float, QuoteStr};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -127,9 +127,19 @@ impl ToSql for Literal {
 					for (i, expr) in exprs.iter().enumerate() {
 						if i > 0 {
 							fmt.write_separator(f);
+						} else if let Expr::Literal(Literal::RecordId(_)) = *expr {
+							f.push('(');
+							expr.fmt_sql(f, fmt);
+							f.push(')');
+							continue;
 						}
 						CoverStmts(expr).fmt_sql(f, fmt);
 					}
+
+					if exprs.len() == 1 {
+						f.push(',');
+					}
+
 					if fmt.is_pretty() {
 						f.push('\n');
 						// One level less indentation for closing bracket
@@ -141,6 +151,8 @@ impl ToSql for Literal {
 							}
 						}
 					}
+				} else {
+					f.push(',');
 				}
 				f.push('}');
 			}
@@ -164,7 +176,7 @@ impl ToSql for Literal {
 							f,
 							fmt,
 							"{}: {}",
-							EscapeKey(&entry.key),
+							EscapeObjectKey(&entry.key),
 							CoverStmts(&entry.value)
 						);
 					}
@@ -449,6 +461,6 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 
 impl ToSql for ObjectEntry {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "{}: {}", EscapeKey(&self.key), self.value);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(&self.key), self.value);
 	}
 }

@@ -1,7 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER NAMESPACE`.
 ///
 /// Currently supports the `COMPACT` maintenance operation, which instructs the

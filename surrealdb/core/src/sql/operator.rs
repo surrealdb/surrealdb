@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 
@@ -64,6 +64,7 @@ impl ToSql for PrefixOperator {
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	MethodCall(String, Vec<Expr>),
 	Call(Vec<Expr>),
 }
@@ -105,9 +106,17 @@ impl ToSql for PostfixOperator {
 			Self::Range => f.push_str(".."),
 			Self::RangeSkip => f.push_str(">.."),
 			Self::MethodCall(name, x) => {
-				write_sql!(f, fmt, ".{}({})", EscapeKwFreeIdent(name), Fmt::comma_separated(x));
+				write_sql!(
+					f,
+					fmt,
+					".{}({})",
+					EscapeKwFreeIdent(name),
+					Fmt::comma_separated(x.iter().map(CoverStmts))
+				);
 			}
-			Self::Call(args) => write_sql!(f, fmt, "({})", Fmt::comma_separated(args.iter())),
+			Self::Call(args) => {
+				write_sql!(f, fmt, "({})", Fmt::comma_separated(args.iter().map(CoverStmts)))
+			}
 		}
 	}
 }

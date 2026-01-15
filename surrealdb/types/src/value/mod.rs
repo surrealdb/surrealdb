@@ -1108,8 +1108,8 @@ mod tests {
 	#[case::string(Value::String("escap'd".to_string()), "\"escap'd\"")]
 	#[case::string(Value::String("\"escaped\"".to_string()), "'\"escaped\"'")]
 	#[case::string(Value::String("mix'd \"quotes\"".to_string()), "\"mix'd \\\"quotes\\\"\"")]
-	#[case::string(Value::String("tab\there".to_string()), "'tab\there'")]
-	#[case::string(Value::String("new\nline".to_string()), "'new\nline'")]
+	#[case::string(Value::String("tab\there".to_string()), "'tab\\there'")]
+	#[case::string(Value::String("new\nline".to_string()), "'new\\nline'")]
 	// Strings - unicode
 	#[case::string(Value::String("你好".to_string()), "'你好'")]
 	#[case::string(Value::String("emoji 🎉".to_string()), "'emoji 🎉'")]

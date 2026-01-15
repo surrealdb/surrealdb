@@ -123,7 +123,7 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	use crate::utils::escape::EscapeKey;
+	use crate::utils::escape::EscapeObjectKey;
 
 	let pairs: Vec<_> = pairs.into_iter().collect();
 
@@ -135,7 +135,7 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 		if i > 0 {
 			fmt.write_separator(f);
 		}
-		write_sql!(f, fmt, "{}: {}", EscapeKey(key.as_ref()), value);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(key.as_ref()), value);
 	}
 	if fmt.is_pretty() && !pairs.is_empty() {
 		f.push('\n');

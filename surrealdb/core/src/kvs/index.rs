@@ -277,7 +277,7 @@ impl IndexBuilder {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
@@ -286,11 +286,33 @@ pub(crate) struct Appending {
 
 impl_kv_value_revisioned!(Appending);
 
+impl Appending {
+	#[cfg(test)]
+	pub(crate) fn new(
+		old_values: Option<Vec<Value>>,
+		new_values: Option<Vec<Value>>,
+		id: RecordIdKey,
+	) -> Self {
+		Self {
+			old_values,
+			new_values,
+			id,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub(crate) struct PrimaryAppending(u32);
 
 impl_kv_value_revisioned!(PrimaryAppending);
+
+impl PrimaryAppending {
+	#[cfg(test)]
+	pub(crate) fn new(i: u32) -> Self {
+		Self(i)
+	}
+}
 
 #[derive(Default)]
 struct QueueSequences {

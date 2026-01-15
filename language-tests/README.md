@@ -429,7 +429,22 @@ Specifies a duration in milliseconds within which the entire test should finish.
 This controls the overall test execution time from start to finish. If the test 
 takes longer than the given duration it will be considered an error and it will 
 cause a test run to fail. This key can also be set to `false` to disable the 
-timeout altogether or `true` to default to 1 second. Defaults to `2000` (2 seconds).
+timeout altogether or `true` to default to 1 second. Defaults to `1000` (1 second).
+
+#### `[env.timeout-tikv]`, `[env.timeout-rocksdb]`, `[env.timeout-surrealkv]`
+
+Backend-specific timeout overrides in milliseconds. When running tests against a 
+specific backend, these values take precedence over the base `timeout`. This is 
+useful for tests that are known to be slower on certain backends (e.g., TiKV due 
+to network latency).
+
+**Example:**
+```toml
+[env]
+timeout = 2000           # Default timeout for memory backend
+timeout-tikv = 10000     # TiKV needs 5x more time due to network latency
+timeout-rocksdb = 3000   # RocksDB may need slightly more time for disk I/O
+```
 
 #### `[env.context_timeout]`
 
@@ -437,7 +452,19 @@ Specifies a duration in milliseconds for individual query execution within the
 datastore context. This controls how long each query is allowed to run. If a 
 query takes longer than the given duration, it will be terminated. This key can 
 also be set to `false` to disable the context timeout altogether or `true` to 
-default to 1 second. Defaults to `3000` (3 seconds).
+default to 1 second. Defaults to `1000` (1 second).
+
+#### `[env.context-timeout-tikv]`, `[env.context-timeout-rocksdb]`, `[env.context-timeout-surrealkv]`
+
+Backend-specific context timeout overrides in milliseconds. Similar to the timeout 
+overrides, these allow setting different query execution limits per backend.
+
+**Example:**
+```toml
+[env]
+context-timeout = 1000           # Default context timeout
+context-timeout-tikv = 5000      # TiKV queries may take longer
+```
 
 Note: `[env.timeout]` and `[env.context_timeout]` serve different purposes:
 - `timeout`: Controls the entire test execution time (end-to-end)

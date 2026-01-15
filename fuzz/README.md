@@ -24,24 +24,32 @@ command below.
 
 ## Building the fuzzers
 Now that we've install cargo-fuzz we can go ahead and build our fuzzers.
+If we want to build the executor fuzzer we can use the following command.
 ```
-cd lib  
-# -O: Optimised build
-# --debug-assertions: Catch common bugs, e.g. integer overflow.
-cargo +nightly fuzz build -O --debug-assertions
+cargo +nightly fuzz build --fuzz-dir ./ fuzz_executor
 ````
+This will build the fuzzer with debug info and with -03 or maximum optimizations.
+
+When investigating an issue it might be more convenient to build the fuzzer without optimizations which will significantly speed up the build.
+This will make fuzzing around 10 times slower but that is still plenty fast for replicating a found crash.
+For building without optimizations add `-D`:
+```
+cargo +nightly fuzz build -D --fuzz-dir ./ fuzz_executor
+````
+
+
 
 ## Running the fuzzer
 Now that the fuzzer has successfully built we can actually run them. To
 list the available fuzz harnesses we can use the command.
 ```
-cargo +nightly fuzz list
+cargo +nightly fuzz list --fuzz-dir ./
 ```
 
 Once we know what fuzzer (in this case fuzz_executor) we want to run we 
 can it using the command;
 ```
-cargo +nightly fuzz run -O --debug-assertions fuzz_executor
+cargo +nightly fuzz run --fuzz-dir ./ fuzz_executor
 ```
 
 The previous command will run the fuzzer in libfuzzer's default mode,
@@ -52,7 +60,7 @@ up we can make use of all cores, and use a dictionary file. e.g.
 #        use nproc to match the number of processors on our local
 #        machine.
 # -dict: Make use the fuzzer specific dictionary file.
-cargo +nightly fuzz run -O --debug-assertions \
-  fuzz_executor -- -fork=$(nproc) \
+cargo +nightly fuzz run --fuzz-dir ./ \
+  #FUZZ_TARGET# -- -fork=$(nproc) \
   -dict=fuzz/fuzz_targets/fuzz_executor.dict
 ```

@@ -8,7 +8,7 @@ use std::cell::Cell;
 use std::fmt::Display;
 
 pub use escape::{
-	EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRidKey, QuoteStr,
+	EscapeIdent, EscapeKwFreeIdent, EscapeKwIdent, EscapeObjectKey, EscapeRidKey, QuoteStr,
 };
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -158,8 +158,17 @@ impl ToSql for CoverStmts<'_> {
 			| sql::Expr::Break
 			| sql::Expr::Continue
 			| sql::Expr::Throw(_) => self.0.fmt_sql(f, fmt),
-			sql::Expr::Return(_)
-			| sql::Expr::IfElse(_)
+			sql::Expr::Return(x) => {
+				if x.fetch.is_some() {
+					f.push('(');
+					self.0.fmt_sql(f, fmt);
+					f.push(')')
+				} else {
+					self.0.fmt_sql(f, fmt);
+				}
+			}
+
+			sql::Expr::IfElse(_)
 			| sql::Expr::Select(_)
 			| sql::Expr::Create(_)
 			| sql::Expr::Update(_)

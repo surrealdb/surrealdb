@@ -387,46 +387,42 @@ impl Transaction {
 		record.data.to_mut().def(&rid);
 		// Match on the value to determine if it is a graph edge record or a normal
 		// record.
-		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
+		if record.is_edge()
+			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*IN)
+			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*OUT)
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(true, crate::val::Value::RecordId(_), crate::val::Value::RecordId(_)) => {
-				if let Some(version) = version {
-					// If a version exists, format the value as an INSERT RELATION VERSION command.
-					let ts = Utc.timestamp_nanos(version as i64);
-					let sql = format!(
-						"INSERT RELATION {} VERSION d'{:?}';",
-						record.data.as_ref().to_sql(),
-						ts
-					);
-					records_relate.push(sql);
-					String::new()
-				} else {
-					// If no version exists, push the value to the records_relate vector.
-					records_relate.push(record.data.as_ref().to_sql());
-					String::new()
-				}
+			if let Some(version) = version {
+				// If a version exists, format the value as an INSERT RELATION VERSION command.
+				let ts = Utc.timestamp_nanos(version as i64);
+				let sql = format!(
+					"INSERT RELATION {} VERSION d'{:?}';",
+					record.data.as_ref().to_sql(),
+					ts
+				);
+				records_relate.push(sql);
+				String::new()
+			} else {
+				// If no version exists, push the value to the records_relate vector.
+				records_relate.push(record.data.as_ref().to_sql());
+				String::new()
 			}
 			// If the value is a normal record:
-			_ => {
-				if let Some(is_tombstone) = is_tombstone {
-					if is_tombstone {
-						// If the record is a tombstone, format it as a DELETE command.
-						format!("DELETE {}:{};", rid.table, rid.key.to_sql())
-					} else {
-						// If the record is not a tombstone and a version exists, format it as an
-						// INSERT VERSION command.
-						let ts =
-							Utc.timestamp_nanos(version.expect("version should be set") as i64);
-						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref().to_sql(), ts)
-					}
-				} else {
-					// If no tombstone or version information is provided, push the value to the
-					// records_normal vector.
-					records_normal.push(record.data.as_ref().to_sql());
-					String::new()
-				}
+		} else if let Some(is_tombstone) = is_tombstone {
+			if is_tombstone {
+				// If the record is a tombstone, format it as a DELETE command.
+				format!("DELETE {}:{};", rid.table, rid.key.to_sql())
+			} else {
+				// If the record is not a tombstone and a version exists, format it as an
+				// INSERT VERSION command.
+				let ts = Utc.timestamp_nanos(version.expect("version should be set") as i64);
+				format!("INSERT {} VERSION d'{:?}';", record.data.as_ref().to_sql(), ts)
 			}
+		} else {
+			// If no tombstone or version information is provided, push the value to the
+			// records_normal vector.
+			records_normal.push(record.data.as_ref().to_sql());
+			String::new()
 		}
 	}
 
@@ -544,6 +540,8 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		// Initialize vectors to hold normal records and graph edge records.
+		// TODO: these buffer are unnecessary, we just use them to then join into a string.
+		// Just write into a string from the start and you avoid a lot of allocs.
 		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
 

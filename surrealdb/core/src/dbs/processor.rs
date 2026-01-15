@@ -1042,8 +1042,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys {
 			// Create a new iterable range
-			let mut stream =
-				txn.stream_keys_vals(beg..end, opt.version, None, ScanDirection::Forward);
+			let mut stream = txn.stream_keys(beg..end, opt.version, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
@@ -1052,7 +1051,7 @@ pub(super) trait Collector {
 					break;
 				}
 				// Parse the key from the result
-				let key = res?.0;
+				let key = res?;
 				// Collector the key
 				self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
 				count += 1;

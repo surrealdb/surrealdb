@@ -32,6 +32,16 @@ pub(crate) struct TaskLease {
 
 impl_kv_value_revisioned!(TaskLease);
 
+impl TaskLease {
+	#[cfg(test)]
+	pub(crate) fn new(owner: Uuid, expiration: DateTime<Utc>) -> Self {
+		Self {
+			owner,
+			expiration,
+		}
+	}
+}
+
 /// Manages distributed task leases in a multi-node environment.
 ///
 /// The LeaseHandler provides a mechanism for coordinating tasks across multiple
