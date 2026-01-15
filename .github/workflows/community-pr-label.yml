@@ -50,6 +50,7 @@ jobs:
             } catch (error) {
               if (error.status === 404) {
                 // User is not a member of the team
+                console.log(error);
                 console.log(`${author} is not a member of ${ORG}/${TEAM_SLUG}`);
                 isTeamMember = false;
               } else {
