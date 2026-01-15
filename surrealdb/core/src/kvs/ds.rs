@@ -1049,7 +1049,7 @@ impl Datastore {
 		match res {
 			Err(e) => {
 				if matches!(
-					e.downcast_ref(),
+					e.downcast_ref::<Error>(),
 					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 				) {
 					Err(anyhow::Error::new(Error::ClAlreadyExists {
@@ -1239,13 +1239,16 @@ impl Datastore {
 		let archived = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
+			txn.cancel().await?;
 			// Filter the archived nodes
 			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
 		// Fetch all namespaces
 		let nss = {
 			let txn = self.transaction(Read, Optimistic).await?;
-			catch!(txn, txn.all_ns().await)
+			let res = catch!(txn, txn.all_ns().await);
+			txn.cancel().await?;
+			res
 		};
 		// Loop over all namespaces
 		for ns in nss.iter() {
@@ -1254,7 +1257,9 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				catch!(txn, txn.all_db(ns.namespace_id).await)
+				let res = catch!(txn, txn.all_db(ns.namespace_id).await);
+				txn.cancel().await?;
+				res
 			};
 			// Loop over all databases
 			for db in dbs.iter() {
@@ -1263,7 +1268,9 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await)
+					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
+					txn.cancel().await?;
+					res
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
@@ -1302,7 +1309,7 @@ impl Datastore {
 						yield_now!();
 					}
 					// Commit the changes
-					txn.commit().await?;
+					catch!(txn, txn.commit().await);
 				}
 			}
 		}
@@ -1345,7 +1352,7 @@ impl Datastore {
 			}
 		}
 		// Commit the changes
-		txn.commit().await?;
+		catch!(txn, txn.commit().await);
 		// All ok
 		Ok(())
 	}
@@ -1445,7 +1452,8 @@ impl Datastore {
 			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
-			for (k, _) in txn.getr(range.clone(), None).await? {
+			let items = catch!(txn, txn.getr(range.clone(), None).await);
+			for (k, _) in items {
 				count += 1;
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1455,20 +1463,29 @@ impl Datastore {
 				{
 					continue;
 				}
-				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+				match catch!(txn, txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await)
+				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
+							let ft = catch!(
+								txn,
+								FullTextIndex::new(
+									&self.index_stores,
+									&txn,
+									IndexKeyBase::new(
+										ic.ns,
+										ic.db,
+										ix.table_name.clone(),
+										ix.index_id
+									),
+									p,
+								)
+								.await
+							);
+							catch!(txn, ft.compaction(&txn).await);
 						}
 						Index::Count(_) => {
-							IndexOperation::index_count_compaction(&ic, &txn).await?;
+							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
@@ -1481,8 +1498,8 @@ impl Datastore {
 				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
-				txn.delr(range).await?;
-				txn.commit().await?;
+				catch!(txn, txn.delr(range).await);
+				catch!(txn, txn.commit().await);
 			} else {
 				txn.cancel().await?;
 				return Ok(());
@@ -2154,9 +2171,9 @@ impl Datastore {
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			let res = txn.export(&ns, &db, cfg, chn).await;
+			txn.cancel().await?;
+			res
 		})
 	}
 
@@ -2411,15 +2428,17 @@ mod test {
 		let password = "root";
 
 		// Setup the initial user if there are no root users
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			0
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 0);
+			txn.cancel().await.unwrap();
+		}
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			1
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 1);
+			txn.cancel().await.unwrap();
+		}
 		verify_root_creds(&ds, username, password).await.unwrap();
 
 		// Do not setup the initial root user if there are root users:
@@ -2427,28 +2446,19 @@ mod test {
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
-		let pass_hash = ds
-			.transaction(Read, Optimistic)
-			.await
-			.unwrap()
-			.expect_root_user(username)
-			.await
-			.unwrap()
-			.hash
-			.clone();
+		let pass_hash = {
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.expect_root_user(username).await.unwrap().hash.clone();
+			txn.cancel().await.unwrap();
+			res
+		};
 
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			pass_hash,
-			ds.transaction(Read, Optimistic)
-				.await
-				.unwrap()
-				.expect_root_user(username)
-				.await
-				.unwrap()
-				.hash
-				.clone()
-		)
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
+			txn.cancel().await.unwrap();
+		}
 	}
 
 	#[tokio::test]
@@ -2493,9 +2503,9 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
-		ctx.set_transaction(txn.enclose());
+		ctx.set_transaction(txn.clone());
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -2507,6 +2517,7 @@ mod test {
 			.catch_return()
 			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(1002)));
+		txn.cancel().await?;
 		Ok(())
 	}
 
@@ -2606,7 +2617,7 @@ mod test {
 			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let after_remove_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
-			drop(txn);
+			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);

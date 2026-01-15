@@ -120,13 +120,16 @@ pub(crate) async fn create_refresh_token_record(
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
-	let grant = access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
-		.await
-		.map_err(|e| {
-			warn!("Unexpected error when attempting to create a refresh token: {e}");
-			Error::UnexpectedAuth
-		})?;
-	tx.commit().await?;
+	let grant = catch!(
+		tx,
+		access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
+			.await
+			.map_err(|e| {
+				warn!("Unexpected error when attempting to create a refresh token: {e}");
+				anyhow::Error::new(Error::UnexpectedAuth)
+			})
+	);
+	catch!(tx, tx.commit().await);
 	// Return the key string from the bearer grant
 	match grant.grant {
 		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
@@ -157,15 +160,18 @@ pub async fn revoke_refresh_token_record(
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
 	let mut stack = reblessive::tree::TreeStack::new();
-	stack
-		.enter(|stk| async {
-			access::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
-				warn!("Unexpected error when attempting to revoke a refresh token: {e}");
-				Error::UnexpectedAuth
+	catch!(
+		tx,
+		stack
+			.enter(|stk| async {
+				access::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
+					warn!("Unexpected error when attempting to revoke a refresh token: {e}");
+					anyhow::Error::new(Error::UnexpectedAuth)
+				})
 			})
-		})
-		.finish()
-		.await?;
-	tx.commit().await?;
+			.finish()
+			.await
+	);
+	catch!(tx, tx.commit().await);
 	Ok(())
 }

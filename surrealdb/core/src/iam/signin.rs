@@ -253,208 +253,196 @@ pub async fn db_access(
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 
-	let ns_def = tx.expect_ns_by_name(&ns).await?;
-	let db_def = tx.expect_db_by_name(&ns, &db).await?;
+	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
+	let db_def = catch!(tx, tx.expect_db_by_name(&ns, &db).await);
 
 	// Fetch the specified access method from storage
-	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
+	let Some(av) = catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await)
+	else {
+		let _ = tx.cancel().await;
+		bail!(Error::AccessNotFound);
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Check the provided access method exists
 
-	match access {
-		Ok(Some(av)) => {
-			// Check the access method type
-			// All access method types are supported except for JWT
-			// The JWT access method is the one that is internal to SurrealDB
-			// The equivalent of signing in with JWT is to authenticate it
-			match av.access_type.clone() {
-				catalog::AccessType::Record(at) => {
-					// Check if the record access method supports issuing tokens
-					let iss = match &at.jwt.issue {
-						Some(iss) => iss.clone(),
-						_ => bail!(Error::AccessMethodMismatch),
-					};
-					// Check if a refresh token is defined
-					if let Some(bearer) = &at.bearer {
-						// Check if a refresh token is being used to authenticate
-						if let Some(key) = vars.get("refresh") {
-							// Perform bearer access using the refresh token as the bearer key
-							return signin_bearer(
-								kvs,
-								session,
-								Some(&ns_def),
-								Some(&db_def),
-								av,
-								bearer,
-								key.clone().into_string()?,
-							)
-							.await;
-						}
-					};
-					match &at.signin {
-						// This record access allows signin
-						Some(val) => {
-							// Setup the system session for finding the signin record
-							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-							sess.ip.clone_from(&session.ip);
-							sess.or.clone_from(&session.or);
-							// Compute the value with the params
-							match kvs.evaluate(val, &sess, Some(vars)).await {
-								// The signin value succeeded
-								Ok(val) => {
-									match val.into_record() {
-										// There is a record returned
-										Ok(mut rid) => {
-											// Create the authentication key
-											let key = iam::issue::config(iss.alg, &iss.key)?;
-											// Create the authentication claim
-											let claims = Claims {
-												iss: Some(SERVER_NAME.to_owned()),
-												iat: Some(Utc::now().timestamp()),
-												nbf: Some(Utc::now().timestamp()),
-												exp: iam::issue::expiration(av.token_duration)?,
-												jti: Some(Uuid::new_v4().to_string()),
-												ns: Some(ns.clone()),
-												db: Some(db.clone()),
-												ac: Some(ac.clone()),
-												id: Some(rid.to_sql()),
-												..Claims::default()
-											};
-											// AUTHENTICATE clause
-											if let Some(au) = &av.authenticate {
-												// Setup the system session for finding the signin
-												// record
-												let mut sess =
-													Session::editor().with_ns(&ns).with_db(&db);
-												sess.rd = Some(
-													crate::val::convert_value_to_public_value(
-														Value::RecordId(rid.clone().into()),
-													)
-													.expect("record id conversion should succeed"),
-												);
-												sess.tk = Some(
-													crate::val::convert_value_to_public_value(
-														claims.clone().into_claims_object().into(),
-													)
-													.expect("claims conversion should succeed"),
-												);
-												sess.ip.clone_from(&session.ip);
-												sess.or.clone_from(&session.or);
-												rid = authenticate_record(kvs, &sess, au).await?;
-											}
-											// Create refresh token if defined for the record access
-											// method
-											let refresh = match &at.bearer {
-												Some(_) => Some(
-													create_refresh_token_record(
-														kvs,
-														av.name.clone(),
-														&ns,
-														&db,
-														rid.clone().into(),
-													)
-													.await?,
-												),
-												None => None,
-											};
-											// Log the authenticated access method info
-											trace!(
-												"Signing in to database with access method `{}`",
-												ac
-											);
-											// Create the authentication token
-											let enc = encode(
-												&Header::new(algorithm_to_jwt_algorithm(iss.alg)),
-												&claims,
-												&key,
-											);
-											// Set the authentication on the session
-											session.tk = Some(
-												crate::val::convert_value_to_public_value(
-													claims.into_claims_object().into(),
-												)
-												.expect("claims conversion should succeed"),
-											);
-											session.ns = Some(ns.clone());
-											session.db = Some(db.clone());
-											session.ac = Some(ac.clone());
-											session.rd = Some(
-												crate::val::convert_value_to_public_value(
-													Value::RecordId(rid.clone().into()),
-												)
-												.expect("record id conversion should succeed"),
-											);
-											session.exp =
-												iam::issue::expiration(av.session_duration)?;
-											session.au = Arc::new(Auth::new(Actor::new(
-												rid.to_sql(),
-												Default::default(),
-												Level::Record(ns, db, rid.to_sql()),
-											)));
-											// Check the authentication token
-											match enc {
-												// The auth token was created successfully
-												Ok(token) => Ok(match refresh {
-													Some(refresh) => Token::WithRefresh {
-														access: token,
-														refresh,
-													},
-													None => Token::Access(token),
-												}),
-												_ => Err(anyhow::Error::new(
-													Error::TokenMakingFailed,
-												)),
-											}
-										}
-										_ => Err(anyhow::Error::new(Error::NoRecordFound)),
+	// Check the access method type
+	// All access method types are supported except for JWT
+	// The equivalent of signing in with JWT is to authenticate it
+	match av.access_type.clone() {
+		catalog::AccessType::Record(at) => {
+			// Check if the record access method supports issuing tokens
+			let iss = match &at.jwt.issue {
+				Some(iss) => iss.clone(),
+				_ => bail!(Error::AccessMethodMismatch),
+			};
+			// Check if a refresh token is defined
+			if let Some(bearer) = &at.bearer {
+				// Check if a refresh token is being used to authenticate
+				if let Some(key) = vars.get("refresh") {
+					// Perform bearer access using the refresh token as the bearer key
+					return signin_bearer(
+						kvs,
+						session,
+						Some(&ns_def),
+						Some(&db_def),
+						av,
+						bearer,
+						key.clone().into_string()?,
+					)
+					.await;
+				}
+			};
+			match &at.signin {
+				// This record access allows signin
+				Some(val) => {
+					// Setup the system session for finding the signin record
+					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					sess.ip.clone_from(&session.ip);
+					sess.or.clone_from(&session.or);
+					// Compute the value with the params
+					match kvs.evaluate(val, &sess, Some(vars)).await {
+						// The signin value succeeded
+						Ok(val) => {
+							match val.into_record() {
+								// There is a record returned
+								Ok(mut rid) => {
+									// Create the authentication key
+									let key = iam::issue::config(iss.alg, &iss.key)?;
+									// Create the authentication claim
+									let claims = Claims {
+										iss: Some(SERVER_NAME.to_owned()),
+										iat: Some(Utc::now().timestamp()),
+										nbf: Some(Utc::now().timestamp()),
+										exp: iam::issue::expiration(av.token_duration)?,
+										jti: Some(Uuid::new_v4().to_string()),
+										ns: Some(ns.clone()),
+										db: Some(db.clone()),
+										ac: Some(ac.clone()),
+										id: Some(rid.to_sql()),
+										..Claims::default()
+									};
+									// AUTHENTICATE clause
+									if let Some(au) = &av.authenticate {
+										// Setup the system session for finding the signin
+										// record
+										let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+										sess.rd = Some(
+											crate::val::convert_value_to_public_value(
+												Value::RecordId(rid.clone().into()),
+											)
+											.expect("record id conversion should succeed"),
+										);
+										sess.tk = Some(
+											crate::val::convert_value_to_public_value(
+												claims.clone().into_claims_object().into(),
+											)
+											.expect("claims conversion should succeed"),
+										);
+										sess.ip.clone_from(&session.ip);
+										sess.or.clone_from(&session.or);
+										rid = authenticate_record(kvs, &sess, au).await?;
+									}
+									// Create refresh token if defined for the record access
+									// method
+									let refresh = match &at.bearer {
+										Some(_) => Some(
+											create_refresh_token_record(
+												kvs,
+												av.name.clone(),
+												&ns,
+												&db,
+												rid.clone().into(),
+											)
+											.await?,
+										),
+										None => None,
+									};
+									// Log the authenticated access method info
+									trace!("Signing in to database with access method `{}`", ac);
+									// Create the authentication token
+									let enc = encode(
+										&Header::new(algorithm_to_jwt_algorithm(iss.alg)),
+										&claims,
+										&key,
+									);
+									// Set the authentication on the session
+									session.tk = Some(
+										crate::val::convert_value_to_public_value(
+											claims.into_claims_object().into(),
+										)
+										.expect("claims conversion should succeed"),
+									);
+									session.ns = Some(ns.clone());
+									session.db = Some(db.clone());
+									session.ac = Some(ac.clone());
+									session.rd = Some(
+										crate::val::convert_value_to_public_value(Value::RecordId(
+											rid.clone().into(),
+										))
+										.expect("record id conversion should succeed"),
+									);
+									session.exp = iam::issue::expiration(av.session_duration)?;
+									session.au = Arc::new(Auth::new(Actor::new(
+										rid.to_sql(),
+										Default::default(),
+										Level::Record(ns, db, rid.to_sql()),
+									)));
+									// Check the authentication token
+									match enc {
+										// The auth token was created successfully
+										Ok(token) => Ok(match refresh {
+											Some(refresh) => Token::WithRefresh {
+												access: token,
+												refresh,
+											},
+											None => Token::Access(token),
+										}),
+										_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 									}
 								}
-								Err(e) => match e.downcast_ref() {
-									// If the SIGNIN clause throws a specific error, authentication
-									// fails with that error
-									Some(Error::Thrown(_)) => Err(e),
-									// If the SIGNIN clause failed due to an unexpected error, be
-									// more specific This allows clients to handle these
-									// errors, which may be retryable
-									Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
-										debug!(
-											"Unexpected error found while executing a SIGNIN clause: {e}"
-										);
-										Err(anyhow::Error::new(Error::UnexpectedAuth))
-									}
-									// Otherwise, return a generic error unless it should be
-									// forwarded
-									_ => {
-										debug!("Record user signin query failed: {e}");
-										if *INSECURE_FORWARD_ACCESS_ERRORS {
-											Err(e)
-										} else {
-											Err(anyhow::Error::new(
-												Error::AccessRecordSigninQueryFailed,
-											))
-										}
-									}
-								},
+								_ => Err(anyhow::Error::new(Error::NoRecordFound)),
 							}
 						}
-						_ => Err(anyhow::Error::new(Error::AccessRecordNoSignin)),
+						Err(e) => match e.downcast_ref() {
+							// If the SIGNIN clause throws a specific error, authentication
+							// fails with that error
+							Some(Error::Thrown(_)) => Err(e),
+							// If the SIGNIN clause failed due to an unexpected error, be
+							// more specific This allows clients to handle these
+							// errors, which may be retryable
+							Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
+								debug!(
+									"Unexpected error found while executing a SIGNIN clause: {e}"
+								);
+								Err(anyhow::Error::new(Error::UnexpectedAuth))
+							}
+							// Otherwise, return a generic error unless it should be
+							// forwarded
+							_ => {
+								debug!("Record user signin query failed: {e}");
+								if *INSECURE_FORWARD_ACCESS_ERRORS {
+									Err(e)
+								} else {
+									Err(anyhow::Error::new(Error::AccessRecordSigninQueryFailed))
+								}
+							}
+						},
 					}
 				}
-				catalog::AccessType::Bearer(at) => {
-					// Extract key identifier and key from the provided variables.
-					let key = match vars.get("key") {
-						Some(key) => key.clone().into_string()?,
-						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
-					};
-
-					signin_bearer(kvs, session, Some(&ns_def), Some(&db_def), av, &at, key).await
-				}
-				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+				_ => Err(anyhow::Error::new(Error::AccessRecordNoSignin)),
 			}
 		}
-		Ok(None) => Err(anyhow::Error::new(Error::AccessNotFound)),
-		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
+		catalog::AccessType::Bearer(at) => {
+			// Extract key identifier and key from the provided variables.
+			let key = match vars.get("key") {
+				Some(key) => key.clone().into_string()?,
+				None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
+			};
+
+			signin_bearer(kvs, session, Some(&ns_def), Some(&db_def), av, &at, key).await
+		}
+		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }
 
@@ -535,30 +523,27 @@ pub async fn ns_access(
 ) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
-	let ns_def = tx.expect_ns_by_name(&ns).await?;
+	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
 	// Fetch the specified access method from storage
-	let access = tx.get_ns_access(ns_def.namespace_id, &ac).await;
+	let Some(av) = catch!(tx, tx.get_ns_access(ns_def.namespace_id, &ac).await) else {
+		let _ = tx.cancel().await;
+		bail!(Error::AccessNotFound);
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-	// Check the provided access method exists
-	match access {
-		Ok(Some(av)) => {
-			// Check the access method type
-			match av.access_type.clone() {
-				catalog::AccessType::Bearer(at) => {
-					// Extract key identifier and key from the provided variables.
-					let key = match vars.get("key") {
-						Some(key) => key.clone().into_string()?,
-						None => bail!(Error::AccessBearerMissingKey),
-					};
 
-					signin_bearer(kvs, session, Some(&ns_def), None, av, &at, key).await
-				}
-				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
-			}
+	// Check the access method type
+	match av.access_type.clone() {
+		catalog::AccessType::Bearer(at) => {
+			// Extract key identifier and key from the provided variables.
+			let key = match vars.get("key") {
+				Some(key) => key.clone().into_string()?,
+				None => bail!(Error::AccessBearerMissingKey),
+			};
+
+			signin_bearer(kvs, session, Some(&ns_def), None, av, &at, key).await
 		}
-		Ok(None) => Err(anyhow::Error::new(Error::AccessNotFound)),
-		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
+		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }
 
@@ -675,29 +660,26 @@ pub async fn root_access(
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
-	let access = tx.get_root_access(&ac).await;
+	let Some(av) = catch!(tx, tx.get_root_access(&ac).await) else {
+		let _ = tx.cancel().await;
+		bail!(Error::AccessNotFound);
+	};
 
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-	// Check the provided access method exists
-	match access {
-		Ok(Some(av)) => {
-			// Check the access method type
-			match av.access_type.clone() {
-				catalog::AccessType::Bearer(at) => {
-					// Extract key identifier and key from the provided variables.
-					let key = match vars.get("key") {
-						Some(PublicValue::String(key)) => key.clone(),
-						_ => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
-					};
 
-					signin_bearer(kvs, session, None, None, av, &at, key).await
-				}
-				_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
-			}
+	// Check the access method type
+	match av.access_type.clone() {
+		catalog::AccessType::Bearer(at) => {
+			// Extract key identifier and key from the provided variables.
+			let key = match vars.get("key") {
+				Some(PublicValue::String(key)) => key.clone(),
+				_ => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
+			};
+
+			signin_bearer(kvs, session, None, None, av, &at, key).await
 		}
-		Ok(None) => Err(anyhow::Error::new(Error::AccessNotFound)),
-		_ => Err(anyhow::Error::new(Error::AccessNotFound)),
+		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
 	}
 }
 
@@ -760,13 +742,28 @@ pub async fn signin_bearer(
 	// Fetch the specified access grant from storage
 	let gr = match (&ns, &db) {
 		(Some(ns), Some(db)) => {
-			tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await?
+			catch!(
+				tx,
+				tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await
+			)
 		}
-		(Some(ns), None) => tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await?,
-		(None, None) => tx.get_root_access_grant(&av.name, &kid).await?,
-		(None, Some(_)) => bail!(Error::NsEmpty),
-	}
-	.ok_or(Error::InvalidAuth)?;
+		(Some(ns), None) => {
+			catch!(tx, tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await)
+		}
+		(None, None) => catch!(tx, tx.get_root_access_grant(&av.name, &kid).await),
+		(None, Some(_)) => {
+			let _ = tx.cancel().await;
+			bail!(Error::NsEmpty)
+		}
+	};
+
+	let gr = match gr {
+		Some(gr) => gr,
+		None => {
+			let _ = tx.cancel().await;
+			bail!(Error::InvalidAuth);
+		}
+	};
 
 	// Ensure that the transaction is cancelled.
 	tx.cancel().await?;
@@ -780,40 +777,67 @@ pub async fn signin_bearer(
 		// Fetch the specified user from storage.
 
 		let user = match (&ns, &db) {
-			(Some(ns), Some(db)) => tx
-				.get_db_user(ns.namespace_id, db.database_id, user)
-				.await
-				.map_err(|e| {
-					debug!(
-						"Error retrieving user for bearer access to database `{}/{}`: {}",
-						ns.name, db.name, e
-					);
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(Some(ns), None) => tx
-				.get_ns_user(ns.namespace_id, user)
-				.await
-				.map_err(|e| {
-					debug!(
-						"Error retrieving user for bearer access to namespace `{}`: {}",
-						ns.name, e
-					);
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(None, None) => tx
-				.get_root_user(user)
-				.await
-				.map_err(|e| {
-					debug!("Error retrieving user for bearer access to root: {e}");
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(None, Some(_)) => bail!(Error::NsEmpty),
+			(Some(ns), Some(db)) => {
+				let res = catch!(
+					tx,
+					tx.get_db_user(ns.namespace_id, db.database_id, user).await.map_err(|e| {
+						debug!(
+							"Error retrieving user for bearer access to database `{}/{}`: {}",
+							ns.name, db.name, e
+						);
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(Some(ns), None) => {
+				let res = catch!(
+					tx,
+					tx.get_ns_user(ns.namespace_id, user).await.map_err(|e| {
+						debug!(
+							"Error retrieving user for bearer access to namespace `{}`: {}",
+							ns.name, e
+						);
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(None, None) => {
+				let res = catch!(
+					tx,
+					tx.get_root_user(user).await.map_err(|e| {
+						debug!("Error retrieving user for bearer access to root: {e}");
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(None, Some(_)) => {
+				let _ = tx.cancel().await;
+				bail!(Error::NsEmpty)
+			}
 		};
 		// Ensure that the transaction is cancelled.
 		tx.cancel().await?;
@@ -2125,7 +2149,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
-				r#"
+                r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
 						SELECT * FROM type::record('user', $id)
@@ -2144,11 +2168,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				CREATE user:1 SET enabled = false;
 				"#,
-			&sess,
-			None,
-		)
-		.await
-		.unwrap();
+                &sess,
+                None,
+            )
+                .await
+                .unwrap();
 
 			// Signin with the user
 			let mut sess = Session {
