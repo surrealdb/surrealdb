@@ -40,7 +40,7 @@ value = "NONE"
 
 # 9
 [[test.results]]
-error = "Header value contains invalid characters: test\r\nvalue"
+error = "Invalid header value for x-test: test\r\nvalue: failed to parse header value"
 
 # 10
 [[test.results]]
@@ -48,7 +48,7 @@ value = "NONE"
 
 # 11
 [[test.results]]
-error = "Header value contains invalid characters: test\nvalue"
+error = "Invalid header value for x-test: test\nvalue: failed to parse header value"
 
 # 12
 [[test.results]]
