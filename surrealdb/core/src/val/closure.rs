@@ -130,7 +130,7 @@ impl PartialOrd for Closure {
 
 impl Ord for Closure {
 	fn cmp(&self, _other: &Self) -> Ordering {
-		// Closures cannot be meaningfully ordered
+		// Builtin closures cannot be meaningfully compared
 		Ordering::Equal
 	}
 }

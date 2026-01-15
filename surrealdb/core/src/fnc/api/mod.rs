@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use http::StatusCode;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
@@ -13,6 +13,7 @@ use crate::catalog::providers::ApiProvider;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::fnc::args::FromPublic;
 use crate::val::{Closure, Duration, Value};
 
@@ -66,7 +67,7 @@ pub async fn invoke(
 
 	if !path.starts_with('/') {
 		// align behaviour with the path provided in DEFINE API statement
-		bail!("The string could not be parsed into a path: Segment should start with /");
+		return Err(anyhow::Error::from(Error::InvalidPath("Segment should start with /".to_string())));
 	}
 
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();

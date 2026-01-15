@@ -24,14 +24,14 @@ pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Opti
 	}
 
 	// Depending on the user chosen strategy, decide which output formats are possible
-	let supported = match strategy {
-		BodyStrategy::Json => vec![(BodyStrategy::Json, &APPLICATION_JSON)],
-		BodyStrategy::Cbor => vec![(BodyStrategy::Cbor, &*APPLICATION_CBOR)],
-		BodyStrategy::Flatbuffers => vec![(BodyStrategy::Flatbuffers, &*APPLICATION_SDB_FB)],
-		BodyStrategy::Plain => vec![(BodyStrategy::Plain, &TEXT_PLAIN)],
-		BodyStrategy::Bytes => vec![(BodyStrategy::Bytes, &APPLICATION_OCTET_STREAM)],
-		BodyStrategy::Native => vec![(BodyStrategy::Native, &*APPLICATION_SDB_NATIVE)],
-		BodyStrategy::Auto => vec![
+	let supported: &[_] = match strategy {
+		BodyStrategy::Json => &[(BodyStrategy::Json, &APPLICATION_JSON)],
+		BodyStrategy::Cbor => &[(BodyStrategy::Cbor, &*APPLICATION_CBOR)],
+		BodyStrategy::Flatbuffers => &[(BodyStrategy::Flatbuffers, &*APPLICATION_SDB_FB)],
+		BodyStrategy::Plain => &[(BodyStrategy::Plain, &TEXT_PLAIN)],
+		BodyStrategy::Bytes => &[(BodyStrategy::Bytes, &APPLICATION_OCTET_STREAM)],
+		BodyStrategy::Native => &[(BodyStrategy::Native, &*APPLICATION_SDB_NATIVE)],
+		BodyStrategy::Auto => &[
 			(BodyStrategy::Json, &APPLICATION_JSON),
 			(BodyStrategy::Cbor, &*APPLICATION_CBOR),
 			(BodyStrategy::Flatbuffers, &*APPLICATION_SDB_FB),
@@ -91,7 +91,7 @@ fn parse_accept(value: &HeaderValue) -> Vec<AcceptRange> {
 		accepted.push((q, mime.into(), i));
 	}
 
-	// Sort by quality factor first, fallback to positional index when equal
+	// Sort by quality factor first, by specifity second, then fallback to positional index when equal
 	accepted.sort_by(|a, b| {
 		b.0.partial_cmp(&a.0)
 			.unwrap_or(Equal)

@@ -104,7 +104,9 @@ pub async fn process_api_request_with_stack(
 		.rev()
 		.fold(final_action, |next, def| create_middleware_closure(def.clone(), next));
 
-	let res = next.invoke(stk, ctx, opt, None, vec![req.into()]).await?;
+	// APIs run without permissions
+	let opt = opt.new_with_perms(false);
+	let res = next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?;
 	let res: ApiResponse = res.try_into()?;
 	Ok(Some(res))
 }
@@ -131,33 +133,24 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 					}
 				};
 
-			// Update options and context - use the parameters passed to the closure
-			let opt = opt.new_with_perms(false);
+			// Update context - use the parameters passed to the closure
 			let mut ctx_isolated = Context::new_isolated(ctx);
 			ctx_isolated.add_value("request", Arc::new(req.into()));
 			let ctx_frozen = ctx_isolated.freeze();
 
 			// Clone required values
 			let action_expr = action_expr.clone();
-			let doc = doc.cloned();
 			// Execute
-			Box::pin(async {
-				stk.run(move |stk| {
-					let ctx_frozen = ctx_frozen.clone();
-					let opt = opt.clone();
-					async move { 
-						action_expr
-							.compute(stk, &ctx_frozen, &opt, doc.as_ref())
-							.await
-							.catch_return()
+			Box::pin(stk.run(async move |stk| {
+				action_expr
+					.compute(stk, &ctx_frozen, opt, doc)
+					.await
+					.catch_return()
 
-							// Ensure that the next middleware receives a proper api response object
-							.and_then(ApiResponse::try_from)
-							.map(Value::from)
-					}
-				})
-				.await
-			})
+					// Ensure that the next middleware receives a proper api response object
+					.and_then(ApiResponse::try_from)
+					.map(Value::from)
+			}))
 		},
 	))
 }
@@ -213,19 +206,16 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 			let ctx = Context::new_isolated(ctx).freeze();
 			let opt = opt.clone();
 			let doc = doc.cloned();
-			Box::pin(async {
-				stk.run(move |stk| async move {
-					function
-						.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
-						.await
-						.catch_return()
+			Box::pin(stk.run(async move |stk| {
+				function
+					.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
+					.await
+					.catch_return()
 
-						// Ensure that the next middleware receives a proper api response object
-						.and_then(ApiResponse::try_from)
-						.map(Value::from)
-				})
-				.await
-			})
+					// Ensure that the next middleware receives a proper api response object
+					.and_then(ApiResponse::try_from)
+					.map(Value::from)
+			}))
 		},
 	))
 }

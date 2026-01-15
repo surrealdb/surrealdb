@@ -185,10 +185,6 @@ pub async fn header(
 	let name: HeaderName =
 		name.parse().map_err(|e| ApiError::InvalidHeaderName(format!("{}: {}", name, e)))?;
 	if let Some(value) = value {
-		// Validate header value doesn't contain CRLF (header injection prevention)
-		if value.contains("\r\n") || value.contains('\n') {
-			return Err(ApiError::HeaderInjectionAttempt(value).into());
-		}
 		let value: HeaderValue = value.parse().map_err(|e| ApiError::InvalidHeaderValue {
 			name: name.to_string(),
 			value: format!("{}: {}", value, e),
@@ -238,34 +234,20 @@ pub async fn headers(
 	let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
 	let mut res: ApiResponse = res.try_into()?;
 
-	// Batch header operations for better performance
-	let mut to_insert = Vec::new();
-	let mut to_remove = Vec::new();
-
 	for (k, value) in headers {
 		let name: HeaderName =
 			k.parse().map_err(|e| ApiError::InvalidHeaderName(format!("{}: {}", k, e)))?;
+
 		if let Some(value) = value {
-			// Validate header value doesn't contain CRLF (header injection prevention)
-			if value.contains("\r\n") || value.contains('\n') {
-				return Err(ApiError::HeaderInjectionAttempt(value).into());
-			}
 			let value: HeaderValue = value.parse().map_err(|e| ApiError::InvalidHeaderValue {
 				name: k.clone(),
 				value: format!("{}: {}", value, e),
 			})?;
-			to_insert.push((name, value));
-		} else {
-			to_remove.push(name);
-		}
-	}
 
-	// Apply batched operations
-	for (name, value) in to_insert {
-		res.headers.insert(name, value);
-	}
-	for name in to_remove {
-		res.headers.remove(name);
+			res.headers.insert(name, value);
+		} else {
+			res.headers.remove(name);
+		}
 	}
 
 	Ok(res.into())
