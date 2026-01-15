@@ -33,6 +33,7 @@ impl Severity {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum IssueKind {
 	IncompatibleFuture,
+	StoredClosure,
 	AllIdiom,
 	FieldIdiomFollowed,
 	FunctionLogicalAnd,
@@ -41,12 +42,14 @@ pub enum IssueKind {
 	FunctionMathMin,
 	FunctionMathMax,
 	MockValue,
+	NumberKeyOrdering,
 }
 
 impl IssueKind {
 	pub fn as_str(&self) -> &str {
 		match *self {
 			Self::IncompatibleFuture => "incompatible future",
+			Self::StoredClosure => "stored closure",
 			Self::AllIdiom => "all idiom",
 			Self::FieldIdiomFollowed => "field idiom followed",
 			Self::FunctionLogicalAnd => "function logical_and",
@@ -55,25 +58,26 @@ impl IssueKind {
 			Self::FunctionMathMin => "function math::min",
 			Self::FunctionMathMax => "function math::max",
 			Self::MockValue => "mock value",
+			Self::NumberKeyOrdering => "number key ordering",
 		}
 	}
 }
 
 pub struct MigrationIssue {
 	/// How bad is the issue
-	severity: Severity,
+	pub severity: Severity,
 	/// The message telling what is wrong.
-	error: String,
+	pub error: String,
 	/// Specific information about what is wrong.
-	details: String,
+	pub details: String,
 	/// The type of issue.
-	kind: IssueKind,
+	pub kind: IssueKind,
 	/// The location of the error.
-	origin: String,
+	pub origin: String,
 	/// The location of the error as source code snippet.
-	error_location: Option<Snippet>,
+	pub error_location: Option<Snippet>,
 	/// Possible resolution
-	resolution: Option<Snippet>,
+	pub resolution: Option<Snippet>,
 }
 
 impl MigrationIssue {
