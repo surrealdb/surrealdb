@@ -48,73 +48,91 @@ jobs:
   # ----------------------------------------
 
   crud-benchmark:
-    name: CRUD Benchmark (${{ matrix.name }})
+    name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
     runs-on: [runner-amd64-large]
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # SurrealDB + Memory (WebSocket)
-          - name: memory
-            database: surrealdb-memory
-            endpoint: ws://localhost:8000
-            description: SurrealDB with in-memory storage
-          # SurrealDB + RocksDB (WebSocket)
-          - name: rocksdb
-            database: surrealdb-rocksdb
-            endpoint: ws://localhost:8000
-            description: SurrealDB with RocksDB storage
-          # SurrealDB + SurrealKV (WebSocket)
-          - name: surrealkv
-            database: surrealdb-surrealkv
-            endpoint: ws://localhost:8000
-            description: SurrealDB with SurrealKV storage
-            skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
-          # SurrealDB Memory Engine (Embedded)
-          - name: embedded-memory
-            database: surrealdb
-            endpoint: memory
-            description: SurrealDB embedded with in-memory storage
-          # SurrealDB RocksDB Engine (Embedded)
-          - name: embedded-rocksdb
-            database: surrealdb
-            endpoint: rocksdb:~/crud-bench
-            description: SurrealDB embedded with RocksDB storage
-          # SurrealDB SurrealKV Engine (Embedded)
-          - name: embedded-surrealkv
-            database: surrealdb
-            endpoint: surrealkv:~/crud-bench
-            description: SurrealDB embedded with SurrealKV storage
-            skipped: SurrealDB with SurrealKV storage benchmark awaiting fixes
-          # SurrealKV
-          - name: surrealkv
-            database: surrealkv
-            description: SurrealKV
-          # SurrealMX
-          - name: surrealmx
-            database: surrealmx
-            description: SurrealMX
+        # Cartesian product: config × key_type
+        config:
+          - memory
+          - rocksdb
+          - embedded-memory
+          - embedded-rocksdb
+          - surrealkv-local
+          - surrealmx
+        key_type:
+          - integer
+          - string26
+          - string90
+          - string250
+        exclude:
+          # Skip SurrealKV benchmarks (awaiting fixes)
+          - config: surrealkv-networked
+          - config: embedded-surrealkv
 
     steps:
-      - name: Skip if matrix.skipped is set
-        if: matrix.skipped
-        run: |
-          echo "⏭️ Skipping benchmark: ${{ matrix.skipped }}"
-          exit 0
-
       - name: Checkout sources
-        if: ${{ !matrix.skipped }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
+      - name: Determine configuration
+        id: meta
+        run: |
+          # Map config to database, endpoint, and other metadata
+          case "${{ matrix.config }}" in
+            memory)
+              echo "database=surrealdb-memory" >> $GITHUB_OUTPUT
+              echo "endpoint=ws://localhost:8000" >> $GITHUB_OUTPUT
+              echo "needs_server=true" >> $GITHUB_OUTPUT
+              echo "description=SurrealDB with in-memory storage" >> $GITHUB_OUTPUT
+              ;;
+            rocksdb)
+              echo "database=surrealdb-rocksdb" >> $GITHUB_OUTPUT
+              echo "endpoint=ws://localhost:8000" >> $GITHUB_OUTPUT
+              echo "needs_server=true" >> $GITHUB_OUTPUT
+              echo "description=SurrealDB with RocksDB storage" >> $GITHUB_OUTPUT
+              ;;
+            embedded-memory)
+              echo "database=surrealdb" >> $GITHUB_OUTPUT
+              echo "endpoint=memory" >> $GITHUB_OUTPUT
+              echo "needs_server=false" >> $GITHUB_OUTPUT
+              echo "description=SurrealDB embedded with in-memory storage" >> $GITHUB_OUTPUT
+              ;;
+            embedded-rocksdb)
+              echo "database=surrealdb" >> $GITHUB_OUTPUT
+              echo "endpoint=rocksdb:~/crud-bench-data" >> $GITHUB_OUTPUT
+              echo "needs_server=false" >> $GITHUB_OUTPUT
+              echo "description=SurrealDB embedded with RocksDB storage" >> $GITHUB_OUTPUT
+              ;;
+            surrealkv-local)
+              echo "database=surrealkv" >> $GITHUB_OUTPUT
+              echo "endpoint=" >> $GITHUB_OUTPUT
+              echo "needs_server=false" >> $GITHUB_OUTPUT
+              echo "description=SurrealKV storage engine" >> $GITHUB_OUTPUT
+              ;;
+            surrealmx)
+              echo "database=surrealmx" >> $GITHUB_OUTPUT
+              echo "endpoint=" >> $GITHUB_OUTPUT
+              echo "needs_server=false" >> $GITHUB_OUTPUT
+              echo "description=SurrealMX storage engine" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "Unknown config: ${{ matrix.config }}"
+              exit 1
+              ;;
+          esac
+          
+          # Set result name for artifacts
+          echo "result_name=${{ matrix.config }}-${{ matrix.key_type }}" >> $GITHUB_OUTPUT
+
       - name: Setup environment
-        if: ${{ !matrix.skipped }}
         uses: ./.github/actions/setup-environment
         with:
           save-cache: false
 
       - name: Build SurrealDB binary (for networked benchmarks)
-        if: ${{ !matrix.skipped && startsWith(matrix.database, 'surrealdb-') }}
+        if: steps.meta.outputs.needs_server == 'true'
         run: |
           cargo build
           mkdir -p ${{ github.workspace }}/bin
@@ -122,7 +140,6 @@ jobs:
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Checkout crud-bench repository
-        if: ${{ !matrix.skipped }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: surrealdb/crud-bench
@@ -130,7 +147,6 @@ jobs:
           path: .github/tools/crud-bench
 
       - name: Setup crud-bench cache
-        if: ${{ !matrix.skipped }}
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: .github/tools/crud-bench
@@ -138,7 +154,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Align SurrealDB version with crud-bench
-        if: ${{ !matrix.skipped }}
         run: |
           # Extract the surrealdb version that crud-bench expects
           EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
@@ -163,53 +178,54 @@ jobs:
           fi
 
       - name: Build crud-bench
-        if: ${{ !matrix.skipped }}
         run: |
           cd .github/tools/crud-bench
           cargo build
 
-      - name: Clean up environment
-        if: ${{ !matrix.skipped }}
+      - name: Prepare environment
         run: |
-          rm -rf ~/crud-bench-data
+          # Create data directory for embedded benchmarks
           mkdir -p ~/crud-bench-data
           chmod 777 ~/crud-bench-data
+          
+          # Create data directory for networked benchmarks (if needed)
+          if [ "${{ steps.meta.outputs.needs_server }}" = "true" ]; then
+            mkdir -p ~/surrealdb-data
+          fi
+          
+          # Clean up any existing result files
           rm -f result*.json result*.html result*.csv
 
       - name: Optimize system
-        if: ${{ !matrix.skipped }}
         run: |
           sync
           ulimit -n 65536 || true
           ulimit -u unlimited || true
           ulimit -l unlimited || true
 
-      - name: Start local SurrealDB server (for networked benchmarks)
-        if: ${{ !matrix.skipped && startsWith(matrix.database, 'surrealdb-') }}
+      - name: Start SurrealDB server (for networked benchmarks)
+        if: steps.meta.outputs.needs_server == 'true'
         run: |
-
           # Start SurrealDB in the background using the PR's binary
-          case "${{ matrix.database }}" in
+          case "${{ steps.meta.outputs.database }}" in
             surrealdb-memory)
               echo "Starting SurrealDB with in-memory storage..."
-              surreal start --user root --pass root memory &
+              surreal start --log error --user root --pass root memory &
               ;;
             surrealdb-rocksdb)
               echo "Starting SurrealDB with RocksDB storage..."
-              mkdir -p ~/surrealdb-data
-              surreal start --user root --pass root rocksdb:~/surrealdb-data &
+              surreal start --log error --user root --pass root rocksdb:~/surrealdb-data &
               ;;
             surrealdb-surrealkv)
               echo "Starting SurrealDB with SurrealKV storage..."
-              mkdir -p ~/surrealdb-data
-              surreal start --user root --pass root surrealkv:~/surrealdb-data &
+              surreal start --log error --user root --pass root surrealkv:~/surrealdb-data &
               ;;
           esac
-
+          
           # Store the PID for cleanup
           echo $! > /tmp/surrealdb.pid
           echo "SurrealDB started with PID $(cat /tmp/surrealdb.pid)"
-
+          
           # Wait for server to be ready
           echo "Waiting for SurrealDB to start..."
           for i in {1..30}; do
@@ -224,51 +240,53 @@ jobs:
             sleep 1
           done
 
-      - name: Run benchmark - ${{ matrix.description }}
-        if: ${{ !matrix.skipped }}
-        timeout-minutes: 30
+      - name: Run benchmark - ${{ steps.meta.outputs.description }} (${{ matrix.key_type }})
+        timeout-minutes: 10
         run: |
           cd .github/tools/crud-bench
           
-          # Build the command with optional endpoint
-          CMD="./target/debug/crud-bench -d ${{ matrix.database }}"
+          # Build benchmark command
+          CMD="./target/debug/crud-bench -d ${{ steps.meta.outputs.database }}"
           
-          if [ -n "${{ matrix.endpoint }}" ]; then
-            CMD="$CMD --endpoint ${{ matrix.endpoint }}"
+          # Add endpoint if specified
+          if [ -n "${{ steps.meta.outputs.endpoint }}" ]; then
+            CMD="$CMD --endpoint ${{ steps.meta.outputs.endpoint }}"
           fi
           
-          CMD="$CMD -s 10000 -c 12 -t 48 -r -n ${{ matrix.name }}"
+          # Add benchmark parameters
+          CMD="$CMD -s 10000 -c 12 -t 48 -r -k ${{ matrix.key_type }} -n ${{ steps.meta.outputs.result_name }}"
           
-          # Execute the benchmark
+          echo "Running: $CMD"
           eval $CMD
         env:
           SURREALDB_USER: root
           SURREALDB_PASS: root
 
       - name: Collect results
-        if: ${{ !matrix.skipped }}
         run: |
           mkdir -p ${{ github.workspace }}/benchmark-results
           cp .github/tools/crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
           ls -la ${{ github.workspace }}/benchmark-results
 
       - name: Upload benchmark results
-        if: ${{ !matrix.skipped }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: benchmark-results-${{ matrix.name }}
+          name: benchmark-results-${{ steps.meta.outputs.result_name }}
           path: ${{ github.workspace }}/benchmark-results/*.json
           retention-days: 30
 
       - name: Cleanup
         if: always()
         run: |
-          # Kill local SurrealDB server if it was started
+          # Kill SurrealDB server if it was started
           if [ -f /tmp/surrealdb.pid ]; then
-            echo "Stopping local SurrealDB server..."
+            echo "Stopping SurrealDB server..."
             kill $(cat /tmp/surrealdb.pid) 2>/dev/null || true
-            rm /tmp/surrealdb.pid
+            rm -f /tmp/surrealdb.pid
           fi
+          
+          # Clean up data directories
+          rm -rf ~/surrealdb-data ~/crud-bench-data
 
   # ----------------------------------------
   # Analyze results and report

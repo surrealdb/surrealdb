@@ -14,6 +14,22 @@ The benchmark workflow runs automatically on:
 - **Manual Dispatch:** Can be manually triggered via GitHub Actions UI for testing
   - Allows specifying a custom crud-bench revision for testing upgrades
 
+## Matrix Strategy
+
+The workflow uses a **Cartesian product matrix** to maximize parallelization:
+
+- **6 configurations** × **4 key types** = **24 independent jobs**
+- Each job runs one benchmark with a clean database state
+- Jobs run in parallel (subject to available runners)
+- Failed jobs don't block other combinations
+
+**Benefits:**
+- ✅ Faster completion time (~10 minutes total vs ~40 minutes sequential)
+- ✅ Better fault isolation (one failure doesn't stop others)
+- ✅ Individual retry capability per config/key-type
+- ✅ Clearer progress tracking (24 jobs vs 7)
+- ✅ Guaranteed clean state for each benchmark
+
 ## crud-bench Version Management
 
 The workflow uses a **pinned version** of crud-bench to ensure consistent benchmarking across all PRs (apples-to-apples comparison). This prevents benchmark variations caused by changes in the benchmarking tool itself.
@@ -127,14 +143,20 @@ This flexibility allows you to:
 
 ## Benchmark Parameters
 
-Each configuration runs with:
+The workflow uses a **matrix strategy** to test each configuration with multiple key types:
 
-- **Samples:** 10,000 operations per CRUD operation
-- **Clients:** 12 concurrent clients
-- **Threads:** 48 threads per client
-- **Order:** Randomized key generation (`-r` flag)
+- **Matrix dimensions:**
+  - **Configurations:** 6 (memory, rocksdb, embedded-memory, embedded-rocksdb, surrealkv-local, surrealmx)
+  - **Key types:** 4 (integer, string26, string90, string250)
+  - **Total jobs:** 24 (6 configs × 4 key types)
 
-These parameters balance test duration with statistical significance while providing high concurrency stress testing.
+- **Benchmark parameters per job:**
+  - **Samples:** 10,000 operations per CRUD operation
+  - **Clients:** 12 concurrent clients
+  - **Threads:** 48 threads per client
+  - **Order:** Randomized key generation (`-r` flag)
+
+Each matrix job runs independently with a clean database state, ensuring accurate performance measurements. Multiple key types ensure performance is measured across different indexing scenarios (small integers vs. long strings).
 
 ## Operations Tested
 
@@ -224,8 +246,11 @@ cd crud-bench
 # Build crud-bench
 cargo build --release
 
-# Run benchmark against embedded SurrealDB
-./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -r
+# Run benchmark against embedded SurrealDB with integer keys
+./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -k integer -r
+
+# Run benchmark with string26 keys
+./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -k string26 -r
 
 # Results will be in result*.json files
 ```
@@ -283,27 +308,46 @@ If the Python analysis script fails:
 
 ### Benchmarks are Slow
 
-If benchmarks take too long:
+The workflow uses parallel matrix execution, so total wall-clock time should be ~10-15 minutes if runners are available.
 
-- Reduce sample count: Change `-s 10000` to `-s 5000` or `-s 2500`
+If individual jobs are too slow:
+
+- Reduce sample count: Change `-s 10000` in the workflow to `-s 5000` or `-s 2500`
 - Reduce concurrency: Change `-c 12 -t 48` to lower values like `-c 8 -t 16`
-- Skip configurations: Comment out matrix entries in `crud-bench.yml`
+
+If you want to run fewer benchmarks:
+
+- Skip specific configs: Add them to the `exclude:` section in the matrix
+- Skip key types: Add specific config/key combinations to `exclude:`
+- Example:
+  ```yaml
+  exclude:
+    - config: rocksdb
+      key_type: string250
+  ```
 
 ## Architecture
 
 ### Workflow Jobs
 
-1. **crud-benchmark** (matrix job)
-   - Builds SurrealDB from source
-   - Clones and builds crud-bench
-   - Runs benchmarks for each configuration
-   - Uploads JSON results as artifacts
+1. **crud-benchmark** (matrix job: 24 parallel jobs)
+   - Matrix dimensions: 6 configs × 4 key types
+   - Each job runs independently with:
+     - Configuration metadata determination (database, endpoint, server requirements)
+     - Conditional SurrealDB binary build (only for networked benchmarks)
+     - crud-bench checkout and build
+     - Optional SurrealDB server startup (for networked benchmarks)
+     - Single benchmark run with specific config and key type
+     - Result upload as individual artifact
+   - Clean state for every job (no data carryover)
+   - Timeout: 30 minutes per job
 
 2. **analyze-and-report**
-   - Downloads benchmark results from all matrix jobs
+   - Downloads benchmark results from all 24 matrix jobs
+   - Merges all JSON result files
    - Parses and analyzes the results
    - Generates markdown and JSON reports
-   - Posts PR comment with results
+   - Posts/updates PR comment with results
    - Uploads analysis artifacts
 
 ### How PR Code is Used
