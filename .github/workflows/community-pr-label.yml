@@ -3,11 +3,17 @@
 # This workflow automatically labels PRs from community contributors (non-core team members).
 # It runs when PRs are opened, marked ready for review, reopened, or synchronized.
 # PRs in draft mode are skipped.
+#
+# SECURITY NOTE: This uses pull_request_target (not pull_request) to allow labeling
+# forked PRs. This is safe because:
+# - We don't check out any code from the PR
+# - We only read PR metadata (author) from the GitHub API context
+# - The core team list is defined in this workflow file (not user-controlled)
 
 name: Community PR Labeler
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, ready_for_review, reopened, synchronize]
 
 permissions: read-all
