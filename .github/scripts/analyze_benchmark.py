@@ -270,7 +270,8 @@ class BenchmarkAnalyzer:
 		# Methodology
 		report.append("\n<details>")
 		report.append("<summary>ℹ️ Methodology</summary>\n")
-		report.append("\n- **Benchmark parameters:** 10,000 samples, 12 clients, 48 threads")
+		report.append("\n- **Benchmark parameters:** 10,000 samples, 12 clients, 48 threads, randomized keys")
+		report.append("- **Key types tested:** integer, string26, string90, string250")
 		report.append("- **Benchmarking tool:** [crud-bench](https://github.com/surrealdb/crud-bench)")
 		report.append("- **Metrics:** Throughput (ops/s), Latency percentiles (P50/P95/P99)")
 		report.append("</details>")
