@@ -196,6 +196,166 @@ impl KeyConflictChecker {
 /// The number of records we load per batch for checking the migration.
 const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
 
+#[derive(Eq, PartialEq, Hash)]
+pub enum TypeKey {
+	Integer(usize),
+	String(String),
+}
+
+#[derive(Eq, PartialEq, Hash)]
+pub enum TypeKeyRef<'a> {
+	Integer(usize),
+	String(&'a str),
+}
+
+impl<'a> Equivalent<TypeKey> for TypeKeyRef<'a> {
+	fn equivalent(&self, key: &TypeKey) -> bool {
+		match (self, key) {
+			(TypeKeyRef::Integer(a), TypeKey::Integer(b)) => a == b,
+			(TypeKeyRef::String(a), TypeKey::String(b)) => a == b,
+			_ => false,
+		}
+	}
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum IdType {
+	Integer,
+	Float,
+	Decimal,
+}
+
+const MAX_SCHEMA_TYPES: usize = 1024;
+
+/// Struct to check for number values, within the same place in a key, which have a different type.
+pub struct KeyConflictChecker {
+	types: Vec<(HashMap<TypeKey, usize>, Option<IdType>)>,
+}
+
+impl KeyConflictChecker {
+	pub fn new() -> Self {
+		KeyConflictChecker {
+			types: vec![(HashMap::new(), None)],
+		}
+	}
+
+	/// Checks if the new id value has a number conflict with already existing schema.
+	///
+	/// Will return None if the schema has grown too large to keep track off.
+	pub fn check_conflict(&mut self, id: &Id) -> Option<bool> {
+		match id {
+			Id::Array(array) => return self.visit_array(array, 0),
+			Id::Object(object) => return self.visit_object(object, 0),
+			_ => {}
+		}
+		Some(false)
+	}
+
+	fn visit_array(&mut self, array: &Array, type_idx: usize) -> Option<bool> {
+		for (k, v) in array.iter().enumerate() {
+			if let Some(x) = self.types[type_idx].0.get(&TypeKey::Integer(k)) {
+				if self.visit_value(v, *x)? {
+					return Some(true);
+				}
+			} else {
+				let idx = self.build_value(v)?;
+				self.types[type_idx].0.insert(TypeKey::Integer(k), idx);
+			}
+		}
+		Some(false)
+	}
+
+	fn visit_object(&mut self, object: &Object, type_idx: usize) -> Option<bool> {
+		for (k, v) in object.iter() {
+			if let Some(x) = self.types[type_idx].0.get(&TypeKeyRef::String(k)) {
+				if self.visit_value(v, *x)? {
+					return Some(true);
+				}
+			} else {
+				let idx = self.build_value(v)?;
+				self.types[type_idx].0.insert(TypeKey::String(k.clone()), idx);
+			}
+		}
+		Some(false)
+	}
+
+	fn visit_value(&mut self, value: &Value, type_idx: usize) -> Option<bool> {
+		match value {
+			Value::Number(number) => {
+				let kind = match number {
+					Number::Int(_) => IdType::Integer,
+					Number::Float(_) => IdType::Float,
+					Number::Decimal(_) => IdType::Decimal,
+				};
+				if let Some(x) = self.types[type_idx].1 {
+					if x != kind {
+						// conflict
+						return Some(true);
+					}
+				} else {
+					self.types[type_idx].1 = Some(kind);
+				}
+				Some(false)
+			}
+			Value::Array(array) => self.visit_array(array, type_idx),
+			Value::Object(object) => self.visit_object(object, type_idx),
+			_ => Some(false),
+		}
+	}
+
+	fn build_value(&mut self, value: &Value) -> Option<usize> {
+		match value {
+			Value::Number(number) => {
+				let kind = match number {
+					Number::Int(_) => IdType::Integer,
+					Number::Float(_) => IdType::Float,
+					Number::Decimal(_) => IdType::Decimal,
+				};
+				let res = self.types.len();
+				if res >= MAX_SCHEMA_TYPES {
+					return None;
+				}
+				self.types.push((HashMap::new(), Some(kind)));
+				Some(res)
+			}
+			Value::Array(array) => {
+				let mut object_schema = HashMap::new();
+				for (k, v) in array.iter().enumerate() {
+					let idx = self.build_value(v)?;
+					object_schema.insert(TypeKey::Integer(k), idx);
+				}
+				let res = self.types.len();
+				if res >= MAX_SCHEMA_TYPES {
+					return None;
+				}
+				self.types.push((object_schema, None));
+				Some(res)
+			}
+			Value::Object(object) => {
+				let mut object_schema = HashMap::new();
+				for (k, v) in object.iter() {
+					let idx = self.build_value(v)?;
+					object_schema.insert(TypeKey::String(k.clone()), idx);
+				}
+				let res = self.types.len();
+				if res >= MAX_SCHEMA_TYPES {
+					return None;
+				}
+				self.types.push((object_schema, None));
+				Some(res)
+			}
+			_ => {
+				let res = self.types.len();
+				if res >= MAX_SCHEMA_TYPES {
+					return None;
+				}
+				self.types.push((HashMap::new(), None));
+				Some(res)
+			}
+		}
+	}
+}
+
 pub async fn diagnose(
 	(ctx, opts): (&Context, &Options),
 	(probe,): (Option<bool>,),
@@ -342,6 +502,7 @@ async fn diagnose_ns_db(
 						Some(true) => {
 							found_key_issue = true;
 							issues.push(MigrationIssue{
+<<<<<<< HEAD
 								severity: Severity::CanBreak,
 								error: "Found number keys with different types in the same position within a record-id key which will have a different order in 3.0".to_owned(),
 								details: String::new(),
@@ -350,6 +511,16 @@ async fn diagnose_ns_db(
 								error_location: None,
 								resolution: None,
 							});
+=======
+									severity: Severity::CanBreak,
+									error: "Found number keys with different types in the same position within a record-id key which will have a different order in 3.0".to_owned(),
+									details: String::new(),
+									kind: IssueKind::NumberKeyOrdering,
+									origin: path.clone(),
+									error_location: None,
+									resolution: None,
+								});
+>>>>>>> 79f0cdcc5 (Add check for numeric order issues)
 						} // no issue
 						Some(false) => {} // no issue
 						None => {
@@ -357,6 +528,7 @@ async fn diagnose_ns_db(
 							// usage.
 							found_key_issue = true;
 							issues.push(MigrationIssue{
+<<<<<<< HEAD
 								severity: Severity::CanBreak,
 								error: "Found table key schema with a very poly-morphic type, table could contain keys which might have a different ordering in 3.0".to_owned(),
 								details: String::new(),
@@ -365,6 +537,16 @@ async fn diagnose_ns_db(
 								error_location: None,
 								resolution: None,
 							});
+=======
+									severity: Severity::CanBreak,
+									error: "Found table key schema with a very poly-morphic type, table could contain keys which might have a different ordering in 3.0".to_owned(),
+									details: String::new(),
+									kind: IssueKind::NumberKeyOrdering,
+									origin: path.clone(),
+									error_location: None,
+									resolution: None,
+								});
+>>>>>>> 79f0cdcc5 (Add check for numeric order issues)
 						}
 					}
 				}
