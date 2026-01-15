@@ -146,7 +146,6 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 					.compute(stk, &ctx_frozen, opt, doc)
 					.await
 					.catch_return()
-
 					// Ensure that the next middleware receives a proper api response object
 					.and_then(ApiResponse::try_from)
 					.map(Value::from)
@@ -211,7 +210,6 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 					.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
 					.await
 					.catch_return()
-
 					// Ensure that the next middleware receives a proper api response object
 					.and_then(ApiResponse::try_from)
 					.map(Value::from)

@@ -91,7 +91,8 @@ fn parse_accept(value: &HeaderValue) -> Vec<AcceptRange> {
 		accepted.push((q, mime.into(), i));
 	}
 
-	// Sort by quality factor first, by specifity second, then fallback to positional index when equal
+	// Sort by quality factor first, by specifity second, then fallback to positional index when
+	// equal
 	accepted.sort_by(|a, b| {
 		b.0.partial_cmp(&a.0)
 			.unwrap_or(Equal)

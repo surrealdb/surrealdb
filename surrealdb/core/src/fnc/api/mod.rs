@@ -67,7 +67,9 @@ pub async fn invoke(
 
 	if !path.starts_with('/') {
 		// align behaviour with the path provided in DEFINE API statement
-		return Err(anyhow::Error::from(Error::InvalidPath("Segment should start with /".to_string())));
+		return Err(anyhow::Error::from(Error::InvalidPath(
+			"Segment should start with /".to_string(),
+		)));
 	}
 
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
