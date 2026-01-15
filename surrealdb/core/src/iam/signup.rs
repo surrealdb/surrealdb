@@ -174,11 +174,12 @@ pub async fn db_access(
 ) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
-	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+	let db_def = match catch!(tx, tx.get_db_by_name(&ns, &db).await) {
 		Some(db) => db,
 		None => {
+			let _ = tx.cancel().await;
 			return Err(Error::DbNotFound {
-				name: db.clone(),
+				name: db,
 			}
 			.into());
 		}

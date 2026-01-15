@@ -1049,7 +1049,7 @@ impl Datastore {
 		match res {
 			Err(e) => {
 				if matches!(
-					e.downcast_ref(),
+					e.downcast_ref::<Error>(),
 					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 				) {
 					Err(anyhow::Error::new(Error::ClAlreadyExists {
@@ -2418,15 +2418,17 @@ mod test {
 		let password = "root";
 
 		// Setup the initial user if there are no root users
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			0
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 0);
+			txn.cancel().await.unwrap();
+		}
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			1
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 1);
+			txn.cancel().await.unwrap();
+		}
 		verify_root_creds(&ds, username, password).await.unwrap();
 
 		// Do not setup the initial root user if there are root users:
@@ -2434,28 +2436,19 @@ mod test {
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
-		let pass_hash = ds
-			.transaction(Read, Optimistic)
-			.await
-			.unwrap()
-			.expect_root_user(username)
-			.await
-			.unwrap()
-			.hash
-			.clone();
+		let pass_hash = {
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.expect_root_user(username).await.unwrap().hash.clone();
+			txn.cancel().await.unwrap();
+			res
+		};
 
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			pass_hash,
-			ds.transaction(Read, Optimistic)
-				.await
-				.unwrap()
-				.expect_root_user(username)
-				.await
-				.unwrap()
-				.hash
-				.clone()
-		)
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
+			txn.cancel().await.unwrap();
+		}
 	}
 
 	#[tokio::test]
@@ -2500,9 +2493,9 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
-		ctx.set_transaction(txn.enclose());
+		ctx.set_transaction(txn.clone());
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -2514,6 +2507,7 @@ mod test {
 			.catch_return()
 			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(1002)));
+		txn.cancel().await?;
 		Ok(())
 	}
 
@@ -2613,7 +2607,7 @@ mod test {
 			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let after_remove_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
-			drop(txn);
+			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);

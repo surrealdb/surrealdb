@@ -253,8 +253,8 @@ pub async fn db_access(
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 
-	let ns_def = tx.expect_ns_by_name(&ns).await?;
-	let db_def = tx.expect_db_by_name(&ns, &db).await?;
+	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
+	let db_def = catch!(tx, tx.expect_db_by_name(&ns, &db).await);
 
 	// Fetch the specified access method from storage
 	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
@@ -535,7 +535,7 @@ pub async fn ns_access(
 ) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
-	let ns_def = tx.expect_ns_by_name(&ns).await?;
+	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
 	// Fetch the specified access method from storage
 	let access = tx.get_ns_access(ns_def.namespace_id, &ac).await;
 	// Ensure that the transaction is cancelled
@@ -760,13 +760,28 @@ pub async fn signin_bearer(
 	// Fetch the specified access grant from storage
 	let gr = match (&ns, &db) {
 		(Some(ns), Some(db)) => {
-			tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await?
+			catch!(
+				tx,
+				tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await
+			)
 		}
-		(Some(ns), None) => tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await?,
-		(None, None) => tx.get_root_access_grant(&av.name, &kid).await?,
-		(None, Some(_)) => bail!(Error::NsEmpty),
-	}
-	.ok_or(Error::InvalidAuth)?;
+		(Some(ns), None) => {
+			catch!(tx, tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await)
+		}
+		(None, None) => catch!(tx, tx.get_root_access_grant(&av.name, &kid).await),
+		(None, Some(_)) => {
+			let _ = tx.cancel().await;
+			bail!(Error::NsEmpty)
+		}
+	};
+
+	let gr = match gr {
+		Some(gr) => gr,
+		None => {
+			let _ = tx.cancel().await;
+			bail!(Error::InvalidAuth);
+		}
+	};
 
 	// Ensure that the transaction is cancelled.
 	tx.cancel().await?;
@@ -780,40 +795,67 @@ pub async fn signin_bearer(
 		// Fetch the specified user from storage.
 
 		let user = match (&ns, &db) {
-			(Some(ns), Some(db)) => tx
-				.get_db_user(ns.namespace_id, db.database_id, user)
-				.await
-				.map_err(|e| {
-					debug!(
-						"Error retrieving user for bearer access to database `{}/{}`: {}",
-						ns.name, db.name, e
-					);
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(Some(ns), None) => tx
-				.get_ns_user(ns.namespace_id, user)
-				.await
-				.map_err(|e| {
-					debug!(
-						"Error retrieving user for bearer access to namespace `{}`: {}",
-						ns.name, e
-					);
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(None, None) => tx
-				.get_root_user(user)
-				.await
-				.map_err(|e| {
-					debug!("Error retrieving user for bearer access to root: {e}");
-					// Return opaque error to avoid leaking grant subject existence.
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?,
-			(None, Some(_)) => bail!(Error::NsEmpty),
+			(Some(ns), Some(db)) => {
+				let res = catch!(
+					tx,
+					tx.get_db_user(ns.namespace_id, db.database_id, user).await.map_err(|e| {
+						debug!(
+							"Error retrieving user for bearer access to database `{}/{}`: {}",
+							ns.name, db.name, e
+						);
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(Some(ns), None) => {
+				let res = catch!(
+					tx,
+					tx.get_ns_user(ns.namespace_id, user).await.map_err(|e| {
+						debug!(
+							"Error retrieving user for bearer access to namespace `{}`: {}",
+							ns.name, e
+						);
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(None, None) => {
+				let res = catch!(
+					tx,
+					tx.get_root_user(user).await.map_err(|e| {
+						debug!("Error retrieving user for bearer access to root: {e}");
+						// Return opaque error to avoid leaking grant subject existence.
+						anyhow::Error::new(Error::InvalidAuth)
+					})
+				);
+				match res {
+					Some(v) => v,
+					None => {
+						let _ = tx.cancel().await;
+						bail!(Error::InvalidAuth);
+					}
+				}
+			}
+			(None, Some(_)) => {
+				let _ = tx.cancel().await;
+				bail!(Error::NsEmpty)
+			}
 		};
 		// Ensure that the transaction is cancelled.
 		tx.cancel().await?;
