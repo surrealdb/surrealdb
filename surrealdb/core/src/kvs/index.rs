@@ -468,19 +468,16 @@ impl Building {
 			return Ok(());
 		};
 		// Check the index still exists and is not decommissioned
-		catch!(
-			tx,
-			tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
-				.await?
-				.expect_not_prepare_remove()
-		);
+		tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
+			.await?
+			.expect_not_prepare_remove()?;
 		*last_prepare_remove_check = Instant::now();
 		Ok(())
 	}
 
 	async fn check_prepare_remove(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
 		let tx = self.new_read_tx().await?;
-		self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await?;
+		catch!(tx, self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await);
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -495,8 +492,8 @@ impl Building {
 			let key =
 				crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
-			tx.delp(&key).await?;
-			tx.commit().await?;
+			catch!(tx, tx.delp(&key).await);
+			catch!(tx, tx.commit().await);
 		}
 
 		// First iteration, we index every key
@@ -520,7 +517,10 @@ impl Building {
 			let batch = {
 				let tx = self.new_read_tx().await?;
 				// Check if the index has been decommissioned
-				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
+				catch!(
+					tx,
+					self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await
+				);
 				// Get the next batch of records
 				let res = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
 				tx.cancel().await?;
@@ -542,7 +542,7 @@ impl Building {
 					tx,
 					self.index_initial_batch(&ctx, &tx, batch.result, &mut initial_count).await
 				);
-				tx.commit().await?;
+				catch!(tx, tx.commit().await);
 			}
 		}
 		// Second iteration, we index/remove any records that has been added or removed
@@ -596,7 +596,7 @@ impl Building {
 					self.index_appending_range(&ctx, &tx, range, initial_count, &mut updates_count)
 						.await
 				);
-				tx.commit().await?;
+				catch!(tx, tx.commit().await);
 			}
 		}
 		Ok(())

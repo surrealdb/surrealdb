@@ -1309,7 +1309,7 @@ impl Datastore {
 						yield_now!();
 					}
 					// Commit the changes
-					txn.commit().await?;
+					catch!(txn, txn.commit().await);
 				}
 			}
 		}
@@ -1352,7 +1352,7 @@ impl Datastore {
 			}
 		}
 		// Commit the changes
-		txn.commit().await?;
+		catch!(txn, txn.commit().await);
 		// All ok
 		Ok(())
 	}
@@ -1452,7 +1452,8 @@ impl Datastore {
 			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
-			for (k, _) in txn.getr(range.clone(), None).await? {
+			let items = catch!(txn, txn.getr(range.clone(), None).await);
+			for (k, _) in items {
 				count += 1;
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1462,20 +1463,29 @@ impl Datastore {
 				{
 					continue;
 				}
-				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
+				match catch!(txn, txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await)
+				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
+							let ft = catch!(
+								txn,
+								FullTextIndex::new(
+									&self.index_stores,
+									&txn,
+									IndexKeyBase::new(
+										ic.ns,
+										ic.db,
+										ix.table_name.clone(),
+										ix.index_id
+									),
+									p,
+								)
+								.await
+							);
+							catch!(txn, ft.compaction(&txn).await);
 						}
 						Index::Count(_) => {
-							IndexOperation::index_count_compaction(&ic, &txn).await?;
+							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
@@ -1488,8 +1498,8 @@ impl Datastore {
 				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
-				txn.delr(range).await?;
-				txn.commit().await?;
+				catch!(txn, txn.delr(range).await);
+				catch!(txn, txn.commit().await);
 			} else {
 				txn.cancel().await?;
 				return Ok(());

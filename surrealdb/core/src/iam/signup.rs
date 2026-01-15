@@ -185,14 +185,13 @@ pub async fn db_access(
 		}
 	};
 	// Fetch the specified access method from storage
-	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
+	let Some(av) = catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await)
+	else {
+		let _ = tx.cancel().await;
+		bail!(Error::AccessNotFound);
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-
-	// Check the provided access method exists
-	let Ok(Some(av)) = access else {
-		bail!(Error::AccessNotFound)
-	};
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
