@@ -60,7 +60,7 @@ impl SelectStatement {
 		// Assign the statement
 		let stm = Statement::from_select(stk, ctx, opt, parent_doc, self).await?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
 		let version = stk
@@ -73,10 +73,10 @@ impl SelectStatement {
 		let opt = Arc::new(opt.clone().with_version(version));
 
 		// Extract the limits
-		i.setup_limit(stk, ctx, &opt, &stm).await?;
+		iterator.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
 		ensure!(
-			!self.only || i.is_limit_one_or_zero() || self.what.len() <= 1,
+			!self.only || iterator.is_limit_one_or_zero() || self.what.len() <= 1,
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout
@@ -99,7 +99,7 @@ impl SelectStatement {
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
-			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
+			iterator.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
 		}
 
 		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
@@ -107,7 +107,7 @@ impl SelectStatement {
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement
 			let res =
-				i.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
+				iterator.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 

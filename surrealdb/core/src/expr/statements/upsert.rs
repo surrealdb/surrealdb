@@ -55,7 +55,7 @@ impl UpsertStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 
 		// Assign the statement
 		let stm = Statement::from(self);
@@ -76,7 +76,7 @@ impl UpsertStatement {
 		};
 		// Loop over the upsert targets
 		for w in self.what.iter() {
-			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
+			iterator.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
 				|e| {
 					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 						let Ok(Error::InvalidStatementTarget {
@@ -102,7 +102,7 @@ impl UpsertStatement {
 			ctx.get_db(opt).await?;
 
 			// Process the statement
-			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

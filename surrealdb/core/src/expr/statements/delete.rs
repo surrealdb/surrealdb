@@ -53,7 +53,7 @@ impl DeleteStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Check if there is a timeout
