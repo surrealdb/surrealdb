@@ -271,12 +271,13 @@ pub async fn init<F: RouterFactory>(
 
 #[cfg(test)]
 mod tests {
-	use super::*;
+	use axum::Extension;
 	use axum::body::Body;
 	use axum::http::{Request, StatusCode};
-	use axum::Extension;
 	use surrealdb_core::dbs::Session;
 	use tower::ServiceExt;
+
+	use super::*;
 
 	#[tokio::test]
 	async fn test_sql_endpoint_query_params() {
@@ -286,9 +287,7 @@ mod tests {
 			datastore: ds,
 		};
 
-		let app = sql::router()
-			.layer(Extension(state))
-			.layer(Extension(Session::owner()));
+		let app = sql::router().layer(Extension(state)).layer(Extension(Session::owner()));
 
 		let response = app
 			.oneshot(
