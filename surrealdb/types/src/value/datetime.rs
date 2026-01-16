@@ -1,0 +1,149 @@
+use std::fmt::{self, Display, Formatter};
+use std::ops::Deref;
+use std::str::FromStr;
+
+use chrono::offset::LocalResult;
+use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
+use surrealdb_types_derive::write_sql;
+
+use crate::sql::{SqlFormat, ToSql};
+use crate::utils::escape::QuoteStr;
+
+/// Represents a datetime value in SurrealDB
+///
+/// A datetime represents a specific point in time, stored as UTC.
+/// This type wraps the `chrono::DateTime<Utc>` type.
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Datetime(pub(crate) DateTime<Utc>);
+
+impl Default for Datetime {
+	fn default() -> Self {
+		Self(Utc::now())
+	}
+}
+
+impl Datetime {
+	/// The minimum UTC datetime
+	pub const MIN_UTC: Self = Datetime(DateTime::<Utc>::MIN_UTC);
+	/// The maximum UTC datetime
+	pub const MAX_UTC: Self = Datetime(DateTime::<Utc>::MAX_UTC);
+
+	/// Returns the current UTC datetime
+	pub fn now() -> Self {
+		Self(Utc::now())
+	}
+
+	/// Convert into the inner DateTime<Utc>
+	pub fn into_inner(self) -> DateTime<Utc> {
+		self.0
+	}
+
+	/// Create a new datetime from a timestamp.
+	pub fn from_timestamp(seconds: i64, nanos: u32) -> Option<Self> {
+		match Utc.timestamp_opt(seconds, nanos) {
+			LocalResult::Single(v) => Some(Self(v)),
+			LocalResult::Ambiguous(_, _) => None,
+			LocalResult::None => None,
+		}
+	}
+}
+
+impl FromStr for Datetime {
+	type Err = anyhow::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Self(DateTime::parse_from_rfc3339(s)?.to_utc()))
+	}
+}
+
+impl From<DateTime<Utc>> for Datetime {
+	fn from(v: DateTime<Utc>) -> Self {
+		Self(v)
+	}
+}
+
+impl From<Datetime> for DateTime<Utc> {
+	fn from(x: Datetime) -> Self {
+		x.0
+	}
+}
+
+impl Display for Datetime {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
+	}
+}
+
+impl ToSql for Datetime {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate as surrealdb_types;
+		write_sql!(f, fmt, "d{}", QuoteStr(&self.to_string()));
+	}
+}
+
+impl TryFrom<(i64, u32)> for Datetime {
+	type Error = anyhow::Error;
+
+	fn try_from(v: (i64, u32)) -> Result<Self, Self::Error> {
+		match Utc.timestamp_opt(v.0, v.1) {
+			LocalResult::Single(v) => Ok(Self(v)),
+			err => match err {
+				LocalResult::Single(v) => Ok(Self(v)),
+				LocalResult::Ambiguous(_, _) => {
+					Err(anyhow::anyhow!("Ambiguous timestamp: {}, {}", v.0, v.1))
+				}
+				LocalResult::None => Err(anyhow::anyhow!("Invalid timestamp: {}, {}", v.0, v.1)),
+			},
+		}
+	}
+}
+
+impl Deref for Datetime {
+	type Target = DateTime<Utc>;
+	fn deref(&self) -> &Self::Target {
+		&self.0
+	}
+}
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use arbitrary::Arbitrary;
+	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, Timelike};
+
+	use super::*;
+
+	impl<'a> Arbitrary<'a> for Datetime {
+		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+			let date = u.arbitrary::<NaiveDate>()?;
+			let time = u.arbitrary::<NaiveTime>()?;
+			// Arbitrary was able to create times with 60 seconds instead of the 59 second limit.
+			let time = time.with_second(time.second() % 60).expect("0 to 59 is a valid second");
+			let time = time
+				.with_nanosecond(time.nanosecond() % 1_000_000_000)
+				.expect("0 to 999_999_999 is a valid nanosecond");
+
+			let offset = if u.arbitrary()? {
+				Utc.fix()
+			} else {
+				let hour = u.int_in_range(0..=23)?;
+				let minute = u.int_in_range(0..=59)?;
+				if u.arbitrary()? {
+					FixedOffset::west_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
+				} else {
+					FixedOffset::east_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
+				}
+			};
+
+			let datetime = NaiveDateTime::new(date, time);
+
+			let Some(x) = offset.from_local_datetime(&datetime).earliest() else {
+				return Err(arbitrary::Error::IncorrectFormat);
+			};
+
+			Ok(Datetime(x.with_timezone(&Utc)))
+		}
+	}
+}
