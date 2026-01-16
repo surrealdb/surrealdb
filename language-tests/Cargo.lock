@@ -1486,6 +1486,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 
 [[package]]
+name = "headers"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "headers-core",
+ "http 1.4.0",
+ "httpdate",
+ "mime",
+ "sha1",
+]
+
+[[package]]
+name = "headers-core"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
+dependencies = [
+ "http 1.4.0",
+]
+
+[[package]]
 name = "heapless"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3654,13 +3678,13 @@ dependencies = [
  "dmp",
  "ext-sort",
  "fastnum",
- "flatbuffers",
  "fst",
  "futures",
  "fuzzy-matcher",
  "geo 0.28.0",
  "geo-types",
  "getrandom 0.3.4",
+ "headers",
  "hex",
  "http 1.4.0",
  "humantime",
@@ -3669,6 +3693,7 @@ dependencies = [
  "lexicmp",
  "linfa-linalg",
  "md-5",
+ "mime",
  "nanoid",
  "ndarray",
  "ndarray-stats",

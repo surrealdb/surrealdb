@@ -1456,35 +1456,7 @@ impl Parser<'_> {
 					let mut middleware = Vec::new();
 
 					loop {
-						let mut name = match self.peek_kind() {
-							t!("API") => {
-								self.pop_peek();
-								expected!(self, t!("::"));
-								"api::".to_string()
-							}
-							t!("fn") => {
-								bail!("Custom middlewares are not yet supported")
-							}
-							_ => {
-								if middleware.is_empty() {
-									unexpected!(
-										self,
-										self.peek(),
-										"at least one middleware function"
-									);
-								}
-								break;
-							}
-						};
-
-						let part = self.parse_ident()?;
-						name.push_str(part.to_lowercase().as_str());
-
-						while self.eat(t!("::")) {
-							let part = self.parse_ident()?;
-							name.push_str("::");
-							name.push_str(part.to_lowercase().as_str());
-						}
+						let name = self.parse_function_name().await?.to_string();
 
 						expected!(self, t!("("));
 						let args = self.parse_function_args(stk).await?;

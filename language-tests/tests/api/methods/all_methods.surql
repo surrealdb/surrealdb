@@ -1,0 +1,141 @@
+/**
+[test]
+reason = "Test all HTTP methods (GET, POST, PUT, PATCH, DELETE, TRACE)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'get' }, context: {  }, headers: {}, status: 200 }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'post' }, context: {  }, headers: {}, status: 200 }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'put' }, context: {  }, headers: {}, status: 200 }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'patch' }, context: {  }, headers: {}, status: 200 }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'delete' }, context: {  }, headers: {}, status: 200 }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ body: { method: 'trace' }, context: {  }, headers: {}, status: 200 }"
+
+[env.capabilities]
+allow-experimental = ["define_api"]
+
+*/
+
+// GET method
+DEFINE API "/method/get"
+    FOR get
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/get", {
+    method: "get"
+});
+
+// POST method
+DEFINE API "/method/post"
+    FOR post
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/post", {
+    method: "post"
+});
+
+// PUT method
+DEFINE API "/method/put"
+    FOR put
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/put", {
+    method: "put"
+});
+
+// PATCH method
+DEFINE API "/method/patch"
+    FOR patch
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/patch", {
+    method: "patch"
+});
+
+// DELETE method
+DEFINE API "/method/delete"
+    FOR delete
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/delete", {
+    method: "delete"
+});
+
+// TRACE method
+DEFINE API "/method/trace"
+    FOR trace
+        THEN {
+            {
+                status: 200,
+                body: {
+                    method: $request.method
+                }
+            };
+        };
+
+api::invoke("/method/trace", {
+    method: "trace"
+});
+

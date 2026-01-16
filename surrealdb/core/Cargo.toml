@@ -118,7 +118,6 @@ ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
 fastnum.workspace = true
-flatbuffers.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -177,6 +176,8 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
 ], optional = true }
 tempfile = { workspace = true, optional = true }
+headers = "0.4.1"
+mime = "0.3.17"
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]

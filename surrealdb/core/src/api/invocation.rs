@@ -1,164 +1,219 @@
-use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::Result;
-use http::HeaderMap;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
-use surrealdb_types::SurrealValue;
 
-use super::body::ApiBody;
-use super::context::InvocationContext;
-use super::middleware::invoke;
-use super::response::{ApiResponse, ResponseInstruction};
+use super::response::ApiResponse;
+use crate::api::err::ApiError;
+use crate::api::request::ApiRequest;
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{ApiDefinition, ApiMethod};
+use crate::catalog::{ApiDefinition, MiddlewareDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::expr::FlowResultExt as _;
-use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::{PublicObject, PublicValue};
-use crate::val::convert_value_to_public_value;
+use crate::doc::CursorDoc;
+use crate::expr::{Expr, FlowResultExt as _};
+use crate::fnc::args::{Any, FromArgs, FromPublic};
+use crate::syn::function_with_capabilities;
+use crate::val::{Closure, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ApiInvocation {
-	pub params: PublicObject,
-	pub method: ApiMethod,
-	pub query: BTreeMap<String, String>,
-	pub headers: HeaderMap,
+/// Processes an API request through the middleware chain and executes the handler.
+///
+/// This function orchestrates the entire API request lifecycle:
+/// 1. Finds the appropriate handler based on HTTP method
+/// 2. Collects middleware from database-level, route-level, and method-level configs
+/// 3. Builds a middleware chain in execution order
+/// 4. Executes the middleware chain with the final handler
+/// 5. Returns the response or `None` if no handler matched
+///
+/// # Arguments
+/// * `ctx` - The frozen context containing database and transaction information
+/// * `opt` - Database options including permissions
+/// * `api` - The API definition containing path, handlers, and middleware configuration
+/// * `req` - The incoming API request with method, headers, body, params, etc.
+///
+/// # Returns
+/// * `Ok(Some(response))` - Successfully processed request with a response
+/// * `Ok(None)` - No matching handler found for the request method
+/// * `Err(e)` - Error during processing (middleware failure, handler error, etc.)
+pub async fn process_api_request(
+	ctx: &FrozenContext,
+	opt: &Options,
+	api: &ApiDefinition,
+	req: ApiRequest,
+) -> Result<Option<ApiResponse>> {
+	let mut stack = TreeStack::new();
+	stack.enter(|stk| process_api_request_with_stack(stk, ctx, opt, api, req)).finish().await
 }
 
-impl ApiInvocation {
-	pub fn vars(self, body: PublicValue) -> Result<PublicValue> {
-		let mut obj = PublicObject::new();
-		obj.insert("params".to_string(), PublicValue::Object(self.params));
-		obj.insert("body".to_string(), body);
-		obj.insert("method".to_string(), PublicValue::String(self.method.to_string()));
+/// Internal version of `process_api_request` that uses an existing stack.
+///
+/// This function is used internally when a stack is already available,
+/// avoiding the overhead of creating a new stack.
+///
+/// # Arguments
+/// * `stk` - The existing reblessive stack for async execution
+/// * `ctx` - The frozen context containing database and transaction information
+/// * `opt` - Database options including permissions
+/// * `api` - The API definition containing path, handlers, and middleware configuration
+/// * `req` - The incoming API request with method, headers, body, params, etc.
+///
+/// # Returns
+/// * `Ok(Some(response))` - Successfully processed request with a response
+/// * `Ok(None)` - No matching handler found for the request method
+/// * `Err(e)` - Error during processing (middleware failure, handler error, etc.)
+pub async fn process_api_request_with_stack(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	api: &ApiDefinition,
+	req: ApiRequest,
+) -> Result<Option<ApiResponse>> {
+	// TODO: Figure out if it is possible if multiple actions can have the same
+	// method, and if so should they all be run?
+	let method_action = api.actions.iter().find(|x| x.methods.contains(&req.method));
 
-		obj.insert(
-			"query".to_string(),
-			PublicValue::Object(PublicObject::from_iter(
-				self.query.into_iter().map(|(k, v)| (k, PublicValue::String(v))),
-			)),
-		);
-
-		obj.insert(
-			"headers".to_string(),
-			PublicValue::Object(PublicObject::from_iter(self.headers.into_iter().filter_map(
-				|(k, v)| {
-					k.map(|name| {
-						(
-							name.to_string(),
-							PublicValue::String(v.to_str().unwrap_or("").to_string()),
-						)
-					})
-				},
-			))),
-		);
-
-		Ok(PublicValue::Object(obj))
-	}
-
-	pub async fn invoke_with_transaction(
-		self,
-		ctx: &FrozenContext,
-		opt: &Options,
-		api: &ApiDefinition,
-		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
-		let mut stack = TreeStack::new();
-		stack.enter(|stk| self.invoke_with_context(stk, ctx, opt, api, body)).finish().await
-	}
-
-	// The `invoke` method accepting a parameter like `Option<&mut Stk>`
-	// causes issues with axum, hence the separation
-	pub async fn invoke_with_context(
-		self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		api: &ApiDefinition,
-		body: ApiBody,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>> {
-		// TODO: Figure out if it is possible if multiple actions can have the same
-		// method, and if so should they all be run?
-		let method_action = api.actions.iter().find(|x| x.methods.contains(&self.method));
-
-		if method_action.is_none() && api.fallback.is_none() {
-			// nothing to do, just return.
+	let (action_expr, method_config) = match (method_action, &api.fallback) {
+		(Some(x), _) => (x.action.clone(), Some(&x.config)),
+		(None, Some(x)) => (x.clone(), None),
+		// nothing to do, just return
+		_ => {
 			return Ok(None);
 		}
+	};
 
-		let mut inv_ctx = InvocationContext::default();
+	// first run the middleware which is globally configured for the database.
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	let global = ctx.tx().get_db_config(ns, db, "api").await?;
+	let middleware: Vec<_> = global
+		.as_ref()
+		.map(|v| v.try_as_api())
+		.transpose()?
+		.into_iter()
+		.flat_map(|cfg| cfg.middleware.iter().cloned())
+		.chain(api.config.middleware.iter().cloned())
+		.chain(method_config.into_iter().flat_map(|config| config.middleware.iter().cloned()))
+		.collect();
 
-		// first run the middleware which is globally configured for the database.
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let global = ctx.tx().get_db_config(ns, db, "api").await?;
-		if let Some(config) = global.as_ref().map(|v| v.try_as_api()).transpose()? {
-			for m in config.middleware.iter() {
-				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
-			}
-		}
+	// Create the final action closure (end of the middleware chain)
+	let final_action = create_final_action_closure(action_expr);
 
-		// run the middleware for the api definition.
-		for m in api.config.middleware.iter() {
-			invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
-		}
+	// Build the middleware chain backwards, wrapping each middleware around the previous closure
+	let next = middleware
+		.iter()
+		.rev()
+		.fold(final_action, |next, def| create_middleware_closure(def.clone(), next));
 
-		// run the middleware for the http method.
-		if let Some(method_action) = method_action {
-			for m in method_action.config.middleware.iter() {
-				invoke::invoke(&mut inv_ctx, &m.name, m.args.clone())?;
-			}
-		}
+	// APIs run without permissions
+	let opt = opt.new_with_perms(false);
+	let res = next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?;
+	let res: ApiResponse = res.try_into()?;
+	Ok(Some(res))
+}
 
-		// Prepare the response headers and conversion
-		let res_instruction = if body.is_native() {
-			ResponseInstruction::Native
-		} else if inv_ctx.response_body_raw {
-			ResponseInstruction::Raw
-		} else {
-			ResponseInstruction::for_format(&self)?
-		};
+/// Creates a closure that executes the final API action handler.
+///
+/// This closure is the end of the middleware chain and directly executes
+/// the action expression with the request in the context.
+fn create_final_action_closure(action_expr: Expr) -> Closure {
+	Closure::Builtin(Arc::new(
+		move |stk: &mut Stk,
+		      ctx: &FrozenContext,
+		      opt: &Options,
+		      doc: Option<&CursorDoc>,
+		      args: Any| {
+			// Extract request argument
+			let (FromPublic(req),): (FromPublic<ApiRequest>,) =
+				match FromArgs::from_args("", args.0) {
+					Ok(v) => v,
+					Err(_e) => {
+						return Box::pin(std::future::ready(Err(
+							ApiError::FinalActionRequestParseFailure.into(),
+						)));
+					}
+				};
 
-		let body_public = body.process(&inv_ctx, &self).await?;
+			// Update context - use the parameters passed to the closure
+			let mut ctx_isolated = Context::new_isolated(ctx);
+			ctx_isolated.add_value("request", Arc::new(req.into()));
+			let ctx_frozen = ctx_isolated.freeze();
 
-		// Edit the options
-		let opt = opt.new_with_perms(false);
+			// Clone required values
+			let action_expr = action_expr.clone();
+			// Execute
+			Box::pin(stk.run(async move |stk| {
+				action_expr
+					.compute(stk, &ctx_frozen, opt, doc)
+					.await
+					.catch_return()
+					// Ensure that the next middleware receives a proper api response object
+					.and_then(ApiResponse::try_from)
+					.map(Value::from)
+			}))
+		},
+	))
+}
 
-		// Edit the context
-		let mut ctx = Context::new_isolated(ctx);
+/// Creates a closure that executes a middleware function.
+///
+/// This closure wraps the next middleware/handler in the chain and calls
+/// the middleware function with the request and next closure.
+fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closure {
+	Closure::Builtin(Arc::new(
+		move |stk: &mut Stk,
+		      ctx: &FrozenContext,
+		      opt: &Options,
+		      doc: Option<&CursorDoc>,
+		      args: Any| {
+			// Clone required values
+			let def = def.clone();
 
-		// Set the request variable
-		let vars = self.vars(body_public)?;
-		let vars_internal = convert_public_value_to_internal(vars);
-		ctx.add_value("request", vars_internal.into());
+			// Extract request argument
+			let (FromPublic(req),): (FromPublic<ApiRequest>,) =
+				match FromArgs::from_args("", args.0) {
+					Ok(v) => v,
+					Err(_e) => {
+						return Box::pin(std::future::ready(Err(
+							ApiError::MiddlewareRequestParseFailure {
+								middleware: def.name,
+							}
+							.into(),
+						)));
+					}
+				};
 
-		// Possibly set the timeout
-		if let Some(timeout) = inv_ctx.timeout {
-			ctx.add_timeout(*timeout)?
-		}
+			// Parse function name - use ctx parameter directly
+			let function: crate::expr::Function =
+				match function_with_capabilities(&def.name, ctx.get_capabilities().as_ref()) {
+					Ok(f) => f.into(),
+					Err(_e) => {
+						return Box::pin(std::future::ready(Err(
+							ApiError::MiddlewareFunctionNotFound {
+								function: def.name.clone(),
+							}
+							.into(),
+						)));
+					}
+				};
 
-		// Freeze the context
-		let ctx = ctx.freeze();
+			// Prepare arguments to be passed
+			let mut fn_args = vec![Value::from(req), Value::Closure(Box::new(next.clone()))];
+			fn_args.extend(def.args);
 
-		// Compute the action
-
-		let Some(action) = method_action.map(|x| &x.action).or(api.fallback.as_ref()) else {
-			// condition already checked above.
-			// either method_action is some or api fallback is some.
-			unreachable!()
-		};
-
-		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
-
-		let val = convert_value_to_public_value(res)?;
-		let mut res = ApiResponse::from_value(val)?;
-		if let Some(headers) = inv_ctx.response_headers {
-			let mut headers = headers;
-			headers.extend(res.headers);
-			res.headers = headers;
-		}
-
-		Ok(Some((res, res_instruction)))
-	}
+			// Each middleware should execute in an isolated context to prevent cross-contamination
+			// between middleware calls, besides passed context objects
+			let ctx = Context::new_isolated(ctx).freeze();
+			let opt = opt.clone();
+			let doc = doc.cloned();
+			Box::pin(stk.run(async move |stk| {
+				function
+					.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
+					.await
+					.catch_return()
+					// Ensure that the next middleware receives a proper api response object
+					.and_then(ApiResponse::try_from)
+					.map(Value::from)
+			}))
+		},
+	))
 }

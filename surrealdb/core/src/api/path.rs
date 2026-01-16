@@ -26,6 +26,11 @@ impl<'a> Path {
 	///  - when we no longer match, or when the url is to short, we return None
 	///  - when the url is too long and there is no rest segment, we return None
 	pub fn fit(&'a self, segments: &'a [&'a str]) -> Option<Object> {
+		// Early exit if path has more segments than URL (unless rest segment exists)
+		if segments.len() < self.len() && !matches!(self.last(), Some(Segment::Rest(_))) {
+			return None;
+		}
+
 		let mut obj = Object::default();
 		for (i, segment) in self.iter().enumerate() {
 			if let Some(res) = segment.fit(&segments[i..]) {
