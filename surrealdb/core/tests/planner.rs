@@ -251,31 +251,31 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 
 fn three_table_explain() -> String {
 	"[
-		{{
-			detail: {{
+		{
+			detail: {
 				direction: 'forward',
 				table: 'person'
-			}},
+			},
 			operation: 'Iterate Table'
-		}},
-		{{
-			detail: {{
+		},
+		{
+			detail: {
 				type: 'MemoryOrdered'
-			}},
+			},
 			operation: 'Collector'
-		}},
-		{{
-			detail: {{
+		},
+		{
+			detail: {
 				type: 'KeysAndValues'
-			}},
+			},
 			operation: 'RecordStrategy'
-		}},
-		{{
-			detail: {{
+		},
+		{
+			detail: {
 				count: 3
-			}},
+			},
 			operation: 'Fetch'
-		}}
+		}
 	]"
 	.to_string()
 }
@@ -2328,42 +2328,40 @@ async fn select_memory_ordered_collector() -> Result<()> {
 	t.expect_size(5)?;
 	t.skip_ok(1)?;
 	// Check explain plans
-	for _ in 0..2 {
-		t.expect_val(
-			"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 'i'
-					},
-					operation: 'Iterate Table'
+	t.expect_val(
+		"[
+			{
+				detail: {
+					direction: 'forward',
+					table: 'i'
 				},
-				{
-					detail: {
-						type: 'MemoryRandom'
-					},
-					operation: 'Collector'
-				}
-			]",
-		)?;
-		t.expect_val(
-			"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 'i'
-					},
-					operation: 'Iterate Table'
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryRandom'
 				},
-				{
-					detail: {
-						type: 'MemoryOrdered'
-					},
-					operation: 'Collector'
-				}
-			]",
-		)?;
-	}
+				operation: 'Collector'
+			}
+		]",
+	)?;
+	t.expect_val(
+		"[
+			{
+				detail: {
+					direction: 'forward',
+					table: 'i'
+				},
+				operation: 'Iterate Table'
+			},
+			{
+				detail: {
+					type: 'MemoryOrdered'
+				},
+				operation: 'Collector'
+			}
+		]",
+	)?;
 
 	// Extract the array from a value
 	let mut get_array = || -> Result<_> {
@@ -2377,16 +2375,12 @@ async fn select_memory_ordered_collector() -> Result<()> {
 	};
 
 	// Check that the values are sorted `ORDER BY v`
-	for _ in 0..2 {
-		let a = get_array()?;
-		assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
-	}
+	let a = get_array()?;
+	assert!(a.windows(2).all(|w| w[0] <= w[1]), "Values are not sorted: {a:?}");
 
 	// Check that the values are not sorted `ORDER BY RAND()`
-	for _ in 0..2 {
-		let a = get_array()?;
-		assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
-	}
+	let a = get_array()?;
+	assert!(a.windows(2).any(|w| w[0] <= w[1]), "Values are not random: {a:?}");
 	// With an array of 1500, there is a probability of factorial 1500! that `ORDER
 	// BY RAND()` returns a sorted array At a rate of one test per minute, we're
 	// SURE that approximately 10^4,104.8 years from now a test WILL fail.
@@ -2402,52 +2396,51 @@ async fn select_limit_start() -> Result<()> {
 		SELECT * FROM item LIMIT 10 START 2 EXPLAIN FULL;
 		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(5)?;
+	t.expect_size(3)?;
 	t.skip_ok(1)?;
-	for _ in 0..2 {
-		t.expect_val(
-			"[
-					{
-						detail: {
-							direction: 'forward',
-							table: 'item'
-						},
-						operation: 'Iterate Table'
+	t.expect_val(
+		"[
+				{
+					detail: {
+						direction: 'forward',
+						table: 'item'
 					},
-					{
-						detail: {
-							type: 'Memory'
-						},
-						operation: 'Collector'
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						type: 'Memory'
 					},
-					{
-						detail: {
-							type: 'KeysAndValues'
-						},
-						operation: 'RecordStrategy'
+					operation: 'Collector'
+				},
+				{
+					detail: {
+						type: 'KeysAndValues'
 					},
-					{
-						detail: {
-							CancelOnLimit: 10,
-							SkipStart: 2
-						},
-						operation: 'StartLimitStrategy'
+					operation: 'RecordStrategy'
+				},
+				{
+					detail: {
+						CancelOnLimit: 10,
+						SkipStart: 2
 					},
-					{
-						detail: {
-							count: 10
-						},
-						operation: 'Fetch'
-					}
-				]",
-		)?;
-		let r = t.next()?.result?;
-		if let Value::Array(a) = r {
-			assert_eq!(a.len(), 10);
-		} else {
-			panic!("Unexpected value: {r:#?}");
-		}
+					operation: 'StartLimitStrategy'
+				},
+				{
+					detail: {
+						count: 10
+					},
+					operation: 'Fetch'
+				}
+			]",
+	)?;
+	let r = t.next()?.result?;
+	if let Value::Array(a) = r {
+		assert_eq!(a.len(), 10);
+	} else {
+		panic!("Unexpected value: {r:#?}");
 	}
+
 	Ok(())
 }
 
@@ -2460,31 +2453,29 @@ async fn select_limit_start_order() -> Result<()> {
 	let mut t = Test::new(sql).await?;
 	t.expect_size(3)?;
 	t.skip_ok(1)?;
-	for _ in 0..2 {
-		t.expect_val(
-			"[
-					{
-						detail: {
-							direction: 'forward',
-							table: 'item'
-						},
-						operation: 'Iterate Table'
+	t.expect_val(
+		"[
+				{
+					detail: {
+						direction: 'forward',
+						table: 'item'
 					},
-					{
-						detail: {
-							limit: 12,
-							type: 'MemoryOrderedLimit'
-						},
-						operation: 'Collector'
-					}
-				]",
-		)?;
-		let r = t.next()?.result?;
-		if let Value::Array(a) = r {
-			assert_eq!(a.len(), 10);
-		} else {
-			panic!("Unexpected value: {r:#?}");
-		}
+					operation: 'Iterate Table'
+				},
+				{
+					detail: {
+						limit: 12,
+						type: 'MemoryOrderedLimit'
+					},
+					operation: 'Collector'
+				}
+			]",
+	)?;
+	let r = t.next()?.result?;
+	if let Value::Array(a) = r {
+		assert_eq!(a.len(), 10);
+	} else {
+		panic!("Unexpected value: {r:#?}");
 	}
 	Ok(())
 }
