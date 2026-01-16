@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput};
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 
@@ -16,7 +16,15 @@ pub(super) async fn init(target: &str) {
 	match target {
 		#[cfg(feature = "kv-mem")]
 		"lib-mem" => {
-			let _ = DB.set(Arc::new(Datastore::new("memory").await.unwrap()));
+			let ds = Datastore::new("memory").await.unwrap();
+			// Define namespace and database for benchmarks
+			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
+				.await
+				.expect("Unable to define namespace");
+			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
+				.await
+				.expect("Unable to define database");
+			let _ = DB.set(Arc::new(ds));
 		}
 		#[cfg(feature = "kv-rocksdb")]
 		"lib-rocksdb" => {
@@ -29,9 +37,13 @@ pub(super) async fn init(target: &str) {
 			);
 			println!("\n### Using path: {} ###\n", path);
 			let ds = Datastore::new(&path).await.unwrap();
-			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
+			// Define namespace and database for benchmarks
+			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
 				.await
-				.expect("Unable to execute the query");
+				.expect("Unable to define namespace");
+			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
+				.await
+				.expect("Unable to define database");
 			let _ = DB.set(Arc::new(ds));
 		}
 		#[cfg(feature = "kv-surrealkv")]
@@ -45,9 +57,13 @@ pub(super) async fn init(target: &str) {
 			);
 			println!("\n### Using path: {} ###\n", path);
 			let ds = Datastore::new(&path).await.unwrap();
-			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
+			// Define namespace and database for benchmarks
+			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
 				.await
-				.expect("Unable to execute the query");
+				.expect("Unable to define namespace");
+			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
+				.await
+				.expect("Unable to define database");
 			let _ = DB.set(Arc::new(ds));
 		}
 
