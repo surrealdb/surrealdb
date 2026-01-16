@@ -26,7 +26,6 @@ pub(crate) struct RelateStatement {
 	pub data: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 }
 
 impl RelateStatement {
@@ -181,7 +180,9 @@ impl RelateStatement {
 
 		CursorDoc::update_parent(ctx, doc, async |ctx| {
 			// Process the statement
-			let res = iterator.output(stk, ctx.as_ref(), opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator
+				.output(stk, ctx.as_ref(), opt, &stm, RecordStrategy::KeysAndValues)
+				.await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

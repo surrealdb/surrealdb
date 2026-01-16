@@ -122,8 +122,7 @@ pub fn parse_continue() {
 #[test]
 fn parse_create() {
 	let res = syn::parse_with(
-		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL"
-			.as_bytes(),
+		"CREATE ONLY foo SET bar = 3, foo +?= baz RETURN VALUE foo AS bar TIMEOUT 1s".as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -150,7 +149,6 @@ fn parse_create() {
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			version: Expr::Literal(Literal::None),
 		})),
 	);
@@ -1785,7 +1783,7 @@ fn parse_define_analyzer() {
 
 #[test]
 fn parse_delete() {
-	let res = syn::parse_with("DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL".as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = syn::parse_with("DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s EXPLAIN FULL".as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
@@ -1795,7 +1793,6 @@ fn parse_delete() {
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))
 	);
@@ -1803,7 +1800,7 @@ fn parse_delete() {
 
 #[test]
 fn parse_delete_2() {
-	let res = syn::parse_with(r#"DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = syn::parse_with(r#"DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
@@ -1824,7 +1821,6 @@ fn parse_delete_2() {
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(60 * 60))),
-			parallel: true,
 			explain: Some(Explain(false)),
 		}))
 	)
@@ -1844,7 +1840,7 @@ pub fn parse_for() {
 			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
-					expr: Fields::Select(vec![Field::Single(Selector {
+					fields: Fields::Select(vec![Field::Single(Selector {
 						expr: ident_field("foo"),
 						alias: None
 					})],),
@@ -1861,7 +1857,6 @@ pub fn parse_for() {
 					fetch: None,
 					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
-					parallel: false,
 					explain: None,
 					tempfiles: false
 				}))),
@@ -2013,7 +2008,7 @@ fn parse_select() {
 	assert_eq!(
 		res,
 		Expr::Select(Box::new(SelectStatement {
-			expr: Fields::Select(vec![
+			fields: Fields::Select(vec![
 				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
@@ -2060,7 +2055,6 @@ fn parse_select() {
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
 			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			tempfiles: false,
 			explain: Some(Explain(true)),
 		})),
@@ -2261,7 +2255,6 @@ fn parse_insert() {
 			output: Some(Output::After),
 			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
 		})),
 	)
@@ -2279,7 +2272,7 @@ fn parse_insert_select() {
 		Expr::Insert(Box::new(InsertStatement {
 			into: Some(Expr::Table("bar".to_owned())),
 			data: Data::SingleExpression(Expr::Select(Box::new(SelectStatement {
-				expr: Fields::Select(vec![Field::Single(Selector {
+				fields: Fields::Select(vec![Field::Single(Selector {
 					expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
 					alias: None
 				})],),
@@ -2296,7 +2289,6 @@ fn parse_insert_select() {
 				fetch: None,
 				version: Expr::Literal(Literal::None),
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
 				explain: None,
 				tempfiles: false
 			}))),
@@ -2305,7 +2297,6 @@ fn parse_insert_select() {
 			output: None,
 			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
 		})),
 	)
@@ -2419,7 +2410,7 @@ fn parse_return() {
 #[test]
 fn parse_relate() {
 	let res = syn::parse_with(
-		r#"RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE PARALLEL"#.as_bytes(),
+		r#"RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE"#.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -2441,7 +2432,6 @@ fn parse_relate() {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
 				version: Expr::Literal(Literal::None),
 			})),
 			uniq: true,
@@ -2452,7 +2442,6 @@ fn parse_relate() {
 			}])),
 			output: Some(Output::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: true,
 		})),
 	)
 }
@@ -2621,7 +2610,7 @@ fn parse_remove() {
 
 #[test]
 fn parse_update() {
-	let res = syn::parse_with(r#"UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = syn::parse_with(r#"UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Update(Box::new(UpdateStatement {
@@ -2656,7 +2645,6 @@ fn parse_update() {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true))
 		}))
 	);
@@ -2664,7 +2652,7 @@ fn parse_update() {
 
 #[test]
 fn parse_upsert() {
-	let res = syn::parse_with(r#"UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+	let res = syn::parse_with(r#"UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Upsert(Box::new(UpsertStatement {
@@ -2699,7 +2687,6 @@ fn parse_upsert() {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(false))
 		}))
 	);

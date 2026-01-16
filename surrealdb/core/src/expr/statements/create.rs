@@ -25,8 +25,6 @@ pub(crate) struct CreateStatement {
 	pub(crate) output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Expr,
-	// If the statement should be run in parallel
-	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
 	pub(crate) version: Expr,
 }
@@ -39,7 +37,6 @@ impl Default for CreateStatement {
 			data: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			version: Expr::Literal(Literal::None),
 		}
 	}
@@ -89,8 +86,10 @@ impl CreateStatement {
 
 		// Loop over the create targets
 		for w in self.what.iter() {
-			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
-				|e| {
+			iterator
+				.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.await
+				.map_err(|e| {
 					// double match to avoid allocation
 					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 						let Ok(Error::InvalidStatementTarget {
@@ -105,8 +104,7 @@ impl CreateStatement {
 					} else {
 						e
 					}
-				},
-			)?;
+				})?;
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
@@ -116,7 +114,7 @@ impl CreateStatement {
 
 		CursorDoc::update_parent(&ctx, doc, async |ctx| {
 			// Process the statement
-			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

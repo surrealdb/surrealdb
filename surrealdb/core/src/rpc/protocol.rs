@@ -749,7 +749,7 @@ pub trait RpcProtocol {
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			only,
-			expr: Fields::all(),
+			fields: Fields::all(),
 			what: vec![what],
 			with: None,
 			cond: None,
@@ -762,7 +762,6 @@ pub trait RpcProtocol {
 			fetch: None,
 			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 			tempfiles: false,
 		};
@@ -812,7 +811,6 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
 			version: Expr::Literal(Literal::None),
 		};
@@ -860,7 +858,6 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
@@ -916,7 +913,6 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
@@ -971,7 +967,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		};
 		let ast = Ast::single_expr(Expr::Upsert(Box::new(sql)));
@@ -1027,7 +1022,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		};
 		let ast = Ast::single_expr(Expr::Update(Box::new(sql)));
@@ -1148,7 +1142,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		}));
 		// Specify the query parameters
@@ -1208,7 +1201,6 @@ pub trait RpcProtocol {
 			output: Some(Output::After),
 			uniq: false,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 		}));
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
@@ -1246,7 +1238,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		}));
 		let ast = Ast::single_expr(sql);

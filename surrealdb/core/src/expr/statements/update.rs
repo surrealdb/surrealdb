@@ -22,7 +22,6 @@ pub(crate) struct UpdateStatement {
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
@@ -36,7 +35,6 @@ impl Default for UpdateStatement {
 			cond: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			explain: Default::default(),
 		}
 	}
@@ -76,8 +74,10 @@ impl UpdateStatement {
 		};
 		// Loop over the update targets
 		for w in self.what.iter() {
-			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
-				|e| {
+			iterator
+				.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.await
+				.map_err(|e| {
 					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 						let Ok(Error::InvalidStatementTarget {
 							value,
@@ -91,15 +91,14 @@ impl UpdateStatement {
 					} else {
 						e
 					}
-				},
-			)?;
+				})?;
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
 
 		CursorDoc::update_parent(&ctx, doc, async |ctx| {
 			// Process the statement
-			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

@@ -186,7 +186,6 @@ pub async fn process_tbs(
 						fetch: None,
 						version: Expr::Literal(Literal::None),
 						timeout: Expr::Literal(Literal::None),
-						parallel: false,
 						explain: None,
 						tempfiles: false,
 					}));
@@ -302,7 +301,6 @@ pub async fn process_tbs(
 								fetch: None,
 								version: Expr::Literal(Literal::None),
 								timeout: Expr::Literal(Literal::None),
-								parallel: false,
 								explain: None,
 								tempfiles: false,
 							};
@@ -432,7 +430,6 @@ pub async fn process_tbs(
 						fetch: None,
 						version: Expr::Literal(Literal::None),
 						timeout: Expr::Literal(Literal::None),
-						parallel: false,
 						explain: None,
 						tempfiles: false,
 					};
@@ -493,7 +490,6 @@ fn make_table_field_resolver(
 					fetch: None,
 					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
-					parallel: false,
 					explain: None,
 					tempfiles: false,
 				};

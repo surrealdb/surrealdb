@@ -24,7 +24,6 @@ pub(crate) struct InsertStatement {
 	pub update: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub relation: bool,
 	pub version: Expr,
 }

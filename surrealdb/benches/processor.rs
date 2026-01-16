@@ -22,26 +22,13 @@ fn bench_processor(c: &mut Criterion) {
 		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item", i.count * 5))
 	});
 
-	group.bench_function("table-iterator-parallel", |b| {
-		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item PARALLEL", i.count * 5))
-	});
-
 	group.bench_function("non-uniq-index-iterator", |b| {
 		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item WHERE number=4", i.count))
-	});
-
-	group.bench_function("non-uniq-index-iterator-parallel", |b| {
-		b.to_async(&runtime).iter(|| run(&i, "SELECT * FROM item WHERE number=4 PARALLEL", i.count))
 	});
 
 	group.bench_function("full-text-index-iterator", |b| {
 		b.to_async(&runtime)
 			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie'", i.count))
-	});
-
-	group.bench_function("full-text-index-iterator-parallel", |b| {
-		b.to_async(&runtime)
-			.iter(|| run(&i, "SELECT * FROM item WHERE label @@ 'charlie' PARALLEL", i.count))
 	});
 
 	group.finish();

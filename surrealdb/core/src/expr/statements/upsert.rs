@@ -22,7 +22,6 @@ pub(crate) struct UpsertStatement {
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
@@ -36,7 +35,6 @@ impl Default for UpsertStatement {
 			cond: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			explain: Default::default(),
 		}
 	}
@@ -76,8 +74,10 @@ impl UpsertStatement {
 		};
 		// Loop over the upsert targets
 		for w in self.what.iter() {
-			iterator.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w).await.map_err(
-				|e| {
+			iterator
+				.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.await
+				.map_err(|e| {
 					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 						let Ok(Error::InvalidStatementTarget {
 							value,
@@ -91,8 +91,7 @@ impl UpsertStatement {
 					} else {
 						e
 					}
-				},
-			)?;
+				})?;
 		}
 		CursorDoc::update_parent(&ctx, doc, async |ctx| {
 			// Attach the query planner to the context

@@ -672,7 +672,6 @@ impl Document {
 				fetch: None,
 				version: Expr::Literal(Literal::None),
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
 				explain: None,
 				tempfiles: false,
 			};
@@ -1080,7 +1079,6 @@ impl Document {
 				fetch: None,
 				version: Expr::Literal(Literal::None),
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
 				explain: None,
 				tempfiles: false,
 			};

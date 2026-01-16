@@ -62,12 +62,11 @@ impl Parser<'_> {
 			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 		let tempfiles = self.eat(t!("TEMPFILES"));
 		let explain = self.try_parse_explain()?;
 
 		Ok(SelectStatement {
-			expr,
+			fields: expr,
 			omit,
 			only,
 			what,
@@ -81,7 +80,6 @@ impl Parser<'_> {
 			fetch,
 			version,
 			timeout,
-			parallel,
 			tempfiles,
 			explain,
 		})

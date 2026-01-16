@@ -223,7 +223,10 @@ impl Document {
 					Ok(current.doc.data.as_ref().clone())
 				} else {
 					// Process the SELECT statement fields
-					stmt.fields.compute(stk, ctx, opt, Some(current)).await.map_err(IgnoreError::from)
+					stmt.fields
+						.compute(stk, ctx, opt, Some(current))
+						.await
+						.map_err(IgnoreError::from)
 				}
 			}
 		}?;

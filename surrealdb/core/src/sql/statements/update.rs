@@ -14,7 +14,6 @@ pub(crate) struct UpdateStatement {
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
@@ -28,7 +27,6 @@ impl Default for UpdateStatement {
 			cond: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			explain: Default::default(),
 		}
 	}
@@ -56,9 +54,6 @@ impl ToSql for UpdateStatement {
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
-		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -75,7 +70,6 @@ impl From<UpdateStatement> for crate::expr::statements::UpdateStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}
@@ -91,7 +85,6 @@ impl From<crate::expr::statements::UpdateStatement> for UpdateStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}

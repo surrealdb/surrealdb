@@ -164,7 +164,6 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 			update,
 			output: u.arbitrary()?,
 			timeout: u.arbitrary()?,
-			parallel: u.arbitrary()?,
 			relation: u.arbitrary()?,
 			version: u.arbitrary()?,
 		})
@@ -208,7 +207,6 @@ impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 			fetch: u.arbitrary()?,
 			version: u.arbitrary()?,
 			timeout: u.arbitrary()?,
-			parallel: u.arbitrary()?,
 			explain: u.arbitrary()?,
 			tempfiles: u.arbitrary()?,
 		})

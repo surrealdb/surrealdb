@@ -33,7 +33,6 @@ pub(crate) struct SelectStatement {
 	pub fetch: Option<Fetchs>,
 	pub version: Expr,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
 }
@@ -99,15 +98,18 @@ impl SelectStatement {
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
-			iterator.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
+			iterator
+				.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.await?;
 		}
 
 		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement
-			let res =
-				iterator.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator
+				.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues)
+				.await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 

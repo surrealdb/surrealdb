@@ -13,24 +13,10 @@ use crate::helpers::Test;
 #[tokio::test]
 async fn select_where_iterate_three_multi_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res = execute_test(&dbs, &three_multi_index_query("", ""), 12).await?;
+	let mut res = execute_test(&dbs, &three_multi_index_query(""), 12).await?;
 	skip_ok(&mut res, 8)?;
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	// OR results
-	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
-	// AND results
-	check_result(&mut res, "[{name: 'Jaime'}]")?;
-	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_where_iterate_three_multi_index_parallel() -> Result<()> {
-	let dbs = new_ds("test", "test").await?;
-	let mut res = execute_test(&dbs, &three_multi_index_query("", "PARALLEL"), 12).await?;
-	skip_ok(&mut res, 8)?;
-	// OR results
-	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]")?;
 	check_result(&mut res, THREE_MULTI_INDEX_EXPLAIN)?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
@@ -43,7 +29,7 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
 	let mut res = execute_test(
 		&dbs,
-		&three_multi_index_query("WITH INDEX uniq_name,idx_genre,ft_company", ""),
+		&three_multi_index_query("WITH INDEX uniq_name,idx_genre,ft_company"),
 		12,
 	)
 	.await?;
@@ -60,13 +46,12 @@ async fn select_where_iterate_three_multi_index_with_all_index() -> Result<()> {
 #[tokio::test]
 async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res =
-		execute_test(&dbs, &three_multi_index_query("WITH INDEX ft_company", ""), 12).await?;
+	let mut res = execute_test(&dbs, &three_multi_index_query("WITH INDEX ft_company"), 12).await?;
 	skip_ok(&mut res, 8)?;
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, &three_table_explain(false))?;
+	check_result(&mut res, &three_table_explain())?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
 	check_result(&mut res, SINGLE_INDEX_FT_EXPLAIN)?;
@@ -77,13 +62,12 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 #[ignore] // TODO EK
 async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res =
-		execute_test(&dbs, &three_multi_index_query("WITH INDEX uniq_name", ""), 12).await?;
+	let mut res = execute_test(&dbs, &three_multi_index_query("WITH INDEX uniq_name"), 12).await?;
 	skip_ok(&mut res, 8)?;
 
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' } ]")?;
-	check_result(&mut res, &three_table_explain(false))?;
+	check_result(&mut res, &three_table_explain())?;
 	// AND results
 	check_result(&mut res, "[{name: 'Jaime'}]")?;
 	check_result(&mut res, SINGLE_INDEX_UNIQ_EXPLAIN)?;
@@ -93,7 +77,7 @@ async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
 #[tokio::test]
 async fn select_where_iterate_two_multi_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res = execute_test(&dbs, &two_multi_index_query("", ""), 9).await?;
+	let mut res = execute_test(&dbs, &two_multi_index_query(""), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
@@ -107,7 +91,7 @@ async fn select_where_iterate_two_multi_index() -> Result<()> {
 #[tokio::test]
 async fn select_where_iterate_two_multi_index_with_one_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res = execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre", ""), 9).await?;
+	let mut res = execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre"), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
@@ -122,7 +106,7 @@ async fn select_where_iterate_two_multi_index_with_one_index() -> Result<()> {
 async fn select_where_iterate_two_multi_index_with_two_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
 	let mut res =
-		execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre,uniq_name", ""), 9).await?;
+		execute_test(&dbs, &two_multi_index_query("WITH INDEX idx_genre,uniq_name"), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
@@ -136,7 +120,7 @@ async fn select_where_iterate_two_multi_index_with_two_index() -> Result<()> {
 #[tokio::test]
 async fn select_where_iterate_two_no_index() -> Result<()> {
 	let dbs = new_ds("test", "test").await?;
-	let mut res = execute_test(&dbs, &two_multi_index_query("WITH NOINDEX", ""), 9).await?;
+	let mut res = execute_test(&dbs, &two_multi_index_query("WITH NOINDEX"), 9).await?;
 	skip_ok(&mut res, 5)?;
 	// OR results
 	check_result(&mut res, "[{ name: 'Jaime' }, { name: 'Tobie' }]")?;
@@ -165,21 +149,21 @@ fn check_result(res: &mut Vec<QueryResult>, expected: &str) -> Result<()> {
 	Ok(())
 }
 
-fn two_multi_index_query(with: &str, parallel: &str) -> String {
+fn two_multi_index_query(with: &str) -> String {
 	format!(
 		"CREATE person:tobie SET name = 'Tobie', genre='m', company='SurrealDB';
 		CREATE person:jaime SET name = 'Jaime', genre='m', company='SurrealDB';
 		CREATE person:lizzie SET name = 'Lizzie', genre='f', company='SurrealDB';
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name {parallel} EXPLAIN FULL;"
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name;
+	    SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' ORDER BY name EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name;
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' ORDER BY name EXPLAIN FULL;"
 	)
 }
 
-fn three_multi_index_query(with: &str, parallel: &str) -> String {
+fn three_multi_index_query(with: &str) -> String {
 	format!("
 		CREATE person:tobie SET name = 'Tobie', genre='m', company='SurrealDB';
 		CREATE person:jaime SET name = 'Jaime', genre='m', company='SurrealDB';
@@ -189,10 +173,10 @@ fn three_multi_index_query(with: &str, parallel: &str) -> String {
 		DEFINE INDEX ft_company ON person FIELDS company FULLTEXT ANALYZER simple BM25;
 		DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 		DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel};
-		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;
-		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel};
-	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name {parallel} EXPLAIN FULL;")
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name;
+		SELECT name FROM person {with} WHERE name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb' ORDER BY name EXPLAIN FULL;
+		SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name;
+	    SELECT name FROM person {with} WHERE name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb' ORDER BY name EXPLAIN FULL;")
 }
 
 fn table_explain(fetch_count: usize) -> String {
@@ -265,41 +249,35 @@ fn table_explain_no_index(fetch_count: usize) -> String {
 	)
 }
 
-fn three_table_explain(parallel: bool) -> String {
-	let collector = if parallel {
-		"AsyncMemoryOrdered"
-	} else {
-		"MemoryOrdered"
-	};
-	format!(
-		"[
-			{{
-				detail: {{
-					direction: 'forward',
-					table: 'person'
-				}},
-				operation: 'Iterate Table'
+fn three_table_explain() -> String {
+	"[
+		{{
+			detail: {{
+				direction: 'forward',
+				table: 'person'
 			}},
-			{{
-				detail: {{
-					type: '{collector}'
-				}},
-				operation: 'Collector'
+			operation: 'Iterate Table'
+		}},
+		{{
+			detail: {{
+				type: 'MemoryOrdered'
 			}},
-			{{
-				detail: {{
-					type: 'KeysAndValues'
-				}},
-				operation: 'RecordStrategy'
+			operation: 'Collector'
+		}},
+		{{
+			detail: {{
+				type: 'KeysAndValues'
 			}},
-			{{
-				detail: {{
-					count: 3
-				}},
-				operation: 'Fetch'
-			}}
-		]"
-	)
+			operation: 'RecordStrategy'
+		}},
+		{{
+			detail: {{
+				count: 3
+			}},
+			operation: 'Fetch'
+		}}
+	]"
+	.to_string()
 }
 
 const THREE_MULTI_INDEX_EXPLAIN: &str = "[
@@ -2343,14 +2321,11 @@ async fn select_memory_ordered_collector() -> Result<()> {
 		CREATE |i:1500| SET v = rand::id() RETURN NONE;
 		SELECT v FROM i ORDER BY RAND() EXPLAIN;
 		SELECT v FROM i ORDER BY v EXPLAIN;
-		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
-		SELECT v FROM i ORDER BY v PARALLEL EXPLAIN;
 		SELECT v FROM i ORDER BY v;
-		SELECT v FROM i ORDER BY v PARALLEL;
 		SELECT v FROM i ORDER BY RAND();
-		SELECT v FROM i ORDER BY RAND() PARALLEL;";
+	";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(9)?;
+	t.expect_size(5)?;
 	t.skip_ok(1)?;
 	// Check explain plans
 	for _ in 0..2 {
@@ -2424,8 +2399,6 @@ async fn select_memory_ordered_collector() -> Result<()> {
 async fn select_limit_start() -> Result<()> {
 	let sql = r"
 		CREATE |item:1000|;
-		SELECT * FROM item LIMIT 10 START 2 PARALLEL EXPLAIN FULL;
-		SELECT * FROM item LIMIT 10 START 2 PARALLEL;
 		SELECT * FROM item LIMIT 10 START 2 EXPLAIN FULL;
 		SELECT * FROM item LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
@@ -2482,12 +2455,10 @@ async fn select_limit_start() -> Result<()> {
 async fn select_limit_start_order() -> Result<()> {
 	let sql = r"
 		CREATE |item:1000| RETURN NONE;
-		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL EXPLAIN;
-		SELECT * FROM item ORDER BY id LIMIT 10 START 2 PARALLEL;
 		SELECT * FROM item ORDER BY id LIMIT 10 START 2 EXPLAIN;
 		SELECT * FROM item ORDER BY id LIMIT 10 START 2;";
 	let mut t = Test::new(sql).await?;
-	t.expect_size(5)?;
+	t.expect_size(3)?;
 	t.skip_ok(1)?;
 	for _ in 0..2 {
 		t.expect_val(

@@ -9,7 +9,7 @@ use crate::sql::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
-	pub expr: Fields,
+	pub fields: Fields,
 	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
@@ -24,14 +24,13 @@ pub struct SelectStatement {
 	pub fetch: Option<Fetchs>,
 	pub version: Expr,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
 }
 
 impl ToSql for SelectStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "SELECT {}", self.expr);
+		write_sql!(f, fmt, "SELECT {}", self.fields);
 		if !self.omit.is_empty() {
 			write_sql!(f, fmt, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmts)));
 		}
@@ -70,9 +69,6 @@ impl ToSql for SelectStatement {
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
-		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -82,7 +78,7 @@ impl ToSql for SelectStatement {
 impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {
 		Self {
-			fields: v.expr.into(),
+			fields: v.fields.into(),
 			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
@@ -96,7 +92,6 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			fetch: v.fetch.map(Into::into),
 			version: v.version.into(),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
 		}
@@ -106,7 +101,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 	fn from(v: crate::expr::statements::SelectStatement) -> Self {
 		Self {
-			expr: v.fields.into(),
+			fields: v.fields.into(),
 			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
@@ -120,7 +115,6 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			fetch: v.fetch.map(Into::into),
 			version: v.version.into(),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
 		}

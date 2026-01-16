@@ -52,4 +52,4 @@ SELECT id, search::score(1) as sc1, search::score(2) as sc2
 	FROM page WHERE
 	host = 'test'
 	AND (title @1@ 'dog' OR content @2@ 'dog')
-	ORDER BY id PARALLEL;
+	ORDER BY id;

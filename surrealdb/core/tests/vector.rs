@@ -15,7 +15,6 @@ async fn select_where_brute_force_knn() -> Result<()> {
 		LET $pt = [2,3,4,5];
 		SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt ORDER BY dist;
-		SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt ORDER BY dist PARALLEL;
 	";
 	let mut t = Test::new(sql).await?;
 	//
