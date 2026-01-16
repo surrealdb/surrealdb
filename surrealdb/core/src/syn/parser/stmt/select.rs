@@ -15,7 +15,7 @@ impl Parser<'_> {
 		stk: &mut Stk,
 	) -> ParseResult<SelectStatement> {
 		let before = self.peek().span;
-		let expr = self.parse_fields(stk).await?;
+		let fields = self.parse_fields(stk).await?;
 		let fields_span = before.covers(self.last_span());
 
 		let omit = if self.eat(t!("OMIT")) {
@@ -43,9 +43,9 @@ impl Parser<'_> {
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
-		let split = self.try_parse_split(&expr, fields_span)?;
-		let group = self.try_parse_group(&expr, fields_span)?;
-		let order = self.try_parse_orders(&expr, fields_span)?;
+		let split = self.try_parse_split(&fields, fields_span)?;
+		let group = self.try_parse_group(&fields, fields_span)?;
+		let order = self.try_parse_orders(&fields, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;
 			let limit = self.try_parse_limit(stk).await?;
@@ -66,7 +66,7 @@ impl Parser<'_> {
 		let explain = self.try_parse_explain()?;
 
 		Ok(SelectStatement {
-			fields: expr,
+			fields,
 			omit,
 			only,
 			what,
