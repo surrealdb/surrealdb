@@ -82,7 +82,7 @@ impl ToSql for SelectStatement {
 impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {
 		Self {
-			expr: v.expr.into(),
+			fields: v.expr.into(),
 			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
@@ -106,7 +106,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 	fn from(v: crate::expr::statements::SelectStatement) -> Self {
 		Self {
-			expr: v.expr.into(),
+			expr: v.fields.into(),
 			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),

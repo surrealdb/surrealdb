@@ -10,8 +10,7 @@ use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Literal, Splits, Start,
-	With,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
@@ -19,7 +18,7 @@ use crate::val::{Datetime, Value};
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
-	pub expr: Fields,
+	pub fields: Fields,
 	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
@@ -39,34 +38,10 @@ pub(crate) struct SelectStatement {
 	pub tempfiles: bool,
 }
 
-impl Default for SelectStatement {
-	fn default() -> Self {
-		SelectStatement {
-			expr: Fields::all(),
-			omit: vec![],
-			only: false,
-			what: Vec::new(),
-			with: None,
-			cond: None,
-			split: None,
-			group: None,
-			order: None,
-			limit: None,
-			start: None,
-			fetch: None,
-			version: Expr::Literal(Literal::None),
-			timeout: Expr::Literal(Literal::None),
-			parallel: false,
-			explain: None,
-			tempfiles: false,
-		}
-	}
-}
-
 impl SelectStatement {
 	/// Check if computing this type can be done on a read only transaction.
 	pub(crate) fn read_only(&self) -> bool {
-		self.expr.read_only()
+		self.fields.read_only()
 			&& self.what.iter().all(|v| v.read_only())
 			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
 	}

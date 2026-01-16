@@ -409,7 +409,7 @@ impl Value {
 							]));
 
 							let stm = SelectStatement {
-								expr,
+								fields: expr,
 								what: vec![what],
 								cond: g.cond.clone(),
 								limit: g.limit.clone(),
@@ -417,7 +417,15 @@ impl Value {
 								split: g.split.clone(),
 								group: g.group.clone(),
 								start: g.start.clone(),
-								..SelectStatement::default()
+								omit: vec![],
+								only: false,
+								with: None,
+								fetch: None,
+								version: Expr::Literal(Literal::None),
+								timeout: Expr::Literal(Literal::None),
+								parallel: false,
+								explain: None,
+								tempfiles: false,
 							};
 
 							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();

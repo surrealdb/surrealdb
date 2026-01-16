@@ -471,7 +471,7 @@ implement_visitor! {
 	}
 
 	fn visit_select(this, s: &SelectStatement){
-		this.visit_fields(&s.expr)?;
+		this.visit_fields(&s.fields)?;
 		for o in s.omit.iter(){
 			this.visit_expr(o)?;
 		}
@@ -1876,7 +1876,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_select(this, s: &mut SelectStatement){
-		this.visit_mut_fields(&mut s.expr)?;
+		this.visit_mut_fields(&mut s.fields)?;
 		for o in s.omit.iter_mut(){
 			this.visit_mut_expr(o)?;
 		}
