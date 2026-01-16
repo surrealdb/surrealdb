@@ -33,7 +33,7 @@ jobs:
             // Core team members - update this list when team membership changes
             const CORE_TEAM = [
               'arriqaaq',
-              'delskayne',
+              'delskayn',
               'dhghomon',
               'emmanuel-keller',
               'kearfy',
