@@ -221,6 +221,19 @@ Release 3.0.1 from release/3.0 branch
 
 ## Version Management
 
+### Surrealism Crates
+
+**Important**: The `surrealism-*` crates follow independent versioning and are **not updated** during SurrealDB releases.
+
+- Surrealism version: `0.1.x` (independent)
+- SurrealDB version: `3.0.0-beta` (workspace-managed)
+
+The release scripts automatically detect and version only packages starting with `surrealdb-*`:
+- ✅ Automatically included: `surrealdb`, `surrealdb-core`, `surrealdb-server`, `surrealdb-types`, `surrealdb-types-derive`, `surrealdb-profiling`
+- ❌ Automatically excluded: `surrealism`, `surrealism-runtime`, `surrealism-types`, `surrealism-macros`, `surrealism-demo`
+
+This is handled by the release scripts using `cargo metadata` to dynamically detect package names. If you add a new `surrealdb-*` crate, it will automatically be included in version bumps.
+
 ### Main Branch Version Evolution
 
 The version on the `main` branch reflects the **next development target**, not the current release:
@@ -556,12 +569,23 @@ git push origin --delete release/vX.Y.Z
 	```bash
 	git checkout main
 	git pull
-	cargo set-version --workspace X.Y.Z-correct
+	
+	# Build list of surrealdb-* packages (auto-excludes surrealism-*)
+	PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
+		jq -r '.packages[].name' | \
+		grep '^surrealdb' | \
+		sed 's/^/--package /' | \
+		tr '\n' ' ')
+	
+	# Update only surrealdb packages
+	cargo set-version $PACKAGES X.Y.Z-correct
 	cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 	git commit -am "chore: fix version to X.Y.Z-correct"
 	git push origin HEAD:chore/fix-version
 	# Create PR and merge
 	```
+	
+	**Note**: The release scripts automatically exclude `surrealism-*` packages by only versioning packages with the `surrealdb-*` prefix.
 
 ### Need to Retry a Failed Release
 
