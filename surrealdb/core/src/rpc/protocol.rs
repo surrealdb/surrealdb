@@ -292,7 +292,7 @@ pub trait RpcProtocol {
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
 					let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-					run!(tx, tx.get_or_add_ns(None, &ns).await);
+					run!(tx, tx.get_or_add_ns(None, &ns).await)?;
 					session.ns = Some(ns)
 				}
 				unexpected => {
@@ -311,7 +311,7 @@ pub trait RpcProtocol {
 						.kvs()
 						.transaction(TransactionType::Write, LockType::Optimistic)
 						.await?;
-					run!(tx, tx.ensure_ns_db(None, &ns, &db).await);
+					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)?;
 					session.db = Some(db)
 				}
 				unexpected => {

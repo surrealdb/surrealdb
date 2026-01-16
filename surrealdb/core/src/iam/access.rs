@@ -120,7 +120,7 @@ pub(crate) async fn create_refresh_token_record(
 	ctx.set_transaction(tx.clone());
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
-	let grant = catch!(
+	let grant = run!(
 		tx,
 		access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
 			.await
@@ -128,8 +128,7 @@ pub(crate) async fn create_refresh_token_record(
 				warn!("Unexpected error when attempting to create a refresh token: {e}");
 				anyhow::Error::new(Error::UnexpectedAuth)
 			})
-	);
-	catch!(tx, tx.commit().await);
+	)?;
 	// Return the key string from the bearer grant
 	match grant.grant {
 		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
@@ -160,7 +159,7 @@ pub async fn revoke_refresh_token_record(
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
 	let mut stack = reblessive::tree::TreeStack::new();
-	catch!(
+	run!(
 		tx,
 		stack
 			.enter(|stk| async {
@@ -171,7 +170,6 @@ pub async fn revoke_refresh_token_record(
 			})
 			.finish()
 			.await
-	);
-	catch!(tx, tx.commit().await);
+	)?;
 	Ok(())
 }

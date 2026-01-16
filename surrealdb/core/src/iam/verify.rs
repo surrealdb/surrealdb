@@ -701,7 +701,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to root with access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			// Get the namespace access method
+			// Get the root access method
 			let de = catch!(tx, tx.get_root_access(ac).await);
 
 			// Ensure that the transaction is cancelled
