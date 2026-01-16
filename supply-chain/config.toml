@@ -43,9 +43,6 @@ audit-as-crates-io = false
 [policy.surrealism]
 audit-as-crates-io = true
 
-[policy.surrealism-cli]
-audit-as-crates-io = true
-
 [policy.surrealism-macros]
 audit-as-crates-io = true
 

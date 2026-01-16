@@ -7,6 +7,8 @@ mod fix;
 mod import;
 mod isready;
 mod ml;
+#[cfg(feature = "surrealism")]
+mod module;
 #[cfg(feature = "cli")]
 mod sql;
 mod start;
@@ -30,6 +32,8 @@ use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
+#[cfg(feature = "surrealism")]
+use module::ModuleCommand;
 use semver::Version;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
@@ -172,6 +176,9 @@ enum Commands {
 	Sql(SqlCommandArguments),
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
 	Ml(MlCommand),
+	#[cfg(feature = "surrealism")]
+	#[command(subcommand, about = "Manage and execute WASM modules", name = "module")]
+	Module(ModuleCommand),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -285,6 +292,8 @@ pub async fn init<
 		#[cfg(feature = "cli")]
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::Ml(args) => ml::init(args).await,
+		#[cfg(feature = "surrealism")]
+		Commands::Module(args) => module::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(args).await,
