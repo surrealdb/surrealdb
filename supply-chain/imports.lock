@@ -1153,13 +1153,6 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.surrealism-cli]]
-version = "0.1.6"
-when = "2025-12-17"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealism-macros]]
 version = "0.1.6"
 when = "2025-12-17"

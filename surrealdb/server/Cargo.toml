@@ -33,7 +33,13 @@ jwks = ["surrealdb-core/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb-core/scripting"]
-surrealism = ["surrealdb-core/surrealism"]
+surrealism = [
+    "surrealdb-core/surrealism",
+    "dep:surrealism-runtime",
+    "dep:surrealism-types",
+    "dep:walrus",
+    "dep:wasm-opt",
+]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
@@ -133,6 +139,10 @@ pprof = { workspace = true, features = [
     "flamegraph",
     "prost-codec",
 ], optional = true }
+surrealism-runtime = { workspace = true, optional = true }
+surrealism-types = { workspace = true, features = ["host"], optional = true }
+walrus = { workspace = true, optional = true }
+wasm-opt = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.46.0"

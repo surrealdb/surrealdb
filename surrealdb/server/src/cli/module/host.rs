@@ -7,8 +7,6 @@ use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::kv::{BTreeMapStore, KVStore};
 
-use crate::parse_value;
-
 pub struct DemoHost {
 	kv: BTreeMapStore,
 }
@@ -19,6 +17,11 @@ impl DemoHost {
 			kv: BTreeMapStore::new(),
 		}
 	}
+}
+
+/// Custom parser for `surrealdb_types::Value`
+fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
+	crate::core::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
 }
 
 #[async_trait]

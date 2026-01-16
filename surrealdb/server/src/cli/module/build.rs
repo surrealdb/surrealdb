@@ -10,34 +10,25 @@ use tempfile::TempDir;
 use walrus::Module;
 use wasm_opt::OptimizationOptions;
 
-use crate::commands::SurrealismCommand;
+pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>) -> Result<()> {
+	// Ensure all requirements are met
+	let path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+	let config = load_config(&path)?;
+	let source_wasm = get_source_wasm(&path)?;
 
-pub struct BuildCommand {
-	pub path: Option<PathBuf>,
-	pub out: Option<PathBuf>,
-}
+	// Compile the WASM module and optimize it
+	build_wasm_module(&path)?;
+	let wasm = optimize_wasm(&source_wasm)?;
 
-impl SurrealismCommand for BuildCommand {
-	async fn run(self) -> Result<()> {
-		// Ensure all requirements are met
-		let path = self.path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-		let config = load_config(&path)?;
-		let source_wasm = get_source_wasm(&path)?;
+	// Pack the optimized WASM into a Surrealism package
+	let package = SurrealismPackage {
+		config,
+		wasm,
+	};
+	let out = resolve_output_path(out, &package.config)?;
+	package.pack(out).prefix_err(|| "Failed to pack Surrealism package")?;
 
-		// Compile the WASM module and optimize it
-		build_wasm_module(&path)?;
-		let wasm = optimize_wasm(&source_wasm)?;
-
-		// Pack the optimized WASM into a Surrealism package
-		let package = SurrealismPackage {
-			config,
-			wasm,
-		};
-		let out = resolve_output_path(self.out, &package.config)?;
-		package.pack(out).prefix_err(|| "Failed to pack Surrealism package")?;
-
-		Ok(())
-	}
+	Ok(())
 }
 
 fn load_config(path: &Path) -> Result<SurrealismConfig> {

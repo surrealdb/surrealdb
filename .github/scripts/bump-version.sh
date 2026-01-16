@@ -28,8 +28,15 @@ fi
 # Create release branch
 git checkout -b "${RELEASE_BRANCH}"
 
-# Bump version in workspace
-cargo set-version --workspace "${VERSION}"
+# Dynamically build list of surrealdb-* packages (excludes surrealism-*)
+PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
+	jq -r '.packages[].name' | \
+	grep '^surrealdb' | \
+	sed 's/^/--package /' | \
+	tr '\n' ' ')
+
+# Bump version for surrealdb packages only
+cargo set-version $PACKAGES "${VERSION}"
 # Update lock file (only touch workspace crates, not dependencies)
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 

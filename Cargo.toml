@@ -11,7 +11,6 @@ members = [
 	"surrealdb/types/derive",
 	# Surrealism crates
 	"surrealism",
-	"surrealism/cli",
 	"surrealism/demo",
 	"surrealism/macros",
 	"surrealism/runtime",
@@ -46,7 +45,6 @@ surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
 surrealism = { version = "0.1", path = "surrealism" }
-surrealism-cli = { version = "0.1", path = "surrealism/cli" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
 surrealism-runtime = { version = "0.1", path = "surrealism/runtime" }
 surrealism-types = { version = "0.1", path = "surrealism/types", default-features = false }

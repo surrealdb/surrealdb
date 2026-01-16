@@ -6665,6 +6665,8 @@ dependencies = [
  "surrealdb",
  "surrealdb-core",
  "surrealdb-types",
+ "surrealism-runtime",
+ "surrealism-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -6681,6 +6683,8 @@ dependencies = [
  "tracing-subscriber",
  "ulid",
  "uuid",
+ "walrus",
+ "wasm-opt",
  "wiremock",
 ]
 
@@ -6752,7 +6756,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "surrealdb-types",
@@ -6762,26 +6766,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealism-cli"
-version = "0.1.6"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "serde_json",
- "surrealdb-core",
- "surrealdb-types",
- "surrealism-runtime",
- "surrealism-types",
- "tempfile",
- "tokio",
- "walrus",
- "wasm-opt",
-]
-
-[[package]]
 name = "surrealism-macros"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6790,7 +6776,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-runtime"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6807,7 +6793,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-types"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "async-trait",
