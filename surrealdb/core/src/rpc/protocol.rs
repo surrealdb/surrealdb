@@ -265,24 +265,24 @@ pub trait RpcProtocol {
 				// Fetch defaults from database configuration
 				let kvs = self.kvs();
 				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				let (ns, db) = if let Some(x) = tx.get_default_config().await? {
+				let (ns, db) = if let Some(x) = catch_into!(tx, tx.get_default_config().await) {
 					(x.namespace.clone(), x.database.clone())
 				} else {
 					(None, None)
 				};
 
 				if let Some(ns) = ns {
-					tx.get_or_add_ns(None, &ns).await?;
+					catch_into!(tx, tx.get_or_add_ns(None, &ns).await);
 
 					if let Some(db) = db {
-						tx.ensure_ns_db(None, &ns, &db).await?;
+						catch_into!(tx, tx.ensure_ns_db(None, &ns, &db).await);
 						session.db = Some(db);
 					}
 
 					session.ns = Some(ns);
 				}
 
-				tx.commit().await?;
+				catch_into!(tx, tx.commit().await);
 			}
 		} else {
 			// Update the selected namespace
@@ -292,9 +292,7 @@ pub trait RpcProtocol {
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
 					let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-					tx.get_or_add_ns(None, &ns).await?;
-					tx.commit().await?;
-
+					run!(tx, tx.get_or_add_ns(None, &ns).await);
 					session.ns = Some(ns)
 				}
 				unexpected => {
@@ -313,8 +311,7 @@ pub trait RpcProtocol {
 						.kvs()
 						.transaction(TransactionType::Write, LockType::Optimistic)
 						.await?;
-					tx.ensure_ns_db(None, &ns, &db).await?;
-					tx.commit().await?;
+					run!(tx, tx.ensure_ns_db(None, &ns, &db).await);
 					session.db = Some(db)
 				}
 				unexpected => {
