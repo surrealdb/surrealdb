@@ -52,7 +52,6 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value> {
 	if name.eq("sleep")
-		|| name.eq("api::invoke")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -91,6 +90,7 @@ pub async fn run(
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
 		|| name.eq("sequence::nextval")
+		|| name.starts_with("api")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -562,6 +562,12 @@ pub async fn asynchronous(
 		"no such builtin function found",
 		//
 		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
+		exp(DefineApi) "api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
+		exp(DefineApi) "api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
+		exp(DefineApi) "api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
+		exp(DefineApi) "api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
+		exp(DefineApi) "api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
+		exp(DefineApi) "api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

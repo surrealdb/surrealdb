@@ -21,16 +21,18 @@ pub enum Function {
 }
 
 impl Function {
-	pub(crate) fn to_idiom(&self) -> Idiom {
+	// we explicitely dont want a display implementation but do need to print a function to a string
+	#[allow(clippy::inherent_to_string)]
+	pub(crate) fn to_string(&self) -> String {
 		match self {
 			// Safety: "function" does not contain null bytes"
-			Self::Script(_) => Idiom::field("function".to_owned()),
-			Self::Normal(f) => Idiom::field(f.to_owned()),
-			Self::Custom(name) => Idiom::field(format!("fn::{name}")),
-			Self::Model(m) => Idiom::field(m.to_sql()),
+			Self::Script(_) => "function".to_owned(),
+			Self::Normal(f) => f.to_owned(),
+			Self::Custom(name) => format!("fn::{name}"),
+			Self::Model(m) => m.to_sql(),
 			Self::Module(m, s) => match s {
-				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
-				None => Idiom::field(format!("mod::{m}")),
+				Some(s) => format!("mod::{m}::{s}"),
+				None => format!("mod::{m}"),
 			},
 			Self::Silo {
 				org,
@@ -41,11 +43,15 @@ impl Function {
 				sub,
 			} => match sub {
 				Some(s) => {
-					Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}"))
+					format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}")
 				}
-				None => Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")),
+				None => format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>"),
 			},
 		}
+	}
+
+	pub(crate) fn to_idiom(&self) -> Idiom {
+		Idiom::field(self.to_string())
 	}
 }
 

@@ -13,9 +13,9 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
+use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, ClosureExpr};
 use crate::fmt::QuoteStr;
 use crate::sql::expression::convert_public_value_to_internal;
 
@@ -551,11 +551,7 @@ impl Value {
 			}
 			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
-			Value::Closure(closure) => expr::Expr::Closure(Box::new(ClosureExpr {
-				returns: closure.returns.clone(),
-				args: closure.args.clone(),
-				body: closure.body.clone(),
-			})),
+			Value::Closure(closure) => closure.into_expr(),
 			Value::Range(range) => range.into_literal(),
 			Value::Table(t) => expr::Expr::Table(t),
 		}

@@ -1,44 +1,29 @@
-use anyhow::Result;
-use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, StatusCode};
 use surrealdb_types::SurrealValue;
 
-use super::err::ApiError;
-use super::invocation::ApiInvocation;
-use crate::err::Error;
-use crate::rpc::format::Format;
-use crate::types::PublicValue;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicObject, PublicValue};
+use crate::val::{Value, convert_value_to_public_value};
 
-#[derive(Debug, SurrealValue)]
+#[derive(Debug, Default, SurrealValue)]
+#[surreal(default)]
 pub struct ApiResponse {
-	pub raw: Option<bool>,
 	pub status: StatusCode,
-	pub body: Option<PublicValue>,
+	pub body: PublicValue,
 	pub headers: HeaderMap,
+	pub context: PublicObject,
 }
 
-pub enum ResponseInstruction {
-	Native,
-	Raw,
-	Format(Format),
+impl TryFrom<Value> for ApiResponse {
+	type Error = anyhow::Error;
+
+	fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+		convert_value_to_public_value(value)?.into_t()
+	}
 }
 
-impl ResponseInstruction {
-	pub(crate) fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
-		let mime = invocation
-			.headers
-			.get(ACCEPT)
-			.or_else(|| invocation.headers.get(CONTENT_TYPE))
-			.and_then(|v| v.to_str().ok());
-
-		let format = match mime {
-			Some(super::format::JSON) => Format::Json,
-			Some(super::format::CBOR) => Format::Cbor,
-			Some(super::format::FLATBUFFERS) => Format::Flatbuffers,
-			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
-			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
-		};
-
-		Ok(ResponseInstruction::Format(format))
+impl From<ApiResponse> for Value {
+	fn from(value: ApiResponse) -> Self {
+		convert_public_value_to_internal(value.into_value())
 	}
 }
