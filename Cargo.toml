@@ -24,7 +24,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-beta"
+version = "3.0.0-beta.2"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -39,11 +39,11 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "3.0.0-beta", path = "surrealdb" }
-surrealdb-core = { version = "3.0.0-beta", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-features = false }
-surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
+surrealdb = { version = "3.0.0-beta.2", path = "surrealdb" }
+surrealdb-core = { version = "3.0.0-beta.2", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "3.0.0-beta.2", path = "surrealdb/server", default-features = false }
+surrealdb-types = { version = "3.0.0-beta.2", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.0.0-beta.2", path = "surrealdb/types/derive" }
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
 surrealism-runtime = { version = "0.1", path = "surrealism/runtime" }
