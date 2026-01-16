@@ -533,6 +533,8 @@ impl TransactionBuilder for DatastoreFlavor {
 	}
 
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	// Allow unused variable when kv-rocksdb feature is not enabled
+	#[allow(unused_variables)]
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		match self {
 			#[cfg(feature = "kv-rocksdb")]
