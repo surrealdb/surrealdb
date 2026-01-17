@@ -997,6 +997,16 @@ impl Iterator {
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
 						}
+						Value::Set(v) => {
+							for val in v {
+								// Make a copy of object
+								let mut obj = obj.clone();
+								// Set the value at the path
+								obj.set(stk, ctx, opt, split, val).await?;
+								// Add the object to the results
+								self.results.push(stk, ctx, opt, rs, obj).await?;
+							}
+						}
 						_ => {
 							// Make a copy of object
 							let mut obj = obj.clone();
