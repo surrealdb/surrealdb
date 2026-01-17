@@ -146,7 +146,7 @@ pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
 # TODO: Look at use of this dependency. Last update was 4 years ago and it is unmaintained
-radix_trie = "0.2.1"
+radix_trie = "0.3.0"
 rand = "0.8.5"
 rayon = "1.11.0"
 regex = "1.12.2"
