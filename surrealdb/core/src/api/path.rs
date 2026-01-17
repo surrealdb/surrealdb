@@ -21,7 +21,7 @@ impl<'a> Path {
 	/// the url Considering path the parsed path of an API, and url the current
 	/// subject, this method:
 	///  - iterates over each path segment (divided by `/`)
-	///  - attempts to to match against url segment
+	///  - attempts to match against url segment
 	///  - extracting variables where instructed by the path segment
 	///  - when we no longer match, or when the url is to short, we return None
 	///  - when the url is too long and there is no rest segment, we return None
