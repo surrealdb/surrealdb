@@ -314,7 +314,7 @@ impl Document {
 		!self.retry && self.initial.doc.as_ref().is_none()
 	}
 
-	/// Check if the the record id for this document
+	/// Check if the record id for this document
 	/// has been specifically set upfront. This is true
 	/// in the following instances:
 	///
