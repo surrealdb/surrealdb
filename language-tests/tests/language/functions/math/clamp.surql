@@ -17,7 +17,7 @@ value = "4f"
 value = "2f"
 
 [[test.results]]
-error = "Incorrect arguments for function math::clamp(). Lowerbound for clamp must be smaller the the upperbound"
+error = "Incorrect arguments for function math::clamp(). Lowerbound for clamp must be smaller than the upperbound"
 
 */
 math::clamp(1, 2, 4);
