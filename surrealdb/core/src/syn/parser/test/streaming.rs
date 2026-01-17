@@ -79,7 +79,7 @@ static SOURCE: &str = r#"
 	INFO FOR ROOT;
 	INFO FOR NAMESPACE;
 	INFO FOR USER user ON namespace;
-	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
+	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a
 		WITH INDEX index,index_2
 		WHERE true
 		SPLIT ON foo,bar
@@ -470,7 +470,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			]),
 			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
 			only: true,
-			what: vec![Expr::Table("a".to_owned()), Expr::Literal(Literal::Integer(1))],
+			what: vec![Expr::Table("a".to_owned())],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			split: Some(Splits(vec![
