@@ -205,7 +205,7 @@ tar = "0.4.44"
 zstd = "0.13.3"
 wasmtime = { version = "34.0.2", default-features = false, features = ["cranelift", "winch"] }
 wasmtime-wasi = "34.0.2"
-walrus = "0.20.3"
+walrus = "0.24.4"
 wasm-opt = "0.116.1"
 candle-core = "0.9.1"
 
