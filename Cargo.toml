@@ -124,7 +124,7 @@ humantime = "2.3.0"
 indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
-jsonwebtoken = "9.3.1"
+jsonwebtoken = { version = "10.2.0", default-features = false, features = ["use_pem"] }
 linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
