@@ -162,7 +162,7 @@ opentelemetry-proto = { version = "0.7.0", features = [
     "logs",
 ] }
 rcgen = "0.13.2"
-tonic = "0.12.3"
+tonic = "0.14.2"
 
 # Other crates
 chrono.workspace = true
