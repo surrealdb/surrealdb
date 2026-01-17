@@ -203,8 +203,8 @@ clap = { version = "4.5.54", features = ["derive"] }
 toml = "0.8.23"
 tar = "0.4.44"
 zstd = "0.13.3"
-wasmtime = { version = "34.0.2", default-features = false, features = ["cranelift", "winch"] }
-wasmtime-wasi = "34.0.2"
+wasmtime = { version = "40.0.2", default-features = false, features = ["cranelift", "winch"] }
+wasmtime-wasi = { version = "40.0.2", features = ["p1"] }
 walrus = "0.24.4"
 wasm-opt = "0.116.1"
 candle-core = "0.9.1"
