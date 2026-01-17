@@ -161,7 +161,7 @@ opentelemetry-proto = { version = "0.7.0", features = [
     "metrics",
     "logs",
 ] }
-rcgen = "0.13.2"
+rcgen = "0.14.6"
 tonic = "0.14.2"
 
 # Other crates
