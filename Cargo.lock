@@ -2988,10 +2988,6 @@ name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash 0.8.12",
- "allocator-api2",
-]
 
 [[package]]
 name = "hashbrown"
@@ -6864,7 +6860,6 @@ dependencies = [
  "flate2",
  "futures",
  "getrandom 0.3.4",
- "hashbrown 0.14.5",
  "indexmap 2.13.0",
  "js-sys",
  "nanoid",
@@ -6941,7 +6936,6 @@ dependencies = [
  "geo 0.32.0",
  "geo-types",
  "getrandom 0.3.4",
- "hashbrown 0.14.5",
  "headers",
  "hex",
  "http 1.4.0",

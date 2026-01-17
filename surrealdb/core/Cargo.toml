@@ -224,7 +224,6 @@ mimalloc = { workspace = true, optional = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
-hashbrown.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
