@@ -89,8 +89,8 @@ opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
 rustyline = { version = "17.0.2", features = ["derive"], optional = true }
-tower = { version = "0.4.13", features = ["limit", "load-shed"] }
-tower-http = { version = "0.5.2", features = [
+tower = { version = "0.5.3", features = ["limit", "load-shed"] }
+tower-http = { version = "0.6.8", features = [
     "trace",
     "sensitive-headers",
     "auth",
