@@ -119,7 +119,6 @@ tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
-bincode.workspace = true
 ciborium.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
