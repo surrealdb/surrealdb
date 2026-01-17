@@ -173,12 +173,21 @@ pub async fn process_tbs(
 					// Note: We select * (not just id) so that permissions are properly checked
 					let expr = expr::Expr::Select(Box::new(SelectStatement {
 						what: vec![Expr::Table(tb_name)],
-						expr: Fields::all(),
+						fields: Fields::all(),
 						order: orders.map(|x| Ordering::Order(OrderList(x))),
 						cond,
 						limit,
 						start,
-						..Default::default()
+						omit: vec![],
+						only: false,
+						with: None,
+						split: None,
+						group: None,
+						fetch: None,
+						version: Expr::Literal(Literal::None),
+						timeout: Expr::Literal(Literal::None),
+						explain: None,
+						tempfiles: false,
 					}));
 
 					// Convert to LogicalPlan and execute
@@ -276,12 +285,24 @@ pub async fn process_tbs(
 							// Build SELECT VALUE id FROM ONLY <record_id>
 							let select_stmt = SelectStatement {
 								what: vec![Value::RecordId(record_id.clone()).into_literal()],
-								expr: Fields::Value(Box::new(Selector {
+								fields: Fields::Value(Box::new(Selector {
 									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 									alias: None,
 								})),
 								only: true,
-								..Default::default()
+								omit: vec![],
+								with: None,
+								cond: None,
+								split: None,
+								group: None,
+								order: None,
+								limit: None,
+								start: None,
+								fetch: None,
+								version: Expr::Literal(Literal::None),
+								timeout: Expr::Literal(Literal::None),
+								explain: None,
+								tempfiles: false,
 							};
 
 							let plan = LogicalPlan {
@@ -393,12 +414,24 @@ pub async fn process_tbs(
 					// Build SELECT VALUE id FROM ONLY <record_id>
 					let select_stmt = SelectStatement {
 						what: vec![Value::RecordId(record_id.clone()).into_literal()],
-						expr: Fields::Value(Box::new(Selector {
+						fields: Fields::Value(Box::new(Selector {
 							expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 							alias: None,
 						})),
 						only: true,
-						..Default::default()
+						omit: vec![],
+						with: None,
+						cond: None,
+						split: None,
+						group: None,
+						order: None,
+						limit: None,
+						start: None,
+						fetch: None,
+						version: Expr::Literal(Literal::None),
+						timeout: Expr::Literal(Literal::None),
+						explain: None,
+						tempfiles: false,
 					};
 
 					let plan = LogicalPlan {
@@ -441,12 +474,24 @@ fn make_table_field_resolver(
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let select_stmt = SelectStatement {
 					what: vec![Value::RecordId(rid.clone()).into_literal()],
-					expr: Fields::Value(Box::new(Selector {
+					fields: Fields::Value(Box::new(Selector {
 						expr: expr::Expr::Idiom(Idiom::field(fd_name.clone())),
 						alias: None,
 					})),
 					only: true,
-					..Default::default()
+					omit: vec![],
+					with: None,
+					cond: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
+					fetch: None,
+					version: Expr::Literal(Literal::None),
+					timeout: Expr::Literal(Literal::None),
+					explain: None,
+					tempfiles: false,
 				};
 
 				let plan = LogicalPlan {

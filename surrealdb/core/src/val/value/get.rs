@@ -398,7 +398,7 @@ impl Value {
 						// This is a graph traversal expression
 						Part::Lookup(g) => {
 							let last_part = path.len() == 1;
-							let expr = g.expr.clone().unwrap_or(Fields::value_id());
+							let fields = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
 								Part::Lookup(Lookup {
@@ -409,7 +409,7 @@ impl Value {
 							]));
 
 							let stm = SelectStatement {
-								expr,
+								fields,
 								what: vec![what],
 								cond: g.cond.clone(),
 								limit: g.limit.clone(),
@@ -417,7 +417,14 @@ impl Value {
 								split: g.split.clone(),
 								group: g.group.clone(),
 								start: g.start.clone(),
-								..SelectStatement::default()
+								omit: vec![],
+								only: false,
+								with: None,
+								fetch: None,
+								version: Expr::Literal(Literal::None),
+								timeout: Expr::Literal(Literal::None),
+								explain: None,
+								tempfiles: false,
 							};
 
 							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();

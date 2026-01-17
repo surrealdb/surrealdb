@@ -284,10 +284,22 @@ impl DefineTableStatement {
 		condition: Option<&Expr>,
 	) -> Result<()> {
 		let select = SelectStatement {
-			expr: fields.clone(),
+			fields: fields.clone(),
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
 			cond: condition.cloned().map(Cond),
-			..Default::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 
 		let Value::Array(Array(v)) = select.compute(stk, ctx, opt, None).await? else {
@@ -517,13 +529,24 @@ impl DefineTableStatement {
 
 		let stmt = SelectStatement {
 			// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..
-			expr: Fields::Select(fields),
+			fields: Fields::Select(fields),
 			// WHERE cond
 			cond: condition.cloned().map(Cond),
 			// GROUP BY g0,g1,..
 			group: Some(Groups(groups)),
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
-			..Default::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			split: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 		let res = stmt.compute(stk, ctx, opt, None).await?;
 		let Value::Array(res) = res else {

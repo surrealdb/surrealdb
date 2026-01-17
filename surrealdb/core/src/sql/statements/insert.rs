@@ -12,7 +12,6 @@ pub struct InsertStatement {
 	pub update: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub relation: bool,
 	pub version: Expr,
 }
@@ -42,9 +41,6 @@ impl ToSql for InsertStatement {
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
-		}
 	}
 }
 
@@ -57,7 +53,6 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			relation: v.relation,
 			version: v.version.into(),
 		}
@@ -73,7 +68,6 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			relation: v.relation,
 			version: v.version.into(),
 		}

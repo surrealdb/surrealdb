@@ -53,7 +53,7 @@ static SOURCE: &str = r#"
 	COMMIT;
 	COMMIT TRANSACTION;
 	CONTINUE;
-	CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL;
+	CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s;
 	DEFINE NAMESPACE a COMMENT 'test';
 	DEFINE NS a;
 	DEFINE DATABASE a COMMENT 'test' CHANGEFEED 10m;
@@ -69,8 +69,8 @@ static SOURCE: &str = r#"
 	DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
-	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL;
-	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN FULL;
+	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s EXPLAIN FULL;
+	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h EXPLAIN FULL;
 	FOR $foo IN (SELECT foo FROM bar) * 2 {
 		BREAK
 	};
@@ -98,11 +98,11 @@ static SOURCE: &str = r#"
 	INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE a.b +?= null, c.d += none RETURN AFTER;
 	KILL u"e72bee20-f49b-11ec-b939-0242ac120002";
 	RETURN RETRUN FETCH RETURN;
-	RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE PARALLEL;
+	RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE;
 	REMOVE FUNCTION fn::foo::bar();
 	REMOVE FIELD foo.bar[10] ON bar;
-	UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
-	UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
+	UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL;
+	UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL;
 	function(){ ((1 + 1)) };
 	"a b c d e f g h";
 	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
@@ -153,7 +153,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			version: Expr::Literal(Literal::None),
 		}))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
@@ -379,7 +378,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Delete(Box::new(DeleteStatement {
@@ -400,14 +398,13 @@ fn statements() -> Vec<TopLevelExpr> {
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(60 * 60))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Foreach(Box::new(ForeachStatement {
 			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
-					expr: Fields::Select(vec![Field::Single(Selector {
+					fields: Fields::Select(vec![Field::Single(Selector {
 						expr: ident_field("foo"),
 						alias: None,
 					})]),
@@ -424,7 +421,6 @@ fn statements() -> Vec<TopLevelExpr> {
 					fetch: None,
 					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
-					parallel: false,
 					explain: None,
 					tempfiles: false,
 				}))),
@@ -455,7 +451,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			false,
 		)))),
 		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
-			expr: Fields::Select(vec![
+			fields: Fields::Select(vec![
 				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
@@ -502,7 +498,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
 			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			tempfiles: false,
 			explain: Some(Explain(true)),
 		}))),
@@ -557,7 +552,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			output: Some(Output::After),
 			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
 		}))),
 		TopLevelExpr::Kill(KillStatement {
@@ -585,7 +579,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
 				version: Expr::Literal(Literal::None),
 			})),
 			uniq: true,
@@ -596,7 +589,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			}])),
 			output: Some(Output::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: true,
 		}))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Function(
 			RemoveFunctionStatement {
@@ -645,7 +637,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Upsert(Box::new(UpsertStatement {
@@ -680,7 +671,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {

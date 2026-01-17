@@ -51,7 +51,7 @@ impl Value {
 						]));
 
 						let stm = SelectStatement {
-							expr: g.expr.clone().unwrap_or(Fields::all()),
+							fields: g.expr.clone().unwrap_or(Fields::all()),
 							what: vec![what],
 							cond: g.cond.clone(),
 							limit: g.limit.clone(),
@@ -59,7 +59,14 @@ impl Value {
 							split: g.split.clone(),
 							group: g.group.clone(),
 							start: g.start.clone(),
-							..SelectStatement::default()
+							omit: vec![],
+							only: false,
+							with: None,
+							fetch: None,
+							version: Expr::Literal(Literal::None),
+							timeout: Expr::Literal(Literal::None),
+							explain: None,
+							tempfiles: false,
 						};
 						*this = stm
 							.compute(stk, ctx, opt, None)
@@ -243,9 +250,22 @@ impl Value {
 				let val = v.clone();
 				// Fetch the remote embedded record
 				let stm = SelectStatement {
-					expr: Fields::Select(vec![Field::All]),
+					fields: Fields::Select(vec![Field::All]),
 					what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
-					..SelectStatement::default()
+					omit: vec![],
+					only: false,
+					with: None,
+					cond: None,
+					split: None,
+					group: None,
+					order: None,
+					limit: None,
+					start: None,
+					fetch: None,
+					version: Expr::Literal(Literal::None),
+					timeout: Expr::Literal(Literal::None),
+					explain: None,
+					tempfiles: false,
 				};
 				*this = stm.compute(stk, ctx, opt, None).await?.first();
 				Ok(())

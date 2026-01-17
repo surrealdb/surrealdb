@@ -19,7 +19,6 @@ impl Parser<'_> {
 			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 
 		Ok(CreateStatement {
 			only,
@@ -27,7 +26,6 @@ impl Parser<'_> {
 			data,
 			output,
 			timeout,
-			parallel,
 			version,
 		})
 	}

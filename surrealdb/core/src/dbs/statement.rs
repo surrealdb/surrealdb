@@ -313,7 +313,7 @@ impl Statement<'_> {
 			Statement::Select {
 				stmt,
 				..
-			} => Some(&stmt.expr),
+			} => Some(&stmt.fields),
 			Statement::Live(v) => match &v.fields {
 				LiveFields::Diff => None,
 				LiveFields::Select(x) => Some(x),

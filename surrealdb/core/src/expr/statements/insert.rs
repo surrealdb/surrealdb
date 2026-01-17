@@ -24,7 +24,6 @@ pub(crate) struct InsertStatement {
 	pub update: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub relation: bool,
 	pub version: Expr,
 }
@@ -42,7 +41,7 @@ impl InsertStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 		// Propagate the version to the underlying datastore
 		let version = stk
 			.run(|stk| self.version.compute(stk, ctx, opt, doc))
@@ -148,7 +147,7 @@ impl InsertStatement {
 					};
 
 					// Pass the value to the iterator
-					i.ingest(iterable(
+					iterator.ingest(iterable(
 						doc_ctx.clone().expect("doc_ctx must be set at this point"),
 						tb.clone(),
 						id,
@@ -190,7 +189,7 @@ impl InsertStatement {
 							};
 
 							// Pass the value to the iterator
-							i.ingest(iterable(
+							iterator.ingest(iterable(
 								doc_ctx.clone().expect("doc_ctx must be set at this point"),
 								tb.clone(),
 								id,
@@ -226,7 +225,7 @@ impl InsertStatement {
 						};
 
 						// Pass the value to the iterator
-						i.ingest(iterable(
+						iterator.ingest(iterable(
 							doc_ctx.clone().expect("doc_ctx must be set at this point"),
 							tb.clone(),
 							id,
@@ -251,7 +250,7 @@ impl InsertStatement {
 
 		CursorDoc::update_parent(ctx, doc, async |ctx| {
 			// Process the statement
-			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

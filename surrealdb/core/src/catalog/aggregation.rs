@@ -700,7 +700,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		}
 		self.visit_mut_expr(&mut s.version)?;
 
-		ParentRewritor.visit_mut_fields(&mut s.expr)?;
+		ParentRewritor.visit_mut_fields(&mut s.fields)?;
 		for o in s.omit.iter_mut() {
 			ParentRewritor.visit_mut_expr(o)?;
 		}
@@ -860,7 +860,7 @@ impl MutVisitor for ParentRewritor {
 	}
 
 	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
-		self.visit_mut_fields(&mut s.expr)?;
+		self.visit_mut_fields(&mut s.fields)?;
 		for v in s.what.iter_mut() {
 			self.visit_mut_expr(v)?;
 		}

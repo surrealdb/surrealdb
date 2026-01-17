@@ -10,8 +10,7 @@ use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Literal, Splits, Start,
-	With,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, With,
 };
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
@@ -19,7 +18,7 @@ use crate::val::{Datetime, Value};
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
-	pub expr: Fields,
+	pub fields: Fields,
 	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
@@ -34,39 +33,14 @@ pub(crate) struct SelectStatement {
 	pub fetch: Option<Fetchs>,
 	pub version: Expr,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
-}
-
-impl Default for SelectStatement {
-	fn default() -> Self {
-		SelectStatement {
-			expr: Fields::all(),
-			omit: vec![],
-			only: false,
-			what: Vec::new(),
-			with: None,
-			cond: None,
-			split: None,
-			group: None,
-			order: None,
-			limit: None,
-			start: None,
-			fetch: None,
-			version: Expr::Literal(Literal::None),
-			timeout: Expr::Literal(Literal::None),
-			parallel: false,
-			explain: None,
-			tempfiles: false,
-		}
-	}
 }
 
 impl SelectStatement {
 	/// Check if computing this type can be done on a read only transaction.
 	pub(crate) fn read_only(&self) -> bool {
-		self.expr.read_only()
+		self.fields.read_only()
 			&& self.what.iter().all(|v| v.read_only())
 			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
 	}
@@ -85,7 +59,7 @@ impl SelectStatement {
 		// Assign the statement
 		let stm = Statement::from_select(stk, ctx, opt, parent_doc, self).await?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
 		let version = stk
@@ -98,10 +72,10 @@ impl SelectStatement {
 		let opt = Arc::new(opt.clone().with_version(version));
 
 		// Extract the limits
-		i.setup_limit(stk, ctx, &opt, &stm).await?;
+		iterator.setup_limit(stk, ctx, &opt, &stm).await?;
 		// Fail for multiple targets without a limit
 		ensure!(
-			!self.only || i.is_limit_one_or_zero() || self.what.len() <= 1,
+			!self.only || iterator.is_limit_one_or_zero() || self.what.len() <= 1,
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout
@@ -124,15 +98,18 @@ impl SelectStatement {
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
-			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w).await?;
+			iterator
+				.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.await?;
 		}
 
 		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement
-			let res =
-				i.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator
+				.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues)
+				.await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 

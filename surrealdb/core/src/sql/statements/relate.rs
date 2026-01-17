@@ -17,7 +17,6 @@ pub(crate) struct RelateStatement {
 	pub data: Option<Data>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 }
 
 impl ToSql for RelateStatement {
@@ -99,9 +98,6 @@ impl ToSql for RelateStatement {
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
-		}
 	}
 }
 
@@ -116,7 +112,6 @@ impl From<RelateStatement> for crate::expr::statements::RelateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 		}
 	}
 }
@@ -132,7 +127,6 @@ impl From<crate::expr::statements::RelateStatement> for RelateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 		}
 	}
 }

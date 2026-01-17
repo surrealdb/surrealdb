@@ -241,7 +241,7 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-10') ON DUPLICATE KEY UPDATE founded = $input.founded;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
-		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded PARALLEL;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded;
 	";
 	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
