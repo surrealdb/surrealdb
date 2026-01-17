@@ -40,7 +40,7 @@ toml_edit = { version = "0.22", features = ["serde"] }
 semver = "1.0.27"
 
 # Used for formatting output
-base64 = "0.21.5"
+base64 = "0.22.1"
 similar = "2.6.0"
 
 # Used for for communicating with the surrealdb server during upgrade tests.
