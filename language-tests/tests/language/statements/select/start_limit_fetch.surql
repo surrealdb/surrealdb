@@ -2,19 +2,7 @@
 [test]
 
 [[test.results]]
-value = "[{ id: tag:rs, name: 'Rust' }]"
-
-[[test.results]]
-value = "[{ id: tag:go, name: 'Golang' }]"
-
-[[test.results]]
-value = "[{ id: tag:js, name: 'JavaScript' }]"
-
-[[test.results]]
-value = "[{ id: person:tobie, tags: [tag:rs, tag:go, tag:js] }]"
-
-[[test.results]]
-value = "[{ id: person:jaime, tags: [tag:js] }]"
+value = "'OK'"
 
 [[test.results]]
 value = "[{ id: person:jaime, tags: [{ id: tag:js, name: 'JavaScript' }] }]"
@@ -29,10 +17,13 @@ value = """[
 ]"""
 */
 
-CREATE tag:rs SET name = 'Rust';
-CREATE tag:go SET name = 'Golang';
-CREATE tag:js SET name = 'JavaScript';
-CREATE person:tobie SET tags = [tag:rs, tag:go, tag:js];
-CREATE person:jaime SET tags = [tag:js];
+{
+    CREATE tag:rs SET name = 'Rust';
+    CREATE tag:go SET name = 'Golang';
+    CREATE tag:js SET name = 'JavaScript';
+    CREATE person:tobie SET tags = [tag:rs, tag:go, tag:js];
+    CREATE person:jaime SET tags = [tag:js];
+    RETURN "OK";
+};
 SELECT * FROM person LIMIT 1 FETCH tags;
 SELECT * FROM person START 1 LIMIT 1 FETCH tags;
