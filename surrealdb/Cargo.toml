@@ -92,7 +92,7 @@ rustls = { workspace = true, default-features = false, features = [
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 js-sys = "0.3"
-rustls-pki-types = { version = "1.7.0", features = ["web"] }
+rustls-pki-types = { version = "1.14.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
