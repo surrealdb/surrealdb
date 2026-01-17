@@ -182,7 +182,7 @@ unicase = "2.9.0"
 url = "2.5.8"
 uuid = "1.19.0"
 wasm-bindgen-futures = "0.4.58"
-wasmtimer = { version = "0.2.1", default-features = false }
+wasmtimer = { version = "0.4.3", default-features = false }
 tokio-tungstenite-wasm = "0.6.1"
 
 # used only in dev-dependencies
