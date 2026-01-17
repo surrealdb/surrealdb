@@ -170,7 +170,7 @@ subtle = "2.6"
 surrealdb-protocol = { version = "0.6.1", default-features = false }
 sysinfo = "0.33.1"
 tempfile = "3.24.0"
-thiserror = "1.0.69"
+thiserror = "2.0.17"
 tokio = { version = "1.49.0", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
