@@ -122,11 +122,6 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.21.1"
 
-[[audits.rust-s3]]
-who = "Micha de Vries <micha@devrie.sh>"
-criteria = "safe-to-deploy"
-version = "0.35.1"
-
 [[audits.rxml]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"

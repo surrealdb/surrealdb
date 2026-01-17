@@ -156,7 +156,6 @@ ring = "0.17.14"
 roaring = "0.11.3"
 rustls = { version = "0.23.36", default-features = false }
 rust_decimal = { version = "1.40.0" }
-rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"

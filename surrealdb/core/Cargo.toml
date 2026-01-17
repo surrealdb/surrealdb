@@ -198,7 +198,6 @@ wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 # The surrealism feature will be enabled by default for non-WASM in the parent workspace
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
-rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
