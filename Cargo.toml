@@ -54,14 +54,14 @@ affinitypool = "0.4.0"
 dmp = "0.2.3"
 indxdb = "0.11.0"
 lexicmp = "0.2.0"
-revision = { version = "0.16.0", features = [
+revision = { version = "0.17.0", features = [
     "bytes",
     "chrono",
     "geo",
     "roaring",
     "regex",
     "rust_decimal",
-    "specialised",
+    "specialised-vectors",
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
