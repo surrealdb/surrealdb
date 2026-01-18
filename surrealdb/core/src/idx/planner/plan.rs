@@ -77,7 +77,13 @@ impl PlanBuilder {
 		}
 
 		if let Some(io) = p.index_count {
-			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count, false));
+			return Ok(Plan::SingleIndex(
+				None,
+				io,
+				RecordStrategy::Count,
+				ScanDirection::Forward,
+				false,
+			));
 		}
 
 		//Analyse the query AST to discover indexable conditions and collect
@@ -90,13 +96,13 @@ impl PlanBuilder {
 		}
 
 		if p.all_and {
-			let mut compound_index: Option<(IdiomCol, IndexOption, bool)> = None;
+			let mut compound_index: Option<(IdiomCol, IndexOption, bool, ScanDirection)> = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io, provides_order)) =
+				if let Some((cols, io, provides_order, scan_dir)) =
 					b.check_compound_index_all_and(&ixr, vals, &p.order_columns)
 				{
 					if cols > 1 || provides_order {
-						let dominated = if let Some((c, _, has_order)) = &compound_index {
+						let dominated = if let Some((c, _, has_order, _)) = &compound_index {
 							if provides_order && !has_order {
 								false
 							} else if !provides_order && *has_order {
@@ -108,16 +114,16 @@ impl PlanBuilder {
 							false
 						};
 						if !dominated {
-							compound_index = Some((cols, io, provides_order));
+							compound_index = Some((cols, io, provides_order, scan_dir));
 						}
 					}
 				}
 			}
 
-			if let Some((_, io, provides_order)) = compound_index {
+			if let Some((_, io, provides_order, scan_dir)) = compound_index {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				return Ok(Plan::SingleIndex(None, io, record_strategy, provides_order));
+				return Ok(Plan::SingleIndex(None, io, record_strategy, scan_dir, provides_order));
 			}
 
 			// Select the first available range query (deterministic group order)
@@ -146,18 +152,28 @@ impl PlanBuilder {
 			}
 
 			if let Some((e, io)) = b.non_range_indexes.pop() {
-				let is_order = io.is_order()
-					|| p.order_columns
-						.get(io.index_reference())
-						.is_some_and(|(col, _)| *col == 0);
+				let (is_order, scan_dir) = p
+					.order_columns
+					.get(io.index_reference())
+					.map(|(col, is_desc)| {
+						let is_order = io.is_order() || *col == 0;
+						let dir = if *is_desc {
+							ScanDirection::Backward
+						} else {
+							ScanDirection::Forward
+						};
+						(is_order, dir)
+					})
+					.unwrap_or((io.is_order(), ScanDirection::Forward));
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				return Ok(Plan::SingleIndex(Some(e), io, record_strategy, is_order));
+				return Ok(Plan::SingleIndex(Some(e), io, record_strategy, scan_dir, is_order));
 			}
 			if let Some(o) = p.order_limit {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				return Ok(Plan::SingleIndex(None, o, record_strategy, true));
+				let scan_dir = Self::check_range_scan_direction(o.op());
+				return Ok(Plan::SingleIndex(None, o, record_strategy, scan_dir, true));
 			}
 		}
 		// If every expression is backed by an index we can use the MultiIndex plan
@@ -204,7 +220,7 @@ impl PlanBuilder {
 		index_reference: &IndexReference,
 		columns: Vec<Vec<IndexOperator>>,
 		order_columns: &OrderColumns,
-	) -> Option<(IdiomCol, IndexOption, bool)> {
+	) -> Option<(IdiomCol, IndexOption, bool, ScanDirection)> {
 		if !self.with_indexes.allowed_index(index_reference.index_id) {
 			return None;
 		}
@@ -238,9 +254,18 @@ impl PlanBuilder {
 			continues_equals_values += 1;
 		}
 
-		let provides_ordering = order_columns
+		let (provides_ordering, scan_direction) = order_columns
 			.get(index_reference)
-			.is_some_and(|(order_col, _)| *order_col == continues_equals_values);
+			.map(|(order_col, is_desc)| {
+				let provides = *order_col == continues_equals_values;
+				let direction = if *is_desc {
+					ScanDirection::Backward
+				} else {
+					ScanDirection::Forward
+				};
+				(provides, direction)
+			})
+			.unwrap_or((false, ScanDirection::Forward));
 
 		if continues_equals_values == 0 {
 			if !range_parts.is_empty() {
@@ -253,6 +278,7 @@ impl PlanBuilder {
 						IndexOperator::Range(vec![], range_parts),
 					),
 					provides_ordering,
+					scan_direction,
 				));
 			}
 			return None;
@@ -272,6 +298,7 @@ impl PlanBuilder {
 						IndexOperator::Range(equals, range_parts),
 					),
 					provides_ordering,
+					scan_direction,
 				));
 			}
 			return Some((
@@ -283,6 +310,7 @@ impl PlanBuilder {
 					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
 				provides_ordering,
+				scan_direction,
 			));
 		}
 		let vals: Vec<Value> = equal_combinations
@@ -301,6 +329,7 @@ impl PlanBuilder {
 				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
 			),
 			provides_ordering,
+			scan_direction,
 		))
 	}
 
@@ -369,7 +398,7 @@ impl PlanBuilder {
 
 pub(super) enum Plan {
 	TableIterator(Option<String>, RecordStrategy, ScanDirection),
-	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy, bool),
+	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy, ScanDirection, bool),
 	MultiIndex(
 		Vec<(Arc<Expr>, IndexOption)>,
 		Vec<(IndexReference, UnionRangeQueryBuilder)>,
