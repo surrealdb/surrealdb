@@ -151,7 +151,7 @@ rand = "0.8.5"
 rayon = "1.11.0"
 regex = "1.12.2"
 regex-syntax = "0.8.8"
-reqwest = { version = "0.12.28", default-features = false }
+reqwest = { version = "0.13.1", default-features = false }
 ring = "0.17.14"
 roaring = "0.11.3"
 rustls = { version = "0.23.36", default-features = false }

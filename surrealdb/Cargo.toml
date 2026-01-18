@@ -33,7 +33,7 @@ native-tls = [
 ]
 rustls = [
     "dep:rustls",
-    "reqwest?/rustls-tls",
+    "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
