@@ -148,10 +148,10 @@ wasm-opt = { workspace = true, optional = true }
 nu-ansi-term = "0.50.3"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.27.1", features = ["user"] }
+nix = { workspace = true, features = ["user"] }
 
 [target.'cfg(unix)'.dev-dependencies]
-nix = { version = "0.27.1", features = ["signal", "user"] }
+nix = { workspace = true, features = ["signal", "user"] }
 
 [dev-dependencies]
 # Crates only used by the root surrealdb crate
