@@ -97,7 +97,7 @@ async-graphql = { version = "7.2.0", default-features = false, features = ["cust
 async-graphql-axum = "7.2.0"
 async-trait = "0.1.89"
 base64 = "0.22.1"
-bcrypt = "0.15.1"
+bcrypt = "0.18.0"
 blake3 = "1.8.3"
 boxcar = "0.2.14"
 bytes = "1.11.0"
