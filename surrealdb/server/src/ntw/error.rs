@@ -3,7 +3,6 @@ use std::error::Error as StdError;
 use axum::Json;
 use axum::response::{IntoResponse, Response};
 use http::{HeaderName, StatusCode};
-use opentelemetry::global::Error as OpentelemetryError;
 use serde::{Serialize, Serializer};
 use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
@@ -27,9 +26,6 @@ pub enum Error {
 
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] reqwest::Error),
-
-	#[error("There was an error with opentelemetry: {0}")]
-	Otel(#[from] OpentelemetryError),
 
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
