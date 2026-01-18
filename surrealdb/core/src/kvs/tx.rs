@@ -1845,6 +1845,10 @@ impl TableProvider for Transaction {
 			crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
 		self.set(&name_lookup_key, &ix.name, None).await?;
 
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
 		// Set the entry in the cache
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
 		let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
@@ -1871,6 +1875,14 @@ impl TableProvider for Transaction {
 		// Delete the definition
 		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
 		self.del(&key).await?;
+
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
+		// Invalidate the cached index entry
+		let index_key = cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix.name);
+		self.cache.remove(index_key);
 
 		Ok(())
 	}
