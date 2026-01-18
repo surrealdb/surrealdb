@@ -44,7 +44,7 @@ impl super::Routine for Create {
 
 				tasks.spawn_on(
 					async move {
-						let mut res = criterion::black_box(
+						let mut res = std::hint::black_box(
 							ds.execute(
 								format!(
 									"CREATE {} SET field = '{}'",

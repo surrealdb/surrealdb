@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
+use std::hint::black_box;
 use std::time::Duration;
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::Value;
