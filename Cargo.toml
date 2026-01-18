@@ -182,7 +182,7 @@ url = "2.5.8"
 uuid = "1.19.0"
 wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
-tokio-tungstenite-wasm = "0.6.1"
+tokio-tungstenite-wasm = "0.8.1"
 
 # used only in dev-dependencies
 criterion = "0.8.1"
