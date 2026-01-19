@@ -285,7 +285,6 @@ impl Parser<'_> {
 			groups.0.push(Group(group));
 		}
 
-
 		if let Some(split_span) = split_span {
 			let group_span = group_start_span.covers(self.last_span());
 			bail!(

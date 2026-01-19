@@ -1,7 +1,6 @@
 /**
 
 [test]
-wip = true
 reason = "OMIT does not work as expected with group by. It applies to the records not the group by results."
 
 # 0: Setup
