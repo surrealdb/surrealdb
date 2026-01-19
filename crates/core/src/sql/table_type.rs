@@ -21,22 +21,38 @@ impl Display for TableType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			TableType::Normal => {
-				f.write_str(" NORMAL")?;
+				f.write_str("NORMAL")?;
 			}
 			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(kind) = &rel.from {
-					write!(f, " IN {kind}")?;
+				f.write_str("RELATION")?;
+				if let Some(Kind::Record(kind)) = &rel.from {
+					if !kind.is_empty() {
+						write!(f, " IN ")?;
+						for (idx, i) in kind.iter().enumerate() {
+							if idx != 0 {
+								f.write_str(" | ")?;
+							}
+							i.fmt(f)?;
+						}
+					}
 				}
-				if let Some(kind) = &rel.to {
-					write!(f, " OUT {kind}")?;
+				if let Some(Kind::Record(kind)) = &rel.to {
+					if !kind.is_empty() {
+						write!(f, " OUT ")?;
+						for (idx, i) in kind.iter().enumerate() {
+							if idx != 0 {
+								f.write_str(" | ")?;
+							}
+							i.fmt(f)?;
+						}
+					}
 				}
 				if rel.enforced {
 					write!(f, " ENFORCED")?;
 				}
 			}
 			TableType::Any => {
-				f.write_str(" ANY")?;
+				f.write_str("ANY")?;
 			}
 		}
 		Ok(())

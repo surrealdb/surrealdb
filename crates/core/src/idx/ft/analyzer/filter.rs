@@ -757,7 +757,7 @@ mod tests {
 		test_analyzer_tokens(
 			"ANALYZER test TOKENIZERS blank,class FILTERS lowercase,ngram(2,3);",
 			"Ālea iacta",
-			&vec![
+			&[
 				Token::String {
 					chars: (0, 0, 4),
 					bytes: (0, 5),
