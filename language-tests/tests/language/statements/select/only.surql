@@ -29,7 +29,12 @@ value = "NONE"
 [[test.results]]
 value = "1"
 
-# 7: Test ONLY with a two element array and a limit
+[[test.results]]
+value = "1"
+
+[[test.results]]
+error = "Expected a single result output when using the ONLY keyword"
+
 [[test.results]]
 value = "1"
 
@@ -57,3 +62,9 @@ SELECT * FROM ONLY [1] LIMIT 1;
 
 // 7: Test ONLY with a two element array and a limit
 SELECT * FROM ONLY [1, 2] LIMIT 1;
+
+// 8: Test ONLY with multiple tables should error
+SELECT * FROM ONLY 1, 2;
+
+// 9: Test with multiple tables and a limit
+SELECT * FROM ONLY 1, 2 LIMIT 1;
