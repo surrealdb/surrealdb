@@ -122,11 +122,6 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.21.1"
 
-[[audits.rust-s3]]
-who = "Micha de Vries <micha@devrie.sh>"
-criteria = "safe-to-deploy"
-version = "0.35.1"
-
 [[audits.rxml]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
@@ -577,12 +572,6 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-13"
 end = "2025-08-06"
-
-[[trusted.hashbrown]]
-criteria = "safe-to-deploy"
-user-id = 2915 # Amanieu d'Antras (Amanieu)
-start = "2019-04-02"
-end = "2025-05-02"
 
 [[trusted.headers]]
 criteria = "safe-to-deploy"
@@ -1618,7 +1607,7 @@ end = "2026-10-30"
 
 [[trusted.wasmtime-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2023-08-21"
 end = "2026-10-30"
 

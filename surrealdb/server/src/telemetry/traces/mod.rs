@@ -2,8 +2,7 @@ pub mod rpc;
 
 use anyhow::Result;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::SpanExporterBuilder;
-use opentelemetry_sdk::trace::{Config, TracerProvider};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
@@ -20,16 +19,15 @@ where
 	match TELEMETRY_PROVIDER.trim() {
 		// The OTLP telemetry provider has been specified
 		s if s.eq_ignore_ascii_case("otlp") && !*TELEMETRY_DISABLE_TRACING => {
-			// Create a new OTLP exporter using gRPC
-			let exporter = opentelemetry_otlp::new_exporter().tonic();
-			// Build a new span exporter which uses gRPC
-			let span_exporter = SpanExporterBuilder::Tonic(exporter).build_span_exporter()?;
-			// Define the OTEL metadata configuration
-			let config = Config::default().with_resource(OTEL_DEFAULT_RESOURCE.clone());
-			// Create the provider with the Tokio runtime
-			let provider = TracerProvider::builder()
-				.with_batch_exporter(span_exporter, opentelemetry_sdk::runtime::Tokio)
-				.with_config(config)
+			// Build a new span exporter which uses gRPC via tonic
+			let span_exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic().build()?;
+			// Create a batch span processor with the exporter (uses Tokio runtime automatically)
+			let batch_processor =
+				opentelemetry_sdk::trace::BatchSpanProcessor::builder(span_exporter).build();
+			// Create the provider
+			let provider = SdkTracerProvider::builder()
+				.with_span_processor(batch_processor)
+				.with_resource(OTEL_DEFAULT_RESOURCE.clone())
 				.build();
 			// Set it as the global tracer provider
 			let _ = opentelemetry::global::set_tracer_provider(provider.clone());

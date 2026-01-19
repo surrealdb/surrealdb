@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -17,7 +18,7 @@ use crate::telemetry;
 pub fn graceful_shutdown(
 	state: Arc<RpcState>,
 	canceller: CancellationToken,
-	http_handle: Handle,
+	http_handle: Handle<SocketAddr>,
 ) -> JoinHandle<()> {
 	// Spawn a new background asynchronous task
 	tokio::spawn(async move {

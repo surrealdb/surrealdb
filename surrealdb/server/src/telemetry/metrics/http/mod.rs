@@ -3,7 +3,7 @@ pub(super) mod tower_layer;
 use std::sync::LazyLock;
 
 use opentelemetry::global;
-use opentelemetry::metrics::{Counter, Histogram, Meter, MetricsError, UpDownCounter};
+use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
 use self::tower_layer::HttpCallMetricTracker;
 
@@ -13,14 +13,14 @@ pub static HTTP_SERVER_ACTIVE_REQUESTS: LazyLock<UpDownCounter<i64>> = LazyLock:
 	METER
 		.i64_up_down_counter("http.server.active_requests")
 		.with_description("The number of active HTTP requests.")
-		.init()
+		.build()
 });
 
 pub static HTTP_SERVER_REQUEST_COUNT: LazyLock<Counter<u64>> = LazyLock::new(|| {
 	METER
 		.u64_counter("http.server.request.count")
 		.with_description("The total number of HTTP requests processed.")
-		.init()
+		.build()
 });
 
 pub static HTTP_SERVER_REQUEST_DURATION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -28,7 +28,7 @@ pub static HTTP_SERVER_REQUEST_DURATION: LazyLock<Histogram<u64>> = LazyLock::ne
 		.u64_histogram("http.server.request.duration")
 		.with_description("The duration of inbound HTTP requests in milliseconds.")
 		.with_unit("ms")
-		.init()
+		.build()
 });
 
 pub static HTTP_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -36,7 +36,7 @@ pub static HTTP_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 		.u64_histogram("http.server.request.size")
 		.with_description("The size of inbound HTTP request messages.")
 		.with_unit("mb")
-		.init()
+		.build()
 });
 
 pub static HTTP_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -44,13 +44,12 @@ pub static HTTP_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|
 		.u64_histogram("http.server.response.size")
 		.with_description("The size of outbound HTTP response messages.")
 		.with_unit("mb")
-		.init()
+		.build()
 });
 
-fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
+fn observe_active_request(value: i64, tracker: &HttpCallMetricTracker) {
 	let attrs = tracker.active_req_attrs();
 	HTTP_SERVER_ACTIVE_REQUESTS.add(value, &attrs);
-	Ok(())
 }
 
 fn record_request_duration(tracker: &HttpCallMetricTracker) {

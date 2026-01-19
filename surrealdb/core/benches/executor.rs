@@ -4,7 +4,6 @@ mod common;
 
 use common::{block_on, setup_datastore, setup_datastore_with_query, setup_datastore_with_records};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use pprof::criterion::{Output, PProfProfiler};
 use surrealdb_core::syn::value;
 
 // ============================================================================
@@ -950,7 +949,7 @@ fn bench_table_select_fulltext_index(c: &mut Criterion) {
 
 criterion_group!(
 	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+	config = Criterion::default();
 	targets = bench_value_select,
 		bench_record_select,
 		bench_table_select,

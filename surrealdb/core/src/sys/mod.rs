@@ -73,7 +73,7 @@ impl Environment {
 	/// corresponds to the amount of CPUs, but
 	/// it may diverge in various cases.
 	pub fn physical_cores(&self) -> usize {
-		self.sys.physical_core_count().unwrap_or_default()
+		System::physical_core_count().unwrap_or_default()
 	}
 
 	/// Fetches the estimate of the available
