@@ -32,7 +32,7 @@ use crate::{
 		AccessType, Array, Block, Cast, Closure, Data, Edges, Entry, Expression, Field, Fields,
 		Function, Future, Geometry, Graph, IdRange, Idiom, Index, Kind, Mock, Model, Number,
 		Object, Operator, Output, Param, Part, Permission, Permissions, Range, Statements,
-		Subquery, TableType, Thing, Value, View, With,
+		Subquery, Thing, Value, View, With,
 	},
 	syn::error::{Location, MessageKind, Snippet},
 };
@@ -321,36 +321,7 @@ impl Visitor for MigratorPass<'_> {
 
 		write!(self.w, " {}", a.name)?;
 		if let Some(kind) = &a.kind {
-			write!(self.w, " TYPE")?;
-			match &kind {
-				TableType::Normal => {
-					self.w.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					self.w.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(self.w, " IN ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								self.w.write_str("|")?;
-							}
-							write!(self.w, "{k}")?;
-						}
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(self.w, " OUT ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								self.w.write_str("|")?;
-							}
-							write!(self.w, "{k}")?;
-						}
-					}
-				}
-				TableType::Any => {
-					self.w.write_str(" ANY")?;
-				}
-			}
+			write!(self.w, " TYPE {kind}")?;
 		}
 		if let Some(full) = a.full {
 			let s = if full {
@@ -1293,39 +1264,7 @@ impl Visitor for MigratorPass<'_> {
 				this.w.write_str(" OVERWRITE")?;
 			}
 			write!(this.w, " {}", d.name)?;
-			write!(this.w, " TYPE")?;
-			match &d.kind {
-				TableType::Any => {
-					this.w.write_str(" ANY")?;
-				}
-				TableType::Normal => {
-					this.w.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					this.w.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						this.w.write_str(" IN ")?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								this.w.write_str("|")?;
-							}
-							write!(this.w, "{k}")?;
-						}
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						this.w.write_str(" OUT ")?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								this.w.write_str("|")?;
-							}
-							write!(this.w, "{k}")?;
-						}
-					}
-					if rel.enforced {
-						this.w.write_str(" ENFORCED")?;
-					}
-				}
-			}
+			write!(this.w, " TYPE {}", d.kind)?;
 
 			let s = if d.full {
 				" SCHEMAFULL"

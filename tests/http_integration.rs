@@ -1575,7 +1575,7 @@ mod http_integration {
 			// Verify the record was updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
@@ -1645,7 +1645,7 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
@@ -1671,7 +1671,7 @@ mod http_integration {
 			// Verify the record was not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
 			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
@@ -1721,7 +1721,7 @@ mod http_integration {
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:2", "body: {body}");
 		}
 
 		// Delete one record without authentication

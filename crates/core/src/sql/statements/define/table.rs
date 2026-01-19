@@ -250,35 +250,7 @@ impl Display for DefineTableStatement {
 			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
-		match &self.kind {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
-			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(
-						f,
-						" IN {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
-				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(
-						f,
-						" OUT {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
-				}
-				if rel.enforced {
-					write!(f, " ENFORCED")?;
-				}
-			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
-		}
+		write!(f, " TYPE {}", self.kind)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}

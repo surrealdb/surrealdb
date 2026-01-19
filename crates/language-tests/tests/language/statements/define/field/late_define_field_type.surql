@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "[{ a: 1, b: '2', id: table:1 }]"
+value = "[{ a: 1, b: '2', id: `table`:1 }]"
 
 [[test.results]]
 value = "NONE"
@@ -14,10 +14,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ a: 1, b: '2', id: table:1 }]"
+value = "[{ a: 1, b: '2', id: `table`:1 }]"
 
 [[test.results]]
-error = "Found '1' for field `a`, with record `table:2`, but expected a number"
+error = "Found '1' for field `a`, with record ``table`:2`, but expected a number"
 
 */
 
