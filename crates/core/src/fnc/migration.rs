@@ -196,24 +196,42 @@ impl KeyConflictChecker {
 /// The number of records we load per batch for checking the migration.
 const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq)]
 pub enum TypeKey {
 	Integer(usize),
 	String(String),
 }
 
-#[derive(Eq, PartialEq, Hash)]
-pub enum TypeKeyRef<'a> {
-	Integer(usize),
-	String(&'a str),
+impl hash::Hash for TypeKey {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			TypeKey::Integer(i) => {
+				0u8.hash(state);
+				i.hash(state);
+			}
+			TypeKey::String(s) => {
+				1u8.hash(state);
+				s.hash(state);
+			}
+		}
+	}
+}
+
+#[derive(Eq, PartialEq)]
+pub struct TypeKeyRef<'a>(&'a str);
+
+impl hash::Hash for TypeKeyRef<'_> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		1u8.hash(state);
+		self.0.hash(state);
+	}
 }
 
 impl<'a> Equivalent<TypeKey> for TypeKeyRef<'a> {
 	fn equivalent(&self, key: &TypeKey) -> bool {
-		match (self, key) {
-			(TypeKeyRef::Integer(a), TypeKey::Integer(b)) => a == b,
-			(TypeKeyRef::String(a), TypeKey::String(b)) => a == b,
-			_ => false,
+		match key {
+			TypeKey::Integer(_) => false,
+			TypeKey::String(b) => self.0 == b,
 		}
 	}
 }
@@ -267,7 +285,7 @@ impl KeyConflictChecker {
 
 	fn visit_object(&mut self, object: &Object, type_idx: usize) -> Option<bool> {
 		for (k, v) in object.iter() {
-			if let Some(x) = self.types[type_idx].0.get(&TypeKeyRef::String(k)) {
+			if let Some(x) = self.types[type_idx].0.get(&TypeKeyRef(k)) {
 				if self.visit_value(v, *x)? {
 					return Some(true);
 				}
@@ -502,7 +520,6 @@ async fn diagnose_ns_db(
 						Some(true) => {
 							found_key_issue = true;
 							issues.push(MigrationIssue{
-<<<<<<< HEAD
 								severity: Severity::CanBreak,
 								error: "Found number keys with different types in the same position within a record-id key which will have a different order in 3.0".to_owned(),
 								details: String::new(),
@@ -511,16 +528,6 @@ async fn diagnose_ns_db(
 								error_location: None,
 								resolution: None,
 							});
-=======
-									severity: Severity::CanBreak,
-									error: "Found number keys with different types in the same position within a record-id key which will have a different order in 3.0".to_owned(),
-									details: String::new(),
-									kind: IssueKind::NumberKeyOrdering,
-									origin: path.clone(),
-									error_location: None,
-									resolution: None,
-								});
->>>>>>> 79f0cdcc5 (Add check for numeric order issues)
 						} // no issue
 						Some(false) => {} // no issue
 						None => {
@@ -528,7 +535,6 @@ async fn diagnose_ns_db(
 							// usage.
 							found_key_issue = true;
 							issues.push(MigrationIssue{
-<<<<<<< HEAD
 								severity: Severity::CanBreak,
 								error: "Found table key schema with a very poly-morphic type, table could contain keys which might have a different ordering in 3.0".to_owned(),
 								details: String::new(),
@@ -537,16 +543,6 @@ async fn diagnose_ns_db(
 								error_location: None,
 								resolution: None,
 							});
-=======
-									severity: Severity::CanBreak,
-									error: "Found table key schema with a very poly-morphic type, table could contain keys which might have a different ordering in 3.0".to_owned(),
-									details: String::new(),
-									kind: IssueKind::NumberKeyOrdering,
-									origin: path.clone(),
-									error_location: None,
-									resolution: None,
-								});
->>>>>>> 79f0cdcc5 (Add check for numeric order issues)
 						}
 					}
 				}

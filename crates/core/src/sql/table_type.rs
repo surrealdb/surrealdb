@@ -24,7 +24,7 @@ impl Display for TableType {
 				f.write_str("NORMAL")?;
 			}
 			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
+				f.write_str("RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
 					if !kind.is_empty() {
 						write!(f, " IN ")?;
