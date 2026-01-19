@@ -10,6 +10,7 @@ use crate::sql::visit::Visitor;
 use crate::sql::{Array, Base, Id, Number, Object, Value};
 use hashbrown::{Equivalent, HashMap};
 use std::hash;
+<<<<<<< HEAD
 
 /// The number of records we load per batch for checking the migration.
 const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
@@ -192,6 +193,8 @@ impl KeyConflictChecker {
 		}
 	}
 }
+=======
+>>>>>>> b01f4345c (Fix warnings and tests)
 
 <<<<<<< HEAD
 fn with_path<R, F: FnOnce(&mut Vec<Value>) -> R>(
@@ -212,24 +215,42 @@ fn with_path<R, F: FnOnce(&mut Vec<Value>) -> R>(
 const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
 >>>>>>> 14c7831c4 (Add more migration checks)
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq)]
 pub enum TypeKey {
 	Integer(usize),
 	String(String),
 }
 
-#[derive(Eq, PartialEq, Hash)]
-pub enum TypeKeyRef<'a> {
-	Integer(usize),
-	String(&'a str),
+impl hash::Hash for TypeKey {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		match self {
+			TypeKey::Integer(i) => {
+				0u8.hash(state);
+				i.hash(state);
+			}
+			TypeKey::String(s) => {
+				1u8.hash(state);
+				s.hash(state);
+			}
+		}
+	}
+}
+
+#[derive(Eq, PartialEq)]
+pub struct TypeKeyRef<'a>(&'a str);
+
+impl hash::Hash for TypeKeyRef<'_> {
+	fn hash<H: hash::Hasher>(&self, state: &mut H) {
+		1u8.hash(state);
+		self.0.hash(state);
+	}
 }
 
 impl<'a> Equivalent<TypeKey> for TypeKeyRef<'a> {
 	fn equivalent(&self, key: &TypeKey) -> bool {
-		match (self, key) {
-			(TypeKeyRef::Integer(a), TypeKey::Integer(b)) => a == b,
-			(TypeKeyRef::String(a), TypeKey::String(b)) => a == b,
-			_ => false,
+		match key {
+			TypeKey::Integer(_) => false,
+			TypeKey::String(b) => self.0 == b,
 		}
 	}
 }
@@ -283,7 +304,7 @@ impl KeyConflictChecker {
 
 	fn visit_object(&mut self, object: &Object, type_idx: usize) -> Option<bool> {
 		for (k, v) in object.iter() {
-			if let Some(x) = self.types[type_idx].0.get(&TypeKeyRef::String(k)) {
+			if let Some(x) = self.types[type_idx].0.get(&TypeKeyRef(k)) {
 				if self.visit_value(v, *x)? {
 					return Some(true);
 				}
