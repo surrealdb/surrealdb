@@ -29,7 +29,7 @@ impl MemoryCollector {
 	}
 
 	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
-		vec_start_limit(start, limit, &mut self.0);
+		vec_start_limit(&mut self.0, start, limit);
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
@@ -139,7 +139,7 @@ impl MemoryRandom {
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		// Only apply if sorted (ordered is empty)
 		if self.ordered.is_empty() {
-			vec_start_limit(start, limit, &mut self.values);
+			vec_start_limit(&mut self.values, start, limit);
 		}
 	}
 
@@ -254,7 +254,7 @@ impl MemoryOrdered {
 	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		// Only apply if sorted (ordered is empty)
 		if self.ordered.is_empty() {
-			vec_start_limit(start, limit, &mut self.values);
+			vec_start_limit(&mut self.values, start, limit);
 		}
 	}
 
@@ -350,7 +350,7 @@ impl MemoryOrderedLimit {
 
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		if let Some(ref mut result) = self.result {
-			vec_start_limit(start, limit, result);
+			vec_start_limit(result, start, limit);
 		}
 	}
 
@@ -374,18 +374,35 @@ impl MemoryOrderedLimit {
 	}
 }
 
-fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
-	match (start, limit) {
-		(Some(start), Some(limit)) => {
-			*vec = mem::take(vec).into_iter().skip(start as usize).take(limit as usize).collect()
+fn vec_start_limit<T>(vec: &mut Vec<T>, start: Option<u32>, limit: Option<u32>) {
+	if let Some(start) = start {
+		let start = start as usize;
+		if start > 0 {
+			let drain_end = start.min(vec.len());
+			vec.drain(..drain_end);
 		}
-		(Some(start), None) => *vec = mem::take(vec).into_iter().skip(start as usize).collect(),
-		(None, Some(limit)) => *vec = mem::take(vec).into_iter().take(limit as usize).collect(),
-		(None, None) => {}
+	}
+	if let Some(limit) = limit {
+		let limit = limit as usize;
+		if vec.len() > limit {
+			vec.truncate(limit);
+		}
 	}
 }
 
-pub(crate) fn apply_permutation_in_place(values: &mut [Value], ordered: &mut [usize]) {
+/// Applies a permutation in-place to a vector of values.
+///
+/// The `ordered` vector is expected to contain the indices of the `values` in the
+/// positions they should be in order to be sorted.
+///
+/// This function iterates over the `ordered` vector and swaps the values in the `values` vector
+/// to the positions they should be in order to be sorted. Whenever a value is swapped, the index
+/// of the value in the `ordered` vector is updated to the new position.
+///
+/// The values and ordered vectors must have the same length.
+pub(crate) fn apply_permutation_in_place<T>(values: &mut [T], ordered: &mut [usize]) {
+	debug_assert!(values.len() == ordered.len());
+
 	for i in 0..ordered.len() {
 		// If already in correct position, skip
 		if ordered[i] == i {
@@ -396,7 +413,9 @@ pub(crate) fn apply_permutation_in_place(values: &mut [Value], ordered: &mut [us
 		let mut current = i;
 		loop {
 			let target = ordered[current];
-			ordered[current] = current; // Mark as visited
+
+			// Mark as visited
+			ordered[current] = current;
 
 			if target == i {
 				// Cycle complete
@@ -406,5 +425,64 @@ pub(crate) fn apply_permutation_in_place(values: &mut [Value], ordered: &mut [us
 			values.swap(current, target);
 			current = target;
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case::empty(vec![], vec![])]
+	#[case::single(vec![1], vec![0])]
+	#[case::two(vec![1, 2], vec![0, 1])]
+	#[case::two(vec![2, 1], vec![1, 0])]
+	#[case::three(vec![1, 2, 3], vec![0, 1, 2])]
+	#[case::three(vec![1, 3, 2], vec![0, 2, 1])]
+	#[case::three(vec![2, 1, 3], vec![1, 0, 2])]
+	#[case::three(vec![2, 3, 1], vec![1, 2, 0])]
+	#[case::three(vec![3, 1, 2], vec![2, 0, 1])]
+	#[case::three(vec![3, 2, 1], vec![2, 1, 0])]
+	fn test_apply_permutation_in_place(
+		#[case] mut values: Vec<i32>,
+		#[case] mut ordered: Vec<usize>,
+	) {
+		let mut expected = values.clone();
+		expected.sort_by(|a, b| a.cmp(b));
+		apply_permutation_in_place(&mut values, &mut ordered);
+		assert_eq!(values, expected);
+	}
+
+	#[rstest]
+	#[case::none(vec![], None, None, vec![])]
+	#[case::none(vec![1, 2], None, None, vec![1, 2])]
+	#[case::start(vec![], Some(0), None, vec![])]
+	#[case::start(vec![1, 2], Some(0), None, vec![1, 2])]
+	#[case::start(vec![1, 2], Some(1), None, vec![2])]
+	#[case::start(vec![1, 2], Some(2), None, vec![])]
+	#[case::start_overflow(vec![1, 2], Some(3), None, vec![])]
+	#[case::limit(vec![], None, Some(0), vec![])]
+	#[case::limit(vec![1, 2], None, Some(0), vec![])]
+	#[case::limit(vec![1, 2], None, Some(1), vec![1])]
+	#[case::limit(vec![1, 2], None, Some(2), vec![1, 2])]
+	#[case::limit_overflow(vec![1, 2], None, Some(3), vec![1, 2])]
+	#[case::start_limit(vec![], Some(0), Some(0), vec![])]
+	#[case::start_limit(vec![1, 2], Some(0), Some(0), vec![])]
+	#[case::start_limit(vec![1, 2], Some(0), Some(1), vec![1])]
+	#[case::start_limit(vec![1, 2], Some(0), Some(2), vec![1, 2])]
+	#[case::start_limit(vec![1, 2], Some(1), Some(0), vec![])]
+	#[case::start_limit(vec![1, 2], Some(1), Some(1), vec![2])]
+	#[case::start_limit(vec![1, 2], Some(1), Some(2), vec![2])]
+	#[case::start_limit_overflow(vec![1, 2], Some(3), Some(0), vec![])]
+	fn test_vec_start_limit(
+		#[case] mut vec: Vec<i32>,
+		#[case] start: Option<u32>,
+		#[case] limit: Option<u32>,
+		#[case] expected: Vec<i32>,
+	) {
+		vec_start_limit(&mut vec, start, limit);
+		assert_eq!(vec, expected);
 	}
 }
