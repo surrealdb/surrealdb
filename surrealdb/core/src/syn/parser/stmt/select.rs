@@ -43,8 +43,14 @@ impl Parser<'_> {
 
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
+
+		let split_before = self.peek().span;
 		let split = self.try_parse_split(&fields, fields_span)?;
-		let group = self.try_parse_group(&fields, fields_span)?;
+		let split_span = match &split {
+			Some(_) => Some(split_before.covers(self.last_span())),
+			None => None,
+		};
+		let group = self.try_parse_group(&fields, fields_span, split_span)?;
 		let order = self.try_parse_orders(&fields, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;
