@@ -28,6 +28,7 @@ impl Categorise for Kv {
 }
 
 impl Kv {
+	#[allow(dead_code)]
 	pub fn new() -> Kv {
 		Kv {
 			__: b'/',

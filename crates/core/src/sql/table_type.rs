@@ -21,10 +21,10 @@ impl Display for TableType {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			TableType::Normal => {
-				f.write_str(" NORMAL")?;
+				f.write_str("NORMAL")?;
 			}
 			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
+				f.write_str("RELATION")?;
 				if let Some(Kind::Record(kind)) = &rel.from {
 					if !kind.is_empty() {
 						write!(f, " IN ")?;
@@ -52,7 +52,7 @@ impl Display for TableType {
 				}
 			}
 			TableType::Any => {
-				f.write_str(" ANY")?;
+				f.write_str("ANY")?;
 			}
 		}
 		Ok(())
