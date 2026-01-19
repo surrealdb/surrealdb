@@ -9,7 +9,7 @@ value = "'OK'"
 value = "[{ author: { id: author:1, name: 'Alice' }, book_count: 2, total_sales: 250f }, { author: { id: author:2, name: 'Bob' }, book_count: 2, total_sales: 320f }]"
 
 [[test.results]]
-value = "[{ author: { id: author:1, name: 'Alice' }, avg_sales: 125f }, { author: { id: author:2, name: 'Bob' }, avg_sales: 160f }]"
+value = "[{ author: { id: author:2, name: 'Bob' }, avg_sales: 160f }, { author: { id: author:1, name: 'Alice' }, avg_sales: 125f }]"
 
 */
 

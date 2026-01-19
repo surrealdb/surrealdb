@@ -6,16 +6,19 @@ reason = "Test GROUP BY with ORDER BY clause for sorting grouped results"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ region: 'east', total: 480f }, { region: 'north', total: 250f }, { region: 'south', total: 450f }]"
+value = "[{ region: 'east', total: 300f }, { region: 'north', total: 250f }, { region: 'south', total: 450f }]"
 
 [[test.results]]
-value = "[{ region: 'east', total: 480f }, { region: 'north', total: 250f }, { region: 'south', total: 450f }]"
+value = "[{ region: 'north', total: 250f }, { region: 'east', total: 300f }, { region: 'south', total: 450f }]"
 
 [[test.results]]
-value = "[{ region: 'east', total: 480f }, { region: 'north', total: 250f }, { region: 'south', total: 450f }]"
+value = "[{ region: 'south', total: 450f }, { region: 'east', total: 300f }, { region: 'north', total: 250f }]"
 
 [[test.results]]
-value = "[{ count: 2, region: 'east' }, { count: 2, region: 'north' }, { count: 2, region: 'south' }]"
+value = "[{ count: 1, region: 'east' }, { count: 2, region: 'south' }, { count: 2, region: 'north' }]"
+
+[[test.results]]
+value = "[{ count: 2, region: 'south' }, { count: 2, region: 'north' }, { count: 1, region: 'east' }]"
 
 */
 
@@ -26,7 +29,6 @@ value = "[{ count: 2, region: 'east' }, { count: 2, region: 'north' }, { count: 
 	CREATE sale:3 SET region = 'north', amount = 150;
 	CREATE sale:4 SET region = 'east', amount = 300;
 	CREATE sale:5 SET region = 'south', amount = 250;
-	CREATE sale:6 SET region = 'east', amount = 180;
 	RETURN "OK";
 };
 
@@ -40,4 +42,7 @@ SELECT region, math::sum(amount) as total FROM sale GROUP BY region ORDER BY tot
 SELECT region, math::sum(amount) as total FROM sale GROUP BY region ORDER BY total DESC;
 
 -- Test ORDER BY with COUNT
-SELECT region, COUNT() as count FROM sale GROUP BY region ORDER BY count DESC;
+SELECT region, COUNT() as count FROM sale GROUP BY region ORDER BY count, region DESC;
+
+-- Test ORDER BY with COUNT descending
+SELECT region, COUNT() as count FROM sale GROUP BY region ORDER BY count DESC, region DESC;

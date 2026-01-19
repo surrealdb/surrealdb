@@ -6,13 +6,16 @@ reason = "Test GROUP BY with LIMIT and START for pagination of grouped results"
 value = "'OK'"
 
 [[test.results]]
+value = "[{ total: 25f, type: 'cpu' }, { total: 65f, type: 'disk' }, { total: 45f, type: 'memory' }, { total: 40f, type: 'network' }]"
+
+[[test.results]]
 value = "[{ total: 25f, type: 'cpu' }, { total: 65f, type: 'disk' }]"
 
 [[test.results]]
 value = "[{ total: 65f, type: 'disk' }, { total: 45f, type: 'memory' }]"
 
 [[test.results]]
-value = "[{ total: 25f, type: 'cpu' }, { total: 65f, type: 'disk' }, { total: 45f, type: 'memory' }]"
+value = "[{ total: 65f, type: 'disk' }, { total: 45f, type: 'memory' }, { total: 40f, type: 'network' }]"
 
 [[test.results]]
 value = "[]"
@@ -30,6 +33,9 @@ value = "[]"
 	CREATE metric:7 SET type = 'disk', value = 35;
 	RETURN "OK";
 };
+
+-- Base case to show the results
+SELECT type, math::sum(value) as total FROM metric GROUP BY type;
 
 -- Test LIMIT on grouped results
 SELECT type, math::sum(value) as total FROM metric GROUP BY type LIMIT 2;

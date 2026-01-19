@@ -28,20 +28,8 @@ impl MemoryCollector {
 		self.0.len()
 	}
 
-	fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
-		match (start, limit) {
-			(Some(start), Some(limit)) => {
-				*vec =
-					mem::take(vec).into_iter().skip(start as usize).take(limit as usize).collect()
-			}
-			(Some(start), None) => *vec = mem::take(vec).into_iter().skip(start as usize).collect(),
-			(None, Some(limit)) => *vec = mem::take(vec).into_iter().take(limit as usize).collect(),
-			(None, None) => {}
-		}
-	}
-
 	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
-		Self::vec_start_limit(start, limit, &mut self.0);
+		vec_start_limit(start, limit, &mut self.0);
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
@@ -66,14 +54,12 @@ pub(super) const DEFAULT_BATCH_SIZE: usize = 1024;
 pub(in crate::dbs) struct MemoryRandom {
 	/// Collected values
 	values: Vec<Value>,
-	/// Ordered index
+	/// Ordered index (empty after sort is finalized)
 	ordered: Vec<usize>,
 	/// The maximum size of a batch
 	batch_size: usize,
 	/// Current batch of values to be merged once full
 	batch: Vec<Value>,
-	/// The finalized result
-	result: Option<Vec<Value>>,
 }
 
 impl MemoryRandom {
@@ -84,16 +70,15 @@ impl MemoryRandom {
 			values: Vec::new(),
 			ordered: Vec::new(),
 			batch: Vec::with_capacity(batch_size),
-			result: None,
 		}
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {
-		if let Some(result) = &self.result {
-			// If we have a finalized result, we return its size
-			result.len()
+		// If sorted (ordered is empty and no pending batch), return values.len()
+		// Otherwise return values + batch
+		if self.ordered.is_empty() && self.batch.is_empty() {
+			self.values.len()
 		} else {
-			// If we don't have a finalized result, we return the current size
 			self.values.len() + self.batch.len()
 		}
 	}
@@ -140,42 +125,34 @@ impl MemoryRandom {
 		}
 	}
 
-	fn ordered_values_to_vec(values: &mut [Value], ordered: &[usize]) -> Vec<Value> {
-		let mut vec = Vec::with_capacity(values.len());
-		for idx in ordered {
-			vec.push(mem::take(&mut values[*idx]));
-		}
-		vec
-	}
-
 	pub(in crate::dbs) fn sort(&mut self) {
 		// Make sure there is no pending batch
 		if !self.batch.is_empty() {
 			self.send_batch();
 		}
-		// We build final sorted vector
-		let res = Self::ordered_values_to_vec(&mut self.values, &self.ordered);
-		self.result = Some(res);
+		// Apply permutation in-place
+		apply_permutation_in_place(&mut self.values, &mut self.ordered);
+		// Clear ordered to mark as finalized (and free memory)
+		self.ordered.clear();
 	}
 
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
-		if let Some(ref mut result) = self.result {
-			MemoryCollector::vec_start_limit(start, limit, result);
+		// Only apply if sorted (ordered is empty)
+		if self.ordered.is_empty() {
+			vec_start_limit(start, limit, &mut self.values);
 		}
 	}
 
 	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
-		// Return the finalized result if available.
-		if let Some(result) = self.result.take() {
-			return result;
+		// If sorted (ordered is empty and batch is empty), just take values
+		if self.ordered.is_empty() && self.batch.is_empty() {
+			mem::take(&mut self.values)
+		} else {
+			// Otherwise, assemble values + batch (unsorted fallback path)
+			let mut vec = mem::take(&mut self.values);
+			vec.append(&mut mem::take(&mut self.batch));
+			vec
 		}
-		// Otherwise, return the raw values.
-		// This path is reached when no explicit sort() was called (e.g., ORDER BY rand()),
-		// or when the collector was used without finalization. In that case, we assemble
-		// the current values and any pending batch into a single vector.
-		let mut vec = mem::take(&mut self.values);
-		vec.append(&mut mem::take(&mut self.batch));
-		vec
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -188,14 +165,12 @@ impl MemoryRandom {
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
-	/// Ordered index
+	/// Ordered index (empty after sort is finalized)
 	ordered: Vec<usize>,
 	/// The maximum size of a batch
 	batch_size: usize,
 	/// Current batch of values to be merged once full
 	batch: Vec<Value>,
-	/// The finalized result
-	result: Option<Vec<Value>>,
 	/// The order specification
 	orders: OrderList,
 }
@@ -208,18 +183,16 @@ impl MemoryOrdered {
 			values: Vec::new(),
 			ordered: Vec::new(),
 			batch: Vec::with_capacity(batch_size),
-			result: None,
 			orders,
 		}
 	}
 
 	pub(in crate::dbs) fn len(&self) -> usize {
-		if let Some(result) = &self.result {
-			// If we have a finalized result, we return its size
-			result.len()
+		// If sorted (ordered is empty and no pending batch), return values.len()
+		// Otherwise return values + batch
+		if self.ordered.is_empty() && self.batch.is_empty() {
+			self.values.len()
 		} else {
-			// If we don't have a finalized result, we return the amount of value summed
-			// with the current batch
 			self.values.len() + self.batch.len()
 		}
 	}
@@ -240,55 +213,61 @@ impl MemoryOrdered {
 
 	#[cfg(target_family = "wasm")]
 	pub(super) fn sort(&mut self) {
-		if self.result.is_none() {
-			if !self.batch.is_empty() {
-				self.send_batch();
-			}
-			let mut ordered = mem::take(&mut self.ordered);
-			let mut values = mem::take(&mut self.values);
-			ordered.sort_unstable_by(|a, b| self.orders.compare(&values[*a], &values[*b]));
-			let res = MemoryRandom::ordered_values_to_vec(&mut values, &ordered);
-			self.result = Some(res);
+		// Make sure there is no pending batch
+		if !self.batch.is_empty() {
+			self.send_batch();
 		}
+		// If ordered is empty, nothing to sort (already sorted or empty)
+		if self.ordered.is_empty() {
+			return;
+		}
+		let mut ordered = mem::take(&mut self.ordered);
+		ordered.sort_unstable_by(|a, b| self.orders.compare(&self.values[*a], &self.values[*b]));
+		apply_permutation_in_place(&mut self.values, &mut ordered);
+		// ordered is already empty from mem::take, so it stays cleared
 	}
 
 	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn sort(&mut self) -> Result<(), Error> {
-		if self.result.is_none() {
-			if !self.batch.is_empty() {
-				self.send_batch();
-			}
-			let mut ordered = mem::take(&mut self.ordered);
-			let mut values = mem::take(&mut self.values);
-			let orders = self.orders.clone();
-			let result = spawn_blocking(move || {
-				ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
-				MemoryRandom::ordered_values_to_vec(&mut values, &ordered)
-			})
-			.await
-			.map_err(|e| Error::OrderingError(format!("{e}")))?;
-			self.result = Some(result);
+		// Make sure there is no pending batch
+		if !self.batch.is_empty() {
+			self.send_batch();
 		}
+		// If ordered is empty, nothing to sort (already sorted or empty)
+		if self.ordered.is_empty() {
+			return Ok(());
+		}
+		let mut ordered = mem::take(&mut self.ordered);
+		let mut values = mem::take(&mut self.values);
+		let orders = self.orders.clone();
+		self.values = spawn_blocking(move || {
+			ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
+			apply_permutation_in_place(&mut values, &mut ordered);
+			values
+		})
+		.await
+		.map_err(|e| Error::OrderingError(format!("{e}")))?;
+		// ordered is already empty from mem::take, so it stays cleared
 		Ok(())
 	}
 
 	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
-		if let Some(ref mut result) = self.result {
-			MemoryCollector::vec_start_limit(start, limit, result);
+		// Only apply if sorted (ordered is empty)
+		if self.ordered.is_empty() {
+			vec_start_limit(start, limit, &mut self.values);
 		}
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
-		// Return the finalized result if available
-		if let Some(result) = self.result.take() {
-			return result;
+		// If sorted (ordered is empty and batch is empty), just take values
+		if self.ordered.is_empty() && self.batch.is_empty() {
+			mem::take(&mut self.values)
+		} else {
+			// Otherwise, assemble values + batch (unsorted fallback path)
+			let mut vec = mem::take(&mut self.values);
+			vec.append(&mut mem::take(&mut self.batch));
+			vec
 		}
-		// Otherwise, return the raw values.
-		// This path is used when sorting hasn’t been finalized yet; we then assemble
-		// any collected values along with the pending batch into a single vector.
-		let mut vec = mem::take(&mut self.values);
-		vec.append(&mut mem::take(&mut self.batch));
-		vec
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
@@ -371,7 +350,7 @@ impl MemoryOrderedLimit {
 
 	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
 		if let Some(ref mut result) = self.result {
-			MemoryCollector::vec_start_limit(start, limit, result);
+			vec_start_limit(start, limit, result);
 		}
 	}
 
@@ -392,5 +371,40 @@ impl MemoryOrderedLimit {
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
 		exp.add_collector("MemoryOrderedLimit", vec![("limit", self.limit.into())]);
+	}
+}
+
+fn vec_start_limit(start: Option<u32>, limit: Option<u32>, vec: &mut Vec<Value>) {
+	match (start, limit) {
+		(Some(start), Some(limit)) => {
+			*vec = mem::take(vec).into_iter().skip(start as usize).take(limit as usize).collect()
+		}
+		(Some(start), None) => *vec = mem::take(vec).into_iter().skip(start as usize).collect(),
+		(None, Some(limit)) => *vec = mem::take(vec).into_iter().take(limit as usize).collect(),
+		(None, None) => {}
+	}
+}
+
+pub(crate) fn apply_permutation_in_place(values: &mut [Value], ordered: &mut [usize]) {
+	for i in 0..ordered.len() {
+		// If already in correct position, skip
+		if ordered[i] == i {
+			continue;
+		}
+
+		// Follow the cycle
+		let mut current = i;
+		loop {
+			let target = ordered[current];
+			ordered[current] = current; // Mark as visited
+
+			if target == i {
+				// Cycle complete
+				break;
+			}
+
+			values.swap(current, target);
+			current = target;
+		}
 	}
 }
