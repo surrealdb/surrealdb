@@ -46,10 +46,7 @@ impl Parser<'_> {
 
 		let split_before = self.peek().span;
 		let split = self.try_parse_split(&fields, fields_span)?;
-		let split_span = match &split {
-			Some(_) => Some(split_before.covers(self.last_span())),
-			None => None,
-		};
+		let split_span = split.as_ref().map(|_| split_before.covers(self.last_span()));
 		let group = self.try_parse_group(&fields, fields_span, split_span)?;
 		let order = self.try_parse_orders(&fields, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
