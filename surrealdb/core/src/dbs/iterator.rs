@@ -754,6 +754,7 @@ impl Iterator {
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
+			// NOTE: This is a no-op for order-less queries.
 			self.results.sort().await?;
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
