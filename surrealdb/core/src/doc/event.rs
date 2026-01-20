@@ -7,6 +7,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::{Action, Document};
 use crate::expr::FlowResultExt as _;
+use crate::iam::AuthLimit;
 use crate::val::Value;
 
 impl Document {
@@ -71,6 +72,9 @@ impl Document {
 
 		// Loop through all event statements
 		for ev in self.ev(ctx, opt).await?.iter() {
+			// Limit auth
+			let opt = AuthLimit::try_from(&ev.auth_limit)?.limit_opt(opt);
+			// Get the event action
 			let evt = match action {
 				Action::Create => Value::from("CREATE"),
 				Action::Update => Value::from("UPDATE"),
@@ -96,14 +100,14 @@ impl Document {
 			let ctx = ctx.freeze();
 			// Process conditional clause
 			let val = stk
-				.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc)))
+				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
 				.await
 				.catch_return()
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
+					stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&*doc)))
 						.await
 						.catch_return()
 						.map_err(|e| {

@@ -13,6 +13,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt as _};
+use crate::iam::AuthLimit;
 use crate::fnc::args::{Any, FromArgs, FromPublic};
 use crate::syn::function_with_capabilities;
 use crate::val::{Closure, Value};
@@ -104,7 +105,8 @@ pub async fn process_api_request_with_stack(
 		.rev()
 		.fold(final_action, |next, def| create_middleware_closure(def.clone(), next));
 
-	// APIs run without permissions
+	// APIs run without permissions & limit auth
+	let opt = AuthLimit::try_from(&api.auth_limit)?.limit_opt(opt);
 	let opt = opt.new_with_perms(false);
 	let res = next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?;
 	let res: ApiResponse = res.try_into()?;
