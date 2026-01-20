@@ -1,19 +1,17 @@
 //! Stream adapter for file system
-use bytes::Bytes;
+use std::error::Error;
 use std::fs::File;
 use std::io::Read;
-
-use crate::{
-	errors::error::{SurrealError, SurrealErrorStatus},
-	safe_eject,
-};
-use futures::stream::Stream;
-use futures::task::{Context, Poll};
-use std::error::Error;
 use std::pin::Pin;
 
+use bytes::Bytes;
+use futures::stream::Stream;
+use futures::task::{Context, Poll};
 // For hyper 1.x compatibility
 use hyper::body::Frame;
+
+use crate::errors::error::{SurrealError, SurrealErrorStatus};
+use crate::safe_eject;
 
 /// Stream adapter for file system.
 ///
@@ -50,7 +48,8 @@ impl Stream for StreamAdapter {
 	///
 	/// # Arguments
 	/// * `self` - The `StreamAdapter` struct.
-	/// * `cx` - The context of the task to enable the task to be woken up and polled again using the waker.
+	/// * `cx` - The context of the task to enable the task to be woken up and polled again using
+	///   the waker.
 	///
 	/// # Returns
 	/// A poll containing the next chunk from the file.

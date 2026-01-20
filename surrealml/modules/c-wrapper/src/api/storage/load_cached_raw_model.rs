@@ -23,13 +23,13 @@ use crate::{process_string_for_string_return, string_return_safe_eject};
 /// A unique identifier for the loaded model.
 #[no_mangle]
 pub extern "C" fn load_cached_raw_model(file_path_ptr: *const c_char) -> StringReturn {
-    let file_path_str = process_string_for_string_return!(file_path_ptr, "file path");
-    let file_id = generate_unique_id();
-    let mut model = string_return_safe_eject!(File::open(file_path_str));
-    let mut data = vec![];
-    string_return_safe_eject!(model.read_to_end(&mut data));
-    let file = SurMlFile::fresh(data);
-    let mut python_state = STATE.lock().unwrap();
-    python_state.insert(file_id.clone(), file);
-    StringReturn::success(file_id)
+	let file_path_str = process_string_for_string_return!(file_path_ptr, "file path");
+	let file_id = generate_unique_id();
+	let mut model = string_return_safe_eject!(File::open(file_path_str));
+	let mut data = vec![];
+	string_return_safe_eject!(model.read_to_end(&mut data));
+	let file = SurMlFile::fresh(data);
+	let mut python_state = STATE.lock().unwrap();
+	python_state.insert(file_id.clone(), file);
+	StringReturn::success(file_id)
 }

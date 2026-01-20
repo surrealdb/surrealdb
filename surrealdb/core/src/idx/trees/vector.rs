@@ -75,8 +75,7 @@ impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
 		let slice = r.read_cow()?;
 		let bytes: &[u8] = slice.as_ref();
 		let mut reader = bytes;
-		DeserializeRevisioned::deserialize_revisioned(&mut reader)
-			.map_err(DecodeError::custom)
+		DeserializeRevisioned::deserialize_revisioned(&mut reader).map_err(DecodeError::custom)
 	}
 }
 

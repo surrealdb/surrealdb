@@ -1,12 +1,12 @@
 //! Defines the session module for the execution module.
-use crate::errors::error::{SurrealError, SurrealErrorStatus};
-use crate::safe_eject;
-use ort::session::Session;
-
 #[cfg(feature = "gpu")]
 use ort::execution_providers::CUDAExecutionProvider;
 #[cfg(feature = "gpu")]
 use ort::execution_providers::ExecutionProvider;
+use ort::session::Session;
+
+use crate::errors::error::{SurrealError, SurrealErrorStatus};
+use crate::safe_eject;
 
 /// Creates a session for a model.
 ///

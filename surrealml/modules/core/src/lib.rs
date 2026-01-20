@@ -1,14 +1,16 @@
-//! An embedded ONNX runtime directly in the Rust binary when compiling result in no need for installing ONNX runtime separately
-//! or worrying about version clashes with other runtimes.
+//! An embedded ONNX runtime directly in the Rust binary when compiling result in no need for
+//! installing ONNX runtime separately or worrying about version clashes with other runtimes.
 //!
-//! This crate is just the Rust implementation of the Surml API. It is advised that you just use this crate directly if you are running
-//! a Rust server. It must be noted that the version of ONNX needs to be the same as the client when using this crate. For this current
-//! version of Surml, the ONNX version is `1.16.0`.
+//! This crate is just the Rust implementation of the Surml API. It is advised that you just use
+//! this crate directly if you are running a Rust server. It must be noted that the version of ONNX
+//! needs to be the same as the client when using this crate. For this current version of Surml, the
+//! ONNX version is `1.16.0`.
 //!
 //! ## Compilation config
-//! If nothing is configured the crate will compiled the ONNX runtime into the binary. This is the default behaviour. However, if you
-//! want to use an ONNX runtime that is installed on your system, you can set the environment variable `ONNXRUNTIME_LIB_PATH` before
-//! you compile the crate. This will make the crate use the ONNX runtime that is installed on your system.
+//! If nothing is configured the crate will compiled the ONNX runtime into the binary. This is the
+//! default behaviour. However, if you want to use an ONNX runtime that is installed on your system,
+//! you can set the environment variable `ONNXRUNTIME_LIB_PATH` before you compile the crate. This
+//! will make the crate use the ONNX runtime that is installed on your system.
 //!
 //! ## Usage
 //! Surml can be used to store, load, and execute ONNX models.
@@ -91,11 +93,10 @@ pub mod errors;
 pub mod execution;
 pub mod storage;
 pub use ndarray;
-
 #[cfg(feature = "tokenizers")]
 pub use surrealml_tokenizers;
 
 /// Returns the version of the ONNX runtime that is used.
 pub fn onnx_runtime() -> &'static str {
-    "1.20.0"
+	"1.20.0"
 }
