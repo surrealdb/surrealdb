@@ -26,7 +26,7 @@ pub fn run_model(
 	// isn't enabled, so we aren't passing in the `hf_token` parameter.
 	let tokenizer = load_local_tokenizer(model.to_string()).map_err(|e| {
 		SurrealError::new(
-			format!("Failed to load tokenizer for model '{}': {}", model.to_string(), e),
+			format!("Failed to load tokenizer for model '{}': {}", model, e),
 			SurrealErrorStatus::NotFound,
 		)
 	})?;

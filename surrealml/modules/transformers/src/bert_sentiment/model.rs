@@ -82,7 +82,7 @@ impl BertForSequenceClassification {
 		let pooler = BertPooler::load(vb.pp("bert.pooler"), cfg)?;
 
 		// ❸ Classifier (hidden_size → num_labels).
-		let classifier = linear(cfg.hidden_size as usize, num_labels, vb.pp("classifier"))?;
+		let classifier = linear(cfg.hidden_size, num_labels, vb.pp("classifier"))?;
 
 		let dropout = Dropout::new(cfg.hidden_dropout_prob as f32);
 

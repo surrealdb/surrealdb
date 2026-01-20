@@ -81,9 +81,7 @@ mod tests {
 		type Cfg = ();
 		type LoadedModel = DummyModel;
 
-		fn config(&self) -> Self::Cfg {
-			()
-		}
+		fn config(&self) -> Self::Cfg {}
 		fn return_tensor_filenames(&self) -> Vec<String> {
 			Vec::new()
 		}

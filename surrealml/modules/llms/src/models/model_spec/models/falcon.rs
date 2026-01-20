@@ -91,17 +91,17 @@ mod tests {
 		assert_eq!(ours.num_attention_heads, 71);
 		assert_eq!(ours.layer_norm_epsilon, 1e-5);
 		assert_eq!(ours.initializer_range, 0.02);
-		assert_eq!(ours.use_cache, true);
+		assert!(ours.use_cache);
 		assert_eq!(ours.bos_token_id, 11);
 		assert_eq!(ours.eos_token_id, 11);
 		assert_eq!(ours.hidden_dropout, 0.0);
 		assert_eq!(ours.attention_dropout, 0.0);
 		assert_eq!(ours.n_head_kv, None);
-		assert_eq!(ours.alibi, false);
-		assert_eq!(ours.new_decoder_architecture, false);
-		assert_eq!(ours.multi_query, true);
-		assert_eq!(ours.parallel_attn, true);
-		assert_eq!(ours.bias, false);
+		assert!(!ours.alibi);
+		assert!(!ours.new_decoder_architecture);
+		assert!(ours.multi_query);
+		assert!(ours.parallel_attn);
+		assert!(!ours.bias);
 	}
 
 	#[test]

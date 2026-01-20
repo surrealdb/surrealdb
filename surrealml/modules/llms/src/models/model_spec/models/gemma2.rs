@@ -109,7 +109,7 @@ mod tests {
 	fn matches_expected_fields() {
 		let ours: Upstream = Gemma2.config();
 		// Check individual fields
-		assert_eq!(ours.attention_bias, false);
+		assert!(!ours.attention_bias);
 		assert_eq!(ours.head_dim, 256);
 		assert_eq!(ours.hidden_size, 2048);
 	}

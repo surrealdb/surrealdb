@@ -1,5 +1,6 @@
 //! High-level **runtime selector**.
 
+use std::fmt;
 use std::str::FromStr;
 
 use candle_transformers::models::mimi::candle_nn::VarBuilder;
@@ -54,29 +55,32 @@ impl FromStr for ModelWrapper {
 	}
 }
 
-impl ModelWrapper {
-	pub fn to_string(&self) -> String {
-		match self {
-			ModelWrapper::Falcon(_) => "tiiuae/falcon-7b".to_string(),
-			ModelWrapper::Gemma(_) => "google/gemma-7b".to_string(),
-			ModelWrapper::Gemma2(_) => "google/gemma-2b".to_string(),
-			ModelWrapper::Gemma3(_) => "google/gemma-3-4b-it".to_string(),
+impl fmt::Display for ModelWrapper {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let s = match self {
+			ModelWrapper::Falcon(_) => "tiiuae/falcon-7b",
+			ModelWrapper::Gemma(_) => "google/gemma-7b",
+			ModelWrapper::Gemma2(_) => "google/gemma-2b",
+			ModelWrapper::Gemma3(_) => "google/gemma-3-4b-it",
 			ModelWrapper::Mistral(s) => match s.spec {
 				crate::models::model_spec::models::mistral::Mistral::V7bV0_1 => {
-					"mistralai/Mistral-7B-v0.1".to_string()
+					"mistralai/Mistral-7B-v0.1"
 				}
 				crate::models::model_spec::models::mistral::Mistral::AmazonLite => {
-					"amazon/MistralLite".to_string()
+					"amazon/MistralLite"
 				}
 			},
 			ModelWrapper::Mixtral(s) => match s.spec {
 				crate::models::model_spec::models::mixtral::Mixtral::V0_1_8x7b => {
-					"mistralai/Mixtral-8x7B-v0.1".to_string()
+					"mistralai/Mixtral-8x7B-v0.1"
 				}
 			},
-		}
+		};
+		write!(f, "{}", s)
 	}
+}
 
+impl ModelWrapper {
 	/// Initialize the underlying model by forwarding to the inner [`State::load`].
 	///
 	/// # Errors

@@ -20,7 +20,8 @@ use surrealml_tokenizers::{encode, load_local_tokenizer};
 use wasmtime::{AsContextMut, Caller, Linker, Memory};
 
 fn guest_str(mem: &[u8], ptr: i32, len: i32) -> &str {
-	std::str::from_utf8(&mem[ptr as usize..(ptr + len) as usize]).unwrap()
+	std::str::from_utf8(&mem[ptr as usize..(ptr + len) as usize])
+		.expect("Guest string is not valid UTF-8")
 }
 
 // helper: write &[u32] to guest memory, return (ptr,len)
@@ -32,7 +33,7 @@ fn write_u32_slice(caller: &mut Caller<'_, ()>, mem: &Memory, data: &[u32]) -> (
 	let mut store = caller.as_context_mut();
 	let old_size = mem.data(&store).len();
 	let extra_pages = ((size + 0xFFFF) / 0x10000) as u64; // 64 KiB pages
-	mem.grow(&mut store, extra_pages).unwrap();
+	mem.grow(&mut store, extra_pages).expect("Failed to grow WASM memory");
 
 	let dst = &mut mem.data_mut(&mut store)[old_size..old_size + size as usize];
 	dst.copy_from_slice(bytes);
@@ -47,15 +48,20 @@ fn tokenizer_encode_raw(
 	input_ptr: i32,
 	input_len: i32,
 ) -> (i32, i32) {
-	let mem = caller.get_export("memory").unwrap().into_memory().unwrap();
+	let mem = caller
+		.get_export("memory")
+		.expect("Failed to get memory export")
+		.into_memory()
+		.expect("Export is not a memory");
 
 	let data = mem.data(&caller);
 
 	let model = guest_str(data, model_ptr, model_len);
 	let input = guest_str(data, input_ptr, input_len);
 
-	let tokenizer_model = load_local_tokenizer(model.to_owned()).unwrap();
-	let tokens = encode(&tokenizer_model, input).unwrap();
+	let tokenizer_model =
+		load_local_tokenizer(model.to_owned()).expect("Failed to load tokenizer from model name");
+	let tokens = encode(&tokenizer_model, input).expect("Failed to encode input");
 	write_u32_slice(&mut caller, &mem, &tokens)
 }
 
@@ -68,7 +74,9 @@ fn tokenizer_encode_raw(
 /// # Arguments
 /// - `linker`: the linker to the WASM host
 pub fn link_ml(linker: &mut Linker<()>) {
-	linker.func_wrap("host", "tokenizer_encode", tokenizer_encode_raw).unwrap();
+	linker
+		.func_wrap("host", "tokenizer_encode", tokenizer_encode_raw)
+		.expect("Failed to link tokenizer_encode function");
 }
 
 #[cfg(test)]
@@ -84,9 +92,9 @@ mod tests {
 	}
 
 	fn call_tokenizer_encode(model: &str, input: &str) -> Vec<u32> {
-		let tokenizer_model = load_local_tokenizer(model.to_owned()).unwrap();
-		let output = encode(&tokenizer_model, input.into()).unwrap();
-		return output;
+		let tokenizer_model =
+			load_local_tokenizer(model.to_owned()).expect("Failed to load tokenizer");
+		encode(&tokenizer_model, input).expect("Failed to encode input")
 	}
 
 	/// To test that the basic raw linking just works. Other tests will focus on the linking of ML

@@ -40,7 +40,7 @@ pub fn fetch_safetensors(
 	let mut paths = Vec::new();
 
 	for filename in filenames {
-		let path = repo.get(&filename).map_err(|_| {
+		let path = repo.get(filename).map_err(|_| {
 			SurrealError::new(
 				format!("{} not found in repository", filename),
 				SurrealErrorStatus::NotFound,

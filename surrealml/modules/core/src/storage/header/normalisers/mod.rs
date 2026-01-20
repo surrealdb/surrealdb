@@ -59,7 +59,7 @@ impl NormaliserMap {
 		let counter = self.store.len();
 		let column_input_index =
 			safe_eject_option!(keys_reference.reference.get(column_name.as_str()));
-		self.reference.insert(*column_input_index as usize, counter);
+		self.reference.insert(*column_input_index, counter);
 		self.store.push(normaliser);
 		self.store_ref.push(column_name);
 		Ok(())
@@ -132,7 +132,7 @@ impl NormaliserMap {
 				NormaliserType::from_string(normaliser_data.to_string())?;
 			let column_input_index =
 				safe_eject_option!(keys_reference.reference.get(column_name.as_str()));
-			reference.insert(*column_input_index as usize, counter as usize);
+			reference.insert(*column_input_index, counter as usize);
 			store.push(normaliser);
 			store_ref.push(column_name);
 			counter += 1;

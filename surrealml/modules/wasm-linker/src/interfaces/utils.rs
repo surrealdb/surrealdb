@@ -96,7 +96,7 @@ impl TokenizerReturn {
 	/// # Returns
 	/// A `TokenizerReturn` with `is_error = 1`, `handle = NULL`, and `error_message` set.
 	pub fn error(msg: String) -> Self {
-		let c_msg = CString::new(msg).unwrap().into_raw();
+		let c_msg = CString::new(msg).expect("Failed to create error CString").into_raw();
 		TokenizerReturn {
 			handle: std::ptr::null_mut(),
 			is_error: 1,
@@ -193,7 +193,7 @@ impl StringReturn {
 	/// A new `StringReturn` object.
 	pub fn success(string: String) -> Self {
 		StringReturn {
-			string: CString::new(string).unwrap().into_raw(),
+			string: CString::new(string).expect("Failed to create result CString").into_raw(),
 			is_error: 0,
 			error_message: std::ptr::null_mut(),
 		}
@@ -284,7 +284,7 @@ impl VecU32Return {
 	}
 
 	pub fn error(msg: String) -> Self {
-		let c_msg = CString::new(msg).unwrap().into_raw();
+		let c_msg = CString::new(msg).expect("Failed to create error CString").into_raw();
 		VecU32Return {
 			data: std::ptr::null_mut(),
 			length: 0,

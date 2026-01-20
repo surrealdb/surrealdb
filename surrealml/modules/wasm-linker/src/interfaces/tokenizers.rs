@@ -144,7 +144,7 @@ pub unsafe extern "C" fn decode(
 			string: std::ptr::null_mut(),
 			is_error: 1,
 			error_message: CString::new("Received null pointer for tokenizer handle")
-				.unwrap()
+				.expect("Failed to create error CString")
 				.into_raw(),
 		};
 	}
@@ -154,7 +154,9 @@ pub unsafe extern "C" fn decode(
 		return StringReturn {
 			string: std::ptr::null_mut(),
 			is_error: 1,
-			error_message: CString::new("Received null pointer for data").unwrap().into_raw(),
+			error_message: CString::new("Received null pointer for data")
+				.expect("Failed to create error CString")
+				.into_raw(),
 		};
 	};
 	let slice: &[u32] = unsafe { slice::from_raw_parts(data_ptr, length) };
@@ -170,14 +172,16 @@ pub unsafe extern "C" fn decode(
 				string: std::ptr::null_mut(),
 				is_error: 1,
 				error_message: CString::new("Failed to create CString from decoded string")
-					.unwrap()
+					.expect("Failed to create error CString")
 					.into_raw(),
 			},
 		},
 		Err(_) => StringReturn {
 			string: std::ptr::null_mut(),
 			is_error: 1,
-			error_message: CString::new("Failed to decode data").unwrap().into_raw(),
+			error_message: CString::new("Failed to decode data")
+				.expect("Failed to create error CString")
+				.into_raw(),
 		},
 	}
 }

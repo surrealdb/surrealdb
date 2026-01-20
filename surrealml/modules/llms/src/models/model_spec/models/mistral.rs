@@ -126,7 +126,7 @@ mod tests {
 		assert_eq!(ours.rms_norm_eps, 1e-5);
 		assert_eq!(ours.rope_theta, 10_000.);
 		assert_eq!(ours.sliding_window, Some(4096));
-		assert_eq!(ours.use_flash_attn, false);
+		assert!(!ours.use_flash_attn);
 	}
 
 	/// Enum-based config must equal the canonical upstream `config_amazon_mistral_lite(false)`
@@ -149,7 +149,7 @@ mod tests {
 		assert_eq!(ours.rms_norm_eps, 1e-5);
 		assert_eq!(ours.rope_theta, 10_000.);
 		assert_eq!(ours.sliding_window, Some(4096));
-		assert_eq!(ours.use_flash_attn, false);
+		assert!(!ours.use_flash_attn);
 	}
 
 	/// Returns 2 `.safetensors` filenames for V7bV0_1.

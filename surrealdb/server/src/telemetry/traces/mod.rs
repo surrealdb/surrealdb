@@ -30,7 +30,7 @@ where
 				.with_resource(OTEL_DEFAULT_RESOURCE.clone())
 				.build();
 			// Set it as the global tracer provider
-			let _ = opentelemetry::global::set_tracer_provider(provider.clone());
+			opentelemetry::global::set_tracer_provider(provider.clone());
 			// Return the tracing layer with the specified filter
 			Ok(Some(
 				tracing_opentelemetry::layer()
