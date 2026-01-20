@@ -260,6 +260,15 @@ impl Parser<'_> {
 		let group_start_span = self.last_span();
 
 		if self.eat(t!("ALL")) {
+			if let Some(split_span) = split_span {
+				let group_span = group_start_span.covers(self.last_span());
+				bail!(
+					"SPLIT and GROUP are mutually exclusive",
+					@split_span => "SPLIT cannot be used with GROUP",
+					@group_span => "GROUP cannot be used with SPLIT",
+				)
+			}
+
 			return Ok(Some(Groups(Vec::new())));
 		}
 
