@@ -450,7 +450,7 @@ mod tests {
 		#[case] mut ordered: Vec<usize>,
 	) {
 		let mut expected = values.clone();
-		expected.sort_by(|a, b| a.cmp(b));
+		expected.sort();
 		apply_permutation_in_place(&mut values, &mut ordered);
 		assert_eq!(values, expected);
 	}
