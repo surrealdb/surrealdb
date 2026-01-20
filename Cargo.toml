@@ -204,7 +204,7 @@ clap = { version = "4.5.40", features = ["derive"] }
 toml = "0.8.10"
 tar = "0.4.40"
 zstd = "0.13.0"
-wasmtime = { version = "34.0.1", default-features = false, features = ["cranelift", "winch"] }
+wasmtime = { version = "36.0.3", default-features = false, features = ["cranelift", "winch"] }
 wasmtime-wasi = "34.0.1"
 walrus = "0.20.3"
 wasm-opt = "0.116.0"
