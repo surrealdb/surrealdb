@@ -392,8 +392,8 @@ fn vec_start_limit<T>(vec: &mut Vec<T>, start: Option<u32>, limit: Option<u32>) 
 
 /// Applies a permutation in-place to a vector of values.
 ///
-/// The `ordered` vector is expected to contain the indices of the `values` in the
-/// positions they should be in order to be sorted.
+/// The `ordered` vector is expected to contain the indices of the `values` that
+/// should be in the final sorted order.
 ///
 /// This function iterates over the `ordered` vector and swaps the values in the `values` vector
 /// to the positions they should be in order to be sorted. Whenever a value is swapped, the index
@@ -442,8 +442,8 @@ mod tests {
 	#[case::three(vec![1, 2, 3], vec![0, 1, 2])]
 	#[case::three(vec![1, 3, 2], vec![0, 2, 1])]
 	#[case::three(vec![2, 1, 3], vec![1, 0, 2])]
-	#[case::three(vec![2, 3, 1], vec![1, 2, 0])]
-	#[case::three(vec![3, 1, 2], vec![2, 0, 1])]
+	#[case::three(vec![2, 3, 1], vec![2, 0, 1])]
+	#[case::three(vec![3, 1, 2], vec![1, 2, 0])]
 	#[case::three(vec![3, 2, 1], vec![2, 1, 0])]
 	fn test_apply_permutation_in_place(
 		#[case] mut values: Vec<i32>,
@@ -451,6 +451,30 @@ mod tests {
 	) {
 		let mut expected = values.clone();
 		expected.sort();
+		apply_permutation_in_place(&mut values, &mut ordered);
+		assert_eq!(values, expected);
+	}
+
+	#[rstest]
+	#[case::empty(vec![], vec![])]
+	#[case::single(vec![1], vec![0])]
+	#[case::two(vec![1, 2], vec![0, 1])]
+	#[case::two(vec![2, 1], vec![1, 0])]
+	#[case::three(vec![1, 2, 3], vec![0, 1, 2])]
+	#[case::three(vec![1, 3, 2], vec![0, 2, 1])]
+	#[case::three(vec![2, 1, 3], vec![1, 0, 2])]
+	#[case::three(vec![2, 3, 1], vec![2, 0, 1])]
+	#[case::three(vec![3, 1, 2], vec![1, 2, 0])]
+	#[case::three(vec![3, 2, 1], vec![2, 1, 0])]
+	fn test_apply_permutation_in_place_with_par_sort(
+		#[case] mut values: Vec<i32>,
+		#[case] expected_orders: Vec<usize>,
+	) {
+		let mut expected = values.clone();
+		expected.sort();
+		let mut ordered = (0..values.len()).collect::<Vec<_>>();
+		ordered.par_sort_unstable_by(|a, b| values[*a].cmp(&values[*b]));
+		assert_eq!(ordered, expected_orders);
 		apply_permutation_in_place(&mut values, &mut ordered);
 		assert_eq!(values, expected);
 	}
