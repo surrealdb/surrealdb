@@ -1,8 +1,7 @@
-use std::ops::Deref;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use surrealdb_types::ToSql;
 
 use super::FlowResultExt as _;
 use crate::ctx::FrozenContext;
@@ -16,13 +15,24 @@ use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Fetchs(pub Vec<Fetch>);
+pub(crate) struct Fetchs(Vec<Fetch>);
 
-impl Deref for Fetchs {
-	type Target = Vec<Fetch>;
+impl Fetchs {
+	pub(crate) fn new(mut fetches: Vec<Fetch>) -> Self {
+		fetches.sort_by_key(|f| f.0.to_sql());
+		Self(fetches)
+	}
 
-	fn deref(&self) -> &Self::Target {
-		&self.0
+	pub(crate) fn len(&self) -> usize {
+		self.0.len()
+	}
+
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Fetch> {
+		self.0.iter()
+	}
+
+	pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Fetch> {
+		self.0.iter_mut()
 	}
 }
 
