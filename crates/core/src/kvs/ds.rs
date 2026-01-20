@@ -1387,12 +1387,17 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			if cfg.v3 {
+				let mut buffer = Vec::new();
+				crate::kvs::export::export_v3(&txn, &cfg, chn, &ns, &db, &mut buffer).await?;
+			} else {
+				txn.export(&ns, &db, cfg, chn).await?;
+			}
+			txn.cancel().await
 		})
 	}
 
