@@ -158,8 +158,8 @@ regex-syntax = "0.8.8"
 reqwest = { version = "0.13.1", default-features = false }
 ring = "0.17.14"
 roaring = "0.11.3"
-rustls = { version = "0.23.36", default-features = false }
-rust_decimal = { version = "1.40.0" }
+rustls = "0.23.36"
+rust_decimal = "1.40.0"
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 scrypt = "0.11.0"
 semver = "1.0.27"
@@ -299,7 +299,7 @@ thiserror.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
 tokio-stream.workspace = true
-tokio-tungstenite.workspace = true
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 tracing.workspace = true
 ulid.workspace = true
 

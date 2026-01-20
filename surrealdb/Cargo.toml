@@ -82,12 +82,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
     "stream",
 ], optional = true }
-rustls = { workspace = true, default-features = false, features = [
-    "ring",
-    "logging",
-    "std",
-    "tls12",
-], optional = true }
+rustls = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }

@@ -123,6 +123,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
+rustls.workspace = true
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
