@@ -19,6 +19,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid as UuidExt;
 
 use super::super::*;
+use crate::catalog::auth::AuthLimit;
 use crate::catalog::record::{Data, Record, RecordType};
 use crate::catalog::schema::base::Base;
 use crate::catalog::{
@@ -365,6 +366,7 @@ pub fn api_basic() -> ApiDefinition {
 		fallback: None,
 		config: ApiConfigDefinition::default(),
 		comment: None,
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -399,6 +401,7 @@ pub fn api_with_middleware() -> ApiDefinition {
 			permissions: Permission::Full,
 		},
 		comment: Some("Order management API".to_string()),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -453,6 +456,7 @@ pub fn event_basic() -> EventDefinition {
 			"CREATE audit SET action = 'create'".to_string(),
 		))],
 		comment: Some("Audit log on create".to_string()),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -477,6 +481,7 @@ pub fn field_basic() -> FieldDefinition {
 		update_permission: Permission::Full,
 		comment: None,
 		reference: None,
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -497,6 +502,7 @@ pub fn field_with_type() -> FieldDefinition {
 		update_permission: Permission::Full,
 		comment: Some("User email address".to_string()),
 		reference: None,
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -517,6 +523,7 @@ pub fn field_readonly() -> FieldDefinition {
 		update_permission: Permission::None,
 		comment: Some("Record creation timestamp".to_string()),
 		reference: None,
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -533,6 +540,7 @@ pub fn function_basic() -> FunctionDefinition {
 		comment: None,
 		permissions: Permission::Full,
 		returns: None,
+		auth_limit: AuthLimit::default(),
 	}
 }
 
@@ -545,6 +553,7 @@ pub fn function_with_args() -> FunctionDefinition {
 		comment: Some("Add two numbers".to_string()),
 		permissions: Permission::Full,
 		returns: Some(Kind::Number),
+		auth_limit: AuthLimit::default(),
 	}
 }
 
