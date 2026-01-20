@@ -202,9 +202,7 @@ wiremock = "0.6.5"
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
-once_cell = "1.21.3"
 ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
-ort-sys = { version = "2.0.0-rc.11", default-features = false }
 safetensors = "0.7.0"
 tokenizers = "0.22.2"
 zip = { version = "7.1.0", default-features = false }

@@ -5,11 +5,8 @@ edition = "2021"
 description = "The core machine learning library for SurrealML that enables SurrealDB to store and load ML models"
 license-file = "LICENSE"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 default = []
-# below are the features for testing different engines
 sklearn-tests = []
 onnx-tests = []
 torch-tests = []
@@ -18,20 +15,15 @@ gpu = []
 tokenizers = ["surrealml-tokenizers"]
 
 [dependencies]
-regex = { workspace = true }
-ort = { workspace = true }
-ort-sys = { workspace = true }
-ndarray = { workspace = true }
-once_cell = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
-futures-util = { workspace = true }
-thiserror = { workspace = true }
-serde = { workspace = true }
-tempfile = { workspace = true }
-zip = { workspace = true, default-features = false }
-surrealml-tokenizers = { path = "../tokenizers/", optional = true }
 hyper = "1.8.1"
+ndarray = { workspace = true }
+ort = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+surrealml-tokenizers = { path = "../tokenizers/", optional = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1.48.0", features = ["full"] }
