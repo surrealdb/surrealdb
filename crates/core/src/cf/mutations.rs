@@ -200,23 +200,6 @@ impl Display for ChangeSet {
 #[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
-<<<<<<< HEAD
-=======
-/*impl WriteMutationSet {
-	pub fn new() -> Self {
-		Self(Vec::new())
-	}
-}*/
-
-/*
-impl Default for WriteMutationSet {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-*/
-
->>>>>>> 5a41472b4 (Improve string escaping code)
 #[cfg(test)]
 mod tests {
 	#[test]
