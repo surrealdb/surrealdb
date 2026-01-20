@@ -104,7 +104,12 @@ impl Results {
 
 	pub(super) async fn sort(&mut self) -> Result<()> {
 		match self {
-			Self::MemoryOrdered(c) => c.sort().await?,
+			Self::MemoryOrdered(c) => {
+				#[cfg(not(target_family = "wasm"))]
+				c.sort().await?;
+				#[cfg(target_family = "wasm")]
+				c.sort();
+			},
 			Self::MemoryOrderedLimit(c) => c.sort(),
 			Self::MemoryRandom(c) => c.sort(),
 			Self::None | Self::Memory(_) | Self::Groups(_) => {}
