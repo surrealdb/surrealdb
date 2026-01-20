@@ -81,8 +81,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -104,8 +103,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -127,7 +125,7 @@ pub async fn standard(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -161,8 +159,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -184,8 +181,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					limit: 3,
-					type: 'MemoryOrderedLimit'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}
@@ -207,7 +203,7 @@ pub async fn unique(new_ds: impl CreateDs) {
 			},
 			{
 				detail: {
-					type: 'MemoryOrdered'
+					type: 'Memory'
 				},
 				operation: 'Collector'
 			}

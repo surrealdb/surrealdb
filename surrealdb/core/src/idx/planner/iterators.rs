@@ -119,6 +119,7 @@ impl IteratorBatch for VecDeque<IndexItemRecord> {
 /// per-IO work and allow cooperative cancellation via Context.
 pub(crate) enum RecordIterator {
 	IndexEqual(IndexEqualThingIterator),
+	IndexEqualReverse(IndexEqualReverseThingIterator),
 	IndexRange(IndexRangeThingIterator),
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
@@ -147,6 +148,7 @@ impl RecordIterator {
 	) -> Result<B> {
 		match self {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
+			Self::IndexEqualReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueEqual(i) => i.next_batch(txn).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
 			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
@@ -176,6 +178,7 @@ impl RecordIterator {
 	) -> Result<usize> {
 		match self {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
+			Self::IndexEqualReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueEqual(i) => i.next_count(txn).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
 			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
@@ -332,6 +335,58 @@ impl IndexEqualThingIterator {
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
 		Ok(Self::next_scan(tx, &mut self.beg, &self.end, limit).await?.len())
+	}
+}
+
+pub(crate) struct IndexEqualReverseThingIterator {
+	irf: IteratorRef,
+	beg: Vec<u8>,
+	end: Vec<u8>,
+}
+
+impl IndexEqualReverseThingIterator {
+	pub(super) fn new(
+		irf: IteratorRef,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		fd: &Array,
+	) -> Result<Self> {
+		let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, fd)?;
+		Ok(Self {
+			irf,
+			beg,
+			end,
+		})
+	}
+
+	async fn next_scanr(
+		tx: &Transaction,
+		beg: &[u8],
+		end: &mut Vec<u8>,
+		limit: u32,
+	) -> Result<Vec<(Key, Val)>> {
+		let min = beg.to_owned();
+		let max = end.clone();
+		let res = tx.scanr(min..max, limit, None).await?;
+		if let Some((key, _)) = res.last() {
+			*end = key.clone();
+		}
+		Ok(res)
+	}
+
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+		let res = Self::next_scanr(tx, &self.beg, &mut self.end, limit).await?;
+		let mut records = B::with_capacity(res.len());
+		res.into_iter().try_for_each(|(_, val)| -> Result<()> {
+			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, self.irf.into()));
+			Ok(())
+		})?;
+		Ok(records)
+	}
+
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+		Ok(Self::next_scanr(tx, &self.beg, &mut self.end, limit).await?.len())
 	}
 }
 
