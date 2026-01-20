@@ -473,10 +473,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			what: vec![Expr::Table("a".to_owned())],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
-			split: Some(Splits(vec![
-				Split(Idiom(vec![Part::Field("foo".to_owned())])),
-				Split(Idiom(vec![Part::Field("bar".to_owned())])),
-			])),
+			split: None,
 			group: Some(Groups(vec![
 				Group(Idiom(vec![Part::Field("foo".to_owned())])),
 				Group(Idiom(vec![Part::Field("bar".to_owned())])),
