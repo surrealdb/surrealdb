@@ -109,7 +109,7 @@ impl Results {
 				c.sort().await?;
 				#[cfg(target_family = "wasm")]
 				c.sort();
-			},
+			}
 			Self::MemoryOrderedLimit(c) => c.sort(),
 			Self::MemoryRandom(c) => c.sort(),
 			Self::None | Self::Memory(_) | Self::Groups(_) => {}
