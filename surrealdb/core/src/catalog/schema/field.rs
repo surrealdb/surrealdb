@@ -2,6 +2,7 @@ use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Permission;
+use crate::catalog::auth::AuthLimit;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
@@ -18,7 +19,7 @@ pub(crate) enum DefineDefault {
 	Set(Expr),
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
@@ -40,6 +41,24 @@ pub struct FieldDefinition {
 
 	pub(crate) comment: Option<String>,
 	pub(crate) reference: Option<Reference>,
+
+	/// The auth limit of the API.
+	#[revision(end = 2, convert_fn = "readd_auth_limit")]
+	pub(crate) old_auth_limit: AuthLimit,
+	#[revision(start = 2, default_fn = "existing_auth_limit")]
+	pub(crate) auth_limit: AuthLimit,
+}
+
+// This was pushed in after the first beta, so we need to add auth_limit to structs in a non-breaking way
+impl FieldDefinition {
+	fn readd_auth_limit(&mut self, _revision: u16, auth_limit: AuthLimit) -> Result<(), revision::Error> {
+		self.auth_limit = auth_limit;
+		Ok(())
+	}
+
+	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 impl_kv_value_revisioned!(FieldDefinition);
 

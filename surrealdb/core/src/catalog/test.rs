@@ -6,6 +6,7 @@ use rstest::rstest;
 use uuid::Uuid;
 
 use super::*;
+use crate::catalog::auth::AuthLimit;
 use crate::catalog::record::{Data, Record};
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
@@ -140,6 +141,7 @@ use crate::val::{Datetime, TableName, Value};
 		permissions: Permission::Full,
 	},
 	comment: None,
+	auth_limit: AuthLimit::default(),
 }, 44)]
 #[case::bucket(BucketDefinition {
 	id: Some(BucketId(123)),
@@ -159,6 +161,7 @@ use crate::val::{Datetime, TableName, Value};
 	when: Expr::Literal(Literal::String("when".to_string())),
 	then: vec![Expr::Literal(Literal::String("then".to_string()))],
 	comment: Some("comment".to_string()),
+	auth_limit: AuthLimit::default(),
 }, 35)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
@@ -175,6 +178,7 @@ use crate::val::{Datetime, TableName, Value};
 	update_permission: Permission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
+	auth_limit: AuthLimit::default(),
 }, 39)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
@@ -185,6 +189,7 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 	returns: Some(Kind::Any),
+	auth_limit: AuthLimit::default(),
 }, 36)]
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
