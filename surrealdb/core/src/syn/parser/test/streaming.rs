@@ -82,7 +82,6 @@ static SOURCE: &str = r#"
 	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a
 		WITH INDEX index,index_2
 		WHERE true
-		SPLIT ON foo,bar
 		GROUP foo,bar
 		ORDER BY foo COLLATE NUMERIC ASC
 		START AT { a: true }
