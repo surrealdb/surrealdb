@@ -29,25 +29,14 @@ pub struct ApiDefinition {
 	/// An optional comment for the definition.
 	pub(crate) comment: Option<String>,
 	/// The auth limit of the API.
-	#[revision(end = 2, convert_fn = "readd_auth_limit")]
-	pub(crate) old_auth_limit: AuthLimit,
-	#[revision(start = 2, default_fn = "existing_auth_limit")]
+	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
 // non-breaking way
 impl ApiDefinition {
-	fn readd_auth_limit(
-		&mut self,
-		_revision: u16,
-		auth_limit: AuthLimit,
-	) -> Result<(), revision::Error> {
-		self.auth_limit = auth_limit;
-		Ok(())
-	}
-
-	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
 	}
 }
