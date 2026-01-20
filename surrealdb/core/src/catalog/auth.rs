@@ -38,6 +38,7 @@ impl From<&AuthLevel> for crate::iam::Level {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AuthLimit {
 	pub level: AuthLevel,
 	pub role: Option<String>,
