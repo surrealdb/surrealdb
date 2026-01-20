@@ -16,13 +16,6 @@ user-id = 3987
 user-login = "rushmorem"
 user-name = "Rushmore Mushambi"
 
-[[publisher.aes]]
-version = "0.8.4"
-when = "2024-02-13"
-user-id = 267
-user-login = "tarcieri"
-user-name = "Tony Arcieri"
-
 [[publisher.affinitypool]]
 version = "0.4.0"
 when = "2025-09-25"
@@ -162,13 +155,6 @@ when = "2023-10-06"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
-
-[[publisher.bzip2]]
-version = "0.6.1"
-when = "2025-10-16"
-user-id = 256011
-user-login = "folkertdev"
-user-name = "Folkert de Vries"
 
 [[publisher.bzip2-sys]]
 version = "0.1.13+1.0.8"
@@ -361,20 +347,6 @@ version = "0.127.2"
 when = "2026-01-14"
 trusted-publisher = "github:bytecodealliance/wasmtime"
 
-[[publisher.crc]]
-version = "3.3.0"
-when = "2025-05-07"
-user-id = 64482
-user-login = "akhilles"
-user-name = "Akhil Velagapudi"
-
-[[publisher.crc-catalog]]
-version = "2.4.0"
-when = "2023-11-04"
-user-id = 64482
-user-login = "akhilles"
-user-name = "Akhil Velagapudi"
-
 [[publisher.cxx]]
 version = "1.0.192"
 when = "2025-12-16"
@@ -395,13 +367,6 @@ when = "2025-12-16"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
-
-[[publisher.deflate64]]
-version = "0.1.10"
-when = "2025-10-01"
-user-id = 131098
-user-login = "anatawa12"
-user-name = "anatawa12"
 
 [[publisher.derive_arbitrary]]
 version = "1.4.2"
@@ -1815,13 +1780,6 @@ user-id = 209322
 user-login = "Pr0methean"
 user-name = "Chris Hennick"
 
-[[publisher.zopfli]]
-version = "0.8.3"
-when = "2025-10-30"
-user-id = 111932
-user-login = "AlexTMjugador"
-user-name = "Alejandro González"
-
 [[audits.bytecode-alliance.wildcard-audits.arbitrary]]
 who = "Nick Fitzgerald <fitzgen@gmail.com>"
 criteria = "safe-to-deploy"
@@ -2402,12 +2360,6 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.3 -> 0.3.0"
 notes = "Nothing out of the ordinary, virtually no unsafe code."
-
-[[audits.bytecode-alliance.audits.constant_time_eq]]
-who = "Nick Fitzgerald <fitzgen@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.2.4"
-notes = "A few tiny blocks of `unsafe` but each of them is very obviously correct."
 
 [[audits.bytecode-alliance.audits.core-foundation-sys]]
 who = "Dan Gohman <dev@sunfishcode.online>"
@@ -5185,32 +5137,6 @@ criteria = "safe-to-deploy"
 delta = "0.4.1 -> 0.5.0"
 notes = "Adds support for Vsock addresses. Usages of `tokio-vsock` for I/O look correct."
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.constant_time_eq]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.2.4 -> 0.2.5"
-notes = "No code changes."
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.constant_time_eq]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.2.5 -> 0.2.6"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.constant_time_eq]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.2.6 -> 0.3.0"
-notes = "Replaces some `unsafe` code by bumping MSRV to 1.66 (to access `core::hint::black_box`)."
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.constant_time_eq]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.3.0 -> 0.3.1"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.crunchy]]
 who = "Jack Grigg <jack@electriccoin.co>"

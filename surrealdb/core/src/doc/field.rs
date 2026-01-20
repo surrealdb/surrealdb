@@ -14,7 +14,7 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::{Kind, KindLiteral};
-use crate::iam::Action;
+use crate::iam::{Action, AuthLimit};
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
@@ -206,6 +206,7 @@ impl Document {
 		let mut skip: Option<&Idiom> = None;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
+			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
@@ -262,7 +263,7 @@ impl Document {
 								self.current
 									.doc
 									.to_mut()
-									.set(stk, ctx, opt, &k, old.as_ref().clone())
+									.set(stk, ctx, &opt, &k, old.as_ref().clone())
 									.await?;
 								continue;
 							}
@@ -291,7 +292,7 @@ impl Document {
 					def: fd,
 					stk,
 					ctx,
-					opt,
+					opt: &opt,
 					old,
 					user_input: inp,
 				};
@@ -367,6 +368,9 @@ impl Document {
 				continue;
 			}
 
+			// Limit auth
+			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+
 			// Loop over each value in document
 			for (_, val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Skip if the value is empty
@@ -382,7 +386,7 @@ impl Document {
 					def: fd,
 					stk,
 					ctx,
-					opt,
+					opt: &opt,
 					old: val.into(),
 					user_input: Value::None.into(),
 				};

@@ -984,10 +984,6 @@ criteria = "safe-to-deploy"
 version = "10.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.libbz2-rs-sys]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.libc]]
 version = "0.2.180"
 criteria = "safe-to-deploy"
@@ -1282,10 +1278,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.polling]]
 version = "3.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ppmd-rust]]
-version = "1.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.pprof]]
@@ -1636,10 +1628,6 @@ criteria = "safe-to-deploy"
 version = "0.4.5"
 criteria = "safe-to-deploy"
 
-[[exemptions.safetensors]]
-version = "0.7.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.salsa20]]
 version = "0.10.2"
 criteria = "safe-to-deploy"
@@ -1976,10 +1964,6 @@ criteria = "safe-to-deploy"
 version = "2.1.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.typed-path]]
-version = "0.12.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.typenum]]
 version = "1.19.0"
 criteria = "safe-to-deploy"
@@ -2216,24 +2200,12 @@ criteria = "safe-to-deploy"
 version = "0.8.33"
 criteria = "safe-to-deploy"
 
-[[exemptions.zeroize_derive]]
-version = "1.4.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.zerotrie]]
 version = "0.2.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.zerovec]]
 version = "0.11.5"
-criteria = "safe-to-deploy"
-
-[[exemptions.zip]]
-version = "7.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.zlib-rs]]
-version = "0.5.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.zmij]]

@@ -8065,6 +8065,7 @@ dependencies = [
  "num_cpus",
  "object_store",
  "parking_lot",
+ "paste",
  "path-clean",
  "pbkdf2",
  "phf 0.13.1",
