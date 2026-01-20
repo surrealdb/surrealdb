@@ -14,7 +14,7 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, Token};
-use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
+use crate::iam::{Actor, Auth, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -209,7 +209,7 @@ pub async fn db_access(
 	};
 	// Setup the query params
 	// Setup the system session for finding the signup record
-	let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+	let mut sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 	sess.ip.clone_from(&session.ip);
 	sess.or.clone_from(&session.or);
 	// Compute the value with the params
@@ -238,7 +238,8 @@ pub async fn db_access(
 			// AUTHENTICATE clause
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				let mut sess =
+					Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 						.expect("record id conversion should succeed"),

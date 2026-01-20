@@ -7,6 +7,7 @@
 #![warn(missing_docs)]
 
 mod access;
+mod auth;
 pub(crate) mod aggregation;
 mod database;
 mod module;
