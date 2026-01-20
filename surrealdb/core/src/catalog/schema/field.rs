@@ -49,9 +49,14 @@ pub struct FieldDefinition {
 	pub(crate) auth_limit: AuthLimit,
 }
 
-// This was pushed in after the first beta, so we need to add auth_limit to structs in a non-breaking way
+// This was pushed in after the first beta, so we need to add auth_limit to structs in a
+// non-breaking way
 impl FieldDefinition {
-	fn readd_auth_limit(&mut self, _revision: u16, auth_limit: AuthLimit) -> Result<(), revision::Error> {
+	fn readd_auth_limit(
+		&mut self,
+		_revision: u16,
+		auth_limit: AuthLimit,
+	) -> Result<(), revision::Error> {
 		self.auth_limit = auth_limit;
 		Ok(())
 	}
