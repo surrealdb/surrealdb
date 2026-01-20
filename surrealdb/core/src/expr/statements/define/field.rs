@@ -17,8 +17,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
 

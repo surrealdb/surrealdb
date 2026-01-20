@@ -297,10 +297,8 @@ pub async fn db_access(
 				// This record access allows signin
 				Some(val) => {
 					// Setup the system session for finding the signin record
-					let mut sess = Session::for_level(
-						Level::Database(ns.clone(), db.clone()),
-						Role::Editor,
-					);
+					let mut sess =
+						Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 					sess.ip.clone_from(&session.ip);
 					sess.or.clone_from(&session.or);
 					// Compute the value with the params
