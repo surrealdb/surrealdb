@@ -200,20 +200,6 @@ impl Display for ChangeSet {
 #[non_exhaustive]
 pub struct WriteMutationSet(pub Vec<TableMutations>);
 
-/*impl WriteMutationSet {
-	pub fn new() -> Self {
-		Self(Vec::new())
-	}
-}*/
-
-/*
-impl Default for WriteMutationSet {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-*/
-
 #[cfg(test)]
 mod tests {
 	#[test]
