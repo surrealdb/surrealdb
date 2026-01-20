@@ -40,4 +40,6 @@ mod generator;
 mod tests;
 
 #[rustfmt::skip]
-mod v3_0_0;
+mod v3_0_0_beta_1;
+#[rustfmt::skip]
+mod v3_0_0_beta_3;
