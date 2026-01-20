@@ -123,7 +123,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
-rustls.workspace = true
+rustls = { workspace = true, features = ["aws_lc_rs"] }
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -82,11 +82,11 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
     "stream",
 ], optional = true }
-rustls = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 js-sys = "0.3"
+rustls = { workspace = true, optional = true, features = ["ring"] }
 rustls-pki-types = { version = "1.14.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
@@ -101,6 +101,7 @@ wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+rustls = { workspace = true, optional = true, features = ["aws_lc_rs"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
