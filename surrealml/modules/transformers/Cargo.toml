@@ -1,0 +1,19 @@
+[package]
+name = "surrealml-transformers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+surrealml-tokenizers = { path = "../tokenizers"}
+surrealml-llms = { path = "../llms" }
+candle-core = { workspace = true }
+anyhow = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
+serde_json = { workspace = true }
+safetensors = { workspace = true }
+tokenizers = { workspace = true }
+# rust-bert = { version = "0.23.0", features = [] }
+
+[lints]
+workspace = true

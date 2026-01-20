@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "ml")]
-use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
@@ -229,11 +227,6 @@ pub async fn init<
 	// Setup the command-line options
 	// Initiate environment
 	env::init()?;
-
-	// if ML feature is enabled load the ONNX runtime lib that is embedded
-	#[cfg(feature = "ml")]
-	crate::core::ml::execution::session::set_environment()
-		.context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();

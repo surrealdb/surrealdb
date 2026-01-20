@@ -1,0 +1,22 @@
+[package]
+name = "surrealml-tokenizers"
+version = "0.1.0"
+edition = "2021"
+description = "An interface for loading tokenizers"
+license = "LICENSE"
+
+[dependencies]
+tokenizers = { version = "0.22.2", default-features = false, features = [
+    "unstable_wasm",
+] }
+hf-hub = { version = "0.4.3", optional = true, features = ["tokio"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.17"
+
+[lib]
+name = "surrealml_tokenizers"
+path = "src/lib.rs"
+
+[features]
+default = []
+http-access = ["hf-hub"]

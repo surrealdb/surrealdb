@@ -9,6 +9,13 @@ members = [
 	"surrealdb/server",
 	"surrealdb/types",
 	"surrealdb/types/derive",
+    # SurrealML crates
+	"surrealml/modules/core",
+	"surrealml/modules/c-wrapper",
+	"surrealml/modules/llms",
+	"surrealml/modules/tokenizers",
+	"surrealml/modules/transformers",
+	"surrealml/modules/wasm-linker",
 	# Surrealism crates
 	"surrealism",
 	"surrealism/demo",
@@ -38,12 +45,17 @@ keywords = [
 categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
-# workspace internal dependencies
+# SurrealDB crates
 surrealdb = { version = "3.0.0-beta", path = "surrealdb" }
 surrealdb-core = { version = "3.0.0-beta", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-features = false }
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
+# SurrealML crates
+surrealml-core = { version = "0.1.9", path = "surrealml/modules/core" }
+surrealml-llms = { version = "0.1.0", path = "surrealml/modules/llms" }
+surrealml-tokenizers = { version = "0.1.1", path = "surrealml/modules/tokenizers" }
+# Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
 surrealism-runtime = { version = "0.1", path = "surrealism/runtime" }
@@ -66,9 +78,6 @@ revision = { version = "0.17.0", features = [
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.17.1"
-surrealml = { version = "0.1.9", package = "surrealml-core", features = [
-    "dynamic",
-] }
 surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"
@@ -76,10 +85,8 @@ vart = "0.9.3"
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
-# External Kv stores
+# External KV stores
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
-
-# Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
@@ -124,19 +131,16 @@ indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.2.0", default-features = false, features = ["use_pem"] }
-linfa-linalg = "=0.2.1"
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 nanoid = "0.4.0"
 native-tls = "0.2.14"
-ndarray = "=0.16.1"
-ndarray-stats = "=0.6.0"
+ndarray = "0.17.2"
+ndarray-stats = "0.7.0"
 nix = { version = "0.30.1", default-features = false }
 num-traits = "0.2.19"
 num_cpus = "1.17.0"
 object_store = "0.13.0"
-ort = "=2.0.0-rc.9"
-ort-sys = "=2.0.0-rc.9"
 papaya = "0.2.3"
 parking_lot = "0.12.5"
 path-clean = "1.0.1"
@@ -145,8 +149,7 @@ phf = "0.13.1"
 pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
-# TODO: Look at use of this dependency. Last update was 4 years ago and it is unmaintained
-radix_trie = "0.3.0"
+radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
 rand = "0.8.5"
 rayon = "1.11.0"
 regex = "1.12.2"
@@ -156,11 +159,10 @@ ring = "0.17.14"
 roaring = "0.11.3"
 rustls = { version = "0.23.36", default-features = false }
 rust_decimal = { version = "1.40.0" }
-# TODO: Look at dependency, 5 years old seems unmaintained.
-rust-stemmers = "1.2.0"
+rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 scrypt = "0.11.0"
 semver = "1.0.27"
-serde = "1.0.228"
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
@@ -184,7 +186,7 @@ wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 tokio-tungstenite-wasm = "0.8.1"
 
-# used only in dev-dependencies
+# Dev dependencies
 criterion = "0.8.1"
 env_logger = "0.11.8"
 flate2 = "1.1.8"
@@ -196,6 +198,17 @@ time = "0.3.45"
 tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 
+# SurrealML specific dependencies
+candle-core = "0.9.1"
+candle-nn = "0.9.1"
+candle-transformers = "0.9.1"
+once_cell = "1.21.3"
+ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
+ort-sys = { version = "2.0.0-rc.11", default-features = false }
+safetensors = "0.7.0"
+tokenizers = "0.22.2"
+zip = { version = "7.1.0", default-features = false }
+
 # Surrealism specific dependencies
 clap = { version = "4.5.54", features = ["derive"] }
 toml = "0.9.11"
@@ -205,7 +218,6 @@ wasmtime = { version = "40.0.2", default-features = false, features = ["cranelif
 wasmtime-wasi = { version = "40.0.2", features = ["p1"] }
 walrus = "0.24.4"
 wasm-opt = "0.116.1"
-candle-core = "0.9.1"
 
 [package]
 name = "surreal"

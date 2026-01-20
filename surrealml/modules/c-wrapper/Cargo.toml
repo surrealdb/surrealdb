@@ -1,0 +1,22 @@
+[package]
+name = "c-wrapper"
+version = "0.1.4"
+edition = "2021"
+description = "A Rust wrapper crate providing C bindings for SurrealML."
+license-file = "LICENSE"
+
+[dependencies]
+surrealml-core = { version = "0.1.4", path = "../core" }
+uuid = { version = "1.18.1", features = ["v4"] }
+ndarray = "0.17.2"
+
+# for the uploading the model to the server
+tokio = { version = "1.48.0", features = ["full"] }
+hyper = { version = "1.8.1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
+http-body-util = "0.1"
+base64 = "0.22.1"
+zip = "7.1.0"
+
+[lib]
+crate-type = ["cdylib"]

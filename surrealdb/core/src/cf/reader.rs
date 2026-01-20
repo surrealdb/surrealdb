@@ -59,7 +59,8 @@ pub async fn read(
 		// Get the timestamp of the changefeed entry
 		match current_ts {
 			Some(ref x) => {
-				if dec.ts.as_ref() != x.as_slice() {
+				let ts_bytes: &[u8] = dec.ts.as_ref();
+				if ts_bytes != x.as_slice() {
 					let db_mut = DatabaseMutation(buf);
 					// Convert timestamp bytes to version number
 					let version =

@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
-use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
@@ -74,7 +73,9 @@ impl<F> Encode<F> for SerializedVector {
 impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
 	fn borrow_decode(r: &mut BorrowReader<'de>) -> std::result::Result<Self, DecodeError> {
 		let slice = r.read_cow()?;
-		DeserializeRevisioned::deserialize_revisioned(&mut slice.as_ref())
+		let bytes: &[u8] = slice.as_ref();
+		let mut reader = bytes;
+		DeserializeRevisioned::deserialize_revisioned(&mut reader)
 			.map_err(DecodeError::custom)
 	}
 }
@@ -135,16 +136,16 @@ impl Vector {
 	#[inline]
 	fn cosine_distance_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
 		let dot_product = a.dot(b);
-		let norm_a = a.norm_l2();
-		let norm_b = b.norm_l2();
+		let norm_a = (a * a).sum().sqrt();
+		let norm_b = (b * b).sum().sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
 	#[inline]
 	fn cosine_distance_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
 		let dot_product = a.dot(b) as f64;
-		let norm_a = a.norm_l2() as f64;
-		let norm_b = b.norm_l2() as f64;
+		let norm_a = ((a * a).sum() as f64).sqrt();
+		let norm_b = ((b * b).sum() as f64).sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 

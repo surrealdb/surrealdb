@@ -1,0 +1,24 @@
+{
+	"compilerOptions": {
+		"module": "NodeNext",
+		"target": "es2022",
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
+		"skipLibCheck": true,
+		"allowJs": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"rootDir": ".",
+		"sourceMap": true,
+		"types": ["node"]
+	},
+	"exclude": [
+		"node_modules",
+		"dist"
+	]
+}
+  

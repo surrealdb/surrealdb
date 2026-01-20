@@ -551,7 +551,7 @@ end = "2026-10-30"
 
 [[trusted.fslock]]
 criteria = "safe-to-deploy"
-user-id = 23043 # brunoczim
+user-id = 23043
 start = "2020-01-01"
 end = "2026-05-06"
 
@@ -755,7 +755,7 @@ end = "2025-09-03"
 
 [[trusted.lzma-rs]]
 criteria = "safe-to-deploy"
-user-id = 14564 # Guillaume E (gendx)
+user-id = 14564
 start = "2019-02-24"
 end = "2026-05-06"
 
@@ -821,7 +821,7 @@ end = "2026-10-30"
 
 [[trusted.nanoservices-utils]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2024-03-30"
 end = "2025-09-03"
 
@@ -863,7 +863,7 @@ end = "2025-08-06"
 
 [[trusted.onnx-embedding]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2025-04-17"
 end = "2026-05-06"
 
@@ -1337,13 +1337,13 @@ end = "2025-08-06"
 
 [[trusted.system-configuration]]
 criteria = "safe-to-deploy"
-user-id = 1459
+user-id = 1459 # Linus Färnstrand (faern)
 start = "2019-10-16"
 end = "2026-05-06"
 
 [[trusted.system-configuration-sys]]
 criteria = "safe-to-deploy"
-user-id = 1459
+user-id = 1459 # Linus Färnstrand (faern)
 start = "2019-10-16"
 end = "2026-05-06"
 

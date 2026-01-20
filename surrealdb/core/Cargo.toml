@@ -41,7 +41,7 @@ kv-surrealkv = [
 ]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml"]
+ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest"]
 surrealism = ["dep:surrealism-runtime"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
@@ -70,7 +70,7 @@ targets = []
 # External surreal crates
 surrealmx = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
-surrealml = { workspace = true, optional = true }
+surrealml-core = { workspace = true, optional = true }
 
 affinitypool = { workspace = true, optional = true }
 dmp.workspace = true
@@ -126,7 +126,6 @@ http.workspace = true
 hex.workspace = true
 humantime.workspace = true
 ipnet.workspace = true
-linfa-linalg.workspace = true
 md-5.workspace = true
 nanoid.workspace = true
 ndarray.workspace = true

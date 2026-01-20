@@ -1,0 +1,44 @@
+{
+  "name": "surrealml",
+  "version": "0.1.3",
+  "author": "Maxwell Flitton",
+  "license": "MIT",
+  "description": "A JavaScript client for the SurrealML functionality",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "keywords": [
+    "math",
+    "addition",
+    "simple"
+  ],
+  "homepage": "https://github.com/surrealdb/surrealml",
+  "bugs": {
+    "url": "https://github.com/surrealdb/surrealml/issues"
+  },
+  "scripts": {
+    "local_build_smoke_test": "tsx --tsconfig tsconfig.scripts.json scripts/local_build_smoke_test.ts",
+    "local_build_smoke_test:no-build-local": "tsx --tsconfig tsconfig.scripts.json scripts/local_build_smoke_test.ts --no-build-local",
+    "npm_install_smoke_test": "tsx --tsconfig tsconfig.scripts.json scripts/npm_install_smoke_test.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "postinstall": "node dist/bin/postinstall.js"
+  },
+  "dependencies": {
+    "axios": "1.8.1",
+    "koffi": "^2.11.0",
+    "tar": "7.4.3",
+    "unzipper": "0.12.3",
+    "uuid": "^11.1.0"
+  },
+  "files": [
+    "dist",
+    "config.json"
+  ],
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/unzipper": "^0.10.11",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

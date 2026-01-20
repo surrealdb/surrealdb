@@ -1,0 +1,14 @@
+[package]
+name = "wasm-linker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+surrealml-tokenizers = { path = "../tokenizers", features = ["http-access"] }
+surrealml-llms = { path = "../llms" }
+wasmtime = "40.0.2"
+wasmtime-wasi = "40.0.2"
+bytemuck = "1.24.0"
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+pytorch2.0.1:…
+Q
+onnx::MatMul_0
+onnx::MatMul_6/linear/MatMul_output_0/linear/MatMul"MatMul
+;
+linear.bias
+/linear/MatMul_output_05/linear/Add"Add	torch_jit*Blinear.biasJdÕ²* Bonnx::MatMul_6J ‘9?[ÄŒ>Z
+onnx::MatMul_0
+
+
+b
+5
+
+
+B
