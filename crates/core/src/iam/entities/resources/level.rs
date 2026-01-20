@@ -118,6 +118,43 @@ impl Level {
 
 		entities
 	}
+
+	/// Returns if the level is a sub level of the given level.
+	/// For example Level::Namespace is a sublevel of Level::Root, and
+	/// Level::Database("foo", "bar") is a sublevel of Level::Namespace("foo").
+	/// Every level is also a sublevel of itself.
+	pub(crate) fn sublevel_of(&self, other: &Self) -> bool {
+		match self {
+			Level::No => true,
+			Level::Root => matches!(other, Level::Root),
+			Level::Namespace(a) => match other {
+				Level::Root => true,
+				Level::Namespace(b) => a == b,
+				_ => false,
+			},
+			Level::Database(ns0, db0) => match other {
+				Level::Root => true,
+				Level::Namespace(ns1) => ns0 == ns1,
+				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
+				_ => false,
+			},
+			Level::Record(ns0, db0, ac0) => match other {
+				Level::Root => true,
+				Level::Namespace(ns1) => ns0 == ns1,
+				Level::Database(ns1, db1) => ns0 == ns1 && db0 == db1,
+				Level::Record(ns1, db1, ac1) => ns0 == ns1 && db0 == db1 && ac0 == ac1,
+				_ => false,
+			},
+		}
+	}
+
+	pub(crate) fn is_record(&self) -> bool {
+		matches!(self, Level::Record(_, _, _))
+	}
+
+	pub(crate) fn is_anonymous(&self) -> bool {
+		matches!(self, Level::No)
+	}
 }
 
 impl From<()> for Level {

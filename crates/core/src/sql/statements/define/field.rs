@@ -3,7 +3,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::statements::info::InfoStructure;
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 use uuid::Uuid;
 
-#[revisioned(revision = 6)]
+#[revisioned(revision = 7)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -41,6 +41,14 @@ pub struct DefineFieldStatement {
 	pub reference: Option<Reference>,
 	#[revision(start = 6)]
 	pub default_always: bool,
+	#[revision(start = 7, default_fn = "existing_auth_limit")]
+	pub auth_limit: AuthLimit,
+}
+
+impl DefineFieldStatement {
+	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 
 impl DefineFieldStatement {
@@ -91,6 +99,7 @@ impl DefineFieldStatement {
 				if_not_exists: false,
 				overwrite: false,
 				kind,
+				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()),
 				..self.clone()
 			})?,
 			None,

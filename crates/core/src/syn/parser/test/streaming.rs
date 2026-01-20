@@ -1,4 +1,5 @@
 use crate::{
+	iam::AuthLimit,
 	sql::{
 		access::AccessDuration,
 		access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess},
@@ -214,6 +215,7 @@ fn statements() -> Vec<Statement> {
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,
+			auth_limit: AuthLimit::default(),
 		})),
 		Statement::Define(DefineStatement::Access(DefineAccessStatement {
 			name: Ident("a".to_string()),
@@ -306,6 +308,7 @@ fn statements() -> Vec<Statement> {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			auth_limit: AuthLimit::default(),
 		})),
 		Statement::Define(DefineStatement::Field(DefineFieldStatement {
 			name: Idiom(vec![
@@ -335,6 +338,7 @@ fn statements() -> Vec<Statement> {
 			overwrite: false,
 			reference: None,
 			default_always: false,
+			auth_limit: AuthLimit::default(),
 		})),
 		Statement::Define(DefineStatement::Index(DefineIndexStatement {
 			name: Ident("index".to_owned()),

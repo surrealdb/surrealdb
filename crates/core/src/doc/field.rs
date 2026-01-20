@@ -130,6 +130,9 @@ impl Document {
 
 			// Loop over each field in document
 			for (k, mut val) in self.current.doc.as_ref().walk(&fd.name).into_iter() {
+				// Limit auth
+				let mut opt = opt.clone();
+				opt.auth = Arc::new(opt.auth.as_ref().new_limited(&fd.auth_limit));
 				// Get the initial value
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
 				// Get the input value
@@ -166,7 +169,7 @@ impl Document {
 								self.current
 									.doc
 									.to_mut()
-									.set(stk, ctx, opt, &k, old.as_ref().clone())
+									.set(stk, ctx, &opt, &k, old.as_ref().clone())
 									.await?;
 								continue;
 							}
@@ -197,7 +200,7 @@ impl Document {
 					def: fd,
 					stk,
 					ctx,
-					opt,
+					opt: &opt,
 					old,
 					inp,
 				};
@@ -261,6 +264,9 @@ impl Document {
 		let rid = self.id()?;
 		// Loop through all field statements
 		for fd in self.fd(ctx, opt).await?.iter() {
+			// Limit auth
+			let mut opt = opt.clone();
+			opt.auth = Arc::new(opt.auth.as_ref().new_limited(&fd.auth_limit));
 			// Only process reference fields
 			if fd.reference.is_none() {
 				continue;
@@ -281,7 +287,7 @@ impl Document {
 					def: fd,
 					stk,
 					ctx,
-					opt,
+					opt: &opt,
 					old: val.into(),
 					inp: Value::None.into(),
 				};

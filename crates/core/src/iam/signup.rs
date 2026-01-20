@@ -5,8 +5,8 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
-use crate::iam::Auth;
 use crate::iam::{Actor, Level};
+use crate::iam::{Auth, Role};
 use crate::kvs::{Datastore, LockType::*, TransactionType::*};
 use crate::sql::AccessType;
 use crate::sql::Object;
@@ -98,7 +98,10 @@ pub async fn db_access(
 							// Setup the query params
 							let vars = Some(vars.0);
 							// Setup the system session for finding the signup record
-							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+							let mut sess = Session::for_level(
+								Level::Database(ns.clone(), db.clone()),
+								Role::Editor,
+							);
 							sess.ip.clone_from(&session.ip);
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
@@ -126,8 +129,10 @@ pub async fn db_access(
 											// AUTHENTICATE clause
 											if let Some(au) = &av.authenticate {
 												// Setup the system session for finding the signin record
-												let mut sess =
-													Session::editor().with_ns(&ns).with_db(&db);
+												let mut sess = Session::for_level(
+													Level::Database(ns.clone(), db.clone()),
+													Role::Editor,
+												);
 												sess.rd = Some(rid.clone().into());
 												sess.tk = Some((&claims).into());
 												sess.ip.clone_from(&session.ip);

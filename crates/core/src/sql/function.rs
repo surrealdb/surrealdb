@@ -282,6 +282,7 @@ impl Function {
 				// Get the function definition
 				let (ns, db) = opt.ns_db()?;
 				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let opt = val.auth_limit.limit_opt(opt);
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
@@ -328,7 +329,7 @@ impl Function {
 				let a = stk
 					.scope(|scope| {
 						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, &opt, doc))),
 						)
 					})
 					.await?;
@@ -340,7 +341,7 @@ impl Function {
 				}
 				let ctx = ctx.freeze();
 				// Run the custom function
-				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
+				let result = match stk.run(|stk| val.block.compute(stk, &ctx, &opt, doc)).await {
 					Err(Error::Return {
 						value,
 					}) => Ok(value),

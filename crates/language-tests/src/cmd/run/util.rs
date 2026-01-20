@@ -50,6 +50,7 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 				.with_scripting(schema_cap.scripting.unwrap_or(true))
 				.with_guest_access(schema_cap.quest_access.unwrap_or(true))
 				.with_live_query_notifications(schema_cap.live_query_notifications.unwrap_or(true))
+				.with_insecure_storable_closures(schema_cap.insecure_storable_closures.unwrap_or(false))
 				.with_functions(extract_targets(&schema_cap.allow_functions, false))
 				.without_functions(extract_targets(&schema_cap.deny_functions, true))
 				.with_network_targets(extract_targets(&schema_cap.allow_net, false))

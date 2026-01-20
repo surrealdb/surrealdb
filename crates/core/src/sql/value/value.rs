@@ -10,6 +10,7 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::visit::{Visit, Visitor};
 use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
@@ -154,6 +155,33 @@ impl Value {
 				end: fields.0.end,
 			})),
 		}))
+	}
+
+	pub(crate) fn contains_illegal_closures(&self, ctx: &Context) -> bool {
+		if ctx.get_capabilities().allows_insecure_storable_closures() {
+			return false;
+		}
+
+		struct ClosureFinder {
+			found: bool,
+		}
+
+		impl Visitor for ClosureFinder {
+			type Error = ();
+
+			fn visit_value(&mut self, value: &Value) -> Result<(), Self::Error> {
+				if let Value::Closure(_) = value {
+					self.found = true;
+				}
+				value.visit(self)
+			}
+		}
+
+		let mut finder = ClosureFinder {
+			found: false,
+		};
+		self.visit(&mut finder).ok();
+		finder.found
 	}
 }
 
