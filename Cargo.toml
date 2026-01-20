@@ -54,7 +54,7 @@ surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/deriv
 # SurrealML crates
 surrealml-core = { version = "0.1.9", path = "surrealml/modules/core" }
 surrealml-llms = { version = "0.1.0", path = "surrealml/modules/llms" }
-surrealml-tokenizers = { version = "0.1.1", path = "surrealml/modules/tokenizers" }
+surrealml-tokenizers = { version = "0.1.0", path = "surrealml/modules/tokenizers" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
@@ -111,6 +111,7 @@ bytes = "1.11.0"
 castaway = "0.2.4"
 chrono = "0.4.43"
 ciborium = "0.2.2"
+clap = "4.5.54"
 dashmap = "6.1.0"
 deunicode = "1.6.2"
 ext-sort = "^0.1.5"
@@ -163,7 +164,7 @@ rust_decimal = "1.40.0"
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 scrypt = "0.11.0"
 semver = "1.0.27"
-serde = { version = "1.0.228", features = ["derive"] }
+serde = "1.0.228"
 serde_json = "1.0.149"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
@@ -200,21 +201,23 @@ tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 
 # SurrealML specific dependencies
+bytemuck = "1.24.0"
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
+hf-hub = "0.4.3"
+hyper-util = "0.1"
 ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
 safetensors = "0.7.0"
-tokenizers = "0.22.2"
+tokenizers = { version = "0.22.2", default-features = false }
 zip = { version = "7.1.0", default-features = false }
 
 # Surrealism specific dependencies
-clap = { version = "4.5.54", features = ["derive"] }
 toml = "0.9.11"
 tar = "0.4.44"
 zstd = "0.13.3"
-wasmtime = { version = "40.0.2", default-features = false, features = ["cranelift", "winch"] }
-wasmtime-wasi = { version = "40.0.2", features = ["p1"] }
+wasmtime = { version = "41.0.0", default-features = false, features = ["cranelift", "winch"] }
+wasmtime-wasi = { version = "41.0.0", features = ["p1"] }
 walrus = "0.24.4"
 wasm-opt = "0.116.1"
 

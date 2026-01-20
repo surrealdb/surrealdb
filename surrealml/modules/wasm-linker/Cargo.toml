@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytemuck = "1.24.0"
-surrealml-llms = { path = "../llms" }
-surrealml-tokenizers = { path = "../tokenizers", features = ["http-access"] }
-wasmtime = "40.0.2"
+bytemuck.workspace = true
+surrealml-llms.workspace = true
+surrealml-tokenizers = { workspace = true, features = ["http-access"] }
+wasmtime.workspace = true
 
 [lints]
 workspace = true

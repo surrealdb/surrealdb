@@ -6,12 +6,12 @@ description = "An interface for loading tokenizers"
 license = "LICENSE"
 
 [dependencies]
-tokenizers = { version = "0.22.2", default-features = false, features = [
+tokenizers = { workspace = true, default-features = false, features = [
     "unstable_wasm",
 ] }
-hf-hub = { version = "0.4.3", optional = true, features = ["tokio"] }
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0.17"
+hf-hub = { workspace = true, optional = true, features = ["tokio"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 
 [lib]
 name = "surrealml_tokenizers"

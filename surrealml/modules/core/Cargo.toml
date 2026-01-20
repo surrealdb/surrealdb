@@ -15,18 +15,18 @@ gpu = []
 tokenizers = ["surrealml-tokenizers"]
 
 [dependencies]
-bytes = { workspace = true }
-futures = { workspace = true }
-hyper = "1.8.1"
-ndarray = { workspace = true }
-ort = { workspace = true }
-regex = { workspace = true }
-serde = { workspace = true }
-surrealml-tokenizers = { path = "../tokenizers/", optional = true }
-thiserror = { workspace = true }
+bytes.workspace = true
+futures.workspace = true
+hyper.workspace = true
+ndarray.workspace = true
+ort.workspace = true
+regex.workspace = true
+serde.workspace = true
+surrealml-tokenizers = { workspace = true, optional = true }
+thiserror.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.48.0", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 
 [lib]
 name = "surrealml_core"

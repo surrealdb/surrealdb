@@ -6,14 +6,14 @@ description = "An interface for loading and running models with candle transform
 license = "LICENSE"
 
 [dependencies]
-surrealml-tokenizers = { path = "../tokenizers", features = ["http-access"] }
-serde = { version = "1.0", features = ["derive"] }
-hf-hub = { version = "0.4.3", features = ["tokio"] }
-thiserror = "2.0.17"
-candle-core = { workspace = true }
-candle-transformers = "0.9.1"
-candle-nn = "0.9.1"
-tempfile = "3.23.0"
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+hf-hub = { workspace = true, features = ["tokio"] }
+serde = { workspace = true, features = ["derive"] }
+surrealml-tokenizers = { workspace = true, features = ["http-access"] }
+tempfile.workspace = true
+thiserror.workspace = true
 
 [lib]
 name = "surrealml_llms"

@@ -75,7 +75,7 @@ axum-extra = { version = "0.12.5", features = [
 ] }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 console-subscriber = "0.5.0"
-clap = { version = "4.5.54", features = [
+clap = { workspace = true, features = [
     "env",
     "derive",
     "wrap_help",

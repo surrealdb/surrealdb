@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anyhow = { workspace = true }
-candle-core = { workspace = true }
-candle-nn = { workspace = true }
-candle-transformers = { workspace = true }
-serde_json = { workspace = true }
-surrealml-llms = { path = "../llms" }
-surrealml-tokenizers = { path = "../tokenizers"}
-tokenizers = { workspace = true }
+anyhow.workspace = true
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+serde_json.workspace = true
+surrealml-llms.workspace = true
+surrealml-tokenizers.workspace = true
+tokenizers.workspace = true
 
 [lints]
 workspace = true

@@ -6,14 +6,14 @@ description = "A Rust wrapper crate providing C bindings for SurrealML."
 license-file = "LICENSE"
 
 [dependencies]
-base64 = "0.22.1"
+base64.workspace = true
 http-body-util = "0.1"
-hyper = { version = "1.8.1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
-ndarray = "0.17.2"
-surrealml-core = { version = "0.1.4", path = "../core" }
-tokio = { version = "1.48.0", features = ["full"] }
-uuid = { version = "1.18.1", features = ["v4"] }
+hyper = { workspace = true, features = ["full"] }
+hyper-util = { workspace = true, features = ["client", "client-legacy", "http1", "http2", "tokio"] }
+ndarray.workspace = true
+surrealml-core.workspace = true
+tokio = { workspace = true, features = ["full"] }
+uuid = { workspace = true, features = ["v4"] }
 
 [lib]
 crate-type = ["cdylib"]
