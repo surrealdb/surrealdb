@@ -14,7 +14,6 @@ use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
-use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 	PurgeKind,
@@ -41,9 +40,9 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order,
-	Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Split,
-	Splits, Start, TableType, TopLevelExpr, With,
+	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Literal, Lookup, Mock, Output, Param,
+	Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, TableType, TopLevelExpr,
+	With,
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;

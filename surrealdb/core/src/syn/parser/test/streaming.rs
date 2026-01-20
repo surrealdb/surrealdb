@@ -34,7 +34,7 @@ use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
 	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Index, Kind, Limit,
 	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit,
-	RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, TopLevelExpr, With,
+	RecordIdLit, Scoring, Script, Start, TableType, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
 use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
