@@ -40,7 +40,7 @@ permissions:
 env:
   # Default crud-bench revision - update this to upgrade crud-bench version
   # This ensures consistent benchmarking across all PRs
-  CRUD_BENCH_REVISION: ${{ inputs.crud_bench_revision || 'rushmore/embeddable' }}
+  CRUD_BENCH_REVISION: ${{ inputs.crud_bench_revision || '8accc013fe279b458d1378f41ba9a9b5ea4ffee2' }}
 
 jobs:
   # ----------------------------------------
