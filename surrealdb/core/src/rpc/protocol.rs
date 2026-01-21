@@ -1196,7 +1196,6 @@ pub trait RpcProtocol {
 			to: Expr::from_public_value(with),
 			data,
 			output: Some(Output::After),
-			uniq: false,
 			timeout: Expr::Literal(Literal::None),
 		}));
 		// Specify the query parameters

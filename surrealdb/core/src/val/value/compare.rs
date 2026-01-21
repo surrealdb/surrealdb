@@ -23,7 +23,9 @@ impl Value {
 		match (self, other) {
 			// Current path part is an object
 			(Value::Object(a), Value::Object(b)) => match p {
-				Part::Field(f) => compare_optional(a.get(&**f), b.get(&**f), path, collate, numeric),
+				Part::Field(f) => {
+					compare_optional(a.get(&**f), b.get(&**f), path, collate, numeric)
+				}
 				_ => None,
 			},
 			// Current path part is an array
@@ -65,7 +67,7 @@ impl Value {
 					}
 
 					Some(a.len().cmp(&b.len()))
-				},
+				}
 				Part::First => compare_optional(a.first(), b.first(), path, collate, numeric),
 				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
 				x => {
@@ -105,7 +107,13 @@ impl Value {
 }
 
 #[inline]
-fn compare_optional(a: Option<&Value>, b: Option<&Value>, path: &[Part], collate: bool, numeric: bool) -> Option<Ordering> {
+fn compare_optional(
+	a: Option<&Value>,
+	b: Option<&Value>,
+	path: &[Part],
+	collate: bool,
+	numeric: bool,
+) -> Option<Ordering> {
 	match (a, b) {
 		(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
 		(Some(_), None) => Some(Ordering::Greater),
