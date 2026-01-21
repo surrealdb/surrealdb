@@ -59,6 +59,7 @@ impl Display for Statements {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum Statement {
 	Value(Value),
 	Analyze(AnalyzeStatement),
