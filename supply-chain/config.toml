@@ -40,6 +40,9 @@ audit-as-crates-io = false
 [policy.surrealdb-types-derive]
 audit-as-crates-io = false
 
+[policy.surrealml-core]
+audit-as-crates-io = true
+
 [policy.surrealism]
 audit-as-crates-io = true
 
@@ -50,6 +53,9 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.surrealism-types]
+audit-as-crates-io = true
+
+[policy.c-wrapper]
 audit-as-crates-io = true
 
 [[exemptions.Inflector]]
