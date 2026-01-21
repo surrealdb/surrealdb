@@ -11,6 +11,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
 use crate::fnc;
+use crate::iam::AuthLimit;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Function {
@@ -113,9 +114,10 @@ impl Function {
 				// Get the function definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let opt = AuthLimit::try_from(&val.auth_limit)?.limit_opt(opt);
 
 				// Check permissions
-				check_perms(stk, ctx, opt, doc, &name, &val.permissions).await?;
+				check_perms(stk, ctx, &opt, doc, &name, &val.permissions).await?;
 				// Validate the arguments
 				validate_args(
 					&name,
@@ -138,7 +140,7 @@ impl Function {
 				let ctx = ctx.freeze();
 				// Run the custom function
 				let result =
-					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+					stk.run(|stk| val.block.compute(stk, &ctx, &opt, doc)).await.catch_return()?;
 				// Validate the return value
 				validate_return(name, val.returns.as_ref(), result)
 			}

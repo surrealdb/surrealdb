@@ -11,7 +11,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineApiStatement {
@@ -80,6 +80,7 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
+			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 			comment,
 		};
 		txn.put_db_api(ns, db, &ap).await?;

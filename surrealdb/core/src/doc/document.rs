@@ -16,7 +16,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Workable};
 use crate::doc::alter::ComputedData;
 use crate::expr::FlowResultExt as _;
-use crate::iam::Action;
+use crate::iam::{Action, AuthLimit};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
@@ -466,6 +466,8 @@ impl Document {
 
 		// Loop over each field in document
 		for fd in table_fields.iter() {
+			// Limit auth
+			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 			// Loop over each field in document
 			for k in reduced.as_ref().each(&fd.name).iter() {
 				// Process the field permissions

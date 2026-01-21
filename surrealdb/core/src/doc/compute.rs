@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
+use crate::iam::AuthLimit;
 use crate::val::RecordId;
 
 impl Document {
@@ -62,8 +63,10 @@ impl Document {
 
 		// Compute the fields
 		for fd in fields.iter() {
+			// Limit auth
+			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 			if let Some(computed) = &fd.computed {
-				let mut val = computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+				let mut val = computed.compute(stk, ctx, &opt, Some(doc)).await.catch_return()?;
 				if let Some(kind) = fd.field_kind.as_ref() {
 					val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
 						record: rid.to_sql(),
