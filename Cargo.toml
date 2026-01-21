@@ -7,7 +7,7 @@ license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [workspace]
-members = ["crates/core", "crates/sdk"]
+members = ["./","crates/core", "crates/sdk"]
 
 [workspace.dependencies]
 # workspace internal dependencies

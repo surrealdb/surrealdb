@@ -7655,3 +7655,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "lru"
+version = "0.16.3"
+source = "git+https://github.com/jeromefroe/lru-rs.git?tag=0.16.3#af233e5c36a6b1be65e1c6d67ebf9601a71150fb"
