@@ -25,6 +25,9 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
+[policy.c-wrapper]
+audit-as-crates-io = true
+
 [policy.surrealdb]
 audit-as-crates-io = true
 
@@ -40,9 +43,6 @@ audit-as-crates-io = false
 [policy.surrealdb-types-derive]
 audit-as-crates-io = false
 
-[policy.surrealml-core]
-audit-as-crates-io = true
-
 [policy.surrealism]
 audit-as-crates-io = true
 
@@ -55,7 +55,7 @@ audit-as-crates-io = true
 [policy.surrealism-types]
 audit-as-crates-io = true
 
-[policy.c-wrapper]
+[policy.surrealml-core]
 audit-as-crates-io = true
 
 [[exemptions.Inflector]]
@@ -268,6 +268,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bytes]]
 version = "1.11.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.c-wrapper]]
+version = "0.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.candle-core]]
@@ -510,20 +514,12 @@ criteria = "safe-to-deploy"
 version = "1.6.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.directories-next]]
-version = "2.0.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.dirs]]
 version = "2.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.dirs-sys]]
 version = "0.3.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.dirs-sys-next]]
-version = "0.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.doc-comment]]
@@ -930,10 +926,6 @@ criteria = "safe-to-deploy"
 version = "0.4.25"
 criteria = "safe-to-run"
 
-[[exemptions.im-rc]]
-version = "15.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.indxdb]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
@@ -1178,14 +1170,6 @@ criteria = "safe-to-deploy"
 version = "1.70.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.onig]]
-version = "6.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.onig_sys]]
-version = "69.9.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.oorandom]]
 version = "11.1.5"
 criteria = "safe-to-deploy"
@@ -1195,7 +1179,7 @@ version = "0.10.75"
 criteria = "safe-to-deploy"
 
 [[exemptions.openssl-probe]]
-version = "0.2.0"
+version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.openssl-sys]]
@@ -1426,10 +1410,6 @@ criteria = "safe-to-deploy"
 version = "0.4.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand_xoshiro]]
-version = "0.6.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.raw-cpuid]]
 version = "10.6.0"
 criteria = "safe-to-deploy"
@@ -1460,10 +1440,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_users]]
 version = "0.4.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.redox_users]]
-version = "0.4.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-syntax]]
@@ -1702,10 +1678,6 @@ criteria = "safe-to-deploy"
 version = "0.7.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_yaml]]
-version = "0.9.34+deprecated"
-criteria = "safe-to-deploy"
-
 [[exemptions.serial_test]]
 version = "3.3.1"
 criteria = "safe-to-run"
@@ -1736,10 +1708,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.siphasher]]
 version = "1.0.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.sized-chunks]]
-version = "0.6.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.socket2]]
@@ -2000,14 +1968,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicode_categories]]
 version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.unit-prefix]]
-version = "0.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.unsafe-libyaml]]
-version = "0.2.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]
