@@ -23,12 +23,7 @@ impl Value {
 		match (self, other) {
 			// Current path part is an object
 			(Value::Object(a), Value::Object(b)) => match p {
-				Part::Field(f) => match (a.get(&**f), b.get(&**f)) {
-					(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
-					(Some(_), None) => Some(Ordering::Greater),
-					(None, Some(_)) => Some(Ordering::Less),
-					(_, _) => Some(Ordering::Equal),
-				},
+				Part::Field(f) => compare_optional(a.get(&**f), b.get(&**f), path, collate, numeric),
 				_ => None,
 			},
 			// Current path part is an array
@@ -36,44 +31,50 @@ impl Value {
 				Part::All => {
 					for (a, b) in a.iter().zip(b.iter()) {
 						match a.compare(b, path.next(), collate, numeric) {
-							Some(Ordering::Equal) => continue,
-							None => continue,
+							None | Some(Ordering::Equal) => continue,
 							o => return o,
 						}
 					}
-					match (a.len(), b.len()) {
-						(a, b) if a > b => Some(Ordering::Greater),
-						(a, b) if a < b => Some(Ordering::Less),
-						_ => Some(Ordering::Equal),
-					}
+					Some(a.len().cmp(&b.len()))
 				}
-				Part::First => match (a.first(), b.first()) {
-					(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
-					(Some(_), None) => Some(Ordering::Greater),
-					(None, Some(_)) => Some(Ordering::Less),
-					(_, _) => Some(Ordering::Equal),
-				},
-				Part::Last => match (a.last(), b.last()) {
-					(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
-					(Some(_), None) => Some(Ordering::Greater),
-					(None, Some(_)) => Some(Ordering::Less),
-					(_, _) => Some(Ordering::Equal),
-				},
+				Part::First => compare_optional(a.first(), b.first(), path, collate, numeric),
+				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
 				//TODO: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1;
 				// a[$b]` for example doesn't as
 				x => {
 					if let Some(idx) = x.as_old_index() {
-						match (a.get(idx), b.get(idx)) {
-							(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
-							(Some(_), None) => Some(Ordering::Greater),
-							(None, Some(_)) => Some(Ordering::Less),
-							(_, _) => Some(Ordering::Equal),
-						}
+						compare_optional(a.get(idx), b.get(idx), path, collate, numeric)
 					} else {
 						for (a, b) in a.iter().zip(b.iter()) {
 							match a.compare(b, path, collate, numeric) {
-								Some(Ordering::Equal) => continue,
-								None => continue,
+								None | Some(Ordering::Equal) => continue,
+								o => return o,
+							}
+						}
+						Some(a.len().cmp(&b.len()))
+					}
+				}
+			},
+			(Value::Set(a), Value::Set(b)) => match p {
+				Part::All => {
+					for (a, b) in a.iter().zip(b.iter()) {
+						match a.compare(b, path.next(), collate, numeric) {
+							None | Some(Ordering::Equal) => continue,
+							o => return o,
+						}
+					}
+
+					Some(a.len().cmp(&b.len()))
+				},
+				Part::First => compare_optional(a.first(), b.first(), path, collate, numeric),
+				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
+				x => {
+					if let Some(idx) = x.as_old_index() {
+						compare_optional(a.nth(idx), b.nth(idx), path, collate, numeric)
+					} else {
+						for (a, b) in a.iter().zip(b.iter()) {
+							match a.compare(b, path, collate, numeric) {
+								None | Some(Ordering::Equal) => continue,
 								o => return o,
 							}
 						}
@@ -100,6 +101,16 @@ impl Value {
 				_ => a.compare(b, path.next(), collate, numeric),
 			},
 		}
+	}
+}
+
+#[inline]
+fn compare_optional(a: Option<&Value>, b: Option<&Value>, path: &[Part], collate: bool, numeric: bool) -> Option<Ordering> {
+	match (a, b) {
+		(Some(a), Some(b)) => a.compare(b, path.next(), collate, numeric),
+		(Some(_), None) => Some(Ordering::Greater),
+		(None, Some(_)) => Some(Ordering::Less),
+		(None, None) => Some(Ordering::Equal),
 	}
 }
 
