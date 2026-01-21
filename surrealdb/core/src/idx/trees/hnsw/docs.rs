@@ -158,7 +158,7 @@ impl VecDocs {
 
 	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
 		let ser_vec = pt.into();
-		let key = self.ikb.new_hv_key(&ser_vec);
+		let key = self.ikb.new_hv_key(ser_vec);
 		if let Some(ed) = tx.get(&key, None).await? {
 			Ok(Some(ed.docs))
 		} else {
@@ -174,7 +174,7 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let ser_vec = SerializedVector::from(&o);
-		let key = self.ikb.new_hv_key(&ser_vec);
+		let key = self.ikb.new_hv_key((&ser_vec).into());
 		if let Some(ed) = match tx.get(&key, None).await? {
 			Some(mut ed) => {
 				// We already have the vector
@@ -206,7 +206,7 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let ser_vec = o.into();
-		let key = self.ikb.new_hv_key(&ser_vec);
+		let key = self.ikb.new_hv_key(ser_vec);
 		if let Some(mut ed) = tx.get(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(d)
 		{

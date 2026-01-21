@@ -158,7 +158,7 @@ pub enum Category {
 	IndexHnswDocIds,
 	/// crate::key::index::hi               /*{ns}*{db}*{tb}+{ix}!hi{id}
 	IndexHnswThings,
-	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{vec}
+	/// crate::key::index::hv                /*{ns}*{db}*{tb}+{ix}!hv{hash}
 	IndexHnswVec,
 	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
 	IndexAppendings,
