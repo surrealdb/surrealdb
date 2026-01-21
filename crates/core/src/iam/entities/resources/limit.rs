@@ -8,6 +8,7 @@ use crate::iam::{Auth, Level, Role};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AuthLimit {
 	pub level: Level,
 	pub role: Option<Role>,
