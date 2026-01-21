@@ -2,16 +2,7 @@
 [test]
 
 [[test.results]]
-value = "[{ g: 1, id: a:1, v: 1 }]"
-
-[[test.results]]
-value = "[{ g: 1, id: a:2, v: 2 }]"
-
-[[test.results]]
-value = "[{ g: 2, id: a:3, v: 3 }]"
-
-[[test.results]]
-value = "[{ g: 2, id: a:4, v: 4 }]"
+value = "'OK'"
 
 [[test.results]]
 error = """
@@ -25,12 +16,14 @@ Select statements with a GROUP BY or GROUP ALL currently have no defined documen
 
 */
 
-create a:1 set v = 1, g = 1;
-create a:2 set v = 2, g = 1;
-create a:3 set v = 3, g = 2;
-create a:4 set v = 4, g = 2;
+{
+    CREATE a:1 SET v = 1, g = 1;
+    CREATE a:2 SET v = 2, g = 1;
+    CREATE a:3 SET v = 3, g = 2;
+    CREATE a:4 SET v = 4, g = 2;
+    RETURN "OK";
+};
 
 SELECT (SELECT $parent FROM 1) as parent,g,math::mean(v) FROM a GROUP BY g;
 
 SELECT (SELECT { $parent } FROM 1) as parent,g,math::mean(v) FROM a GROUP BY g;
-

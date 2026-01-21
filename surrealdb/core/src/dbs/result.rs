@@ -41,7 +41,7 @@ impl Results {
 		if stm.tempfiles()
 			&& let Some(temp_dir) = ctx.temporary_directory()
 		{
-			return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
+			return Ok(Self::File(Box::new(FileCollector::new(temp_dir, stm.order().cloned())?)));
 		}
 		if let Some(ordering) = stm.order() {
 			return match ordering {
@@ -102,31 +102,23 @@ impl Results {
 		Ok(())
 	}
 
-	#[cfg(not(target_family = "wasm"))]
-	#[cfg_attr(not(storage), expect(unused_variables))]
-	pub(super) async fn sort(&mut self, orders: &Ordering) -> Result<()> {
+	pub(super) async fn sort(&mut self) -> Result<()> {
 		match self {
-			#[cfg(storage)]
-			Self::File(f) => f.sort(orders),
-			Self::MemoryOrdered(c) => c.sort().await?,
+			Self::MemoryOrdered(c) => {
+				#[cfg(not(target_family = "wasm"))]
+				c.sort().await?;
+				#[cfg(target_family = "wasm")]
+				c.sort();
+			}
 			Self::MemoryOrderedLimit(c) => c.sort(),
 			Self::MemoryRandom(c) => c.sort(),
 			Self::None | Self::Memory(_) | Self::Groups(_) => {}
+			#[cfg(storage)]
+			Self::File(_) => {
+				// File is sorted when it is taken.
+			}
 		}
 		Ok(())
-	}
-
-	#[cfg(target_family = "wasm")]
-	#[cfg_attr(not(storage), expect(unused_variables))]
-	pub(super) fn sort(&mut self, orders: &Ordering) {
-		match self {
-			Self::MemoryOrdered(c) => c.sort(),
-			Self::MemoryOrderedLimit(c) => c.sort(),
-			Self::MemoryRandom(c) => c.sort(),
-			#[cfg(storage)]
-			Self::File(f) => f.sort(orders),
-			Self::None | Self::Groups(_) | Self::Memory(_) => {}
-		}
 	}
 
 	pub(super) async fn start_limit(
