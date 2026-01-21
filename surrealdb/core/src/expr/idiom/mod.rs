@@ -19,7 +19,7 @@ use crate::fmt::EscapeKwFreeIdent;
 
 pub mod recursion;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
 pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
@@ -38,6 +38,12 @@ impl IntoIterator for Idioms {
 	}
 }
 
+impl PartialOrd for Idioms {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
 impl Ord for Idioms {
 	fn cmp(&self, other: &Self) -> Ordering {
 		for (a, b) in self.0.iter().zip(other.0.iter()) {
@@ -51,7 +57,7 @@ impl Ord for Idioms {
 }
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
@@ -160,6 +166,12 @@ impl Deref for Idiom {
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Self(v)
+	}
+}
+
+impl PartialOrd for Idiom {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
 	}
 }
 
