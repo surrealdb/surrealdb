@@ -1130,11 +1130,7 @@ mod http_integration {
 				num_records - 10,
 				"body: {body}"
 			);
-			assert_eq!(
-				body[0]["result"].as_array().unwrap()[0]["id"],
-				"`table`:11",
-				"body: {body}"
-			);
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:11", "body: {body}");
 		}
 
 		// GET records with a start and limit
