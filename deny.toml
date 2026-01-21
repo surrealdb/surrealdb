@@ -60,7 +60,9 @@ yanked = "warn"
 #   Plan migration to wincode, postcard, bitcode, or rkyv in future. Also need surrealmx to update.
 # - for RUSTSEC-2023-0071, rsa gas a constant-time implementation allowing attackers to recover keys
 #   see https://github.com/RustCrypto/RSA/issues/19#issuecomment-1822995643 for more information
-ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071"]
+# - for RUSTSEC-2024-0436, paste is now unmaintained and archived, but we only use paste in tests
+#   so we could wait for ${concat(...)} metavariable expressions (issue #124225) to stabilize
+ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071", "RUSTSEC-2024-0436"]
 
 # --------------------------------------------------
 # LICENSES
