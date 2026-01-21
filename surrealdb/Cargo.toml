@@ -33,7 +33,7 @@ native-tls = [
 ]
 rustls = [
     "dep:rustls",
-    "reqwest?/rustls-tls",
+    "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
 ml = ["surrealdb-core/ml"]
@@ -82,17 +82,12 @@ reqwest = { workspace = true, default-features = false, features = [
     "multipart",
     "stream",
 ], optional = true }
-rustls = { workspace = true, default-features = false, features = [
-    "ring",
-    "logging",
-    "std",
-    "tls12",
-], optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 js-sys = "0.3"
-rustls-pki-types = { version = "1.7.0", features = ["web"] }
+rustls = { workspace = true, optional = true, features = ["ring"] }
+rustls-pki-types = { version = "1.14.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
@@ -106,6 +101,7 @@ wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+rustls = { workspace = true, optional = true, features = ["aws_lc_rs"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -119,12 +115,10 @@ tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
-bincode.workspace = true
 ciborium.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
-hashbrown.workspace = true
 nanoid.workspace = true
 parking_lot.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }

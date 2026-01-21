@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
-use surrealml::errors::error::SurrealError;
+use surrealml_core::errors::error::SurrealError;
 #[cfg(feature = "ml")]
-use surrealml::execution::compute::ModelComputation;
+use surrealml_core::execution::compute::ModelComputation;
 #[cfg(feature = "ml")]
-use surrealml::ndarray as mlNdarray;
+use surrealml_core::ndarray as mlNdarray;
 #[cfg(feature = "ml")]
-use surrealml::storage::surml_file::SurMlFile;
+use surrealml_core::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
 use crate::catalog::Permission;
