@@ -273,8 +273,11 @@ impl Document {
 		}
 
 		// Remove any omitted fields from output
-		for field in omit {
-			out.del(stk, ctx, opt, field).await?;
+		// But skip this if we have a GROUP BY clause, as OMIT will be applied after aggregation
+		if stmt.group.is_none() {
+			for field in omit {
+				out.del(stk, ctx, opt, field).await?;
+			}
 		}
 		// Output result
 		Ok(out)
