@@ -13,8 +13,8 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt as _};
-use crate::iam::AuthLimit;
 use crate::fnc::args::{Any, FromArgs, FromPublic};
+use crate::iam::AuthLimit;
 use crate::syn::function_with_capabilities;
 use crate::val::{Closure, Value};
 
