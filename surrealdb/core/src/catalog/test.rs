@@ -74,7 +74,7 @@ use crate::val::{Datetime, TableName, Value};
 	})])),
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
-	fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
+	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),

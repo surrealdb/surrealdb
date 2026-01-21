@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::mem;
 use std::sync::Arc;
 
@@ -1044,10 +1045,11 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		if let Some(fetchs) = stm.fetch() {
-			let mut idioms = Vec::with_capacity(fetchs.len());
+			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
 				fetch.compute(stk, ctx, opt, &mut idioms).await?;
 			}
+
 			for i in &idioms {
 				let mut values = self.results.take().await?;
 				// Loop over each result value

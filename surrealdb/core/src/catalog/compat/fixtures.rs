@@ -224,7 +224,9 @@ pub fn subscription_with_filters() -> SubscriptionDefinition {
 		])),
 		what: Expr::Literal(Literal::String("users".to_string())),
 		cond: Some(Expr::Literal(Literal::String("active = true".to_string()))),
-		fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("profile".to_string())))])),
+		fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String(
+			"profile".to_string(),
+		)))])),
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
 		vars: BTreeMap::new(),
