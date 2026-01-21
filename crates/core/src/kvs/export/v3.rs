@@ -1,8 +1,4 @@
 use core::fmt;
-use std::{
-	fmt::{Arguments, Display},
-	future::Future,
-};
 
 use async_channel::Sender;
 use chrono::{TimeZone, Utc};
@@ -77,7 +73,7 @@ impl ChannelWriter {
 
 impl Drop for ChannelWriter {
 	fn drop(&mut self) {
-		const { panic!("ChannelWriter can't be dropped") };
+		const { assert!(false, "ChannelWriter can't be dropped") };
 	}
 }
 
@@ -96,62 +92,46 @@ pub async fn export_v3(
 
 	if cfg.users {
 		let users = tx.all_db_users(ns, db).await?;
-		export_section(
-			"USERS",
-			users.as_ref(),
-			&mut writer,
-			&mut fmt_buffer,
-			async |buf, writer, i| write_visit(issue_buffer, &mut path, buf, writer, i).await,
-		)
-		.await;
+		export_section_header("USERS",&mut writer, &mut fmt_buffer).await;
+		for i in users.as_ref() {
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+		}
+
+		writer.write_bytes(b"\n").await;
 	}
 
 	if cfg.accesses {
 		let accesses = tx.all_db_accesses(ns, db).await?;
-		export_section(
-			"ACCESSES",
-			accesses.as_ref(),
-			&mut writer,
-			&mut fmt_buffer,
-			async |buf, writer, i| write_visit(issue_buffer, &mut path, buf, writer, i).await,
-		)
-		.await;
+		export_section_header("ACCESSES",&mut writer, &mut fmt_buffer).await;
+		for i in accesses.as_ref() {
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+		}
+
+		writer.write_bytes(b"\n").await;
 	}
 
 	if cfg.params {
 		let params = tx.all_db_params(ns, db).await?;
-		export_section(
-			"PARAMS",
-			params.as_ref(),
-			&mut writer,
-			&mut fmt_buffer,
-			async |buf, writer, i| write_visit(issue_buffer, &mut path, buf, writer, i).await,
-		)
-		.await;
+		export_section_header("PARAMS",&mut writer, &mut fmt_buffer).await;
+		for i in params.as_ref() {
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+		}
 	}
 
 	if cfg.functions {
 		let functions = tx.all_db_functions(ns, db).await?;
-		export_section(
-			"FUNCTIONS",
-			functions.as_ref(),
-			&mut writer,
-			&mut fmt_buffer,
-			async |buf, writer, i| write_visit(issue_buffer, &mut path, buf, writer, i).await,
-		)
-		.await;
+		export_section_header("FUNCTIONS",&mut writer, &mut fmt_buffer).await;
+		for i in functions.as_ref() {
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+		}
 	}
 
 	if cfg.analyzers {
 		let analyzers = tx.all_db_analyzers(ns, db).await?;
-		export_section(
-			"ANALYZERS",
-			analyzers.as_ref(),
-			&mut writer,
-			&mut fmt_buffer,
-			async |buf, writer, i| write_visit(issue_buffer, &mut path, buf, writer, i).await,
-		)
-		.await;
+		export_section_header("ANALYZERS",&mut writer, &mut fmt_buffer).await;
+		for i in analyzers.as_ref() {
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+		}
 	}
 
 	if !cfg.tables.is_any() {
@@ -202,6 +182,7 @@ pub async fn export_v3(
 	Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn export_table_structure(
 	tx: &Transaction,
 	ns: &str,
@@ -213,7 +194,8 @@ async fn export_table_structure(
 	t: &DefineTableStatement,
 ) -> Result<(), Error> {
 	writer.write_bytes(b"-- ------------------------------\n").await;
-	write_fmt(fmt_buf, writer, format_args!("-- TABLE: {}\n", InlineCommentDisplay(&t.name))).await;
+	write_fmt(fmt_buf, writer, |s| writeln!(s, "-- TABLE: {}", InlineCommentDisplay(&t.name)))
+		.await;
 	writer.write_bytes(b"-- ------------------------------\n\n").await;
 
 	write_visit(issue_buffer, path, fmt_buf, writer, t).await;
@@ -245,6 +227,7 @@ async fn export_table_structure(
 	Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn export_table_data(
 	tx: &Transaction,
 	versions: bool,
@@ -257,7 +240,7 @@ async fn export_table_data(
 	t: &DefineTableStatement,
 ) -> Result<(), Error> {
 	writer.write_bytes(b"-- ------------------------------\n").await;
-	write_fmt(fmt_buf, writer, format_args!("-- TABLE DATA: {}\n", InlineCommentDisplay(&t.name)))
+	write_fmt(fmt_buf, writer, |s| writeln!(s, "-- TABLE DATA: {}", InlineCommentDisplay(&t.name)))
 		.await;
 	writer.write_bytes(b"-- ------------------------------\n\n").await;
 
@@ -321,7 +304,7 @@ async fn export_versioned_data(
 		if *tombstone {
 			let k = key::thing::Thing::decode(k)?;
 			writer.write_bytes(b"DELETE ").await;
-			write_fmt(fmt_buf, writer, format_args!("{}", EscapeIdent(&k.tb))).await;
+			write_fmt(fmt_buf, writer, |s| write!(s, "{}", EscapeIdent(&k.tb))).await;
 			writer.write_bytes(b":").await;
 			write_visit(issue_buffer, path, fmt_buf, writer, &k.id).await;
 			writer.write_bytes(b";\n").await;
@@ -329,13 +312,13 @@ async fn export_versioned_data(
 			writer.write_bytes(b"INSERT RELATION ").await;
 			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
 			writer.write_bytes(b" VERSION d").await;
-			write_fmt(fmt_buf, writer, format_args!("{:?}", ts)).await;
+			write_fmt(fmt_buf, writer, |s| write!(s, "{:?}", ts)).await;
 			writer.write_bytes(b";\n").await;
 		} else {
 			writer.write_bytes(b"INSERT ").await;
 			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
 			writer.write_bytes(b" VERSION d").await;
-			write_fmt(fmt_buf, writer, format_args!("{:?}", ts)).await;
+			write_fmt(fmt_buf, writer, |s| write!(s, "{:?}", ts)).await;
 			writer.write_bytes(b";\n").await;
 		}
 
@@ -425,9 +408,13 @@ fn is_edge(v: &Value) -> bool {
 	true
 }
 
-async fn write_fmt(buffer: &mut String, writer: &mut ChannelWriter, args: Arguments<'_>) {
+async fn write_fmt<F: FnOnce(&mut String) -> fmt::Result>(
+	buffer: &mut String,
+	writer: &mut ChannelWriter,
+	cb: F,
+) {
 	buffer.clear();
-	let _ = buffer.write_fmt(args);
+	let _ = cb(buffer);
 	writer.write_bytes(buffer.as_bytes()).await
 }
 
@@ -446,29 +433,14 @@ async fn write_visit<T: for<'a> Visit<MigratorPass<'a>>>(
 	writer.write_bytes(&buf.as_bytes()).await;
 }
 
-async fn export_section<I, F: AsyncFnMut(&mut String, &mut ChannelWriter, &I)>(
+async fn export_section_header(
 	title: &str,
-	items: &[I],
 	writer: &mut ChannelWriter,
-	fmt_buffer: &mut String,
-	mut cb: F,
-) {
-	if items.is_empty() {
-		return;
-	}
-
+	fmt_buffer: &mut String
+){
 	writer.write_bytes(b"-- ------------------------------\n").await;
-	write_fmt(fmt_buffer, writer, format_args!("-- {}\n", InlineCommentDisplay(title))).await;
+	write_fmt(fmt_buffer, writer, |s| writeln!(s, "-- {}", InlineCommentDisplay(title))).await;
 	writer.write_bytes(b"-- ------------------------------\n").await;
-	writer.write_bytes(b"\n").await;
-
-	for i in items {
-		if writer.is_closed() {
-			break;
-		}
-
-		cb(fmt_buffer, writer, i).await;
-	}
-
 	writer.write_bytes(b"\n").await;
 }
+

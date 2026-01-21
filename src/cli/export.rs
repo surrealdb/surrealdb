@@ -47,6 +47,10 @@ struct ExportConfigArguments {
 	/// Whether records should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	records: Option<bool>,
+	/// Whether to export for version 3 of surrealdb.
+	#[arg(long, default_missing_value = "true")]
+	v3: bool,
+
 }
 
 #[derive(Args, Debug)]
@@ -187,6 +191,10 @@ fn apply_config<C: Connection, R>(
 
 	if let Some(value) = config.records {
 		export = export.records(value);
+	}
+
+	if config.v3 {
+		export = export.v3(true);
 	}
 
 	export
