@@ -49,7 +49,9 @@ pub(crate) mod version;
 pub use api::Transactable;
 pub use clock::SizedClock;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
-pub use ds::{Datastore, DatastoreFlavor, Metrics, TransactionBuilder, TransactionBuilderFactory};
+pub use ds::{
+	Datastore, DatastoreFlavor, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
+};
 pub use err::{Error, Result};
 pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
