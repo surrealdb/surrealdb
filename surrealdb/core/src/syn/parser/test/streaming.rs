@@ -34,7 +34,7 @@ use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
 	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Index, Kind, Limit,
 	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit,
-	RecordIdLit, Scoring, Script, Start, TableType, TopLevelExpr, With,
+	RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
 use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
@@ -89,6 +89,7 @@ static SOURCE: &str = r#"
 		FETCH foo
 		VERSION d"2012-04-23T18:25:43.0000511Z"
 		EXPLAIN FULL;
+	SELECT foo,bar FROM a SPLIT ON foo,bar;
 	LET $param = 1;
 	SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10;
 	SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z";
@@ -496,6 +497,36 @@ fn statements() -> Vec<TopLevelExpr> {
 			timeout: Expr::Literal(Literal::None),
 			tempfiles: false,
 			explain: Some(Explain(true)),
+		}))),
+		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
+			fields: Fields::Select(vec![
+				Field::Single(Selector {
+					expr: ident_field("foo"),
+					alias: None,
+				}),
+				Field::Single(Selector {
+					expr: ident_field("bar"),
+					alias: None,
+				}),
+			]),
+			omit: vec![],
+			only: false,
+			what: vec![Expr::Table("a".to_owned())],
+			with: None,
+			cond: None,
+			split: Some(Splits(vec![
+				Split(Idiom(vec![Part::Field("foo".to_owned())])),
+				Split(Idiom(vec![Part::Field("bar".to_owned())])),
+			])),
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			tempfiles: false,
+			explain: None,
 		}))),
 		TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
 			name: "param".to_owned(),
