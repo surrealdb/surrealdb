@@ -93,8 +93,6 @@ pub mod errors;
 pub mod execution;
 pub mod storage;
 pub use ndarray;
-#[cfg(feature = "tokenizers")]
-pub use surrealml_tokenizers;
 
 /// Returns the version of the ONNX runtime that is used.
 pub fn onnx_runtime() -> &'static str {

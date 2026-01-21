@@ -12,7 +12,6 @@ onnx-tests = []
 torch-tests = []
 tensorflow-tests = []
 gpu = []
-tokenizers = ["surrealml-tokenizers"]
 
 [dependencies]
 bytes.workspace = true
@@ -21,8 +20,7 @@ hyper.workspace = true
 ndarray.workspace = true
 ort.workspace = true
 regex.workspace = true
-serde.workspace = true
-surrealml-tokenizers = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 
 [dev-dependencies]

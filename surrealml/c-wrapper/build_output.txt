@@ -1,1 +1,0 @@
-Copied library to output directory /Users/maxwellflitton/Documents/github/surrealDB/surrealml/modules/c-wrapper/onnx_lib/onnxruntime-osx-arm64-1.20.1/lib/libonnxruntime.dylib -> /Users/maxwellflitton/Documents/github/surrealDB/surrealml/modules/c-wrapper/onnx_lib
