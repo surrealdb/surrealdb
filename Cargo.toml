@@ -10,12 +10,12 @@ members = [
 	"surrealdb/types",
 	"surrealdb/types/derive",
     # SurrealML crates
-	"surrealml/modules/core",
-	"surrealml/modules/c-wrapper",
-	"surrealml/modules/llms",
-	"surrealml/modules/tokenizers",
-	"surrealml/modules/transformers",
-	"surrealml/modules/wasm-linker",
+	"surrealml/core",
+	"surrealml/c-wrapper",
+	"surrealml/llms",
+	"surrealml/tokenizers",
+	"surrealml/transformers",
+	"surrealml/wasm-linker",
 	# Surrealism crates
 	"surrealism",
 	"surrealism/demo",
@@ -52,9 +52,9 @@ surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
 # SurrealML crates
-surrealml-core = { version = "0.1.9", path = "surrealml/modules/core" }
-surrealml-llms = { version = "0.1.0", path = "surrealml/modules/llms" }
-surrealml-tokenizers = { version = "0.1.0", path = "surrealml/modules/tokenizers" }
+surrealml-core = { version = "0.1.9", path = "surrealml/core" }
+surrealml-llms = { version = "0.1.0", path = "surrealml/llms" }
+surrealml-tokenizers = { version = "0.1.0", path = "surrealml/tokenizers" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }

@@ -48,7 +48,7 @@ python tests/model_builder/tensorflow_assets.py
 python tests/model_builder/onnx_assets.py
 ```
 
-The trained models will be stored in the `modules/core/model_stash/` directory. This directory is ignored by git
+The trained models will be stored in the `core/model_stash/` directory. This directory is ignored by git
 so if you have recently cloned the repo or you are adding a github action that involves the models, you will need
 to ensure that the `build_assets.py` file is run at some point before you rely on those models.
 
@@ -60,20 +60,20 @@ tests just run for that machine learning library. You can run the tests with the
 
 ### Scikit Learn
 ```bash
-cd ../modules/core && cargo test --features sklearn-tests
+cd ../core && cargo test --features sklearn-tests
 ```
 
 ### PyTorch
 ```bash
-cd ../modules/core && cargo test --features torch-tests
+cd ../core && cargo test --features torch-tests
 ```
 
 ### TensorFlow
 ```bash
-cd ../modules/core && cargo test --features tensorflow-tests
+cd ../core && cargo test --features tensorflow-tests
 ```
 
 ### ONNX
 ```bash
-cd ../modules/core && cargo test --features onnx-tests
+cd ../core && cargo test --features onnx-tests
 ```

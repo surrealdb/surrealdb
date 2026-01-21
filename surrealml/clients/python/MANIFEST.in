@@ -1,2 +1,0 @@
-# MANIFEST.in
-recursive-include surrealml *.so *.dylib *.dll config.json

@@ -25,7 +25,7 @@ COPY . .
 # Clean and build the Rust project
 RUN cargo clean
 RUN cargo build
-RUN cp ./target/debug/libc_wrapper.so modules/c-wrapper/tests/test_utils/libc_wrapper.so
+RUN cp ./target/debug/libc_wrapper.so c-wrapper/tests/test_utils/libc_wrapper.so
 
 # Run the tests
 CMD ["cargo", "test"]

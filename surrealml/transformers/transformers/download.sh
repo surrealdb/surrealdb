@@ -1,5 +1,5 @@
 repo="Xenova/bert-base-uncased-finetuned-sst2"
-dest="modules/transformers"
+dest="transformers"
 
 # config (~700 bytes)
 curl -L -o ./config_general.json \
