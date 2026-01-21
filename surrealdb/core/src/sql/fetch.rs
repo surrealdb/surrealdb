@@ -27,12 +27,12 @@ impl ToSql for Fetchs {
 
 impl From<Fetchs> for crate::expr::Fetchs {
 	fn from(v: Fetchs) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect())
+		Self::new(v.0.into_iter().map(Into::into).collect())
 	}
 }
 impl From<crate::expr::Fetchs> for Fetchs {
 	fn from(v: crate::expr::Fetchs) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect())
+		Self(v.into_iter().map(Into::into).collect())
 	}
 }
 

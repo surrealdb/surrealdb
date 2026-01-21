@@ -209,7 +209,7 @@ implement_visitor! {
 			this.visit_expr(&c.0)?;
 		}
 		if let Some(f) = l.fetch.as_ref(){
-			for f in f.0.iter(){
+			for f in f.iter(){
 				this.visit_expr(&f.0)?;
 			}
 		}
@@ -498,7 +498,7 @@ implement_visitor! {
 			this.visit_expr(&l.0)?;
 		}
 		if let Some(f) = s.fetch.as_ref(){
-			for f in f.0.iter(){
+			for f in f.iter(){
 				this.visit_expr(&f.0)?;
 			}
 		}
@@ -656,7 +656,7 @@ implement_visitor! {
 	fn visit_output_stmt(this, o: &OutputStatement){
 		this.visit_expr(&o.what)?;
 		if let Some(f) = o.fetch.as_ref(){
-			for f in f.0.iter(){
+			for f in f.iter(){
 				this.visit_expr(&f.0)?;
 			}
 		}
@@ -1614,7 +1614,7 @@ implement_visitor_mut! {
 			this.visit_mut_expr(&mut c.0)?;
 		}
 		if let Some(f) = l.fetch.as_mut(){
-			for f in f.0.iter_mut(){
+			for f in f.iter_mut(){
 				this.visit_mut_expr(&mut f.0)?;
 			}
 		}
@@ -1903,7 +1903,7 @@ implement_visitor_mut! {
 			this.visit_mut_expr(&mut l.0)?;
 		}
 		if let Some(f) = s.fetch.as_mut(){
-			for f in f.0.iter_mut(){
+			for f in f.iter_mut(){
 				this.visit_mut_expr(&mut f.0)?;
 			}
 		}
@@ -2061,7 +2061,7 @@ implement_visitor_mut! {
 	fn visit_mut_output_stmt(this, o: &mut OutputStatement){
 		this.visit_mut_expr(&mut o.what)?;
 		if let Some(f) = o.fetch.as_mut(){
-			for f in f.0.iter_mut(){
+			for f in f.iter_mut(){
 				this.visit_mut_expr(&mut f.0)?;
 			}
 		}
