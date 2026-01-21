@@ -27,7 +27,6 @@ value = "[{ alias: 'H', the_id: test:a }]"
 
 */
 
-
 CREATE test:a SET name = 'A';
 UPDATE test:a SET name = 'B' RETURN NONE;
 UPDATE test:a SET name = 'C' RETURN NULL;

@@ -42,11 +42,6 @@ impl Set {
 		self.0.last()
 	}
 
-	/// Get the value at a specific index in the set
-	pub fn get(&self, value: &Value) -> Option<&Value> {
-		self.0.get(value)
-	}
-
 	/// Get the nth value in the set
 	pub fn nth(&self, index: usize) -> Option<&Value> {
 		self.0.iter().nth(index)

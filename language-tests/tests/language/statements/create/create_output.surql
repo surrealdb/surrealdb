@@ -24,7 +24,6 @@ value = "[{ alias: 'G', the_id: test:g }]"
 
 */
 
-
 CREATE test:a SET name = 'A' RETURN NONE;
 CREATE test:b SET name = 'B' RETURN NULL;
 CREATE test:c SET name = 'C' RETURN DIFF;

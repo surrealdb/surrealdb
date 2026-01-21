@@ -27,7 +27,6 @@ value = "[{ alias: 'H', the_id: test:a }]"
 
 */
 
-
 UPSERT test:a SET name = 'A';
 UPSERT test:a SET name = 'B' RETURN NONE;
 UPSERT test:a SET name = 'C' RETURN NULL;
