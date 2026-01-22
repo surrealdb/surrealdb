@@ -308,12 +308,28 @@ jobs:
           # Kill SurrealDB server if it was started
           if [ -f /tmp/surrealdb.pid ]; then
             echo "Stopping SurrealDB server..."
-            kill $(cat /tmp/surrealdb.pid) 2>/dev/null || true
+            PID=$(cat /tmp/surrealdb.pid)
+            kill $PID 2>/dev/null || true
+            # Wait for process to fully terminate
+            for i in {1..10}; do
+              if ! kill -0 $PID 2>/dev/null; then
+                break
+              fi
+              sleep 0.5
+            done
             rm -f /tmp/surrealdb.pid
           fi
           
-          # Clean up data directories
-          rm -rf ~/surrealdb-data ~/crud-bench-data
+          # Clean up data directories (with retry for file handle release)
+          for dir in ~/surrealdb-data ~/crud-bench-data; do
+            if [ -d "$dir" ]; then
+              rm -rf "$dir" 2>/dev/null || {
+                echo "Warning: Failed to remove $dir on first attempt, retrying..."
+                sleep 1
+                rm -rf "$dir" 2>/dev/null || echo "Warning: Could not fully clean $dir"
+              }
+            fi
+          done
 
   # ----------------------------------------
   # Analyze results and report
