@@ -1,0 +1,39 @@
+name: Demo Benchmarking
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  benchmark:
+    name: Run Demo Benchmark
+    runs-on: [self-hosted, benchmarking]
+    
+    steps:
+      - name: Print hostname
+        run: hostname
+      
+      - name: Print system information
+        run: |
+          echo "=== System Information ==="
+          echo "Hostname: $(hostname)"
+          echo "OS: $(uname -s)"
+          echo "Kernel: $(uname -r)"
+          echo "Architecture: $(uname -m)"
+          echo "CPU Info:"
+          if [ -f /proc/cpuinfo ]; then
+            grep "model name" /proc/cpuinfo | head -1
+            echo "CPU Cores: $(nproc)"
+          elif command -v sysctl &> /dev/null; then
+            sysctl -n machdep.cpu.brand_string
+            echo "CPU Cores: $(sysctl -n hw.ncpu)"
+          fi
+          echo "Memory:"
+          if command -v free &> /dev/null; then
+            free -h
+          elif command -v vm_stat &> /dev/null; then
+            vm_stat | head -5
+          fi
