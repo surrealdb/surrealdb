@@ -134,9 +134,9 @@ jobs:
       - name: Build SurrealDB binary (for networked benchmarks)
         if: steps.meta.outputs.needs_server == 'true'
         run: |
-          cargo build
+          cargo build --release
           mkdir -p ${{ github.workspace }}/bin
-          cp target/debug/surreal ${{ github.workspace }}/bin/
+          cp target/release/surreal ${{ github.workspace }}/bin/
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
 
       - name: Checkout crud-bench repository
@@ -180,7 +180,7 @@ jobs:
       - name: Build crud-bench
         run: |
           cd .github/tools/crud-bench
-          cargo build
+          cargo build --release
 
       - name: Prepare environment
         run: |
@@ -268,7 +268,7 @@ jobs:
           cd .github/tools/crud-bench
           
           # Build benchmark command
-          CMD="./target/debug/crud-bench -d ${{ steps.meta.outputs.database }}"
+          CMD="./target/release/crud-bench -d ${{ steps.meta.outputs.database }}"
           
           # Add endpoint if specified
           if [ -n "${{ steps.meta.outputs.endpoint }}" ]; then
