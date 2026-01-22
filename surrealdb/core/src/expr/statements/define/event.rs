@@ -22,6 +22,9 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub asynchronous: bool,
+	pub retry: Option<u16>,
+	pub max_depth: Option<u16>,
 }
 
 impl DefineEventStatement {
@@ -81,6 +84,9 @@ impl DefineEventStatement {
 				then: self.then.clone(),
 				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 				comment,
+				asynchronous: self.asynchronous,
+				retry: self.retry.clone(),
+				max_depth: self.max_depth.clone(),
 			},
 			None,
 		)

@@ -842,6 +842,9 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
+			asynchronous: false,
+			retry: None,
+			max_depth: None,
 		};
 
 		loop {
@@ -860,6 +863,18 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+				}
+				t!("ASYNC") => {
+					self.pop_peek();
+					res.asynchronous = true;
+				}
+				t!("RETRY") => {
+					self.pop_peek();
+					res.retry = Some(self.next_token_value()?);
+				}
+				t!("MAXDEPTH") => {
+					self.pop_peek();
+					res.max_depth = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}

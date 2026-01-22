@@ -14,6 +14,9 @@ pub(crate) struct DefineEventStatement {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub asynchronous: bool,
+	pub retry: Option<u16>,
+	pub max_depth: Option<u16>,
 }
 
 impl ToSql for DefineEventStatement {
@@ -48,6 +51,9 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			asynchronous: v.asynchronous.into(),
+			retry: v.retry.into(),
+			max_depth: v.max_depth.into(),
 		}
 	}
 }
@@ -62,6 +68,9 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			asynchronous: v.asynchronous.into(),
+			retry: v.retry.into(),
+			max_depth: v.max_depth.into(),
 		}
 	}
 }

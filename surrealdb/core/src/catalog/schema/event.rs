@@ -9,7 +9,7 @@ use crate::sql::statements::define::DefineKind;
 use crate::sql::{self};
 use crate::val::{TableName, Value};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
@@ -21,6 +21,12 @@ pub struct EventDefinition {
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
+	#[revision(start = 3)]
+	pub(crate) asynchronous: bool,
+	#[revision(start = 3)]
+	pub(crate) retry: Option<u16>,
+	#[revision(start = 3)]
+	pub(crate) max_depth: Option<u16>,
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
@@ -46,6 +52,9 @@ impl EventDefinition {
 				.clone()
 				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+			asynchronous: self.asynchronous,
+			retry: self.retry,
+			max_depth: self.max_depth,
 		}
 	}
 }
@@ -58,6 +67,9 @@ impl InfoStructure for EventDefinition {
 			"when".to_string() => self.when.structure(),
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"async".to_string(), if self.asynchronous =>  { Value::Bool(true) },
+			"retry".to_string(), if let Some(v) = self.retry => Value::Number(v.into()),
+			"maxdepth".to_string(), if let Some(v) = self.max_depth => Value::Number(v.into()),
 		})
 	}
 }
