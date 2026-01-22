@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, ops::Bound};
 
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use surrealdb_core::sql::{
 	Array, Block, Bytes, Cast, Closure, Constant, Datetime, Duration, Edges, Expression, Function,
@@ -12,6 +13,9 @@ pub struct RoughlyEqConfig {
 	pub record_id_keys: bool,
 	pub uuid: bool,
 	pub datetime: bool,
+	/// Epsilon for floating-point comparison. If None, uses exact equality.
+	/// If Some(eps), floats are considered equal if |a - b| <= eps.
+	pub float_epsilon: Option<f64>,
 }
 
 impl RoughlyEqConfig {
@@ -20,6 +24,9 @@ impl RoughlyEqConfig {
 			record_id_keys: true,
 			uuid: true,
 			datetime: true,
+			// Use a reasonable epsilon for floating-point comparison
+			// This handles platform-specific rounding differences
+			float_epsilon: Some(1e-14),
 		}
 	}
 }
@@ -190,10 +197,82 @@ impl RoughlyEq for Uuid {
 }
 
 impl_roughly_eq_delegate!(
-	i64, f64, Decimal, Query, bool, String, Closure, Expression, Number, Geometry, Bytes, Param,
-	Model, Subquery, Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom,
-	Duration
+	i64, f64, Decimal, Query, bool, String, Closure, Expression, Geometry, Bytes, Param, Model,
+	Subquery, Function, Constant, Future, Edges, Range, Block, Cast, Regex, Mock, Idiom, Duration
 );
+
+/// Custom implementation for Number to handle floating-point comparison with epsilon
+impl RoughlyEq for Number {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		match (self, other) {
+			// Int to Int: exact comparison
+			(Number::Int(a), Number::Int(b)) => a == b,
+
+			// Float to Float: use epsilon if configured
+			(Number::Float(a), Number::Float(b)) => {
+				if let Some(epsilon) = config.float_epsilon {
+					// Both NaN should be considered equal for test purposes
+					if a.is_nan() && b.is_nan() {
+						return true;
+					}
+					// Both infinite with same sign
+					if a.is_infinite() && b.is_infinite() {
+						return a.signum() == b.signum();
+					}
+					// Neither should be special values at this point
+					if a.is_nan() || b.is_nan() || a.is_infinite() || b.is_infinite() {
+						return false;
+					}
+					// Use epsilon-based comparison
+					(a - b).abs() <= epsilon
+				} else {
+					// Exact comparison if no epsilon configured
+					a == b
+				}
+			}
+
+			// Decimal to Decimal: exact comparison
+			(Number::Decimal(a), Number::Decimal(b)) => a == b,
+
+			// Cross-type comparisons: try to convert to float and compare with epsilon
+			(Number::Int(a), Number::Float(b)) | (Number::Float(b), Number::Int(a)) => {
+				let a_float = *a as f64;
+				if let Some(epsilon) = config.float_epsilon {
+					if b.is_nan() || b.is_infinite() {
+						return false;
+					}
+					(a_float - b).abs() <= epsilon
+				} else {
+					a_float == *b
+				}
+			}
+
+			(Number::Int(a), Number::Decimal(b)) | (Number::Decimal(b), Number::Int(a)) => {
+				// Convert int to Decimal for exact comparison
+				Decimal::from(*a) == *b
+			}
+
+			(Number::Float(a), Number::Decimal(b)) | (Number::Decimal(b), Number::Float(a)) => {
+				// Convert Decimal to f64 and use epsilon comparison
+				if let Some(b_float) = b.to_f64() {
+					if let Some(epsilon) = config.float_epsilon {
+						if a.is_nan() || a.is_infinite() {
+							return false;
+						}
+						(a - b_float).abs() <= epsilon
+					} else {
+						*a == b_float
+					}
+				} else {
+					false
+				}
+			}
+
+			// Catch-all for any future Number variants (Number is non-exhaustive)
+			_ => false,
+		}
+	}
+}
 
 impl_roughly_eq_struct!(Array, 0);
 impl_roughly_eq_struct!(Object, 0);
