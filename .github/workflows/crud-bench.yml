@@ -54,12 +54,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Cartesian product: each include entry × key_type
+        # Cartesian product: config × key_type
+        config:
+          - memory
+          - rocksdb
+          - embedded-memory
+          - embedded-rocksdb
+          - surrealkv-local
+          - surrealmx
         key_type:
           - integer
           - string26
           - string90
           - string250
+        
+        # Add metadata for each config
         include:
           # Networked configurations
           - config: memory
