@@ -1,10 +1,10 @@
-use revision::revisioned;
+use revision::{Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 1, serialize = false)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
@@ -71,5 +71,22 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 impl ToSql for File {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		write_sql!(f, sql_fmt, "f\"{}\"", self.display_inner())
+	}
+}
+
+// This has a custom serialization to ensure that the bucket is not empty. It should not be but this
+// is a safe guard to ensure there's no way for it to slip in if written to disk.
+impl SerializeRevisioned for File {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		if self.bucket.is_empty() {
+			return Err(revision::Error::Serialize("bucket is empty".to_string()));
+		}
+		SerializeRevisioned::serialize_revisioned(&Self::revision(), writer)?;
+		SerializeRevisioned::serialize_revisioned(&self.bucket, writer)?;
+		SerializeRevisioned::serialize_revisioned(&self.key, writer)?;
+		Ok(())
 	}
 }

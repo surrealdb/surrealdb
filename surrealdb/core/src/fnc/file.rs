@@ -59,12 +59,27 @@ pub async fn delete(
 
 pub async fn copy(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
-	(file, target): (File, String),
+	(src, dst): (File, File),
 ) -> Result<Value> {
-	let target = ObjectKey::new(target);
-	let mut controller = BucketController::new(stk, ctx, opt, doc, &file.bucket).await?;
-	controller.copy(&ObjectKey::new(file.key), target).await?;
+	if src.bucket == dst.bucket || dst.bucket.is_empty() {
+		let mut controller = BucketController::new(stk, ctx, opt, doc, &src.bucket).await?;
+		let src_key = ObjectKey::new(src.key);
+		let dst_key = ObjectKey::new(dst.key);
+		controller.copy(&src_key, dst_key).await?;
+	} else {
+		let data = {
+			let mut src_controller = BucketController::new(stk, ctx, opt, doc, &src.bucket).await?;
+			let src_key = ObjectKey::new(src.key);
+			let Some(data) = src_controller.get(&src_key).await? else {
+				return Err(anyhow::anyhow!("Source file does not exist"));
+			};
+			data
+		};
 
+		let dst_key = ObjectKey::new(dst.key);
+		let mut dst_controller = BucketController::new(stk, ctx, opt, doc, &dst.bucket).await?;
+		dst_controller.put(&dst_key, data.into()).await?;
+	}
 	Ok(Value::None)
 }
 
