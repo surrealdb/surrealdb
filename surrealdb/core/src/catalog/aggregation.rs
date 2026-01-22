@@ -721,7 +721,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			ParentRewritor.visit_mut_ordering(o)?;
 		}
 		if let Some(f) = s.fetch.as_mut() {
-			for f in f.0.iter_mut() {
+			for f in f.iter_mut() {
 				ParentRewritor.visit_mut_expr(&mut f.0)?;
 			}
 		}

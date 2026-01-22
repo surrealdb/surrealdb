@@ -47,10 +47,9 @@ impl OrderList {
 			};
 			//
 			match o {
+				None | Some(cmp::Ordering::Equal) => continue,
 				Some(cmp::Ordering::Greater) => return cmp::Ordering::Greater,
-				Some(cmp::Ordering::Equal) => continue,
 				Some(cmp::Ordering::Less) => return cmp::Ordering::Less,
-				None => continue,
 			}
 		}
 		cmp::Ordering::Equal

@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  windows_surrealml_core:
+    build:
+      context: .
+      dockerfile: builds/Dockerfile.windows
+    restart: unless-stopped
+    command: tail -f /dev/null
+    environment:
+      TEST: test_env
+    ports:
+      - "8001:8001"

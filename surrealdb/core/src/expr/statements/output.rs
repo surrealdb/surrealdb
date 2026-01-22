@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
@@ -32,7 +34,7 @@ impl OutputStatement {
 		let mut value = stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
-			let mut idioms = Vec::with_capacity(fetchs.0.len());
+			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
 				fetch.compute(stk, ctx, opt, &mut idioms).await?
 			}
