@@ -180,6 +180,11 @@ jobs:
       - name: Build crud-bench
         run: |
           cd .github/tools/crud-bench
+          
+          # Update only surrealdb and its dependencies to resolve conflicts with the patched version
+          # This keeps all other crud-bench dependencies locked for consistent benchmarking
+          cargo update -p surrealdb
+          
           cargo build --release
 
       - name: Prepare environment
