@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Strand, Value, Values};
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -26,6 +26,14 @@ pub struct DefineEventStatement {
 	pub if_not_exists: bool,
 	#[revision(start = 3)]
 	pub overwrite: bool,
+	#[revision(start = 4, default_fn = "existing_auth_limit")]
+	pub auth_limit: AuthLimit,
+}
+
+impl DefineEventStatement {
+	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 
 impl DefineEventStatement {
@@ -63,6 +71,7 @@ impl DefineEventStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
+				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()),
 				..self.clone()
 			})?,
 			None,

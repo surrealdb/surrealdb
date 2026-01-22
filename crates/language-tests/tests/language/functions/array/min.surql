@@ -2,6 +2,9 @@
 [env]
 imports = ["datasets/type_order.surql"]
 
+[env.capabilities]
+insecure-storable-closures = true
+
 [test]
 
 [[test.results]]

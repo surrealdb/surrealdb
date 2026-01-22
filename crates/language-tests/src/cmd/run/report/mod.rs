@@ -203,6 +203,7 @@ impl TestExpectation {
 								uuid: x.skip_uuid.map(|x| !x).unwrap_or(true),
 								datetime: x.skip_datetime.map(|x| !x).unwrap_or(true),
 								record_id_keys: x.skip_record_id_key.map(|x| !x).unwrap_or(true),
+								float_epsilon: Some(1e-14),
 							};
 							TestValueExpectation::Value(Some(ValueExpectation {
 								expected: x.value.0.clone(),

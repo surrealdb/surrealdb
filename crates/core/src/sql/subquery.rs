@@ -22,6 +22,7 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Subquery";
 #[serde(rename = "$surrealdb::private::sql::Subquery")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[allow(clippy::large_enum_variant)]
 pub enum Subquery {
 	Value(Value),
 	Ifelse(IfelseStatement),

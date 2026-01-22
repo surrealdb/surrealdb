@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
@@ -11,7 +11,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
@@ -27,6 +27,14 @@ pub struct DefineFunctionStatement {
 	pub overwrite: bool,
 	#[revision(start = 4)]
 	pub returns: Option<Kind>,
+	#[revision(start = 5, default_fn = "existing_auth_limit")]
+	pub auth_limit: AuthLimit,
+}
+
+impl DefineFunctionStatement {
+	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 
 impl DefineFunctionStatement {
@@ -62,6 +70,7 @@ impl DefineFunctionStatement {
 				// Don't persist the `IF NOT EXISTS` clause to schema
 				if_not_exists: false,
 				overwrite: false,
+				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()),
 				..self.clone()
 			})?,
 			None,
