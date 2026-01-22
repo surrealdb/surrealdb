@@ -83,7 +83,7 @@ impl super::Routine for Read {
 
 				tasks.spawn_on(
 					async move {
-						let mut res = criterion::black_box(
+						let mut res = std::hint::black_box(
 							ds.execute(
 								format!(
 									"SELECT * FROM {}:{} WHERE field = '{}'",

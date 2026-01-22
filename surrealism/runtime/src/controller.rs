@@ -36,7 +36,7 @@ use surrealism_types::args::Args;
 use surrealism_types::err::PrefixError;
 use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::*;
-use wasmtime_wasi::preview1::{self, WasiP1Ctx};
+use wasmtime_wasi::p1::{self, WasiP1Ctx};
 
 use crate::config::SurrealismConfig;
 use crate::host::{InvocationContext, implement_host_functions};
@@ -97,7 +97,7 @@ impl Runtime {
 			Module::new(&engine, wasm).prefix_err(|| "Failed to construct module from bytes")?;
 
 		let mut linker: Linker<StoreData> = Linker::new(&engine);
-		preview1::add_to_linker_async(&mut linker, |data| &mut data.wasi)
+		p1::add_to_linker_async(&mut linker, |data| &mut data.wasi)
 			.prefix_err(|| "failed to add WASI to linker")?;
 		implement_host_functions(&mut linker)
 			.prefix_err(|| "failed to implement host functions")?;

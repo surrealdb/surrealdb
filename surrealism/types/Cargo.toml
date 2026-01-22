@@ -17,8 +17,8 @@ host = []
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 surrealdb-types.workspace = true
-bytes = "1.10.1"
 
 [lints]
 workspace = true

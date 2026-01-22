@@ -4,7 +4,6 @@ use super::parts::MissingKind;
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
 use crate::sql::{Expr, Fields, Limit, Literal, Order, Split, Splits, Start};
-use crate::syn::error::bail;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, t};
@@ -38,23 +37,17 @@ impl Parser<'_> {
 		let only = self.eat(t!("ONLY"));
 
 		let mut what = vec![stk.run(|ctx| self.parse_expr_table(ctx)).await?];
-		let span_after_first_what = self.recent_span();
 		while self.eat(t!(",")) {
 			what.push(stk.run(|ctx| self.parse_expr_table(ctx)).await?);
 		}
 
-		if only && what.len() > 1 {
-			let what_span = span_after_first_what.covers(self.last_span());
-			bail!(
-				"Expected a single result output when using the ONLY keyword",
-				@what_span => "ONLY keyword can only be used with a single table expression",
-			);
-		}
-
 		let with = self.try_parse_with()?;
 		let cond = self.try_parse_condition(stk).await?;
+
+		let split_before = self.peek().span;
 		let split = self.try_parse_split(&fields, fields_span)?;
-		let group = self.try_parse_group(&fields, fields_span)?;
+		let split_span = split.as_ref().map(|_| split_before.covers(self.last_span()));
+		let group = self.try_parse_group(&fields, fields_span, split_span)?;
 		let order = self.try_parse_orders(&fields, fields_span)?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;

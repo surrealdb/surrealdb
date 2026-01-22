@@ -3,10 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "ml")]
-use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
+use rustls::crypto::CryptoProvider;
 use surrealdb::engine::{any, tasks};
 use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
@@ -184,6 +183,8 @@ pub async fn init<
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
+	// Install the crypto provider before any TLS operations occur
+	let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 	// Check the path is valid
 	C::path_valid(&path)?;
 	// Check if we should output a banner
@@ -229,11 +230,6 @@ pub async fn init<
 	// Setup the command-line options
 	// Initiate environment
 	env::init()?;
-
-	// if ML feature is enabled load the ONNX runtime lib that is embedded
-	#[cfg(feature = "ml")]
-	crate::core::ml::execution::session::set_environment()
-		.context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();

@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 use std::time::Instant;
 
-use opentelemetry::metrics::{Counter, Histogram, Meter, MetricsError, UpDownCounter};
+use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry::{Context as TelemetryContext, KeyValue, global};
 
 use crate::cnf::TELEMETRY_NAMESPACE;
@@ -12,14 +12,14 @@ pub static RPC_SERVER_ACTIVE_CONNECTIONS: LazyLock<UpDownCounter<i64>> = LazyLoc
 	METER
 		.i64_up_down_counter("rpc.server.active_connections")
 		.with_description("The number of active WebSocket connections.")
-		.init()
+		.build()
 });
 
 pub static RPC_SERVER_CONNECTION_COUNT: LazyLock<Counter<u64>> = LazyLock::new(|| {
 	METER
 		.u64_counter("rpc.server.connection.count")
 		.with_description("The total number of WebSocket connections processed.")
-		.init()
+		.build()
 });
 
 pub static RPC_SERVER_REQUEST_DURATION: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -27,7 +27,7 @@ pub static RPC_SERVER_REQUEST_DURATION: LazyLock<Histogram<u64>> = LazyLock::new
 		.u64_histogram("rpc.server.request.duration")
 		.with_description("The duration of inbound WebSocket requests in milliseconds.")
 		.with_unit("ms")
-		.init()
+		.build()
 });
 
 pub static RPC_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -35,7 +35,7 @@ pub static RPC_SERVER_REQUEST_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| 
 		.u64_histogram("rpc.server.request.size")
 		.with_description("The size of inbound WebSocket request messages.")
 		.with_unit("mb")
-		.init()
+		.build()
 });
 
 pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(|| {
@@ -43,7 +43,7 @@ pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 		.u64_histogram("rpc.server.response.size")
 		.with_description("The size of outbound WebSocket response messages.")
 		.with_unit("mb")
-		.init()
+		.build()
 });
 
 fn otel_common_attrs() -> Vec<KeyValue> {
@@ -55,20 +55,19 @@ fn otel_common_attrs() -> Vec<KeyValue> {
 }
 
 /// Registers the callback that increases the number of active RPC connections.
-pub fn on_connect() -> Result<(), MetricsError> {
-	observe_active_connection(1)
+pub fn on_connect() {
+	observe_active_connection(1);
 }
 
 /// Registers the callback that decreases the number of active RPC connections.
-pub fn on_disconnect() -> Result<(), MetricsError> {
-	observe_active_connection(-1)
+pub fn on_disconnect() {
+	observe_active_connection(-1);
 }
 
-pub(super) fn observe_active_connection(value: i64) -> Result<(), MetricsError> {
+pub(super) fn observe_active_connection(value: i64) {
 	let attrs = otel_common_attrs();
 	RPC_SERVER_CONNECTION_COUNT.add(1, &attrs);
 	RPC_SERVER_ACTIVE_CONNECTIONS.add(value, &attrs);
-	Ok(())
 }
 
 //

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -34,6 +35,24 @@ impl IntoIterator for Idioms {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl PartialOrd for Idioms {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Idioms {
+	fn cmp(&self, other: &Self) -> Ordering {
+		for (a, b) in self.0.iter().zip(other.0.iter()) {
+			let o = a.cmp(b);
+			if o != Ordering::Equal {
+				return o;
+			}
+		}
+		Ordering::Equal
 	}
 }
 
@@ -147,6 +166,27 @@ impl Deref for Idiom {
 impl From<Vec<Part>> for Idiom {
 	fn from(v: Vec<Part>) -> Self {
 		Self(v)
+	}
+}
+
+impl PartialOrd for Idiom {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Idiom {
+	fn cmp(&self, other: &Self) -> Ordering {
+		for (a, b) in self.0.iter().zip(other.0.iter()) {
+			let o = a.partial_cmp(b).unwrap_or(Ordering::Equal);
+			if o != Ordering::Equal {
+				return o;
+			}
+		}
+
+		// If all parts match so far, shorter idiom comes first
+		// This ensures that `a` < `a.b`
+		self.0.len().cmp(&other.0.len())
 	}
 }
 
@@ -303,5 +343,74 @@ mod tests {
 	#[case(Idiom::from(vec![Part::Field("value".to_string())]), "value")]
 	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
 		assert_eq!(idiom.to_raw_string(), expected.to_string());
+	}
+
+	#[rstest]
+	// Test b, a ==> a, b (alphabetical ordering)
+	#[case(
+		vec![Idiom::from(vec![Part::Field("b".to_string())]), Idiom::from(vec![Part::Field("a".to_string())])],
+		vec![Idiom::from(vec![Part::Field("a".to_string())]), Idiom::from(vec![Part::Field("b".to_string())])]
+	)]
+	// Test a.b, a ==> a, a.b (prefix comes first)
+	#[case(
+		vec![Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())]), Idiom::from(vec![Part::Field("a".to_string())])],
+		vec![Idiom::from(vec![Part::Field("a".to_string())]), Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())])]
+	)]
+	// Test complex nested case: author.company, author ==> author, author.company
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string())])
+		],
+		vec![
+			Idiom::from(vec![Part::Field("author".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string())])
+		]
+	)]
+	// Test deeply nested: author.company.address, author, author.company ==> author,
+	// author.company, author.company.address
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string()), Part::Field("address".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string())])
+		],
+		vec![
+			Idiom::from(vec![Part::Field("author".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string())]),
+			Idiom::from(vec![Part::Field("author".to_string()), Part::Field("company".to_string()), Part::Field("address".to_string())])
+		]
+	)]
+	// Test mixed alphabetical and nested: d, a.b.c, b, a, a.b ==> a, a.b, a.b.c, b, d
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field("d".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string()), Part::Field("c".to_string())]),
+			Idiom::from(vec![Part::Field("b".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())])
+		],
+		vec![
+			Idiom::from(vec![Part::Field("a".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string()), Part::Field("c".to_string())]),
+			Idiom::from(vec![Part::Field("b".to_string())]),
+			Idiom::from(vec![Part::Field("d".to_string())])
+		]
+	)]
+	// Test with different Part variants: Field comes before All
+	#[case(
+		vec![
+			Idiom::from(vec![Part::Field("a".to_string()), Part::All]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())])
+		],
+		vec![
+			Idiom::from(vec![Part::Field("a".to_string()), Part::Field("b".to_string())]),
+			Idiom::from(vec![Part::Field("a".to_string()), Part::All])
+		]
+	)]
+	fn test_idiom_sorting(#[case] mut idioms: Vec<Idiom>, #[case] expected: Vec<Idiom>) {
+		idioms.sort();
+		assert_eq!(idioms, expected);
 	}
 }

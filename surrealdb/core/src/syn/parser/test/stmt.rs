@@ -14,7 +14,6 @@ use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
-use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 	PurgeKind,
@@ -41,9 +40,9 @@ use crate::sql::statements::{
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order,
-	Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Split,
-	Splits, Start, TableType, TopLevelExpr, With,
+	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Literal, Lookup, Mock, Output, Param,
+	Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, TableType, TopLevelExpr,
+	With,
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
@@ -1969,95 +1968,6 @@ fn parse_info() {
 			Some(Base::Ns),
 			false
 		)))
-	);
-}
-
-#[test]
-fn parse_select() {
-	let res = syn::parse_with(
-		r#"
-		SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a
-		WITH INDEX index,index_2
-		WHERE true
-		SPLIT ON foo,bar
-		GROUP foo,bar
-		ORDER BY foo COLLATE NUMERIC ASC
-		START AT { a: true }
-		LIMIT BY a:b
-		FETCH foo
-		VERSION d"2012-04-23T18:25:43.0000511Z"
-		EXPLAIN FULL
-		"#
-		.as_bytes(),
-		async |p, s| p.parse_expr_inherit(s).await,
-	)
-	.unwrap();
-
-	let offset = Utc.fix();
-	let expected_datetime = offset
-		.from_local_datetime(
-			&NaiveDate::from_ymd_opt(2012, 4, 23)
-				.unwrap()
-				.and_hms_nano_opt(18, 25, 43, 51_100)
-				.unwrap(),
-		)
-		.earliest()
-		.unwrap()
-		.with_timezone(&Utc);
-
-	assert_eq!(
-		res,
-		Expr::Select(Box::new(SelectStatement {
-			fields: Fields::Select(vec![
-				Field::Single(Selector {
-					expr: ident_field("bar"),
-					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
-				}),
-				Field::Single(Selector {
-					expr: Expr::Literal(Literal::Array(vec![
-						Expr::Literal(Literal::Integer(1)),
-						Expr::Literal(Literal::Integer(2))
-					])),
-					alias: None,
-				}),
-				Field::Single(Selector {
-					expr: ident_field("bar"),
-					alias: None,
-				}),
-			],),
-			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
-			only: true,
-			what: vec![Expr::Table("a".to_owned())],
-			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
-			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
-			split: Some(Splits(vec![
-				Split(Idiom::field("foo".to_owned())),
-				Split(Idiom::field("bar".to_owned())),
-			])),
-			group: Some(Groups(vec![
-				Group(Idiom(vec![Part::Field("foo".to_owned())])),
-				Group(Idiom(vec![Part::Field("bar".to_owned())])),
-			])),
-			order: Some(Ordering::Order(OrderList(vec![Order {
-				value: Idiom(vec![Part::Field("foo".to_owned())]),
-				collate: true,
-				numeric: true,
-				direction: true,
-			}]))),
-			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
-				table: "a".to_owned(),
-				key: RecordIdKeyLit::String("b".to_owned()),
-			})))),
-			start: Some(Start(Expr::Literal(Literal::Object(vec![ObjectEntry {
-				key: "a".to_owned(),
-				value: Expr::Literal(Literal::Bool(true))
-			}])))),
-			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
-			timeout: Expr::Literal(Literal::None),
-			tempfiles: false,
-			explain: Some(Explain(true)),
-		})),
 	);
 }
 

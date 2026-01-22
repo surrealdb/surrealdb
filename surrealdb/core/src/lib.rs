@@ -85,7 +85,7 @@ pub(crate) mod types {
 }
 
 #[cfg(feature = "ml")]
-pub use surrealml as ml;
+pub use surrealml_core as ml;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
