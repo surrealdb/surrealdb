@@ -55,8 +55,12 @@ impl DefineDatabaseStatement {
 		txn.set(
 			key,
 			revision::to_vec(&DefineDatabaseStatement {
-				id: if self.id.is_none() && nsv.id.is_some() {
-					Some(txn.lock().await.get_next_db_id(nsv.id.unwrap()).await?)
+				id: if let Some(id) = nsv.id {
+					if self.id.is_none() {
+						Some(txn.lock().await.get_next_db_id(id).await?)
+					} else {
+						None
+					}
 				} else {
 					None
 				},

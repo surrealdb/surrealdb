@@ -88,8 +88,16 @@ impl DefineTableStatement {
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 		let dbv = txn.get_or_add_db(ns, db, opt.strict).await?;
 		let mut dt = DefineTableStatement {
-			id: if self.id.is_none() && nsv.id.is_some() && dbv.id.is_some() {
-				Some(txn.lock().await.get_next_tb_id(nsv.id.unwrap(), dbv.id.unwrap()).await?)
+			id: if self.id.is_none() {
+				if let Some(nsv_id) = nsv.id {
+					if let Some(dbv_id) = dbv.id {
+						Some(txn.lock().await.get_next_tb_id(nsv_id, dbv_id).await?)
+					} else {
+						None
+					}
+				} else {
+					None
+				}
 			} else {
 				None
 			},
@@ -242,35 +250,7 @@ impl Display for DefineTableStatement {
 			write!(f, " OVERWRITE")?
 		}
 		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
-		match &self.kind {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
-			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(
-						f,
-						" IN {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
-				}
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(
-						f,
-						" OUT {}",
-						kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-					)?;
-				}
-				if rel.enforced {
-					write!(f, " ENFORCED")?;
-				}
-			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
-		}
+		write!(f, " TYPE {}", self.kind)?;
 		if self.drop {
 			f.write_str(" DROP")?;
 		}

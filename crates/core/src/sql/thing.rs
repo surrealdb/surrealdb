@@ -7,7 +7,8 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
-use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
+use crate::sql::escape::EscapeIdent;
+use crate::sql::{id::Id, Strand, Value};
 use crate::syn;
 use futures::StreamExt;
 use reblessive::tree::Stk;
@@ -281,7 +282,7 @@ impl Thing {
 
 impl fmt::Display for Thing {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.tb), self.id)
+		write!(f, "{}:{}", EscapeIdent(&self.tb), self.id)
 	}
 }
 

@@ -140,6 +140,7 @@ futures.workspace = true
 fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
+hashbrown.workspace = true
 http.workspace = true
 hex.workspace = true
 ipnet.workspace = true

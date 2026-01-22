@@ -11,7 +11,6 @@ pub(crate) mod block;
 pub(crate) mod bytes;
 pub(crate) mod bytesize;
 pub(crate) mod cast;
-pub(crate) mod change_feed_include;
 pub(crate) mod changefeed;
 pub(crate) mod closure;
 pub(crate) mod cond;

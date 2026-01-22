@@ -25,7 +25,7 @@ value = "[{ id: likes:qvwx0qdpo7b0mkjnqeq1, in: person:a6cld8fhzwbrwhlfnbju, out
 skip-record-id-key = true
 
 [[test.results]]
-match = '''string::matches($error,"Found record: `likes:[a-zA-Z0-9]*` which is a relation, but expected a  RELATION IN record<person> OUT record<person \\| thing>")'''
+match = '''string::matches($error,"Found record: `likes:[a-zA-Z0-9]*` which is a relation, but expected a RELATION IN person OUT person | thing")'''
 error = true
 
 [[test.results]]

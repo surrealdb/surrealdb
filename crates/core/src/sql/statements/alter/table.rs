@@ -5,8 +5,8 @@ use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::TableType;
 use crate::sql::{changefeed::ChangeFeed, Base, Ident, Permissions, Strand, Value};
-use crate::sql::{Kind, TableType};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -97,32 +97,7 @@ impl Display for AlterTableStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(kind) = &self.kind {
-			write!(f, " TYPE")?;
-			match &kind {
-				TableType::Normal => {
-					f.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					f.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(
-							f,
-							" IN {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(
-							f,
-							" OUT {}",
-							kind.iter().map(|t| t.0.as_str()).collect::<Vec<_>>().join(" | ")
-						)?;
-					}
-				}
-				TableType::Any => {
-					f.write_str(" ANY")?;
-				}
-			}
+			write!(f, " TYPE {kind}")?;
 		}
 		if let Some(drop) = self.drop {
 			write!(f, " DROP {drop}")?;
