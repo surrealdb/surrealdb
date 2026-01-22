@@ -102,6 +102,18 @@ class BenchmarkAnalyzer:
 		json_files = list(self.results_dir.glob("*.json"))
 		print(f"Found {len(json_files)} JSON files in {self.results_dir}", file=sys.stderr)
 
+		# Load display names from txt files
+		display_names = {}
+		for txt_file in self.results_dir.glob("display_name_*.txt"):
+			config_name = txt_file.stem.replace('display_name_', '')
+			try:
+				safe_path = self._validate_and_resolve_input_path(txt_file, self.results_dir)
+				if safe_path is not None:
+					with open(safe_path, 'r') as f:
+						display_names[config_name] = f.read().strip()
+			except Exception:
+				pass
+
 		for json_file in json_files:
 			try:
 				# Validate and resolve path - returns None if outside results_dir
@@ -116,6 +128,9 @@ class BenchmarkAnalyzer:
 					config_name = self._extract_config_name(json_file)
 					print(f"Loading {config_name}...", file=sys.stderr)
 					parsed = self._parse_benchmark_data(data)
+					
+					# Add display name if available
+					parsed['display_name'] = display_names.get(config_name, config_name.replace('-', ' ').title())
 					results[config_name] = parsed
 			except Exception as e:
 				print(f"Warning: Failed to parse {json_file}: {e}", file=sys.stderr)
@@ -220,8 +235,9 @@ class BenchmarkAnalyzer:
 		
 		# Generate a table for each configuration
 		for config, key_type_data in sorted(config_groups.items()):
-			# Format configuration name for display
-			config_display = config.replace('-', ' ').title()
+			# Get display name from first key_type's metadata (they all have the same base config display name)
+			first_key_data = next(iter(key_type_data.values()))
+			config_display = first_key_data.get('display_name', config.replace('-', ' ').title())
 			report.append(f"\n### {config_display}\n")
 			
 			# Table header
@@ -261,7 +277,9 @@ class BenchmarkAnalyzer:
 		report.append("<summary>📊 Detailed Metrics</summary>\n")
 		
 		for config, key_type_data in sorted(config_groups.items()):
-			config_display = config.replace('-', ' ').title()
+			# Get display name from first key_type's metadata
+			first_key_data = next(iter(key_type_data.values()))
+			config_display = first_key_data.get('display_name', config.replace('-', ' ').title())
 			report.append(f"\n#### {config_display}\n")
 			
 			for key_type in ['integer', 'string26', 'string90', 'string250']:
