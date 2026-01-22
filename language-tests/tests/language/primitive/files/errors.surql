@@ -5,7 +5,11 @@
 [env.capabilities]
 allow-experimental = ["files"]
 
-# 0: Operation on non-existent bucket
+# 0: Put on non-existent bucket
+[[test.results]]
+error = "The bucket 'nonexistent' does not exist"
+
+# 0b: Get on non-existent bucket  
 [[test.results]]
 error = "The bucket 'nonexistent' does not exist"
 
@@ -39,7 +43,10 @@ value = "NONE"
 
 */
 
-// 0: Operation on non-existent bucket
+// 0: Put on non-existent bucket fails
+file::put(f"nonexistent:/file.txt", "data");
+
+// 0b: Get on non-existent bucket fails
 file::get(f"nonexistent:/file.txt");
 
 // 1: Setup

@@ -260,7 +260,7 @@ impl Coerce for File {
 		match v {
 			Value::File(x) => Ok(x),
 			Value::String(path) => {
-				let file = File::new("".to_string(), path.to_string());
+				let file = File::new("".to_string(), path);
 				Ok(file)
 			}
 			_ => Err(CoerceError::InvalidKind {
