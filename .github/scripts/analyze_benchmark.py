@@ -201,70 +201,93 @@ class BenchmarkAnalyzer:
 		"""Generate markdown report."""
 		report = []
 		report.append("## 🔍 CRUD Benchmark Results\n")
-
-		# Summary table
-		report.append("### Summary\n")
-		report.append("| Configuration | Operation | Throughput | P50 Latency | P95 Latency | P99 Latency | Samples |")
-		report.append("|--------------|-----------|------------|-------------|-------------|-------------|---------|")
-
-		# Collect all results
-		all_results = []
-		for config, metrics in sorted(self.current_results.items()):
-			for operation in ['create', 'read', 'update', 'delete']:
-				if operation not in metrics or not metrics[operation]:
+		
+		# Group results by base configuration (without key type suffix)
+		config_groups = {}
+		for config_name, metrics in sorted(self.current_results.items()):
+			# Extract base config name (e.g., "memory-integer" -> "memory")
+			parts = config_name.rsplit('-', 1)
+			if len(parts) == 2 and parts[1] in ['integer', 'string26', 'string90', 'string250']:
+				base_config = parts[0]
+				key_type = parts[1]
+			else:
+				base_config = config_name
+				key_type = 'default'
+			
+			if base_config not in config_groups:
+				config_groups[base_config] = {}
+			config_groups[base_config][key_type] = metrics
+		
+		# Generate a table for each configuration
+		for config, key_type_data in sorted(config_groups.items()):
+			# Format configuration name for display
+			config_display = config.replace('-', ' ').title()
+			report.append(f"\n### {config_display}\n")
+			
+			# Table header
+			report.append("| Key Type | Operation | Throughput | P50 | P95 | P99 |")
+			report.append("|----------|-----------|------------|-----|-----|-----|")
+			
+			# Generate rows for each key type and operation
+			for key_type in ['integer', 'string26', 'string90', 'string250']:
+				if key_type not in key_type_data:
 					continue
+				
+				metrics = key_type_data[key_type]
+				first_operation = True
+				
+				for operation in ['create', 'read', 'update', 'delete']:
+					if operation not in metrics or not metrics[operation]:
+						continue
+					
+					op_data = metrics[operation]
+					if not op_data.get('samples'):
+						continue
+					
+					throughput = self.format_throughput(op_data['throughput'])
+					p50 = self.format_latency(op_data['p50_ns'])
+					p95 = self.format_latency(op_data['p95_ns'])
+					p99 = self.format_latency(op_data['p99_ns'])
+					
+					# First row for each key type shows the key type name
+					key_type_display = key_type if first_operation else ""
+					operation_display = operation.capitalize()
+					
+					report.append(f"| {key_type_display} | {operation_display} | {throughput} | {p50} | {p95} | {p99} |")
+					first_operation = False
 
-				op_data = metrics[operation]
-				# Skip if no samples were collected (benchmark didn't run for this operation)
-				if not op_data.get('samples'):
-					continue
-
-				all_results.append({
-					'config': config,
-					'operation': operation,
-					'data': op_data
-				})
-
-		# Generate table rows
-		for item in all_results:
-			config = item['config']
-			operation = item['operation'].capitalize()
-			data = item['data']
-
-			throughput = self.format_throughput(data['throughput'])
-			p50 = self.format_latency(data['p50_ns'])
-			p95 = self.format_latency(data['p95_ns'])
-			p99 = self.format_latency(data['p99_ns'])
-			samples = data['samples']
-
-			report.append(f"| {config} | {operation} | {throughput} | {p50} | {p95} | {p99} | {samples} |")
-
-		# Detailed metrics
+		# Detailed metrics in collapsible section
 		report.append("\n<details>")
 		report.append("<summary>📊 Detailed Metrics</summary>\n")
-
-		for config, metrics in sorted(self.current_results.items()):
-			report.append(f"\n#### {config}\n")
-
-			for operation in ['create', 'read', 'update', 'delete']:
-				# Skip if operation wasn't initialized (not in metrics) or has no data (empty dict)
-				if operation not in metrics or not metrics[operation]:
+		
+		for config, key_type_data in sorted(config_groups.items()):
+			config_display = config.replace('-', ' ').title()
+			report.append(f"\n#### {config_display}\n")
+			
+			for key_type in ['integer', 'string26', 'string90', 'string250']:
+				if key_type not in key_type_data:
 					continue
-
-				op_data = metrics[operation]
-				# Skip if no samples were collected (benchmark didn't run for this operation)
-				if not op_data.get('samples'):
-					continue
-
-				report.append(f"\n**{operation.capitalize()}**")
-				report.append(f"- Throughput: {self.format_throughput(op_data['throughput'])}")
-				report.append(f"- Average Latency: {self.format_latency(op_data['avg_time_ns'])}")
-				report.append(f"- Latency P50: {self.format_latency(op_data['p50_ns'])}")
-				report.append(f"- Latency P95: {self.format_latency(op_data['p95_ns'])}")
-				report.append(f"- Latency P99: {self.format_latency(op_data['p99_ns'])}")
-				report.append(f"- Total Time: {op_data['total_time_ms']:.0f}ms")
-				report.append(f"- Samples: {op_data['samples']}")
-
+				
+				report.append(f"\n**{key_type}**\n")
+				metrics = key_type_data[key_type]
+				
+				for operation in ['create', 'read', 'update', 'delete']:
+					if operation not in metrics or not metrics[operation]:
+						continue
+					
+					op_data = metrics[operation]
+					if not op_data.get('samples'):
+						continue
+					
+					report.append(f"\n*{operation.capitalize()}*")
+					report.append(f"- Throughput: {self.format_throughput(op_data['throughput'])}")
+					report.append(f"- Average Latency: {self.format_latency(op_data['avg_time_ns'])}")
+					report.append(f"- Latency P50: {self.format_latency(op_data['p50_ns'])}")
+					report.append(f"- Latency P95: {self.format_latency(op_data['p95_ns'])}")
+					report.append(f"- Latency P99: {self.format_latency(op_data['p99_ns'])}")
+					report.append(f"- Total Time: {op_data['total_time_ms']:.0f}ms")
+					report.append(f"- Samples: {op_data['samples']}")
+		
 		report.append("\n</details>")
 
 		# Methodology
