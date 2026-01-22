@@ -1,5 +1,11 @@
 /**
+[env]
+
+[env.capabilities]
+insecure-storable-closures = true
+
 [test]
+
 
 [[test.results]]
 value = "NULL"
