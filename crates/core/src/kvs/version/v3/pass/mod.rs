@@ -2102,13 +2102,36 @@ impl Visitor for MigratorPass<'_> {
 		};
 		for p in parts.iter() {
 			let prev_field = last_field;
+			let loc = self.w.location();
 			if matches!(p, Part::Field(_)) {
-				last_field = Some(self.w.location());
+				last_field = Some(loc);
 			} else {
 				last_field = None
 			}
 
 			self.visit_part(p)?;
+
+			if let Part::Field(x) = p {
+				if x.as_str() == "id" {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+					severity: Severity::CanBreak,
+					error:
+						"Found usage of an `.id` idiom, this field had special behavior for record-ids in 2.0 which has been removed in 3.0"
+							.to_string(),
+					details: String::new(),
+					kind: IssueKind::IdField,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						loc..after,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+				}
+			}
 
 			if let Some(field) = prev_field {
 				if last_field.is_none() {
