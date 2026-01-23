@@ -253,12 +253,20 @@ impl Provisioner {
 
 	pub async fn shutdown(mut self) -> Result<()> {
 		mem::drop(self.send);
-		while let Some(x) = self.recv.recv().await {
-			x.shutdown().await.context("Datastore failed to shutdown properly")?;
+		while let Some(datastore) = self.recv.recv().await {
+			// Best-effort shutdown - ignore errors since datastores may have been
+			// cleared by other tests, especially with shared datastore instances
+			if let Err(e) = datastore.shutdown().await {
+				println!("Warning: Datastore shutdown error: {e}");
+			}
 		}
 
 		if let Some(dir) = self.create_info.dir.as_ref() {
-			tokio::fs::remove_dir_all(dir).await.context("Failed to clean up temporary dir")?;
+			// Best-effort cleanup - ignore errors since datastores may have been
+			// cleared by other tests, especially with shared datastore instances
+			if let Err(e) = tokio::fs::remove_dir_all(dir).await {
+				println!("Failed to clean up temporary dir: {e}");
+			}
 		}
 
 		Ok(())
