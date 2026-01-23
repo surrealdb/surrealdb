@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "[{ details: '', error: 'Found a future which would be stored in the database', kind: 'incompatible future', location: { column: 54, kind: 'error', label: 'Incompatible future', length: 23, line: 1, source: ': SET a = <future> {time::now();}', truncation: 'start' }, origin: '/ns/test/db/test/fn/t', severity: 'will_break' }]"
+value = "[{ details: '', error: 'Found a future which would be stored in the database', kind: 'incompatible future', location: { column: 54, kind: 'error', label: 'Incompatible future', length: 23, line: 1, source: ': SET a = <future> {time::now();}', truncation: 'start' }, origin: ['ns', 'test', 'db', 'test', 'function', 't'], severity: 'will_break' }, { details: '', error: 'Found a future which would be stored in the database', kind: 'incompatible future', location: { column: 54, kind: 'error', label: 'Incompatible future', length: 23, line: 1, source: ': SET a = <future> {time::now();}', truncation: 'start' }, origin: ['ns', 'test', 'db', 'test', 'function', 't', 'function', 't'], severity: 'will_break' }]"
 
 */
 
