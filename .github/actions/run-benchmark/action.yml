@@ -159,7 +159,7 @@ runs:
         echo "${{ inputs.description }}" > "display_name_${RESULT_NAME}.txt"
         
         echo "Running: $CMD"
-        timeout 10m bash -c "eval $CMD"
+        timeout 10m bash -c "$CMD"
       env:
         SURREALDB_USER: root
         SURREALDB_PASS: root
