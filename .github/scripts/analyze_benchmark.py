@@ -174,13 +174,29 @@ class BenchmarkAnalyzer:
 				total_time_ms = (elapsed_data.get('secs', 0) * 1000) + (elapsed_data.get('nanos', 0) / 1_000_000)
 
 				metrics[singular_key] = {
-					'throughput': op_data.get('ops', 0),  # crud-bench uses 'ops' for operations per second
+					# Throughput
+					'throughput': op_data.get('ops', 0),
+
+					# Time metrics
 					'total_time_ms': total_time_ms,
-					'avg_time_ns': op_data.get('mean', 0) * 1000,  # Convert µs to ns
-					'p50_ns': op_data.get('q50', 0) * 1000,  # Convert µs to ns
-					'p95_ns': op_data.get('q95', 0) * 1000,  # Convert µs to ns
-					'p99_ns': op_data.get('q99', 0) * 1000,  # Convert µs to ns
-					'samples': op_data.get('samples', 0)
+
+					# Latency statistics (convert µs to ns)
+					'min_ns': op_data.get('min', 0) * 1000,
+					'max_ns': op_data.get('max', 0) * 1000,
+					'avg_time_ns': op_data.get('mean', 0) * 1000,
+					'std_dev_ns': op_data.get('std_dev', op_data.get('stddev', 0)) * 1000,
+
+					# Percentiles (convert µs to ns)
+					'p50_ns': op_data.get('q50', 0) * 1000,
+					'p90_ns': op_data.get('q90', 0) * 1000,
+					'p95_ns': op_data.get('q95', 0) * 1000,
+					'p99_ns': op_data.get('q99', 0) * 1000,
+					'p999_ns': op_data.get('q999', op_data.get('q99.9', 0)) * 1000,
+
+					# Other metrics
+					'samples': op_data.get('samples', 0),
+					'cpu_percent': op_data.get('cpu', op_data.get('cpu_percent', None)),
+					'memory_mb': op_data.get('memory', op_data.get('memory_mb', None))
 				}
 				print(f"  {singular_key}: {self.format_throughput(metrics[singular_key]['throughput'])}, "
 				      f"p50={self.format_latency(metrics[singular_key]['p50_ns'])}, "
@@ -299,12 +315,31 @@ class BenchmarkAnalyzer:
 					
 					report.append(f"\n*{operation.capitalize()}*")
 					report.append(f"- Throughput: {self.format_throughput(op_data['throughput'])}")
-					report.append(f"- Average Latency: {self.format_latency(op_data['avg_time_ns'])}")
-					report.append(f"- Latency P50: {self.format_latency(op_data['p50_ns'])}")
-					report.append(f"- Latency P95: {self.format_latency(op_data['p95_ns'])}")
-					report.append(f"- Latency P99: {self.format_latency(op_data['p99_ns'])}")
 					report.append(f"- Total Time: {op_data['total_time_ms']:.0f}ms")
 					report.append(f"- Samples: {op_data['samples']}")
+					
+					report.append(f"\n  **Latency Statistics:**")
+					report.append(f"  - Min: {self.format_latency(op_data['min_ns'])}")
+					report.append(f"  - Max: {self.format_latency(op_data['max_ns'])}")
+					report.append(f"  - Mean: {self.format_latency(op_data['avg_time_ns'])}")
+					report.append(f"  - Std Dev: {self.format_latency(op_data['std_dev_ns'])}")
+					
+					report.append(f"\n  **Percentiles:**")
+					report.append(f"  - P50 (median): {self.format_latency(op_data['p50_ns'])}")
+					if op_data.get('p90_ns', 0) > 0:
+						report.append(f"  - P90: {self.format_latency(op_data['p90_ns'])}")
+					report.append(f"  - P95: {self.format_latency(op_data['p95_ns'])}")
+					report.append(f"  - P99: {self.format_latency(op_data['p99_ns'])}")
+					if op_data.get('p999_ns', 0) > 0:
+						report.append(f"  - P99.9: {self.format_latency(op_data['p999_ns'])}")
+					
+					# System metrics if available
+					if op_data.get('cpu_percent') is not None or op_data.get('memory_mb') is not None:
+						report.append(f"\n  **System:**")
+						if op_data.get('cpu_percent') is not None:
+							report.append(f"  - CPU: {op_data['cpu_percent']:.1f}%")
+						if op_data.get('memory_mb') is not None:
+							report.append(f"  - Memory: {op_data['memory_mb']:.1f} MB")
 		
 		report.append("\n</details>")
 
