@@ -44,12 +44,138 @@ env:
 
 jobs:
   # ----------------------------------------
+  # Build SurrealDB binaries with minimal features
+  # ----------------------------------------
+
+  build-surrealdb-binaries:
+    name: Build SurrealDB (${{ matrix.config }})
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - memory
+          - rocksdb
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Build SurrealDB with minimal features
+        run: |
+          # Determine features based on configuration
+          case "${{ matrix.config }}" in
+            memory)
+              FEATURES="storage-mem,http"
+              echo "Building SurrealDB with in-memory storage only"
+              ;;
+            rocksdb)
+              FEATURES="storage-rocksdb,http"
+              echo "Building SurrealDB with RocksDB storage only"
+              ;;
+            *)
+              echo "Unknown config: ${{ matrix.config }}"
+              exit 1
+              ;;
+          esac
+          
+          echo "Features: $FEATURES"
+          cargo build --release --no-default-features --features "$FEATURES"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: surreal-binary-${{ matrix.config }}
+          path: target/release/surreal
+          retention-days: 1
+
+  # ----------------------------------------
+  # Build crud-bench with patched surrealdb
+  # ----------------------------------------
+
+  build-crud-bench:
+    name: Build crud-bench
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Checkout crud-bench repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: surrealdb/crud-bench
+          ref: ${{ env.CRUD_BENCH_REVISION }}
+          path: .github/tools/crud-bench
+      
+      - name: Setup crud-bench cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .github/tools/crud-bench
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      
+      - name: Align SurrealDB version with crud-bench
+        run: |
+          # Extract the surrealdb version that crud-bench expects
+          EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
+          echo "crud-bench expects surrealdb version: $EXPECTED_VERSION"
+
+          # Get current version
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          echo "Current workspace version: $CURRENT_VERSION"
+
+          if [ "$EXPECTED_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "Updating workspace and internal crate versions to $EXPECTED_VERSION"
+
+            # Update workspace package version
+            sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$EXPECTED_VERSION\"/" Cargo.toml
+
+            # Update all internal surrealdb-* dependency versions in workspace.dependencies
+            sed -i "s/surrealdb\([a-z-]*\) = { version = \"$CURRENT_VERSION\"/surrealdb\1 = { version = \"$EXPECTED_VERSION\"/g" Cargo.toml
+
+            echo "Updated Cargo.toml workspace and dependency versions"
+          else
+            echo "Versions already match, no changes needed"
+          fi
+      
+      - name: Build crud-bench
+        run: |
+          cd .github/tools/crud-bench
+          
+          # Update only surrealdb and its dependencies to resolve conflicts with the patched version
+          # This keeps all other crud-bench dependencies locked for consistent benchmarking
+          cargo update -p surrealdb
+          
+          cargo build --release
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crud-bench-binary
+          path: .github/tools/crud-bench/target/release/crud-bench
+          retention-days: 1
+
+  # ----------------------------------------
   # Run CRUD benchmarks
   # ----------------------------------------
 
   benchmark:
     name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
+    needs: [build-surrealdb-binaries, build-crud-bench]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -128,61 +254,37 @@ jobs:
         with:
           save-cache: false
 
-      - name: Build SurrealDB binary (for networked benchmarks)
+      - name: Download SurrealDB binary (for networked benchmarks)
+        if: matrix.needs_server == true
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: surreal-binary-${{ matrix.config }}
+          path: ${{ github.workspace }}/bin
+      
+      - name: Make SurrealDB binary executable
         if: matrix.needs_server == true
         run: |
-          cargo build --release
-          mkdir -p ${{ github.workspace }}/bin
-          cp target/release/surreal ${{ github.workspace }}/bin/
+          chmod +x ${{ github.workspace }}/bin/surreal
           echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-
-      - name: Checkout crud-bench repository
+          echo "SurrealDB binary ready at: ${{ github.workspace }}/bin/surreal"
+      
+      - name: Checkout crud-bench repository (for directory structure)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: surrealdb/crud-bench
           ref: ${{ env.CRUD_BENCH_REVISION }}
           path: .github/tools/crud-bench
-
-      - name: Setup crud-bench cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      
+      - name: Download crud-bench binary
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          workspaces: .github/tools/crud-bench
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Align SurrealDB version with crud-bench
+          name: crud-bench-binary
+          path: .github/tools/crud-bench/target/release/
+      
+      - name: Make crud-bench binary executable
         run: |
-          # Extract the surrealdb version that crud-bench expects
-          EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
-          echo "crud-bench expects surrealdb version: $EXPECTED_VERSION"
-
-          # Get current version
-          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
-          echo "Current workspace version: $CURRENT_VERSION"
-
-          if [ "$EXPECTED_VERSION" != "$CURRENT_VERSION" ]; then
-            echo "Updating workspace and internal crate versions to $EXPECTED_VERSION"
-
-            # Update workspace package version
-            sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$EXPECTED_VERSION\"/" Cargo.toml
-
-            # Update all internal surrealdb-* dependency versions in workspace.dependencies
-            sed -i "s/surrealdb\([a-z-]*\) = { version = \"$CURRENT_VERSION\"/surrealdb\1 = { version = \"$EXPECTED_VERSION\"/g" Cargo.toml
-
-            echo "Updated Cargo.toml workspace and dependency versions"
-          else
-            echo "Versions already match, no changes needed"
-          fi
-
-      - name: Build crud-bench
-        run: |
-          cd .github/tools/crud-bench
-          
-          # Update only surrealdb and its dependencies to resolve conflicts with the patched version
-          # This keeps all other crud-bench dependencies locked for consistent benchmarking
-          cargo update -p surrealdb
-          
-          cargo build --release
+          chmod +x .github/tools/crud-bench/target/release/crud-bench
+          echo "crud-bench binary ready"
 
       - name: Prepare environment
         run: |

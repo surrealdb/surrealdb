@@ -24,11 +24,12 @@ The workflow uses a **Cartesian product matrix** to maximize parallelization:
 - Failed jobs don't block other combinations
 
 **Benefits:**
-- ✅ Faster completion time (~10 minutes total vs ~40 minutes sequential)
+- ✅ Faster completion time (~5-7 minutes total vs ~13 minutes sequential per job)
 - ✅ Better fault isolation (one failure doesn't stop others)
 - ✅ Individual retry capability per config/key-type
 - ✅ Clearer progress tracking (24 jobs vs 7)
 - ✅ Guaranteed clean state for each benchmark
+- ✅ Shared binary builds reduce redundant compilation
 
 ## crud-bench Version Management
 
@@ -308,7 +309,17 @@ If the Python analysis script fails:
 
 ### Benchmarks are Slow
 
-The workflow uses parallel matrix execution, so total wall-clock time should be ~10-15 minutes if runners are available.
+The workflow uses parallel matrix execution, so total wall-clock time should be ~5-7 minutes if runners are available.
+
+**Build Phase (parallel):**
+- SurrealDB binaries with minimal features: ~3-4 minutes
+- crud-bench with patched surrealdb: ~5 minutes
+- **Total build time: ~5 minutes** (builds run in parallel)
+
+**Benchmark Phase (parallel):**
+- 24 jobs execute simultaneously
+- Each job downloads pre-built binaries and runs benchmarks: ~30-60 seconds
+- **Total benchmark time: ~1 minute** (when sufficient runners are available)
 
 If individual jobs are too slow:
 
@@ -330,19 +341,49 @@ If you want to run fewer benchmarks:
 
 ### Workflow Jobs
 
-1. **crud-benchmark** (matrix job: 24 parallel jobs)
-   - Matrix dimensions: 6 configs × 4 key types
-   - Each job runs independently with:
-     - Configuration metadata determination (database, endpoint, server requirements)
-     - Conditional SurrealDB binary build (only for networked benchmarks)
-     - crud-bench checkout and build
-     - Optional SurrealDB server startup (for networked benchmarks)
-     - Single benchmark run with specific config and key type
-     - Result upload as individual artifact
+The workflow uses a **three-phase architecture** with shared binary builds:
+
+#### Phase 1: Build Jobs (parallel)
+
+1. **build-surrealdb-binaries** (matrix job: 2 parallel builds)
+   - Builds SurrealDB binaries with **minimal features** for each storage type
+   - Matrix dimensions: 2 configs (memory, rocksdb)
+   - Features per build:
+     - `memory`: `--no-default-features --features "storage-mem,http"`
+     - `rocksdb`: `--no-default-features --features "storage-rocksdb,http"`
+   - Uploads binaries as artifacts: `surreal-binary-{config}`
+   - Timeout: 15 minutes per build
+   - **Expected time: ~3-4 minutes per build** (parallel)
+
+2. **build-crud-bench** (single job)
+   - Checks out SurrealDB sources and crud-bench repository
+   - Aligns version compatibility between crud-bench and PR
+   - Uses Cargo patching (`.github/tools/.cargo/config.toml`) to link crud-bench against local surrealdb
+   - Builds crud-bench with patched dependencies
+   - Uploads binary as artifact: `crud-bench-binary`
+   - Timeout: 15 minutes
+   - **Expected time: ~5 minutes**
+
+#### Phase 2: Benchmark Jobs (parallel, 24 jobs)
+
+3. **benchmark** (matrix job: 24 parallel jobs)
+   - **Depends on:** `build-surrealdb-binaries`, `build-crud-bench`
+   - Matrix dimensions: 6 configs × 4 key types = 24 jobs
+   - Each job:
+     - Downloads pre-built binaries from build phase
+       - SurrealDB binary (if `needs_server == true`)
+       - crud-bench binary (always)
+     - Checks out crud-bench repository for directory structure
+     - Starts SurrealDB server (for networked benchmarks only)
+     - Runs single benchmark with specific config and key type
+     - Uploads results as individual artifact
    - Clean state for every job (no data carryover)
    - Timeout: 30 minutes per job
+   - **Expected time: ~30-60 seconds per job** (just benchmark execution + artifact I/O)
 
-2. **analyze-and-report**
+#### Phase 3: Analysis Job
+
+4. **analyze-and-report**
    - Downloads benchmark results from all 24 matrix jobs
    - Merges all JSON result files
    - Parses and analyzes the results
@@ -352,21 +393,43 @@ If you want to run fewer benchmarks:
 
 ### How PR Code is Used
 
-The workflow ensures all benchmarks test your PR's code through two mechanisms:
+The workflow ensures all benchmarks test your PR's code through **shared build jobs** that create binaries once and distribute them to all benchmark jobs:
 
-#### Networked Benchmarks (surrealdb-memory, surrealdb-rocksdb, surrealdb-surrealkv)
-1. The workflow builds the SurrealDB binary from your PR
-2. For networked configurations, it starts a local SurrealDB server using this binary
-3. crud-bench connects to this local server via `ws://localhost:8000`
-4. The server runs entirely from your PR's code
+#### Build Phase
 
-#### Embedded Benchmarks (embedded-memory, embedded-rocksdb, embedded-surrealkv)
-1. The workflow uses Cargo patching (`.github/tools/.cargo/config.toml`)
-2. This patches the `surrealdb` dependency in crud-bench to use your local SDK code
-3. When crud-bench builds, it links against your PR's surrealdb SDK
-4. The embedded benchmarks run entirely from your PR's code
+1. **SurrealDB Binaries (for networked benchmarks)**
+   - The `build-surrealdb-binaries` job builds minimal-feature binaries from your PR
+   - Each binary includes only the features needed for its storage type:
+     - `memory`: In-memory storage + HTTP server
+     - `rocksdb`: RocksDB storage + HTTP server
+   - Binaries are uploaded as artifacts and downloaded by benchmark jobs
+   - This ensures networked benchmarks test your PR's server code
 
-Both approaches ensure apples-to-apples comparison: all benchmarks test the same PR code, just in different deployment modes (server vs embedded).
+2. **crud-bench Binary (for all benchmarks)**
+   - The `build-crud-bench` job uses Cargo patching (`.github/tools/.cargo/config.toml`)
+   - This patches the `surrealdb` dependency in crud-bench to use your local SDK code
+   - When crud-bench builds, it links against your PR's surrealdb SDK
+   - The binary is uploaded as an artifact and downloaded by all benchmark jobs
+   - This ensures embedded benchmarks test your PR's SDK code
+
+#### Benchmark Phase
+
+**Networked Benchmarks (memory, rocksdb):**
+1. Download storage-specific SurrealDB binary from build phase
+2. Start local SurrealDB server using the downloaded binary
+3. Download and run crud-bench binary (which also uses your PR's SDK)
+4. crud-bench connects to local server via `ws://localhost:8000`
+
+**Embedded Benchmarks (embedded-memory, embedded-rocksdb, surrealkv-local, surrealmx):**
+1. Download crud-bench binary from build phase (linked against your PR's SDK)
+2. Run crud-bench with embedded storage (no server needed)
+3. Benchmarks execute entirely within the SDK from your PR
+
+**Key Benefits:**
+- ✅ All benchmarks test the same PR code
+- ✅ Binaries built once, used 24 times (efficient)
+- ✅ Minimal features = faster builds
+- ✅ Consistent test environment across all jobs
 
 ### Analysis Script
 
