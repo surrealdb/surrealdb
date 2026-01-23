@@ -159,7 +159,8 @@ jobs:
           # This keeps all other crud-bench dependencies locked for consistent benchmarking
           cargo update -p surrealdb
           
-          cargo build --release
+          # Build with only the database features we actually use
+          cargo build --release --no-default-features --features "surrealdb,surrealkv,surrealmx"
       
       - name: Upload binary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
