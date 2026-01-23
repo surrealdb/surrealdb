@@ -6,16 +6,16 @@ reason = "Test ORDER BY with accented Latin characters (French, Spanish, Nordic)
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'cafe' }, { id: item:2, value: 'café' }, { id: item:3, value: 'à' }, { id: item:9, value: 'å' }, { id: item:10, value: 'æ' }, { id: item:7, value: 'ç' }, { id: item:4, value: 'è' }, { id: item:5, value: 'é' }, { id: item:6, value: 'ê' }, { id: item:8, value: 'ñ' }, { id: item:11, value: 'ø' }]"
+value = "[{ value: 'cafe' }, { value: 'café' }, { value: 'à' }, { value: 'å' }, { value: 'æ' }, { value: 'ç' }, { value: 'è' }, { value: 'é' }, { value: 'ê' }, { value: 'ñ' }, { value: 'ø' }]"
 
 [[test.results]]
-value = "[{ id: item:11, value: 'ø' }, { id: item:8, value: 'ñ' }, { id: item:6, value: 'ê' }, { id: item:5, value: 'é' }, { id: item:4, value: 'è' }, { id: item:7, value: 'ç' }, { id: item:10, value: 'æ' }, { id: item:9, value: 'å' }, { id: item:3, value: 'à' }, { id: item:2, value: 'café' }, { id: item:1, value: 'cafe' }]"
+value = "[{ value: 'ø' }, { value: 'ñ' }, { value: 'ê' }, { value: 'é' }, { value: 'è' }, { value: 'ç' }, { value: 'æ' }, { value: 'å' }, { value: 'à' }, { value: 'café' }, { value: 'cafe' }]"
 
 [[test.results]]
-value = "[{ id: item:3, value: 'à' }, { id: item:9, value: 'å' }, { id: item:10, value: 'æ' }, { id: item:7, value: 'ç' }, { id: item:1, value: 'cafe' }, { id: item:2, value: 'café' }, { id: item:4, value: 'è' }, { id: item:5, value: 'é' }, { id: item:6, value: 'ê' }, { id: item:8, value: 'ñ' }, { id: item:11, value: 'ø' }]"
+value = "[{ value: 'à' }, { value: 'å' }, { value: 'æ' }, { value: 'ç' }, { value: 'cafe' }, { value: 'café' }, { value: 'è' }, { value: 'é' }, { value: 'ê' }, { value: 'ñ' }, { value: 'ø' }]"
 
 [[test.results]]
-value = "[{ id: item:11, value: 'ø' }, { id: item:8, value: 'ñ' }, { id: item:6, value: 'ê' }, { id: item:5, value: 'é' }, { id: item:4, value: 'è' }, { id: item:2, value: 'café' }, { id: item:1, value: 'cafe' }, { id: item:7, value: 'ç' }, { id: item:10, value: 'æ' }, { id: item:9, value: 'å' }, { id: item:3, value: 'à' }]"
+value = "[{ value: 'ø' }, { value: 'ñ' }, { value: 'ê' }, { value: 'é' }, { value: 'è' }, { value: 'café' }, { value: 'cafe' }, { value: 'ç' }, { value: 'æ' }, { value: 'å' }, { value: 'à' }]"
 
 */
 
@@ -36,13 +36,13 @@ value = "[{ id: item:11, value: 'ø' }, { id: item:8, value: 'ñ' }, { id: item:
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

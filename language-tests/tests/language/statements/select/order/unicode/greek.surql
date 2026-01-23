@@ -6,16 +6,17 @@ reason = "Test ORDER BY with Greek alphabet characters"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'Α' }, { id: item:2, value: 'Β' }, { id: item:3, value: 'Γ' }, { id: item:4, value: 'Δ' }, { id: item:5, value: 'Ε' }, { id: item:6, value: 'α' }, { id: item:7, value: 'β' }, { id: item:8, value: 'γ' }, { id: item:9, value: 'δ' }, { id: item:10, value: 'ε' }]"
+value = "[{ value: 'Α' }, { value: 'Β' }, { value: 'Γ' }, { value: 'Δ' }, { value: 'Ε' }, { value: 'α' }, { value: 'β' }, { value: 'γ' }, { value: 'δ' }, { value: 'ε' }]"
 
 [[test.results]]
-value = "[{ id: item:10, value: 'ε' }, { id: item:9, value: 'δ' }, { id: item:8, value: 'γ' }, { id: item:7, value: 'β' }, { id: item:6, value: 'α' }, { id: item:5, value: 'Ε' }, { id: item:4, value: 'Δ' }, { id: item:3, value: 'Γ' }, { id: item:2, value: 'Β' }, { id: item:1, value: 'Α' }]"
+value = "[{ value: 'ε' }, { value: 'δ' }, { value: 'γ' }, { value: 'β' }, { value: 'α' }, { value: 'Ε' }, { value: 'Δ' }, { value: 'Γ' }, { value: 'Β' }, { value: 'Α' }]"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'Α' }, { id: item:6, value: 'α' }, { id: item:2, value: 'Β' }, { id: item:7, value: 'β' }, { id: item:4, value: 'Δ' }, { id: item:9, value: 'δ' }, { id: item:5, value: 'Ε' }, { id: item:10, value: 'ε' }, { id: item:3, value: 'Γ' }, { id: item:8, value: 'γ' }]"
+value = "[{ value: 'Α' }, { value: 'α' }, { value: 'Β' }, { value: 'β' }, { value: 'Δ' }, { value: 'δ' }, { value: 'Ε' }, { value: 'ε' }, { value: 'Γ' }, { value: 'γ' }]"
 
 [[test.results]]
-value = "[{ id: item:8, value: 'γ' }, { id: item:3, value: 'Γ' }, { id: item:10, value: 'ε' }, { id: item:5, value: 'Ε' }, { id: item:9, value: 'δ' }, { id: item:4, value: 'Δ' }, { id: item:7, value: 'β' }, { id: item:2, value: 'Β' }, { id: item:6, value: 'α' }, { id: item:1, value: 'Α' }]"
+value = "[{ value: 'γ' }, { value: 'Γ' }, { value: 'ε' }, { value: 'Ε' }, { value: 'δ' }, { value: 'Δ' }, { value: 'β' }, { value: 'Β' }, { value: 'α' }, { value: 'Α' }]"
+
 */
 
 -- Setup: Create records with Greek alphabet characters
@@ -34,13 +35,13 @@ value = "[{ id: item:8, value: 'γ' }, { id: item:3, value: 'Γ' }, { id: item:1
 };
 
 -- Test without COLLATE ASC: case-sensitive (uppercase < lowercase)
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: case-insensitive lexical ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

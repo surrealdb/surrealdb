@@ -6,16 +6,16 @@ reason = "Test ORDER BY with Japanese characters (hiragana, katakana, kanji)"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'あ' }, { id: item:2, value: 'い' }, { id: item:3, value: 'う' }, { id: item:4, value: 'え' }, { id: item:5, value: 'お' }, { id: item:6, value: 'ア' }, { id: item:7, value: 'イ' }, { id: item:8, value: 'ウ' }, { id: item:9, value: '日' }, { id: item:10, value: '本' }, { id: item:11, value: '語' }]"
+value = "[{ value: 'あ' }, { value: 'い' }, { value: 'う' }, { value: 'え' }, { value: 'お' }, { value: 'ア' }, { value: 'イ' }, { value: 'ウ' }, { value: '日' }, { value: '本' }, { value: '語' }]"
 
 [[test.results]]
-value = "[{ id: item:11, value: '語' }, { id: item:10, value: '本' }, { id: item:9, value: '日' }, { id: item:8, value: 'ウ' }, { id: item:7, value: 'イ' }, { id: item:6, value: 'ア' }, { id: item:5, value: 'お' }, { id: item:4, value: 'え' }, { id: item:3, value: 'う' }, { id: item:2, value: 'い' }, { id: item:1, value: 'あ' }]"
+value = "[{ value: '語' }, { value: '本' }, { value: '日' }, { value: 'ウ' }, { value: 'イ' }, { value: 'ア' }, { value: 'お' }, { value: 'え' }, { value: 'う' }, { value: 'い' }, { value: 'あ' }]"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'あ' }, { id: item:6, value: 'ア' }, { id: item:10, value: '本' }, { id: item:4, value: 'え' }, { id: item:2, value: 'い' }, { id: item:7, value: 'イ' }, { id: item:5, value: 'お' }, { id: item:9, value: '日' }, { id: item:3, value: 'う' }, { id: item:8, value: 'ウ' }, { id: item:11, value: '語' }]"
+value = "[{ value: 'あ' }, { value: 'ア' }, { value: '本' }, { value: 'え' }, { value: 'い' }, { value: 'イ' }, { value: 'お' }, { value: '日' }, { value: 'う' }, { value: 'ウ' }, { value: '語' }]"
 
 [[test.results]]
-value = "[{ id: item:11, value: '語' }, { id: item:8, value: 'ウ' }, { id: item:3, value: 'う' }, { id: item:9, value: '日' }, { id: item:5, value: 'お' }, { id: item:7, value: 'イ' }, { id: item:2, value: 'い' }, { id: item:4, value: 'え' }, { id: item:10, value: '本' }, { id: item:6, value: 'ア' }, { id: item:1, value: 'あ' }]"
+value = "[{ value: '語' }, { value: 'ウ' }, { value: 'う' }, { value: '日' }, { value: 'お' }, { value: 'イ' }, { value: 'い' }, { value: 'え' }, { value: '本' }, { value: 'ア' }, { value: 'あ' }]"
 
 */
 
@@ -36,13 +36,13 @@ value = "[{ id: item:11, value: '語' }, { id: item:8, value: 'ウ' }, { id: ite
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

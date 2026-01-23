@@ -6,16 +6,17 @@ reason = "Test ORDER BY with Chinese CJK ideographs"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:1, value: '世' }, { id: item:5, value: '中' }, { id: item:2, value: '你' }, { id: item:6, value: '国' }, { id: item:3, value: '好' }, { id: item:7, value: '文' }, { id: item:8, value: '汉' }, { id: item:4, value: '界' }]"
+value = "[{ value: '世' }, { value: '中' }, { value: '你' }, { value: '国' }, { value: '好' }, { value: '文' }, { value: '汉' }, { value: '界' }]"
 
 [[test.results]]
-value = "[{ id: item:4, value: '界' }, { id: item:8, value: '汉' }, { id: item:7, value: '文' }, { id: item:3, value: '好' }, { id: item:6, value: '国' }, { id: item:2, value: '你' }, { id: item:5, value: '中' }, { id: item:1, value: '世' }]"
+value = "[{ value: '界' }, { value: '汉' }, { value: '文' }, { value: '好' }, { value: '国' }, { value: '你' }, { value: '中' }, { value: '世' }]"
 
 [[test.results]]
-value = "[{ id: item:6, value: '国' }, { id: item:3, value: '好' }, { id: item:4, value: '界' }, { id: item:2, value: '你' }, { id: item:1, value: '世' }, { id: item:7, value: '文' }, { id: item:8, value: '汉' }, { id: item:5, value: '中' }]"
+value = "[{ value: '国' }, { value: '好' }, { value: '界' }, { value: '你' }, { value: '世' }, { value: '文' }, { value: '汉' }, { value: '中' }]"
 
 [[test.results]]
-value = "[{ id: item:5, value: '中' }, { id: item:8, value: '汉' }, { id: item:7, value: '文' }, { id: item:1, value: '世' }, { id: item:2, value: '你' }, { id: item:4, value: '界' }, { id: item:3, value: '好' }, { id: item:6, value: '国' }]"
+value = "[{ value: '中' }, { value: '汉' }, { value: '文' }, { value: '世' }, { value: '你' }, { value: '界' }, { value: '好' }, { value: '国' }]"
+
 */
 
 -- Setup: Create records with Chinese CJK ideographs
@@ -32,13 +33,13 @@ value = "[{ id: item:5, value: '中' }, { id: item:8, value: '汉' }, { id: item
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

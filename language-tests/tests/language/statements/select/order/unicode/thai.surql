@@ -6,16 +6,16 @@ reason = "Test ORDER BY with Thai script characters"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:1, value: 'ก' }, { id: item:2, value: 'ข' }, { id: item:3, value: 'ค' }, { id: item:4, value: 'ง' }, { id: item:5, value: 'จ' }, { id: item:6, value: 'ฉ' }, { id: item:7, value: 'ช' }, { id: item:8, value: 'ซ' }, { id: item:9, value: 'ภาษาไทย' }]"
+value = "[{ value: 'ก' }, { value: 'ข' }, { value: 'ค' }, { value: 'ง' }, { value: 'จ' }, { value: 'ฉ' }, { value: 'ช' }, { value: 'ซ' }, { value: 'ภาษาไทย' }]"
 
 [[test.results]]
-value = "[{ id: item:9, value: 'ภาษาไทย' }, { id: item:8, value: 'ซ' }, { id: item:7, value: 'ช' }, { id: item:6, value: 'ฉ' }, { id: item:5, value: 'จ' }, { id: item:4, value: 'ง' }, { id: item:3, value: 'ค' }, { id: item:2, value: 'ข' }, { id: item:1, value: 'ก' }]"
+value = "[{ value: 'ภาษาไทย' }, { value: 'ซ' }, { value: 'ช' }, { value: 'ฉ' }, { value: 'จ' }, { value: 'ง' }, { value: 'ค' }, { value: 'ข' }, { value: 'ก' }]"
 
 [[test.results]]
-value = "[{ id: item:5, value: 'จ' }, { id: item:6, value: 'ฉ' }, { id: item:7, value: 'ช' }, { id: item:8, value: 'ซ' }, { id: item:1, value: 'ก' }, { id: item:2, value: 'ข' }, { id: item:3, value: 'ค' }, { id: item:4, value: 'ง' }, { id: item:9, value: 'ภาษาไทย' }]"
+value = "[{ value: 'จ' }, { value: 'ฉ' }, { value: 'ช' }, { value: 'ซ' }, { value: 'ก' }, { value: 'ข' }, { value: 'ค' }, { value: 'ง' }, { value: 'ภาษาไทย' }]"
 
 [[test.results]]
-value = "[{ id: item:9, value: 'ภาษาไทย' }, { id: item:4, value: 'ง' }, { id: item:3, value: 'ค' }, { id: item:2, value: 'ข' }, { id: item:1, value: 'ก' }, { id: item:8, value: 'ซ' }, { id: item:7, value: 'ช' }, { id: item:6, value: 'ฉ' }, { id: item:5, value: 'จ' }]"
+value = "[{ value: 'ภาษาไทย' }, { value: 'ง' }, { value: 'ค' }, { value: 'ข' }, { value: 'ก' }, { value: 'ซ' }, { value: 'ช' }, { value: 'ฉ' }, { value: 'จ' }]"
 
 */
 
@@ -34,13 +34,13 @@ value = "[{ id: item:9, value: 'ภาษาไทย' }, { id: item:4, value: '
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

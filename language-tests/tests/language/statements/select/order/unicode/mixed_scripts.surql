@@ -6,16 +6,16 @@ reason = "Test ORDER BY with mixed scripts in single strings"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:7, value: '123abc' }, { id: item:1, value: 'ABC' }, { id: item:2, value: 'abc123' }, { id: item:4, value: 'café日本' }, { id: item:3, value: 'hello世界' }, { id: item:5, value: 'Привет123' }, { id: item:8, value: 'مرحبا123' }, { id: item:6, value: '你好world' }]"
+value = "[{ value: '123abc' }, { value: 'ABC' }, { value: 'abc123' }, { value: 'café日本' }, { value: 'hello世界' }, { value: 'Привет123' }, { value: 'مرحبا123' }, { value: '你好world' }]"
 
 [[test.results]]
-value = "[{ id: item:6, value: '你好world' }, { id: item:8, value: 'مرحبا123' }, { id: item:5, value: 'Привет123' }, { id: item:3, value: 'hello世界' }, { id: item:4, value: 'café日本' }, { id: item:2, value: 'abc123' }, { id: item:1, value: 'ABC' }, { id: item:7, value: '123abc' }]"
+value = "[{ value: '你好world' }, { value: 'مرحبا123' }, { value: 'Привет123' }, { value: 'hello世界' }, { value: 'café日本' }, { value: 'abc123' }, { value: 'ABC' }, { value: '123abc' }]"
 
 [[test.results]]
-value = "[{ id: item:7, value: '123abc' }, { id: item:1, value: 'ABC' }, { id: item:2, value: 'abc123' }, { id: item:4, value: 'café日本' }, { id: item:3, value: 'hello世界' }, { id: item:8, value: 'مرحبا123' }, { id: item:6, value: '你好world' }, { id: item:5, value: 'Привет123' }]"
+value = "[{ value: '123abc' }, { value: 'ABC' }, { value: 'abc123' }, { value: 'café日本' }, { value: 'hello世界' }, { value: 'مرحبا123' }, { value: '你好world' }, { value: 'Привет123' }]"
 
 [[test.results]]
-value = "[{ id: item:5, value: 'Привет123' }, { id: item:6, value: '你好world' }, { id: item:8, value: 'مرحبا123' }, { id: item:3, value: 'hello世界' }, { id: item:4, value: 'café日本' }, { id: item:2, value: 'abc123' }, { id: item:1, value: 'ABC' }, { id: item:7, value: '123abc' }]"
+value = "[{ value: 'Привет123' }, { value: '你好world' }, { value: 'مرحبا123' }, { value: 'hello世界' }, { value: 'café日本' }, { value: 'abc123' }, { value: 'ABC' }, { value: '123abc' }]"
 
 */
 
@@ -33,13 +33,13 @@ value = "[{ id: item:5, value: 'Привет123' }, { id: item:6, value: '你好
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;

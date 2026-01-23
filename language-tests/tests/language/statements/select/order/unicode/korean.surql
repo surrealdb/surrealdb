@@ -6,16 +6,17 @@ reason = "Test ORDER BY with Korean Hangul syllables"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:8, value: 'ABC' }, { id: item:1, value: '가' }, { id: item:2, value: '나' }, { id: item:3, value: '다' }, { id: item:4, value: '라' }, { id: item:5, value: '마' }, { id: item:6, value: '바' }, { id: item:7, value: '사' }, { id: item:9, value: '한국어' }]"
+value = "[{ value: 'ABC' }, { value: '가' }, { value: '나' }, { value: '다' }, { value: '라' }, { value: '마' }, { value: '바' }, { value: '사' }, { value: '한국어' }]"
 
 [[test.results]]
-value = "[{ id: item:9, value: '한국어' }, { id: item:7, value: '사' }, { id: item:6, value: '바' }, { id: item:5, value: '마' }, { id: item:4, value: '라' }, { id: item:3, value: '다' }, { id: item:2, value: '나' }, { id: item:1, value: '가' }, { id: item:8, value: 'ABC' }]"
+value = "[{ value: '한국어' }, { value: '사' }, { value: '바' }, { value: '마' }, { value: '라' }, { value: '다' }, { value: '나' }, { value: '가' }, { value: 'ABC' }]"
 
 [[test.results]]
-value = "[{ id: item:8, value: 'ABC' }, { id: item:6, value: '바' }, { id: item:3, value: '다' }, { id: item:1, value: '가' }, { id: item:9, value: '한국어' }, { id: item:5, value: '마' }, { id: item:2, value: '나' }, { id: item:4, value: '라' }, { id: item:7, value: '사' }]"
+value = "[{ value: 'ABC' }, { value: '바' }, { value: '다' }, { value: '가' }, { value: '한국어' }, { value: '마' }, { value: '나' }, { value: '라' }, { value: '사' }]"
 
 [[test.results]]
-value = "[{ id: item:7, value: '사' }, { id: item:4, value: '라' }, { id: item:2, value: '나' }, { id: item:5, value: '마' }, { id: item:9, value: '한국어' }, { id: item:1, value: '가' }, { id: item:3, value: '다' }, { id: item:6, value: '바' }, { id: item:8, value: 'ABC' }]"
+value = "[{ value: '사' }, { value: '라' }, { value: '나' }, { value: '마' }, { value: '한국어' }, { value: '가' }, { value: '다' }, { value: '바' }, { value: 'ABC' }]"
+
 */
 
 -- Setup: Create records with Korean Hangul syllables mixed with ASCII
@@ -33,13 +34,13 @@ value = "[{ id: item:7, value: '사' }, { id: item:4, value: '라' }, { id: item
 };
 
 -- Test without COLLATE ASC: Unicode code point ordering
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: Unicode-aware ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;
