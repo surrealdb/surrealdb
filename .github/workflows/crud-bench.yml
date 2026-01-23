@@ -44,6 +44,21 @@ env:
 
 jobs:
   # ----------------------------------------
+  # Setup matrix dimensions
+  # ----------------------------------------
+  
+  setup-matrix:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      key_types: ${{ steps.set-matrix.outputs.key_types }}
+    steps:
+      - name: Set matrix dimensions
+        id: set-matrix
+        run: |
+          echo 'key_types=["integer","string26","string90","string250"]' >> $GITHUB_OUTPUT
+
+  # ----------------------------------------
   # Build SurrealDB binaries with minimal features
   # ----------------------------------------
 
@@ -180,16 +195,12 @@ jobs:
   benchmark-memory:
     name: CRUD Benchmark (memory-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-surrealdb-memory, build-crud-bench]
+    needs: [setup-matrix, build-surrealdb-memory, build-crud-bench]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
     
     steps:
       - name: Checkout sources
@@ -209,16 +220,12 @@ jobs:
   benchmark-rocksdb:
     name: CRUD Benchmark (rocksdb-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-surrealdb-rocksdb, build-crud-bench]
+    needs: [setup-matrix, build-surrealdb-rocksdb, build-crud-bench]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
     
     steps:
       - name: Checkout sources
@@ -238,7 +245,7 @@ jobs:
   benchmark-embedded:
     name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-crud-bench]
+    needs: [setup-matrix, build-crud-bench]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -248,11 +255,7 @@ jobs:
           - embedded-rocksdb
           - surrealkv-local
           - surrealmx
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
         
         include:
           - config: embedded-memory
