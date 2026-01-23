@@ -10,7 +10,6 @@ use crate::sql::visit::Visitor;
 use crate::sql::{Array, Base, Id, Number, Object, Value};
 use hashbrown::{Equivalent, HashMap};
 use std::hash;
-<<<<<<< HEAD
 
 /// The number of records we load per batch for checking the migration.
 const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
@@ -193,8 +192,6 @@ impl KeyConflictChecker {
 		}
 	}
 }
-=======
->>>>>>> b01f4345c (Fix warnings and tests)
 
 <<<<<<< HEAD
 fn with_path<R, F: FnOnce(&mut Vec<Value>) -> R>(
