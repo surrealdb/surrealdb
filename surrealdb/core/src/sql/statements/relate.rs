@@ -13,9 +13,11 @@ pub(crate) struct RelateStatement {
 	pub from: Expr,
 	/// The expression the relation targets.
 	pub to: Expr,
-	pub uniq: bool,
+	/// The data associated with the relation being created
 	pub data: Option<Data>,
+	/// What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub output: Option<Output>,
+	/// The timeout for the statement
 	pub timeout: Expr,
 }
 
@@ -86,9 +88,6 @@ impl ToSql for RelateStatement {
 			write_sql!(f, fmt, ")");
 		}
 
-		if self.uniq {
-			write_sql!(f, fmt, " UNIQUE");
-		}
 		if let Some(ref v) = self.data {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -108,7 +107,6 @@ impl From<RelateStatement> for crate::expr::statements::RelateStatement {
 			through: v.through.into(),
 			from: v.from.into(),
 			to: v.to.into(),
-			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
@@ -123,7 +121,6 @@ impl From<crate::expr::statements::RelateStatement> for RelateStatement {
 			through: v.through.into(),
 			from: v.from.into(),
 			to: v.to.into(),
-			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),

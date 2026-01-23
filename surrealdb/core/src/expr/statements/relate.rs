@@ -22,9 +22,11 @@ pub(crate) struct RelateStatement {
 	pub from: Expr,
 	/// The expression the relation targets.
 	pub to: Expr,
-	pub uniq: bool,
+	/// The data associated with the relation being created
 	pub data: Option<Data>,
+	/// What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub output: Option<Output>,
+	/// The timeout for the statement
 	pub timeout: Expr,
 }
 

@@ -141,7 +141,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Delete
 #[case::expr_delete(Expr::Delete(Box::new(DeleteStatement { only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), explain: None })), "DELETE user", "DELETE user")]
 // Expression: Relate
-#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), uniq: false, data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
+#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, through: Expr::Table("likes".to_string()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
 // Expression: Insert
 #[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".to_string())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".to_string(), value: Expr::Literal(Literal::String("test".to_string())) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), relation: false, version: Expr::Literal(Literal::None)})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
 // Expression: Define
