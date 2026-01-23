@@ -2100,7 +2100,7 @@ impl Visitor for MigratorPass<'_> {
 			}
 			_ => idiom.0.as_slice(),
 		};
-		for (idx,p) in parts.iter().enumerate() {
+		for (idx, p) in parts.iter().enumerate() {
 			let prev_field = last_field;
 			let loc = self.w.location();
 			if matches!(p, Part::Field(_)) {
