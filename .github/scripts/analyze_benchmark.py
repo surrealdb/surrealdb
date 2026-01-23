@@ -202,9 +202,20 @@ class BenchmarkAnalyzer:
 				      f"p50={self.format_latency(metrics[singular_key]['p50_ns'])}, "
 				      f"samples={metrics[singular_key]['samples']}", file=sys.stderr)
 
-		# Extract scan metrics
-		if 'scans' in data:
-			metrics['scans'] = data['scans']
+		# Extract additional operation metrics (scans, batch, index operations)
+		additional_ops = {}
+
+		# Common operation types in crud-bench
+		op_types = [
+			'scans', 'batch_create', 'batch_read', 'batch_update', 'batch_delete',
+			'build_index', 'remove_index'
+		]
+
+		for op_type in op_types:
+			if op_type in data:
+				additional_ops[op_type] = data[op_type]
+
+		metrics['additional_operations'] = additional_ops
 
 		return metrics
 
@@ -227,6 +238,31 @@ class BenchmarkAnalyzer:
 			return f"{latency_ns / 1_000:.2f}μs"
 		else:
 			return f"{latency_ns:.0f}ns"
+
+	def format_elapsed_time(self, elapsed: Dict) -> str:
+		"""Format elapsed time from crud-bench duration format."""
+		if not elapsed:
+			return "N/A"
+		
+		secs = elapsed.get('secs', 0)
+		nanos = elapsed.get('nanos', 0)
+		
+		total_ms = (secs * 1000) + (nanos / 1_000_000)
+		
+		if total_ms >= 1000:
+			seconds = total_ms / 1000
+			ms_remainder = total_ms % 1000
+			if ms_remainder > 0:
+				return f"{int(seconds)}s {int(ms_remainder)}ms"
+			return f"{int(seconds)}s"
+		elif total_ms >= 1:
+			us_remainder = (nanos % 1_000_000) / 1000
+			if us_remainder > 0:
+				return f"{int(total_ms)}ms {int(us_remainder)}µs"
+			return f"{int(total_ms)}ms"
+		else:
+			us = nanos / 1000
+			return f"{us:.0f}µs"
 
 	def generate_report(self) -> str:
 		"""Generate markdown report."""
@@ -342,6 +378,66 @@ class BenchmarkAnalyzer:
 							report.append(f"  - Memory: {op_data['memory_mb']:.1f} MB")
 		
 		report.append("\n</details>")
+
+		# Additional Operations (Scans, Batch, Index operations)
+		has_additional_ops = any(
+			metrics.get('additional_operations') 
+			for metrics in self.current_results.values()
+		)
+		
+		if has_additional_ops:
+			report.append("\n<details>")
+			report.append("<summary>⚡ Additional Operations (Scans, Batch, Index)</summary>\n")
+			
+			for config, key_type_data in sorted(config_groups.items()):
+				# Get display name
+				first_key_data = next(iter(key_type_data.values()))
+				config_display = first_key_data.get('display_name', config.replace('-', ' ').title())
+				report.append(f"\n#### {config_display}\n")
+				
+				for key_type in ['integer', 'string26', 'string90', 'string250']:
+					if key_type not in key_type_data:
+						continue
+					
+					metrics = key_type_data[key_type]
+					additional_ops = metrics.get('additional_operations', {})
+					
+					if not additional_ops:
+						continue
+					
+					report.append(f"\n**{key_type}**\n")
+					
+					# Group operations by category for better readability
+					categories = {
+						'Scan Operations': [],
+						'Index Operations': [],
+						'Batch Operations': []
+					}
+					
+					# Collect all operations with their elapsed times
+					for op_type, op_data in additional_ops.items():
+						if isinstance(op_data, dict):
+							for op_name, op_details in op_data.items():
+								if isinstance(op_details, dict) and 'elapsed' in op_details:
+									elapsed_str = self.format_elapsed_time(op_details['elapsed'])
+									
+									# Categorize operations
+									if 'scan' in op_name.lower() or op_type == 'scans':
+										categories['Scan Operations'].append((op_name, elapsed_str))
+									elif 'index' in op_name.lower() or op_type in ['build_index', 'remove_index']:
+										categories['Index Operations'].append((op_name, elapsed_str))
+									elif 'batch' in op_name.lower() or 'batch' in op_type:
+										categories['Batch Operations'].append((op_name, elapsed_str))
+					
+					# Display operations by category
+					for category, ops in categories.items():
+						if ops:
+							report.append(f"\n*{category}:*")
+							for op_name, elapsed in sorted(ops):
+								# Keep operation names as-is from crud-bench
+								report.append(f"- `{op_name}`: {elapsed}")
+			
+			report.append("\n</details>")
 
 		# Methodology
 		report.append("\n<details>")
