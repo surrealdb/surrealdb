@@ -4,7 +4,7 @@ This document explains the automated CRUD performance benchmark workflow that ru
 
 ## Overview
 
-The benchmark workflow (`crud-bench.yml`) automatically runs CRUD benchmarks using [crud-bench](https://github.com/surrealdb/crud-bench) to measure SurrealDB performance. It posts the results as PR comments for review.
+The benchmark workflow (`crud-bench.yml`) automatically runs CRUD benchmarks using [crud-bench](https://github.com/surrealdb/crud-bench) to measure SurrealDB performance. It posts the results as a PR comment for review.
 
 ## Workflow Triggers
 
@@ -13,23 +13,6 @@ The benchmark workflow runs automatically on:
 - **Pull Requests:** When a PR is opened, synchronized (new commits), or reopened
 - **Manual Dispatch:** Can be manually triggered via GitHub Actions UI for testing
   - Allows specifying a custom crud-bench revision for testing upgrades
-
-## Matrix Strategy
-
-The workflow uses a **Cartesian product matrix** to maximize parallelization:
-
-- **6 configurations** × **4 key types** = **24 independent jobs**
-- Each job runs one benchmark with a clean database state
-- Jobs run in parallel (subject to available runners)
-- Failed jobs don't block other combinations
-
-**Benefits:**
-- ✅ Faster completion time (~5-7 minutes total vs ~13 minutes sequential per job)
-- ✅ Better fault isolation (one failure doesn't stop others)
-- ✅ Individual retry capability per config/key-type
-- ✅ Clearer progress tracking (24 jobs vs 7)
-- ✅ Guaranteed clean state for each benchmark
-- ✅ Shared binary builds reduce redundant compilation
 
 ## crud-bench Version Management
 
@@ -167,7 +150,6 @@ For each configuration, the benchmark measures:
 - **Read:** Select operations by primary key
 - **Update:** Modify existing records
 - **Delete:** Remove records
-- **Scans:** Table scans and range queries (if configured)
 
 ## Metrics Collected
 
@@ -202,21 +184,6 @@ After benchmarks complete, the workflow posts a comment on the PR with:
 - **Detailed Metrics:** Expandable section with full metrics including average latency and total time
 - **Methodology:** How the benchmarks were run
 
-### Example Report
-
-```markdown
-## 🔍 CRUD Benchmark Results
-
-### Summary
-
-| Configuration | Operation | Throughput | P50 Latency | P95 Latency | P99 Latency | Samples |
-|--------------|-----------|------------|-------------|-------------|-------------|---------|
-| memory | Create | 125k ops/s | 8.2μs | 12.5μs | 18.3μs | 10000 |
-| memory | Read | 185k ops/s | 5.4μs | 8.1μs | 11.2μs | 10000 |
-| rocksdb | Create | 38k ops/s | 26.3μs | 45.2μs | 68.5μs | 10000 |
-| rocksdb | Read | 52k ops/s | 19.1μs | 32.8μs | 48.9μs | 10000 |
-```
-
 ## Result Artifacts
 
 Benchmark results are stored as GitHub Actions artifacts:
@@ -234,27 +201,6 @@ These can be downloaded from the workflow run for further analysis or comparison
 2. Select **Performance Benchmarks** workflow
 3. Click **Run workflow**
 4. Select branch and click **Run workflow**
-
-### Run Locally
-
-To run benchmarks locally for testing:
-
-```bash
-# Clone crud-bench
-git clone https://github.com/surrealdb/crud-bench.git
-cd crud-bench
-
-# Build crud-bench
-cargo build --release
-
-# Run benchmark against embedded SurrealDB with integer keys
-./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -k integer -r
-
-# Run benchmark with string26 keys
-./target/release/crud-bench -d surrealdb -e memory -s 10000 -c 12 -t 48 -k string26 -r
-
-# Results will be in result*.json files
-```
 
 ## Interpreting Results
 
@@ -425,12 +371,6 @@ The workflow ensures all benchmarks test your PR's code through **shared build j
 2. Run crud-bench with embedded storage (no server needed)
 3. Benchmarks execute entirely within the SDK from your PR
 
-**Key Benefits:**
-- ✅ All benchmarks test the same PR code
-- ✅ Binaries built once, used 24 times (efficient)
-- ✅ Minimal features = faster builds
-- ✅ Consistent test environment across all jobs
-
 ### Analysis Script
 
 The Python script (`.github/scripts/analyze_benchmark.py`) handles:
@@ -439,32 +379,3 @@ The Python script (`.github/scripts/analyze_benchmark.py`) handles:
 - Formatting metrics for display
 - Markdown report generation
 - JSON output for debugging
-
-## Future Enhancements
-
-Potential improvements to consider:
-
-- **Historical Data Storage:** Store results in a database for trend analysis and regression detection
-- **Trend Visualization:** Graphs showing performance over time
-- **Flamegraphs:** CPU profiling for performance analysis
-- **Memory Profiling:** Track memory usage alongside performance
-- **Custom Benchmarks:** Allow PRs to specify custom benchmark configs
-- **Benchmark Dashboard:** GitHub Pages site with historical trends
-- **Comparison Mode:** Compare PR against specific commits or branches
-- **Automated Regression Detection:** Statistical analysis to flag performance regressions
-
-## References
-
-- [crud-bench Repository](https://github.com/surrealdb/crud-bench)
-- [crud-bench Documentation](https://github.com/surrealdb/crud-bench#readme)
-- [SurrealDB Documentation](https://surrealdb.com/docs)
-
-## Questions?
-
-For questions or issues with the benchmark workflow:
-
-1. Check this documentation
-2. Review workflow logs in GitHub Actions
-3. Open an issue with `benchmark` label
-4. Ask in the SurrealDB Discord #performance channel
-
