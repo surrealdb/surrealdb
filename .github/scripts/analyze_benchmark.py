@@ -203,24 +203,38 @@ class BenchmarkAnalyzer:
 				      f"samples={metrics[singular_key]['samples']}", file=sys.stderr)
 
 		# Extract additional operation metrics (scans, batch, index operations)
-		# Look for any top-level keys that aren't the main CRUD operations or metadata
 		additional_ops = {}
-		known_keys = {'creates', 'reads', 'updates', 'deletes', 'metadata'}
 		
-		for key, value in data.items():
-			if key not in known_keys and isinstance(value, dict):
-				# This might be an additional operations group
-				# Check if it contains operation entries with elapsed times
-				has_operations = False
-				for op_name, op_data in value.items():
-					if isinstance(op_data, dict) and 'elapsed' in op_data:
-						has_operations = True
-						break
+		# Parse scans array - each scan has timing data for different execution modes
+		if 'scans' in data and isinstance(data['scans'], list):
+			print(f"  Found {len(data['scans'])} scan operations", file=sys.stderr)
+			
+			for scan in data['scans']:
+				if not isinstance(scan, dict):
+					continue
 				
-				if has_operations:
-					additional_ops[key] = value
-					print(f"  Found additional operations group: {key} with {len(value)} operations", file=sys.stderr)
-
+				scan_name = scan.get('name', 'unknown')
+				
+				# Each scan can have multiple timing modes
+				timing_modes = {
+					'without_index': scan.get('without_index'),
+					'index_build': scan.get('index_build'),
+					'with_index': scan.get('with_index'),
+					'index_remove': scan.get('index_remove')
+				}
+				
+				# Store each timing mode as a separate operation
+				for mode, timing_data in timing_modes.items():
+					if timing_data is not None and isinstance(timing_data, dict) and 'elapsed' in timing_data:
+						# Create operation key in format: "scan_name::mode"
+						op_key = f"{scan_name}::{mode}"
+						if 'Scans' not in additional_ops:
+							additional_ops['Scans'] = {}
+						additional_ops['Scans'][op_key] = timing_data
+						print(f"    - {op_key}: {self.format_elapsed_time(timing_data['elapsed'])}", file=sys.stderr)
+		
+		# Note: batches array only contains metadata tuples without timing data, so we skip it
+		
 		metrics['additional_operations'] = additional_ops
 
 		return metrics
