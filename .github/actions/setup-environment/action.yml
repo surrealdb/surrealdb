@@ -30,10 +30,58 @@ inputs:
     description: 'Additional cache directories'
     required: false
     default: ''
+  free-disk-space:
+    description: 'Whether to free disk space by removing pre-installed software'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
   steps:
+    - name: Free disk space
+      if: inputs.free-disk-space == 'true'
+      shell: bash
+      run: |
+        echo "Disk space before cleanup:"
+        df -h /
+
+        echo "Removing unnecessary software..."
+
+        # Large language runtimes and toolchains
+        sudo rm -rf /usr/share/swift || true
+        sudo rm -rf /usr/lib/jvm || true
+        sudo rm -rf /opt/maven || true
+        sudo rm -rf /usr/share/gradle* || true
+        sudo rm -rf /usr/local/lib/android || true
+        sudo rm -rf /opt/ghc || true
+        sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+        sudo rm -rf /usr/local/share/powershell || true
+        sudo rm -rf /usr/local/share/vcpkg || true
+        sudo rm -rf /usr/share/miniconda || true
+        sudo rm -rf /usr/share/mono || true
+        sudo rm -rf /var/lib/snapd || true
+
+        # Browsers and drivers
+        sudo rm -rf /usr/local/share/chromium || true
+        sudo rm -rf /usr/local/share/gecko_driver || true
+        sudo rm -rf /opt/microsoft/msedge || true
+
+        # Docs and manuals
+        sudo rm -rf /usr/share/doc || true
+        sudo rm -rf /usr/share/man || true
+
+        # Cloud tools
+        sudo rm -rf /usr/share/az_* || true
+
+        # Clean Docker
+        sudo docker image prune --all --force || true
+
+        # Clean apt cache
+        sudo apt-get clean || true
+
+        echo "Disk space after cleanup:"
+        df -h /
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
       with:

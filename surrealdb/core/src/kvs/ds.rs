@@ -1006,7 +1006,7 @@ impl Datastore {
 		trace!(target: TARGET, "Running datastore shutdown operations");
 		// Delete this datastore from the cluster
 		self.delete_node().await?;
-		// Run any storag engine shutdown tasks
+		// Run any storage engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
 	}
 
