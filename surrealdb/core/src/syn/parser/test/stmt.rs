@@ -1611,7 +1611,8 @@ fn parse_define_table() {
 #[test]
 fn parse_define_event() {
 	let res = syn::parse_with(
-		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none"#.as_bytes(),
+		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none ASYNC RETRY 5 MAXDEPTH 64"#
+			.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -1625,6 +1626,9 @@ fn parse_define_event() {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			asynchronous: true,
+			retry: Some(5),
+			max_depth: Some(64)
 		})))
 	)
 }

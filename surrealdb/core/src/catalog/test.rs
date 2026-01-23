@@ -162,6 +162,9 @@ use crate::val::{Datetime, TableName, Value};
 	then: vec![Expr::Literal(Literal::String("then".to_string()))],
 	comment: Some("comment".to_string()),
 	auth_limit: AuthLimit::default(),
+    asynchronous: true,
+	retry: Some(5),
+    max_depth: Some(64),
 }, 39)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),

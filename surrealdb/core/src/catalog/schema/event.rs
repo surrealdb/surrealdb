@@ -67,7 +67,7 @@ impl InfoStructure for EventDefinition {
 			"when".to_string() => self.when.structure(),
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"async".to_string(), if self.asynchronous =>  { Value::Bool(true) },
+			"async".to_string(), if self.asynchronous => Value::Bool(true),
 			"retry".to_string(), if let Some(v) = self.retry => Value::Number(v.into()),
 			"maxdepth".to_string(), if let Some(v) = self.max_depth => Value::Number(v.into()),
 		})

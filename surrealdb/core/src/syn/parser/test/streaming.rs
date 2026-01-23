@@ -294,6 +294,9 @@ fn statements() -> Vec<TopLevelExpr> {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			asynchronous: true,
+			retry: Some(5),
+			max_depth: Some(64),
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,

@@ -869,11 +869,17 @@ impl Parser<'_> {
 					res.asynchronous = true;
 				}
 				t!("RETRY") => {
-					self.pop_peek();
+					let token = self.pop_peek();
+					if !res.asynchronous {
+						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
+					}
 					res.retry = Some(self.next_token_value()?);
 				}
 				t!("MAXDEPTH") => {
-					self.pop_peek();
+					let token = self.pop_peek();
+					if !res.asynchronous {
+						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
+					}
 					res.max_depth = Some(self.next_token_value()?);
 				}
 				_ => break,
