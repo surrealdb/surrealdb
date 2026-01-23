@@ -226,14 +226,31 @@ class BenchmarkAnalyzer:
 				# Store each timing mode as a separate operation
 				for mode, timing_data in timing_modes.items():
 					if timing_data is not None and isinstance(timing_data, dict) and 'elapsed' in timing_data:
-						# Create operation key in format: "scan_name::mode"
-						op_key = f"{scan_name}::{mode}"
-						if 'Scans' not in additional_ops:
-							additional_ops['Scans'] = {}
-						additional_ops['Scans'][op_key] = timing_data
+						# Create operation key like "Scan::count_all::without_index"
+						op_key = f"Scan::{scan_name}::{mode}"
+						additional_ops[op_key] = timing_data
 						print(f"    - {op_key}: {self.format_elapsed_time(timing_data['elapsed'])}", file=sys.stderr)
 		
-		# Note: batches array only contains metadata tuples without timing data, so we skip it
+		# Parse batches array - each batch is a tuple: [name, samples, batch_size, timing_data]
+		if 'batches' in data and isinstance(data['batches'], list):
+			print(f"  Found {len(data['batches'])} batch operations", file=sys.stderr)
+			for batch in data['batches']:
+				if isinstance(batch, list) and len(batch) >= 4:
+					batch_name = batch[0]  # e.g., "batch_create_100"
+					timing_data = batch[3]  # The timing data object
+					
+					if isinstance(timing_data, dict) and 'elapsed' in timing_data:
+						# Create operation key like "BatchCreate::batch_create_100"
+						# Convert "batch_create_100" to "BatchCreate::batch_create_100"
+						parts = batch_name.split('_', 2)  # Split into ['batch', 'create', '100']
+						if len(parts) >= 3 and parts[0] == 'batch':
+							operation_type = parts[1].capitalize()  # 'create' -> 'Create'
+							op_key = f"Batch{operation_type}::{batch_name}"
+							additional_ops[op_key] = timing_data
+							print(f"    - {op_key}: {self.format_elapsed_time(timing_data['elapsed'])}", file=sys.stderr)
+		
+		if additional_ops:
+			print(f"  Total additional operations: {len(additional_ops)}", file=sys.stderr)
 		
 		metrics['additional_operations'] = additional_ops
 
@@ -404,11 +421,9 @@ class BenchmarkAnalyzer:
 		total_ops_found = 0
 		for metrics in self.current_results.values():
 			additional_ops = metrics.get('additional_operations', {})
-			for op_type, op_data in additional_ops.items():
-				if isinstance(op_data, dict):
-					for op_name, op_details in op_data.items():
-						if isinstance(op_details, dict) and 'elapsed' in op_details:
-							total_ops_found += 1
+			for op_key, op_details in additional_ops.items():
+				if isinstance(op_details, dict) and 'elapsed' in op_details:
+					total_ops_found += 1
 		
 		if total_ops_found > 0:
 			print(f"Found {total_ops_found} additional operations to display", file=sys.stderr)
@@ -440,24 +455,19 @@ class BenchmarkAnalyzer:
 					}
 					
 					# Collect all operations with their elapsed times
-					for op_type, op_data in additional_ops.items():
-						if isinstance(op_data, dict):
-							for op_name, op_details in op_data.items():
-								if isinstance(op_details, dict) and 'elapsed' in op_details:
-									elapsed_str = self.format_elapsed_time(op_details['elapsed'])
-									
-									# Categorize operations based on name patterns
-									op_lower = op_name.lower()
-									type_lower = op_type.lower()
-									
-									if 'scan' in op_lower or 'scan' in type_lower:
-										categories['Scan Operations'].append((op_name, elapsed_str))
-									elif 'index' in op_lower or 'index' in type_lower:
-										categories['Index Operations'].append((op_name, elapsed_str))
-									elif 'batch' in op_lower or 'batch' in type_lower:
-										categories['Batch Operations'].append((op_name, elapsed_str))
-									else:
-										categories['Other Operations'].append((op_name, elapsed_str))
+					for op_key, op_details in additional_ops.items():
+						if isinstance(op_details, dict) and 'elapsed' in op_details:
+							elapsed_str = self.format_elapsed_time(op_details['elapsed'])
+							
+							# Categorize operations based on key prefix
+							if op_key.startswith('Scan::'):
+								categories['Scan Operations'].append((op_key, elapsed_str))
+							elif op_key.startswith('BuildIndex::') or op_key.startswith('RemoveIndex::'):
+								categories['Index Operations'].append((op_key, elapsed_str))
+							elif op_key.startswith('Batch'):
+								categories['Batch Operations'].append((op_key, elapsed_str))
+							else:
+								categories['Other Operations'].append((op_key, elapsed_str))
 					
 					# Check if this key_type has any operations
 					has_ops = any(len(ops) > 0 for ops in categories.values())
