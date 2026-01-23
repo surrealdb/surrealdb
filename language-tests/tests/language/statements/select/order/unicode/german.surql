@@ -6,16 +6,16 @@ reason = "Test ORDER BY with German characters (umlauts and sharp s)"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: item:3, value: 'Bar' }, { id: item:1, value: 'Bär' }, { id: item:4, value: 'Für' }, { id: item:2, value: 'bär' }, { id: item:5, value: 'für' }, { id: item:6, value: 'Über' }, { id: item:8, value: 'ß' }, { id: item:7, value: 'über' }]"
+value = "[{ value: 'Bar' }, { value: 'Bär' }, { value: 'Für' }, { value: 'bär' }, { value: 'für' }, { value: 'ss' }, { value: 'Über' }, { value: 'ß' }, { value: 'über' }]"
 
 [[test.results]]
-value = "[{ id: item:7, value: 'über' }, { id: item:8, value: 'ß' }, { id: item:6, value: 'Über' }, { id: item:5, value: 'für' }, { id: item:2, value: 'bär' }, { id: item:4, value: 'Für' }, { id: item:1, value: 'Bär' }, { id: item:3, value: 'Bar' }]"
+value = "[{ value: 'über' }, { value: 'ß' }, { value: 'Über' }, { value: 'ss' }, { value: 'für' }, { value: 'bär' }, { value: 'Für' }, { value: 'Bär' }, { value: 'Bar' }]"
 
 [[test.results]]
-value = "[{ id: item:3, value: 'Bar' }, { id: item:1, value: 'Bär' }, { id: item:2, value: 'bär' }, { id: item:4, value: 'Für' }, { id: item:5, value: 'für' }, { id: item:8, value: 'ß' }, { id: item:6, value: 'Über' }, { id: item:7, value: 'über' }]"
+value = "[{ value: 'Bar' }, { value: 'Bär' }, { value: 'bär' }, { value: 'Für' }, { value: 'für' }, { value: 'ss' }, { value: 'ß' }, { value: 'Über' }, { value: 'über' }]"
 
 [[test.results]]
-value = "[{ id: item:7, value: 'über' }, { id: item:6, value: 'Über' }, { id: item:8, value: 'ß' }, { id: item:5, value: 'für' }, { id: item:4, value: 'Für' }, { id: item:2, value: 'bär' }, { id: item:1, value: 'Bär' }, { id: item:3, value: 'Bar' }]"
+value = "[{ value: 'über' }, { value: 'Über' }, { value: 'ß' }, { value: 'ss' }, { value: 'für' }, { value: 'Für' }, { value: 'bär' }, { value: 'Bär' }, { value: 'Bar' }]"
 
 */
 
@@ -26,20 +26,21 @@ value = "[{ id: item:7, value: 'über' }, { id: item:6, value: 'Über' }, { id: 
 	CREATE item:3 SET value = "Bar";
 	CREATE item:4 SET value = "Für";
 	CREATE item:5 SET value = "für";
-	CREATE item:6 SET value = "Über";
-	CREATE item:7 SET value = "über";
-	CREATE item:8 SET value = "ß";
+	CREATE item:6 SET value = "ss";
+	CREATE item:7 SET value = "Über";
+	CREATE item:8 SET value = "über";
+	CREATE item:9 SET value = "ß";
 	RETURN "OK";
 };
 
 -- Test without COLLATE ASC: case-sensitive (uppercase < lowercase)
-SELECT * FROM item ORDER BY value ASC;
+SELECT `value` FROM item ORDER BY value ASC;
 
 -- Test without COLLATE DESC
-SELECT * FROM item ORDER BY value DESC;
+SELECT `value` FROM item ORDER BY value DESC;
 
 -- Test with COLLATE ASC: case-insensitive lexical ordering
-SELECT * FROM item ORDER BY value COLLATE ASC;
+SELECT `value` FROM item ORDER BY value COLLATE ASC;
 
 -- Test with COLLATE DESC
-SELECT * FROM item ORDER BY value COLLATE DESC;
+SELECT `value` FROM item ORDER BY value COLLATE DESC;
