@@ -10,7 +10,7 @@ value = "[{ details: '', error: 'Found usage of an `.id` idiom, this field had s
 */
 {
 	DEFINE FUNCTION fn::foo() {
-		$param.id;
+		$param.id.foo;
 	};
 	NONE;
 };

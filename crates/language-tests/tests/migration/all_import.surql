@@ -29,7 +29,7 @@ DEFINE FUNCTION fn::f3() {
 	$param.name[1];
 };
 DEFINE FUNCTION fn::f4() {
-	$param.id;
+	$param.id.b;
 };
 DEFINE FUNCTION fn::f5() {
 	CREATE foo SET a = <future> { time::now() };

@@ -2076,7 +2076,7 @@ impl Visitor for MigratorPass<'_> {
 				last_field = Some(loc);
 				write!(self.w, "{}", value)?;
 
-				if value.as_str() == "id" {
+				if value.as_str() == "id" && idiom.0.len() > 1 {
 					let after = self.w.location();
 					self.issues.push(MigrationIssue {
 						severity: Severity::CanBreak,
@@ -2100,7 +2100,7 @@ impl Visitor for MigratorPass<'_> {
 			}
 			_ => idiom.0.as_slice(),
 		};
-		for p in parts.iter() {
+		for (idx,p) in parts.iter().enumerate() {
 			let prev_field = last_field;
 			let loc = self.w.location();
 			if matches!(p, Part::Field(_)) {
@@ -2112,7 +2112,7 @@ impl Visitor for MigratorPass<'_> {
 			self.visit_part(p)?;
 
 			if let Part::Field(x) = p {
-				if x.as_str() == "id" {
+				if x.as_str() == "id" && parts.len() > idx + 1 {
 					let after = self.w.location();
 					self.issues.push(MigrationIssue {
 					severity: Severity::CanBreak,
