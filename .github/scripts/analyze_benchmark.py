@@ -203,17 +203,23 @@ class BenchmarkAnalyzer:
 				      f"samples={metrics[singular_key]['samples']}", file=sys.stderr)
 
 		# Extract additional operation metrics (scans, batch, index operations)
+		# Look for any top-level keys that aren't the main CRUD operations or metadata
 		additional_ops = {}
-
-		# Common operation types in crud-bench
-		op_types = [
-			'scans', 'batch_create', 'batch_read', 'batch_update', 'batch_delete',
-			'build_index', 'remove_index'
-		]
-
-		for op_type in op_types:
-			if op_type in data:
-				additional_ops[op_type] = data[op_type]
+		known_keys = {'creates', 'reads', 'updates', 'deletes', 'metadata'}
+		
+		for key, value in data.items():
+			if key not in known_keys and isinstance(value, dict):
+				# This might be an additional operations group
+				# Check if it contains operation entries with elapsed times
+				has_operations = False
+				for op_name, op_data in value.items():
+					if isinstance(op_data, dict) and 'elapsed' in op_data:
+						has_operations = True
+						break
+				
+				if has_operations:
+					additional_ops[key] = value
+					print(f"  Found additional operations group: {key} with {len(value)} operations", file=sys.stderr)
 
 		metrics['additional_operations'] = additional_ops
 
@@ -380,12 +386,18 @@ class BenchmarkAnalyzer:
 		report.append("\n</details>")
 
 		# Additional Operations (Scans, Batch, Index operations)
-		has_additional_ops = any(
-			metrics.get('additional_operations') 
-			for metrics in self.current_results.values()
-		)
+		# First check if there are actually any operations to display
+		total_ops_found = 0
+		for metrics in self.current_results.values():
+			additional_ops = metrics.get('additional_operations', {})
+			for op_type, op_data in additional_ops.items():
+				if isinstance(op_data, dict):
+					for op_name, op_details in op_data.items():
+						if isinstance(op_details, dict) and 'elapsed' in op_details:
+							total_ops_found += 1
 		
-		if has_additional_ops:
+		if total_ops_found > 0:
+			print(f"Found {total_ops_found} additional operations to display", file=sys.stderr)
 			report.append("\n<details>")
 			report.append("<summary>⚡ Additional Operations (Scans, Batch, Index)</summary>\n")
 			
@@ -393,8 +405,8 @@ class BenchmarkAnalyzer:
 				# Get display name
 				first_key_data = next(iter(key_type_data.values()))
 				config_display = first_key_data.get('display_name', config.replace('-', ' ').title())
-				report.append(f"\n#### {config_display}\n")
 				
+				config_has_ops = False
 				for key_type in ['integer', 'string26', 'string90', 'string250']:
 					if key_type not in key_type_data:
 						continue
@@ -405,13 +417,12 @@ class BenchmarkAnalyzer:
 					if not additional_ops:
 						continue
 					
-					report.append(f"\n**{key_type}**\n")
-					
 					# Group operations by category for better readability
 					categories = {
 						'Scan Operations': [],
 						'Index Operations': [],
-						'Batch Operations': []
+						'Batch Operations': [],
+						'Other Operations': []
 					}
 					
 					# Collect all operations with their elapsed times
@@ -421,23 +432,40 @@ class BenchmarkAnalyzer:
 								if isinstance(op_details, dict) and 'elapsed' in op_details:
 									elapsed_str = self.format_elapsed_time(op_details['elapsed'])
 									
-									# Categorize operations
-									if 'scan' in op_name.lower() or op_type == 'scans':
+									# Categorize operations based on name patterns
+									op_lower = op_name.lower()
+									type_lower = op_type.lower()
+									
+									if 'scan' in op_lower or 'scan' in type_lower:
 										categories['Scan Operations'].append((op_name, elapsed_str))
-									elif 'index' in op_name.lower() or op_type in ['build_index', 'remove_index']:
+									elif 'index' in op_lower or 'index' in type_lower:
 										categories['Index Operations'].append((op_name, elapsed_str))
-									elif 'batch' in op_name.lower() or 'batch' in op_type:
+									elif 'batch' in op_lower or 'batch' in type_lower:
 										categories['Batch Operations'].append((op_name, elapsed_str))
+									else:
+										categories['Other Operations'].append((op_name, elapsed_str))
 					
-					# Display operations by category
-					for category, ops in categories.items():
-						if ops:
-							report.append(f"\n*{category}:*")
-							for op_name, elapsed in sorted(ops):
-								# Keep operation names as-is from crud-bench
-								report.append(f"- `{op_name}`: {elapsed}")
+					# Check if this key_type has any operations
+					has_ops = any(len(ops) > 0 for ops in categories.values())
+					if has_ops:
+						if not config_has_ops:
+							# First time we're showing ops for this config
+							report.append(f"\n#### {config_display}\n")
+							config_has_ops = True
+						
+						report.append(f"\n**{key_type}**\n")
+						
+						# Display operations by category
+						for category, ops in categories.items():
+							if ops:
+								report.append(f"\n*{category}:*")
+								for op_name, elapsed in sorted(ops):
+									# Keep operation names as-is from crud-bench
+									report.append(f"- `{op_name}`: {elapsed}")
 			
 			report.append("\n</details>")
+		else:
+			print("No additional operations found in benchmark results", file=sys.stderr)
 
 		# Methodology
 		report.append("\n<details>")
