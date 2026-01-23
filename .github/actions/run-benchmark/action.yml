@@ -24,10 +24,6 @@ inputs:
   crud_bench_revision:
     description: 'crud-bench git revision'
     required: true
-  crud_bench_binary_suffix:
-    description: 'Suffix for crud-bench binary artifact (e.g., surrealdb, surrealkv, surrealmx)'
-    required: false
-    default: 'surrealdb'
 
 runs:
   using: 'composite'
@@ -62,7 +58,7 @@ runs:
     - name: Download crud-bench binary
       uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
       with:
-        name: crud-bench-binary-${{ inputs.crud_bench_binary_suffix }}
+        name: crud-bench-binary
         path: .github/tools/crud-bench/target/release/
     
     - name: Make crud-bench binary executable
