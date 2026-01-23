@@ -203,14 +203,12 @@ jobs:
             endpoint: ws://localhost:8000
             needs_server: true
             description: SurrealDB with in-memory storage
-            display_name: Memory (Networked)
 
           - config: rocksdb
             database: surrealdb-rocksdb
             endpoint: ws://localhost:8000
             needs_server: true
             description: SurrealDB with RocksDB storage
-            display_name: RocksDB (Networked)
 
           # Embedded configurations
           - config: embedded-memory
@@ -218,27 +216,23 @@ jobs:
             endpoint: memory
             needs_server: false
             description: SurrealDB embedded with in-memory storage
-            display_name: Embedded Memory
 
           - config: embedded-rocksdb
             database: surrealdb
             endpoint: rocksdb:~/crud-bench-data
             needs_server: false
             description: SurrealDB embedded with RocksDB storage
-            display_name: Embedded RocksDB
 
           # Other engines
           - config: surrealkv-local
             database: surrealkv
             needs_server: false
             description: SurrealKV storage engine
-            display_name: SurrealKV
 
           - config: surrealmx
             database: surrealmx
             needs_server: false
             description: SurrealMX storage engine
-            display_name: SurrealMX
 
     steps:
       - name: Checkout sources
@@ -384,7 +378,7 @@ jobs:
           CMD="$CMD -s 10000 -c 12 -t 48 -r -k ${{ matrix.key_type }} -n ${{ steps.meta.outputs.result_name }}"
           
           # Store display name in a separate file for the analysis script
-          echo "${{ matrix.display_name }}" > display_name_${{ steps.meta.outputs.result_name }}.txt
+          echo "${{ matrix.description }}" > display_name_${{ steps.meta.outputs.result_name }}.txt
           
           echo "Running: $CMD"
           eval $CMD
