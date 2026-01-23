@@ -47,16 +47,36 @@ jobs:
   # Build SurrealDB binaries with minimal features
   # ----------------------------------------
 
-  build-surrealdb-binaries:
-    name: Build SurrealDB (${{ matrix.config }})
+  build-surrealdb-memory:
+    name: Build SurrealDB (memory)
     runs-on: [self-hosted, benchmarking]
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - memory
-          - rocksdb
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+
+      - name: Build SurrealDB with minimal features
+        run: |
+          echo "Building SurrealDB with in-memory storage only"
+          cargo build --release --no-default-features --features "storage-mem,http"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: surreal-binary-memory
+          path: target/release/surreal
+          retention-days: 1
+
+  build-surrealdb-rocksdb:
+    name: Build SurrealDB (rocksdb)
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
     
     steps:
       - name: Checkout sources
@@ -69,29 +89,13 @@ jobs:
       
       - name: Build SurrealDB with minimal features
         run: |
-          # Determine features based on configuration
-          case "${{ matrix.config }}" in
-            memory)
-              FEATURES="storage-mem,http"
-              echo "Building SurrealDB with in-memory storage only"
-              ;;
-            rocksdb)
-              FEATURES="storage-rocksdb,http"
-              echo "Building SurrealDB with RocksDB storage only"
-              ;;
-            *)
-              echo "Unknown config: ${{ matrix.config }}"
-              exit 1
-              ;;
-          esac
-          
-          echo "Features: $FEATURES"
-          cargo build --release --no-default-features --features "$FEATURES"
+          echo "Building SurrealDB with RocksDB storage only"
+          cargo build --release --no-default-features --features "storage-rocksdb,http"
       
       - name: Upload binary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: surreal-binary-${{ matrix.config }}
+          name: surreal-binary-rocksdb
           path: target/release/surreal
           retention-days: 1
 
@@ -119,14 +123,14 @@ jobs:
           repository: surrealdb/crud-bench
           ref: ${{ env.CRUD_BENCH_REVISION }}
           path: .github/tools/crud-bench
-      
+
       - name: Setup crud-bench cache
         uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: .github/tools/crud-bench
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      
+
       - name: Align SurrealDB version with crud-bench
         run: |
           # Extract the surrealdb version that crud-bench expects
@@ -150,7 +154,7 @@ jobs:
           else
             echo "Versions already match, no changes needed"
           fi
-      
+
       - name: Build crud-bench
         run: |
           cd .github/tools/crud-bench
@@ -173,18 +177,73 @@ jobs:
   # Run CRUD benchmarks
   # ----------------------------------------
 
-  benchmark:
-    name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
+  benchmark-memory:
+    name: CRUD Benchmark (memory-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-surrealdb-binaries, build-crud-bench]
+    needs: [build-surrealdb-memory, build-crud-bench]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        # Cartesian product: config × key_type
+        key_type:
+          - integer
+          - string26
+          - string90
+          - string250
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: memory
+          database: surrealdb-memory
+          endpoint: ws://localhost:8000
+          description: SurrealDB with in-memory storage
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'true'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+
+  benchmark-rocksdb:
+    name: CRUD Benchmark (rocksdb-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [build-surrealdb-rocksdb, build-crud-bench]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        key_type:
+          - integer
+          - string26
+          - string90
+          - string250
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: rocksdb
+          database: surrealdb-rocksdb
+          endpoint: ws://localhost:8000
+          description: SurrealDB with RocksDB storage
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'true'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+
+  benchmark-embedded:
+    name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [build-crud-bench]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
         config:
-          - memory
-          - rocksdb
           - embedded-memory
           - embedded-rocksdb
           - surrealkv-local
@@ -195,239 +254,41 @@ jobs:
           - string90
           - string250
         
-        # Add metadata for each config
         include:
-          # Networked configurations
-          - config: memory
-            database: surrealdb-memory
-            endpoint: ws://localhost:8000
-            needs_server: true
-            description: SurrealDB with in-memory storage
-
-          - config: rocksdb
-            database: surrealdb-rocksdb
-            endpoint: ws://localhost:8000
-            needs_server: true
-            description: SurrealDB with RocksDB storage
-
-          # Embedded configurations
           - config: embedded-memory
             database: surrealdb
             endpoint: memory
-            needs_server: false
             description: SurrealDB embedded with in-memory storage
 
           - config: embedded-rocksdb
             database: surrealdb
             endpoint: rocksdb:~/crud-bench-data
-            needs_server: false
             description: SurrealDB embedded with RocksDB storage
 
-          # Other engines
           - config: surrealkv-local
             database: surrealkv
-            needs_server: false
+            endpoint: ''
             description: SurrealKV storage engine
 
           - config: surrealmx
             database: surrealmx
-            needs_server: false
+            endpoint: ''
             description: SurrealMX storage engine
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Determine configuration
-        id: meta
-        run: |
-          # Configuration comes from matrix - just set result name
-          echo "result_name=${{ matrix.config }}-${{ matrix.key_type }}" >> $GITHUB_OUTPUT
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
         with:
-          save-cache: false
-
-      - name: Download SurrealDB binary (for networked benchmarks)
-        if: matrix.needs_server == true
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: surreal-binary-${{ matrix.config }}
-          path: ${{ github.workspace }}/bin
-      
-      - name: Make SurrealDB binary executable
-        if: matrix.needs_server == true
-        run: |
-          chmod +x ${{ github.workspace }}/bin/surreal
-          echo "${{ github.workspace }}/bin" >> $GITHUB_PATH
-          echo "SurrealDB binary ready at: ${{ github.workspace }}/bin/surreal"
-      
-      - name: Checkout crud-bench repository (for directory structure)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: surrealdb/crud-bench
-          ref: ${{ env.CRUD_BENCH_REVISION }}
-          path: .github/tools/crud-bench
-      
-      - name: Download crud-bench binary
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: crud-bench-binary
-          path: .github/tools/crud-bench/target/release/
-      
-      - name: Make crud-bench binary executable
-        run: |
-          chmod +x .github/tools/crud-bench/target/release/crud-bench
-          echo "crud-bench binary ready"
-
-      - name: Prepare environment
-        run: |
-          # Create data directory for embedded benchmarks
-          mkdir -p ~/crud-bench-data
-          chmod 777 ~/crud-bench-data
-          
-          # Create data directory for networked benchmarks (if needed)
-          if [ "${{ matrix.needs_server }}" = "true" ]; then
-            mkdir -p ~/surrealdb-data
-          fi
-          
-          # Clean up any existing result files
-          rm -f result*.json result*.html result*.csv
-
-      - name: Optimize system
-        run: |
-          sync
-          ulimit -n 65536 || true
-          ulimit -u unlimited || true
-          ulimit -l unlimited || true
-
-      - name: Print system information
-        run: |
-          echo "=== System Information ==="
-          echo "Hostname: $(hostname)"
-          echo "OS: $(uname -s)"
-          echo "Kernel: $(uname -r)"
-          echo "Architecture: $(uname -m)"
-          echo "CPU Info:"
-          if [ -f /proc/cpuinfo ]; then
-            grep "model name" /proc/cpuinfo | head -1
-            echo "CPU Cores: $(nproc)"
-          elif command -v sysctl &> /dev/null; then
-            sysctl -n machdep.cpu.brand_string
-            echo "CPU Cores: $(sysctl -n hw.ncpu)"
-          fi
-          echo "Memory:"
-          if command -v free &> /dev/null; then
-            free -h
-          elif command -v vm_stat &> /dev/null; then
-            vm_stat | head -5
-          fi
-
-      - name: Start SurrealDB server (for networked benchmarks)
-        if: matrix.needs_server == true
-        run: |
-          # Start SurrealDB in the background using the PR's binary
-          case "${{ matrix.database }}" in
-            surrealdb-memory)
-              echo "Starting SurrealDB with in-memory storage..."
-              surreal start --log error --user root --pass root memory &
-              ;;
-            surrealdb-rocksdb)
-              echo "Starting SurrealDB with RocksDB storage..."
-              surreal start --log error --user root --pass root rocksdb:~/surrealdb-data &
-              ;;
-            surrealdb-surrealkv)
-              echo "Starting SurrealDB with SurrealKV storage..."
-              surreal start --log error --user root --pass root surrealkv:~/surrealdb-data &
-              ;;
-          esac
-          
-          # Store the PID for cleanup
-          echo $! > /tmp/surrealdb.pid
-          echo "SurrealDB started with PID $(cat /tmp/surrealdb.pid)"
-          
-          # Wait for server to be ready
-          echo "Waiting for SurrealDB to start..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "✓ SurrealDB is ready"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "✗ SurrealDB failed to start"
-              exit 1
-            fi
-            sleep 1
-          done
-
-      - name: Run benchmark - ${{ matrix.description }} (${{ matrix.key_type }})
-        timeout-minutes: 10
-        run: |
-          cd .github/tools/crud-bench
-          
-          # Build benchmark command
-          CMD="./target/release/crud-bench -d ${{ matrix.database }}"
-          
-          # Add endpoint if specified
-          if [ -n "${{ matrix.endpoint }}" ]; then
-            CMD="$CMD --endpoint ${{ matrix.endpoint }}"
-          fi
-          
-          # Add benchmark parameters
-          CMD="$CMD -s 10000 -c 12 -t 48 -r -k ${{ matrix.key_type }} -n ${{ steps.meta.outputs.result_name }}"
-          
-          # Store display name in a separate file for the analysis script
-          echo "${{ matrix.description }}" > display_name_${{ steps.meta.outputs.result_name }}.txt
-          
-          echo "Running: $CMD"
-          eval $CMD
-        env:
-          SURREALDB_USER: root
-          SURREALDB_PASS: root
-
-      - name: Collect results
-        run: |
-          mkdir -p ${{ github.workspace }}/benchmark-results
-          cp .github/tools/crud-bench/result*.json ${{ github.workspace }}/benchmark-results/ || true
-          cp .github/tools/crud-bench/display_name_*.txt ${{ github.workspace }}/benchmark-results/ || true
-          ls -la ${{ github.workspace }}/benchmark-results
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: benchmark-results-${{ steps.meta.outputs.result_name }}
-          path: ${{ github.workspace }}/benchmark-results/*
-          retention-days: 30
-
-      - name: Cleanup
-        if: always()
-        run: |
-          # Kill SurrealDB server if it was started
-          if [ -f /tmp/surrealdb.pid ]; then
-            echo "Stopping SurrealDB server..."
-            PID=$(cat /tmp/surrealdb.pid)
-            kill $PID 2>/dev/null || true
-            # Wait for process to fully terminate
-            for i in {1..10}; do
-              if ! kill -0 $PID 2>/dev/null; then
-                break
-              fi
-              sleep 0.5
-            done
-            rm -f /tmp/surrealdb.pid
-          fi
-          
-          # Clean up data directories (with retry for file handle release)
-          for dir in ~/surrealdb-data ~/crud-bench-data; do
-            if [ -d "$dir" ]; then
-              rm -rf "$dir" 2>/dev/null || {
-                echo "Warning: Failed to remove $dir on first attempt, retrying..."
-                sleep 1
-                rm -rf "$dir" 2>/dev/null || echo "Warning: Could not fully clean $dir"
-              }
-            fi
-          done
+          config: ${{ matrix.config }}
+          database: ${{ matrix.database }}
+          endpoint: ${{ matrix.endpoint }}
+          description: ${{ matrix.description }}
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'false'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
 
   # ----------------------------------------
   # Analyze results and report
@@ -436,7 +297,7 @@ jobs:
   analyze-and-report:
     name: Analyze and Report
     runs-on: ubuntu-latest
-    needs: [benchmark]
+    needs: [benchmark-memory, benchmark-rocksdb, benchmark-embedded]
     if: always()
     steps:
       - name: Checkout sources
