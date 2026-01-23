@@ -44,6 +44,21 @@ env:
 
 jobs:
   # ----------------------------------------
+  # Setup: Define matrix dimensions once
+  # ----------------------------------------
+  
+  setup-matrix:
+    name: Setup benchmark matrix
+    runs-on: ubuntu-latest
+    outputs:
+      key_types: ${{ steps.matrix.outputs.key_types }}
+    steps:
+      - name: Define matrix dimensions
+        id: matrix
+        run: |
+          # Define key types to benchmark (single source of truth)
+          echo 'key_types=["integer", "string26", "string90", "string250"]' >> $GITHUB_OUTPUT
+  # ----------------------------------------
   # Build SurrealDB binaries with minimal features
   # ----------------------------------------
 
@@ -103,8 +118,8 @@ jobs:
   # Build crud-bench with patched surrealdb
   # ----------------------------------------
 
-  build-crud-bench:
-    name: Build crud-bench
+  build-crud-bench-surrealdb:
+    name: Build crud-bench (surrealdb)
     runs-on: [self-hosted, benchmarking]
     timeout-minutes: 15
     
@@ -130,6 +145,7 @@ jobs:
           workspaces: .github/tools/crud-bench
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: crud-bench-surrealdb
 
       - name: Align SurrealDB version with crud-bench
         run: |
@@ -155,7 +171,7 @@ jobs:
             echo "Versions already match, no changes needed"
           fi
 
-      - name: Build crud-bench
+      - name: Build crud-bench with surrealdb only
         run: |
           cd .github/tools/crud-bench
           
@@ -163,13 +179,99 @@ jobs:
           # This keeps all other crud-bench dependencies locked for consistent benchmarking
           cargo update -p surrealdb
           
-          # Build with only the database features we actually use
-          cargo build --release --no-default-features --features "surrealdb,surrealkv,surrealmx"
+          # Build with only surrealdb feature (includes all storage backends)
+          cargo build --release --no-default-features --features "surrealdb"
       
       - name: Upload binary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: crud-bench-binary
+          name: crud-bench-binary-surrealdb
+          path: .github/tools/crud-bench/target/release/crud-bench
+          retention-days: 1
+
+  build-crud-bench-surrealkv:
+    name: Build crud-bench (surrealkv)
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Checkout crud-bench repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: surrealdb/crud-bench
+          ref: ${{ env.CRUD_BENCH_REVISION }}
+          path: .github/tools/crud-bench
+
+      - name: Setup crud-bench cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .github/tools/crud-bench
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: crud-bench-surrealkv
+
+      - name: Build crud-bench with surrealkv only
+        run: |
+          cd .github/tools/crud-bench
+          
+          # Build with only surrealkv feature (lightweight, no heavy dependencies)
+          cargo build --release --no-default-features --features "surrealkv"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crud-bench-binary-surrealkv
+          path: .github/tools/crud-bench/target/release/crud-bench
+          retention-days: 1
+
+  build-crud-bench-surrealmx:
+    name: Build crud-bench (surrealmx)
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Checkout crud-bench repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: surrealdb/crud-bench
+          ref: ${{ env.CRUD_BENCH_REVISION }}
+          path: .github/tools/crud-bench
+
+      - name: Setup crud-bench cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .github/tools/crud-bench
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: crud-bench-surrealmx
+
+      - name: Build crud-bench with surrealmx only
+        run: |
+          cd .github/tools/crud-bench
+          
+          # Build with only surrealmx feature (lightweight, no heavy dependencies)
+          cargo build --release --no-default-features --features "surrealmx"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crud-bench-binary-surrealmx
           path: .github/tools/crud-bench/target/release/crud-bench
           retention-days: 1
 
@@ -180,16 +282,12 @@ jobs:
   benchmark-memory:
     name: CRUD Benchmark (memory-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-surrealdb-memory, build-crud-bench]
+    needs: [setup-matrix, build-surrealdb-memory, build-crud-bench-surrealdb]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
     
     steps:
       - name: Checkout sources
@@ -205,20 +303,17 @@ jobs:
           key_type: ${{ matrix.key_type }}
           needs_server: 'true'
           crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+          crud_bench_binary_suffix: surrealdb
 
   benchmark-rocksdb:
     name: CRUD Benchmark (rocksdb-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-surrealdb-rocksdb, build-crud-bench]
+    needs: [setup-matrix, build-surrealdb-rocksdb, build-crud-bench-surrealdb]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
     
     steps:
       - name: Checkout sources
@@ -234,11 +329,12 @@ jobs:
           key_type: ${{ matrix.key_type }}
           needs_server: 'true'
           crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+          crud_bench_binary_suffix: surrealdb
 
-  benchmark-embedded:
+  benchmark-embedded-surrealdb:
     name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
     runs-on: [self-hosted, benchmarking]
-    needs: [build-crud-bench]
+    needs: [setup-matrix, build-crud-bench-surrealdb]
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -246,13 +342,7 @@ jobs:
         config:
           - embedded-memory
           - embedded-rocksdb
-          - surrealkv-local
-          - surrealmx
-        key_type:
-          - integer
-          - string26
-          - string90
-          - string250
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
         
         include:
           - config: embedded-memory
@@ -264,16 +354,6 @@ jobs:
             database: surrealdb
             endpoint: rocksdb:~/crud-bench-data
             description: SurrealDB embedded with RocksDB storage
-
-          - config: surrealkv-local
-            database: surrealkv
-            endpoint: ''
-            description: SurrealKV storage engine
-
-          - config: surrealmx
-            database: surrealmx
-            endpoint: ''
-            description: SurrealMX storage engine
 
     steps:
       - name: Checkout sources
@@ -289,6 +369,59 @@ jobs:
           key_type: ${{ matrix.key_type }}
           needs_server: 'false'
           crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+          crud_bench_binary_suffix: surrealdb
+
+  benchmark-embedded-surrealkv:
+    name: CRUD Benchmark (surrealkv-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [setup-matrix, build-crud-bench-surrealkv]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: surrealkv-local
+          database: surrealkv
+          endpoint: ''
+          description: SurrealKV storage engine
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'false'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+          crud_bench_binary_suffix: surrealkv
+
+  benchmark-embedded-surrealmx:
+    name: CRUD Benchmark (surrealmx-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [setup-matrix, build-crud-bench-surrealmx]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: surrealmx
+          database: surrealmx
+          endpoint: ''
+          description: SurrealMX storage engine
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'false'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+          crud_bench_binary_suffix: surrealmx
 
   # ----------------------------------------
   # Analyze results and report
@@ -297,7 +430,7 @@ jobs:
   analyze-and-report:
     name: Analyze and Report
     runs-on: ubuntu-latest
-    needs: [benchmark-memory, benchmark-rocksdb, benchmark-embedded]
+    needs: [benchmark-memory, benchmark-rocksdb, benchmark-embedded-surrealdb, benchmark-embedded-surrealkv, benchmark-embedded-surrealmx]
     if: always()
     steps:
       - name: Checkout sources
