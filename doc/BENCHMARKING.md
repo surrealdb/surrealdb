@@ -18,7 +18,7 @@ The benchmark workflow runs automatically on:
 
 The workflow uses a **pinned version** of crud-bench to ensure consistent benchmarking across all PRs (apples-to-apples comparison). This prevents benchmark variations caused by changes in the benchmarking tool itself.
 
-**Current pinned revision:** `f8429e8cb3c4aa10dad72ac330f6d59af7d9f76c` (Jan 2024)
+The specific revision is defined in the `CRUD_BENCH_REVISION` environment variable in `.github/workflows/crud-bench.yml`.
 
 ### Why Pin the Version?
 
@@ -40,7 +40,6 @@ When you want to upgrade to a newer version of crud-bench:
 2. **Update the workflow:**
    - Edit `.github/workflows/crud-bench.yml`
    - Update `CRUD_BENCH_REVISION` in the `env` section
-   - Update the comment at the top with the new revision and date
 
 3. **Test the upgrade:**
    - Use workflow dispatch with the new revision as input
