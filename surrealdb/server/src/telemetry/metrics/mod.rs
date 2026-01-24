@@ -2,9 +2,11 @@ pub mod ds;
 pub mod http;
 pub mod ws;
 
+use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::{
 	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
 };
+use tonic::transport::ClientTlsConfig;
 
 pub use self::http::tower_layer::HttpMetricsLayer;
 use super::OTEL_DEFAULT_RESOURCE;
@@ -44,6 +46,7 @@ pub fn init() -> anyhow::Result<Option<SdkMeterProvider>> {
 			// Create a new metrics exporter using OTLP with tonic transport
 			let exporter = opentelemetry_otlp::MetricExporter::builder()
 				.with_tonic()
+				.with_tls_config(ClientTlsConfig::new().with_native_roots())
 				.with_temporality(opentelemetry_sdk::metrics::Temporality::Cumulative)
 				.build()?;
 			let reader = PeriodicReader::builder(exporter)
