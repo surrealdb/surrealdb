@@ -3,10 +3,8 @@ pub mod http;
 pub mod ws;
 
 use opentelemetry_otlp::WithTonicConfig;
-use opentelemetry_sdk::metrics::{
-	Aggregation, Instrument, SdkMeterProvider, Stream,
-	periodic_reader_with_async_runtime::PeriodicReader,
-};
+use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+use opentelemetry_sdk::metrics::{Aggregation, Instrument, SdkMeterProvider, Stream};
 use tonic::transport::ClientTlsConfig;
 
 pub use self::http::tower_layer::HttpMetricsLayer;

@@ -27,9 +27,11 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// The Resource will automatically merge SDK, environment, and telemetry metadata
 	let res = Resource::builder()
 		.with_detectors(&[
-			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES > option_env! CARGO_BIN_NAME > unknown_service
+			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES >
+			// option_env! CARGO_BIN_NAME > unknown_service
 			Box::new(SdkProvidedResourceDetector),
-			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like key1=value1,key2=value2,...)
+			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like
+			// key1=value1,key2=value2,...)
 			Box::new(EnvResourceDetector::new()),
 			// set telemetry.sdk.{name, language, version}
 			Box::new(TelemetryResourceDetector),
