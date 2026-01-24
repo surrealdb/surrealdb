@@ -40,7 +40,7 @@ pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 
 	// If no external service.name is set, set it to surrealdb
 	let name_key = res.get(&Key::from_static_str("service.name"));
-	if name_key.is_none() || name_key.unwrap().as_str() == "unknown_service" {
+	if name_key.is_none_or(|v| v.as_str() == "unknown_service") {
 		Resource::builder()
 			.with_detectors(&[
 				Box::new(SdkProvidedResourceDetector),
