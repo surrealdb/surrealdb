@@ -4,7 +4,8 @@ pub mod ws;
 
 use opentelemetry_otlp::WithTonicConfig;
 use opentelemetry_sdk::metrics::{
-	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
+	Aggregation, Instrument, SdkMeterProvider, Stream,
+	periodic_reader_with_async_runtime::PeriodicReader,
 };
 use tonic::transport::ClientTlsConfig;
 
@@ -49,7 +50,7 @@ pub fn init() -> anyhow::Result<Option<SdkMeterProvider>> {
 				.with_tls_config(ClientTlsConfig::new().with_native_roots())
 				.with_temporality(opentelemetry_sdk::metrics::Temporality::Cumulative)
 				.build()?;
-			let reader = PeriodicReader::builder(exporter)
+			let reader = PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
 				.with_interval(std::time::Duration::from_secs(60))
 				.build();
 			// Create view for histogram durations with custom buckets
