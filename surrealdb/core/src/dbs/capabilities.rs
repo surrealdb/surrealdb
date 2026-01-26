@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
-#[cfg(all(target_family = "wasm", feature = "http"))]
-use std::net::ToSocketAddrs;
 #[cfg(feature = "surrealism")]
 use std::str::FromStr;
 
@@ -12,8 +10,6 @@ use anyhow::bail;
 use ipnet::IpNet;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::capabilities::SurrealismCapabilities;
-#[cfg(all(not(target_family = "wasm"), feature = "http"))]
-use tokio::net::lookup_host;
 use url::Url;
 
 use crate::iam::{Auth, Level};
@@ -188,65 +184,6 @@ impl std::str::FromStr for ExperimentalTarget {
 pub enum NetTarget {
 	Host(url::Host<String>, Option<u16>),
 	IPNet(IpNet),
-}
-
-#[cfg(feature = "http")]
-impl NetTarget {
-	/// Resolves a `NetTarget` to its associated IP address representations.
-	///
-	/// This function performs an asynchronous resolution of a `NetTarget` enum
-	/// instance. If the `NetTarget` is of variant `Host`, it attempts to
-	/// resolve the provided hostname and optional port into a list of `IPNet`
-	/// values. If the port is not provided, port 80 is used by default. If the
-	/// `NetTarget` is of variant `IPNet`, it simply returns an empty vector, as
-	/// there is nothing to resolve.
-	///
-	/// # Returns
-	/// - On success, this function returns a `Vec<Self>` where each resolved `NetTarget::Host` is
-	///   transformed into a `NetTarget::IPNet`.
-	/// - On error, it returns a `std::io::Error` indicating the issue during resolution.
-	///
-	/// # Variants
-	/// - `NetTarget::Host(h, p)`:
-	///    - Resolves the given hostname `h` with an optional port `p` (default is 80) to a list of
-	///      IPs.
-	///    - Each resolved IP is converted into a `NetTarget::IPNet` value.
-	/// - `NetTarget::IPNet(_)`:
-	///    - Returns an empty vector, as `IPNet` does not require resolution.
-	///
-	/// # Errors
-	/// - Returns `std::io::Error` if there is an issue in the asynchronous DNS resolution process.
-	///
-	/// # Notes
-	/// - The function uses `lookup_host` for DNS resolution, which must be awaited.
-	/// - The optional port is replaced by port 80 as a default if not provided.
-	#[cfg(not(target_family = "wasm"))]
-	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
-		match self {
-			NetTarget::Host(h, p) => {
-				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
-					.await?
-					.map(|a| NetTarget::IPNet(a.ip().into()))
-					.collect();
-				Ok(r)
-			}
-			NetTarget::IPNet(_) => Ok(vec![]),
-		}
-	}
-
-	#[cfg(target_family = "wasm")]
-	pub(crate) fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
-		match self {
-			NetTarget::Host(h, p) => {
-				let r = (h.to_string(), p.unwrap_or(80))
-					.to_socket_addrs()?
-					.map(|a| NetTarget::IPNet(a.ip().into()))
-					.collect();
-				Ok(r)
-			}
-			NetTarget::IPNet(_) => Ok(vec![]),
-		}
-	}
 }
 
 // impl display
@@ -1091,30 +1028,6 @@ mod tests {
 		assert!(NetTarget::from_str("11111.3.4.5").is_err());
 		assert!(NetTarget::from_str("2001:db8::1/129").is_err());
 		assert!(NetTarget::from_str("[2001:db8::1").is_err());
-	}
-
-	#[tokio::test]
-	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
-	async fn test_net_target_resolve_async() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
-		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
-	}
-
-	#[test]
-	#[cfg(all(target_family = "wasm", feature = "http"))]
-	fn test_net_target_resolve_sync() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
-		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
 	}
 
 	#[test]

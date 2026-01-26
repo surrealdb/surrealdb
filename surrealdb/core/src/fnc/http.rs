@@ -199,6 +199,13 @@ pub mod resolver {
 					allowed_addrs.push(addr);
 				}
 
+				if allowed_addrs.is_empty() {
+					return Err(Box::new(std::io::Error::new(
+						std::io::ErrorKind::PermissionDenied,
+						format!("No allowed addresses resolved for: {name_str}"),
+					)) as Box<dyn Error + Send + Sync>);
+				}
+
 				Ok(Box::new(allowed_addrs.into_iter()) as Addrs)
 			}) as Resolving
 		}

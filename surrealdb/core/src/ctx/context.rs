@@ -858,7 +858,7 @@ mod tests {
 		assert!(r.is_err());
 		assert_eq!(
 			r.err().unwrap().to_string(),
-			"Access to network target 'blocked.example.com' is not allowed"
+			"Access to network target 'blocked.example.com:80' is not allowed"
 		);
 
 		// Should allow other domains

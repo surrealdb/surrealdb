@@ -1102,19 +1102,23 @@ mod tests {
 			),
 			// - 17
 			(
-				// Ensure FilteringResolver blocks localhost when 127.0.0.1 is denied
+				// Ensure redirects to denied IPs are blocked via FilteringResolver
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All)
 						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+							[
+								NetTarget::from_str("127.0.0.0/8").unwrap(),
+								NetTarget::from_str("::1/128").unwrap(),
+							]
+							.into(),
 						)),
 				),
 				Session::owner(),
-				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
+				format!("RETURN http::get('http://{}:{}')", "127.0.0.1", server1.address().port()),
 				false,
-				"Network target not allowed: 127.0.0.1".to_string(),
+				"Access to network target '127.0.0.1".to_string(),
 			),
 			// 18 - Ensure redirect succeed
 			(
