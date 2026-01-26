@@ -1681,19 +1681,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
-						// If the algorithm is symmetric and a key is already defined, a different
-						// key is not expected.
-						if let JwtAccessVerify::Key(ref ver) = res.verify
-							&& ver.alg.is_symmetric()
-							// TODO(3.0.0): This check is broken now that the value is
-							// parameterized. The expression can be the same by the final key might
-							// be different. Move this check to runtime instead?
-							&& key != ver.key
-						{
-							unexpected!(self, peek, "a symmetric key or no key");
-						}
-						iss.key = key;
+						iss.key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 					}
 					_ => break,
 				}
