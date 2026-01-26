@@ -46,6 +46,8 @@ macro_rules! implement_visitor{
 		#[allow(dead_code)]
 		pub trait Visit<V: Visitor>{
 			fn visit(&self, v: &mut V) -> Result<(), V::Error>;
+
+			fn visit_self(&self, v: &mut V) -> Result<(), V::Error>;
 		}
 
 		#[allow(dead_code)]
@@ -65,6 +67,10 @@ macro_rules! implement_visitor{
 				fn visit(&self, $this: &mut V) -> Result<(), V::Error>{
 					let $value = self;
 					$($t)*
+				}
+
+				fn visit_self(&self, v: &mut V) -> Result<(), V::Error>{
+					v.$name(self)
 				}
 			}
 		)*

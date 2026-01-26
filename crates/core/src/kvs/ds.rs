@@ -1387,12 +1387,35 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			if cfg.v3 {
+				let mut buffer = Vec::new();
+				crate::kvs::export::export_v3(&txn, &cfg, chn, &ns, &db, &mut buffer).await?;
+				for b in buffer {
+					if let Some(loc) = b.error_location {
+						warn!(
+							issue = b.kind.as_str(),
+							severity = b.severity.as_str(),
+							"Export for version 3 encountered issue: {}\n{}",
+							b.error,
+							loc
+						);
+					} else {
+						warn!(
+							issue = b.kind.as_str(),
+							severity = b.severity.as_str(),
+							"Export for version 3 encountered issue: {}",
+							b.error
+						);
+					}
+				}
+			} else {
+				txn.export(&ns, &db, cfg, chn).await?;
+			}
+			txn.cancel().await
 		})
 	}
 
