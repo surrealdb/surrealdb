@@ -2,7 +2,10 @@
 // So we allow dead code for now.
 #![allow(dead_code)]
 
-use crate::{sql::Object, syn::error::Snippet};
+use crate::{
+	sql::{Object, Value},
+	syn::error::Snippet,
+};
 
 mod pass;
 pub use pass::{MigratorPass, PassState};
@@ -43,6 +46,8 @@ pub enum IssueKind {
 	FunctionMathMax,
 	MockValue,
 	NumberKeyOrdering,
+	IdField,
+	SearchIndex,
 }
 
 impl IssueKind {
@@ -59,6 +64,8 @@ impl IssueKind {
 			Self::FunctionMathMax => "function math::max",
 			Self::MockValue => "mock value",
 			Self::NumberKeyOrdering => "number key ordering",
+			Self::IdField => "id field",
+			Self::SearchIndex => "search index",
 		}
 	}
 }
@@ -73,7 +80,7 @@ pub struct MigrationIssue {
 	/// The type of issue.
 	pub kind: IssueKind,
 	/// The location of the error.
-	pub origin: String,
+	pub origin: Vec<Value>,
 	/// The location of the error as source code snippet.
 	pub error_location: Option<Snippet>,
 	/// Possible resolution

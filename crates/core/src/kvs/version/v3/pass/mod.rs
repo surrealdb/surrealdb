@@ -1,12 +1,13 @@
 use std::{
-	fmt::{self, Display, Write},
+	fmt::{self, Write},
+	iter::IntoIterator,
 	ops::Bound,
 };
 
 use crate::{
 	sql::{
 		access_type::{BearerAccessSubject, JwtAccessVerify},
-		escape::{EscapeIdent, EscapeKey, QuoteStr},
+		escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, QuoteStr},
 		graph::GraphSubject,
 		order::Ordering,
 		part::{DestructurePart, RecurseInstruction},
@@ -106,9 +107,24 @@ pub struct PassState {
 	pub _tmp: (),
 }
 
+impl PassState {
+	pub fn with_breaking_futures(mut self) -> Self {
+		self.breaking_futures = true;
+		self
+	}
+	pub fn with_breaking_closures(mut self) -> Self {
+		self.breaking_closures = true;
+		self
+	}
+
+	pub fn with_breaking_storage(self) -> Self {
+		self.with_breaking_futures().with_breaking_closures()
+	}
+}
+
 pub struct MigratorPass<'a> {
 	issues: &'a mut Vec<MigrationIssue>,
-	pub path: &'a mut String,
+	pub path: &'a mut Vec<Value>,
 	w: PassWriter<'a>,
 	state: PassState,
 }
@@ -117,7 +133,7 @@ impl<'a> MigratorPass<'a> {
 	pub fn new(
 		issues: &'a mut Vec<MigrationIssue>,
 		export: &'a mut String,
-		path: &'a mut String,
+		path: &'a mut Vec<Value>,
 		state: PassState,
 	) -> Self {
 		export.clear();
@@ -129,13 +145,18 @@ impl<'a> MigratorPass<'a> {
 		}
 	}
 
-	fn with_path<T, F, R>(&mut self, segment: T, f: F) -> Result<R, fmt::Error>
+	fn with_path<F, R>(
+		&mut self,
+		segment: impl IntoIterator<Item = Value>,
+		f: F,
+	) -> Result<R, fmt::Error>
 	where
-		T: Display,
 		F: FnOnce(&mut Self) -> Result<R, fmt::Error>,
 	{
 		let len = self.path.len();
-		write!(self.path, "{}", segment).unwrap();
+		for s in segment {
+			self.path.push(s);
+		}
 		let r = f(self);
 		self.path.truncate(len);
 		r
@@ -1105,7 +1126,46 @@ impl Visitor for MigratorPass<'_> {
 			self.visit_idiom(i)?;
 		}
 		if Index::Idx != d.index {
-			write!(self.w, " {}", d.index)?;
+			if let Index::Search(x) = &d.index {
+				let before = self.w.location();
+
+				write!(
+					self.w,
+					" FULLTEXT ANALYZER {} {}",
+					EscapeKwFreeIdent(x.az.0.as_str()),
+					x.sc
+				)?;
+				if x.hl {
+					write!(self.w, " HIGHLIGHTS")?;
+				}
+
+				if x.doc_ids_order != 100
+					|| x.doc_lengths_order != 100
+					|| x.postings_order != 100
+					|| x.terms_order != 100
+					|| x.doc_ids_cache != 100
+					|| x.doc_lengths_cache != 100
+					|| x.terms_cache != 100
+				{
+					let range = before..(self.w.location());
+					self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "The `SEARCH` index has been renamed to `FULLTEXT` and some of it's parameters have been removed".to_string(),
+					details: "".to_string(),
+					kind: IssueKind::SearchIndex,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				});
+				}
+			} else {
+				write!(self.w, " {}", d.index)?;
+			}
 		}
 		if let Some(ref v) = d.comment {
 			write!(self.w, " COMMENT {v}")?
@@ -1117,95 +1177,103 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_field(&mut self, d: &DefineFieldStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("tb/{}/field/{}", d.what, d.name), |this| {
-			this.w.write_str("DEFINE FIELD")?;
-			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS")?;
-			}
-			if d.overwrite {
-				this.w.write_str(" OVERWRITE")?;
-			}
-			this.w.write_str(" ")?;
-			this.visit_idiom(&d.name)?;
-			write!(this.w, " ON {}", d.what)?;
-			if d.flex {
-				this.w.write_str(" FLEXIBLE")?
-			}
-			if let Some(ref v) = d.kind {
-				write!(this.w, " TYPE {v}")?
-			}
-			if let Some(ref v) = d.default {
-				this.w.write_str(" DEFAULT")?;
-				if d.default_always {
-					this.w.write_str(" ALWAYS")?
+		self.with_path(
+			[
+				Value::from("table"),
+				Value::from(d.what.0.as_str()),
+				Value::from("field"),
+				Value::from(d.name.to_string()),
+			],
+			|this| {
+				this.w.write_str("DEFINE FIELD")?;
+				if d.if_not_exists {
+					this.w.write_str(" IF NOT EXISTS")?;
 				}
+				if d.overwrite {
+					this.w.write_str(" OVERWRITE")?;
+				}
+				this.w.write_str(" ")?;
+				this.visit_idiom(&d.name)?;
+				write!(this.w, " ON {}", d.what)?;
+				if d.flex {
+					this.w.write_str(" FLEXIBLE")?
+				}
+				if let Some(ref v) = d.kind {
+					write!(this.w, " TYPE {v}")?
+				}
+				if let Some(ref v) = d.default {
+					this.w.write_str(" DEFAULT")?;
+					if d.default_always {
+						this.w.write_str(" ALWAYS")?
+					}
 
-				this.visit_value(v)?;
-			}
-			if d.readonly {
-				this.w.write_str(" READONLY")?
-			}
-			if let Some(v) = &d.value {
-				this.with_path("/value", |this| {
-					// handle future -> computed conversion
-					let mut cur = v;
-					loop {
-						match cur {
-							// (<future> { .. }) is just the same as future
-							Value::Subquery(s) => match **s {
-								Subquery::Value(ref x) => cur = x,
-								_ => {
+					this.visit_value(v)?;
+				}
+				if d.readonly {
+					this.w.write_str(" READONLY")?
+				}
+				if let Some(v) = &d.value {
+					this.with_path([Value::from("value")], |this| {
+						// handle future -> computed conversion
+						let mut cur = v;
+						loop {
+							match cur {
+								// (<future> { .. }) is just the same as future
+								Value::Subquery(s) => match **s {
+									Subquery::Value(ref x) => cur = x,
+									_ => {
+										this.w.write_str(" VALUE ")?;
+										this.with_state(
+											|old| PassState {
+												breaking_futures: true,
+												..old
+											},
+											|this| this.visit_value(cur),
+										)?;
+										break;
+									}
+								},
+								Value::Future(x) => {
+									this.w.write_str(" COMPUTED ")?;
+									this.with_state(
+										|old| PassState {
+											breaking_futures: false,
+											..old
+										},
+										|this| this.visit_block(&x.0),
+									)?;
+									break;
+								}
+								x => {
 									this.w.write_str(" VALUE ")?;
 									this.with_state(
 										|old| PassState {
 											breaking_futures: true,
 											..old
 										},
-										|this| this.visit_value(cur),
+										|this| this.visit_value(x),
 									)?;
 									break;
 								}
-							},
-							Value::Future(x) => {
-								this.w.write_str(" COMPUTED ")?;
-								this.with_state(
-									|old| PassState {
-										breaking_futures: false,
-										..old
-									},
-									|this| this.visit_block(&x.0),
-								)?;
-								break;
-							}
-							x => {
-								this.w.write_str(" VALUE ")?;
-								this.with_state(
-									|old| PassState {
-										breaking_futures: true,
-										..old
-									},
-									|this| this.visit_value(x),
-								)?;
-								break;
 							}
 						}
-					}
-					Ok(())
-				})?;
-			}
-			if let Some(ref v) = d.assert {
-				this.w.write_str(" ASSERT ")?;
-				this.visit_value(v)?;
-			}
-			if let Some(ref v) = d.reference {
-				this.w.write_str(" REFERENCE ")?;
-				this.visit_reference(v)?;
-			}
-			if let Some(ref v) = d.comment {
-				write!(this.w, " COMMENT {v}")?
-			}
-			this.visit_permissions(&d.permissions)
-		})
+						Ok(())
+					})?;
+				}
+				if let Some(ref v) = d.assert {
+					this.w.write_str(" ASSERT ")?;
+					this.visit_value(v)?;
+				}
+				if let Some(ref v) = d.reference {
+					this.w.write_str(" REFERENCE ")?;
+					this.visit_reference(v)?;
+				}
+				if let Some(ref v) = d.comment {
+					write!(this.w, " COMMENT {v}")?
+				}
+				this.visit_permissions(&d.permissions)
+			},
+		)
 	}
 
 	fn visit_reference(&mut self, d: &Reference) -> Result<(), Self::Error> {
@@ -1230,7 +1298,7 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_event(&mut self, d: &DefineEventStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/event/{}", &d.name.0), |this| {
+		self.with_path([Value::from("event"), Value::from(d.name.0.as_str())], |this| {
 			this.w.write_str("DEFINE EVENT")?;
 			if d.if_not_exists {
 				this.w.write_str(" IF NOT EXISTS")?;
@@ -1255,7 +1323,7 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_table(&mut self, d: &DefineTableStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/table/{}", &d.name.0), |this| {
+		self.with_path([Value::from("table"), Value::from(d.name.0.as_str())], |this| {
 			this.w.write_str("DEFINE TABLE")?;
 			if d.if_not_exists {
 				this.w.write_str(" IF NOT EXISTS")?;
@@ -1287,7 +1355,7 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_permissions(&mut self, d: &Permissions) -> Result<(), Self::Error> {
-		self.with_path("/permissions", |this| {
+		self.with_path([Value::from("permissions")], |this| {
 			this.w.write_str("PERMISSIONS")?;
 
 			if d.is_none() {
@@ -1296,13 +1364,13 @@ impl Visitor for MigratorPass<'_> {
 				this.w.write_str(" FULL")?;
 			} else {
 				this.w.write_str(" FOR create")?;
-				this.with_path("/create", |this| this.visit_permission(&d.create))?;
+				this.with_path([Value::from("create")], |this| this.visit_permission(&d.create))?;
 				this.w.write_str(" FOR select ")?;
-				this.with_path("/select", |this| this.visit_permission(&d.select))?;
+				this.with_path([Value::from("select")], |this| this.visit_permission(&d.select))?;
 				this.w.write_str(" FOR update ")?;
-				this.with_path("/update", |this| this.visit_permission(&d.update))?;
+				this.with_path([Value::from("update")], |this| this.visit_permission(&d.update))?;
 				this.w.write_str(" FOR delete ")?;
-				this.with_path("/delete", |this| this.visit_permission(&d.delete))?;
+				this.with_path([Value::from("delete")], |this| this.visit_permission(&d.delete))?;
 			}
 
 			Ok(())
@@ -1310,7 +1378,7 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_view(&mut self, v: &View) -> Result<(), Self::Error> {
-		self.with_path("/view", |this| {
+		self.with_path([Value::from("view")], |this| {
 			this.w.write_str("AS SELECT ")?;
 			this.visit_fields(&v.expr)?;
 			this.w.write_str(" FROM ")?;
@@ -1342,21 +1410,31 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_param(&mut self, d: &DefineParamStatement) -> Result<(), Self::Error> {
-		self.w.write_str("DEFINE PARAM")?;
-		if d.if_not_exists {
-			self.w.write_str(" IF NOT EXISTS")?;
-		}
-		if d.overwrite {
-			self.w.write_str(" OVERWRITE")?;
-		}
-		write!(self.w, " ${} VALUE", d.name)?;
-		self.visit_value(&d.value)?;
+		self.with_path([Value::from("param")], |this| {
+			this.w.write_str("DEFINE PARAM")?;
+			if d.if_not_exists {
+				this.w.write_str(" IF NOT EXISTS")?;
+			}
+			if d.overwrite {
+				this.w.write_str(" OVERWRITE")?;
+			}
+			write!(this.w, " ${} VALUE", d.name)?;
 
-		if let Some(ref v) = d.comment {
-			write!(self.w, " COMMENT {v}")?
-		}
-		self.w.write_str(" PERMISSIONS ")?;
-		self.visit_permission(&d.permissions)
+			this.with_state(
+				|s| PassState {
+					breaking_closures: false,
+					breaking_futures: false,
+					..s
+				},
+				|this| this.visit_value(&d.value),
+			)?;
+
+			if let Some(ref v) = d.comment {
+				write!(this.w, " COMMENT {v}")?
+			}
+			this.w.write_str(" PERMISSIONS ")?;
+			this.visit_permission(&d.permissions)
+		})
 	}
 
 	fn visit_define_analyzer(&mut self, d: &DefineAnalyzerStatement) -> Result<(), Self::Error> {
@@ -1364,7 +1442,7 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_function(&mut self, d: &DefineFunctionStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/fn/{}", d.name.0), |this| {
+		self.with_path([Value::from("function"), Value::from(d.name.0.as_str())], |this| {
 			this.w.write_str("DEFINE FUNCTION")?;
 			if d.if_not_exists {
 				this.w.write_str(" IF NOT EXISTS")?;
@@ -1985,52 +2063,95 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
-		match idiom.0.first().unwrap() {
+		let mut last_field = None;
+		let parts = match idiom.0.first().unwrap() {
 			Part::Start(value) => {
 				self.w.write_str("(")?;
 				self.visit_value(value)?;
 				self.w.write_str(")")?;
-				for p in idiom.0[1..].iter() {
-					self.visit_part(p)?;
-				}
+				&idiom.0[1..]
 			}
 			Part::Field(value) => {
+				let loc = self.w.location();
+				last_field = Some(loc);
 				write!(self.w, "{}", value)?;
-				for p in idiom.0[1..].iter() {
-					self.visit_part(p)?;
+
+				if value.as_str() == "id" && idiom.0.len() > 1 {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error:
+							"Found usage of an `.id` idiom, this field had special behavior for record-ids in 2.0 which has been removed in 3.0"
+								.to_string(),
+						details: String::new(),
+						kind: IssueKind::IdField,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+							self.w.flush_source(),
+							loc..after,
+							None,
+							MessageKind::Error,
+						)),
+						resolution: None,
+					})
+				}
+
+				&idiom.0[1..]
+			}
+			_ => idiom.0.as_slice(),
+		};
+		for (idx, p) in parts.iter().enumerate() {
+			let prev_field = last_field;
+			let loc = self.w.location();
+			if matches!(p, Part::Field(_)) {
+				last_field = Some(loc);
+			} else {
+				last_field = None
+			}
+
+			self.visit_part(p)?;
+
+			if let Part::Field(x) = p {
+				if x.as_str() == "id" && parts.len() > idx + 1 {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+					severity: Severity::CanBreak,
+					error:
+						"Found usage of an `.id` idiom, this field had special behavior for record-ids in 2.0 which has been removed in 3.0"
+							.to_string(),
+					details: String::new(),
+					kind: IssueKind::IdField,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						loc..after,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
 				}
 			}
-			_ => {
-				let mut last_field = None;
-				for p in idiom.0.iter() {
-					let prev_field = last_field;
-					if matches!(p, Part::Field(_)) {
-						last_field = Some(self.w.location());
-					} else {
-						last_field = None
-					}
 
-					self.visit_part(p)?;
-
-					if let Some(field) = prev_field {
-						if last_field.is_none() {
-							let after = self.w.location();
-							self.issues.push(MigrationIssue {
-							severity: Severity::CanBreak,
-							error: "Found usage of an idiom with a field followed by another idiom part".to_string(),
-							details: String::new(),
-							kind: IssueKind::FieldIdiomFollowed,
-							origin: self.path.clone(),
-							error_location: Some(Snippet::from_source_location_range(
-								self.w.flush_source(),
-								field..after,
-								None,
-								MessageKind::Error,
-							)),
-							resolution: None,
-						})
-						}
-					}
+			if let Some(field) = prev_field {
+				if last_field.is_none() {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error:
+							"Found usage of an idiom with a field followed by another idiom part"
+								.to_string(),
+						details: String::new(),
+						kind: IssueKind::FieldIdiomFollowed,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+							self.w.flush_source(),
+							field..after,
+							None,
+							MessageKind::Error,
+						)),
+						resolution: None,
+					})
 				}
 			}
 		}

@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "[{ details: '', error: 'Found number keys with different types in the same position within a record-id key which will have a different order in 3.0', kind: 'number key ordering', origin: '/ns/test/db/test/table/foo/record/{ a: [{ b: [false, 0f], c: true }] }', severity: 'can_break' }]"
+value = "[{ details: '', error: 'Found number keys with different types in the same position within a record-id key which will have a different order in 3.0', kind: 'number key ordering', origin: ['ns', 'test', 'db', 'test', 'table', 'foo', 'record', { a: [{ b: [false, 0f], c: true }] }], severity: 'can_break' }]"
 
 */
 
