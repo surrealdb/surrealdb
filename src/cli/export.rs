@@ -50,7 +50,6 @@ struct ExportConfigArguments {
 	/// Whether to export for version 3 of surrealdb.
 	#[arg(long, default_missing_value = "true")]
 	v3: bool,
-
 }
 
 #[derive(Args, Debug)]

@@ -193,7 +193,6 @@ impl KeyConflictChecker {
 	}
 }
 
-<<<<<<< HEAD
 fn with_path<R, F: FnOnce(&mut Vec<Value>) -> R>(
 	path: &mut Vec<Value>,
 	segment: impl IntoIterator<Item = Value>,
@@ -207,10 +206,6 @@ fn with_path<R, F: FnOnce(&mut Vec<Value>) -> R>(
 	path.truncate(len);
 	r
 }
-=======
-/// The number of records we load per batch for checking the migration.
-const RECORD_CHECK_BATCH_SIZE: u32 = 1024;
->>>>>>> 14c7831c4 (Add more migration checks)
 
 #[derive(Eq, PartialEq)]
 pub enum TypeKey {

@@ -92,7 +92,7 @@ pub async fn export_v3(
 
 	if cfg.users {
 		let users = tx.all_db_users(ns, db).await?;
-		export_section_header("USERS",&mut writer, &mut fmt_buffer).await;
+		export_section_header("USERS", &mut writer, &mut fmt_buffer).await;
 		for i in users.as_ref() {
 			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
 		}
@@ -102,7 +102,7 @@ pub async fn export_v3(
 
 	if cfg.accesses {
 		let accesses = tx.all_db_accesses(ns, db).await?;
-		export_section_header("ACCESSES",&mut writer, &mut fmt_buffer).await;
+		export_section_header("ACCESSES", &mut writer, &mut fmt_buffer).await;
 		for i in accesses.as_ref() {
 			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
 		}
@@ -112,7 +112,7 @@ pub async fn export_v3(
 
 	if cfg.params {
 		let params = tx.all_db_params(ns, db).await?;
-		export_section_header("PARAMS",&mut writer, &mut fmt_buffer).await;
+		export_section_header("PARAMS", &mut writer, &mut fmt_buffer).await;
 		for i in params.as_ref() {
 			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
 		}
@@ -120,7 +120,7 @@ pub async fn export_v3(
 
 	if cfg.functions {
 		let functions = tx.all_db_functions(ns, db).await?;
-		export_section_header("FUNCTIONS",&mut writer, &mut fmt_buffer).await;
+		export_section_header("FUNCTIONS", &mut writer, &mut fmt_buffer).await;
 		for i in functions.as_ref() {
 			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
 		}
@@ -128,7 +128,7 @@ pub async fn export_v3(
 
 	if cfg.analyzers {
 		let analyzers = tx.all_db_analyzers(ns, db).await?;
-		export_section_header("ANALYZERS",&mut writer, &mut fmt_buffer).await;
+		export_section_header("ANALYZERS", &mut writer, &mut fmt_buffer).await;
 		for i in analyzers.as_ref() {
 			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
 		}
@@ -433,14 +433,9 @@ async fn write_visit<T: for<'a> Visit<MigratorPass<'a>>>(
 	writer.write_bytes(&buf.as_bytes()).await;
 }
 
-async fn export_section_header(
-	title: &str,
-	writer: &mut ChannelWriter,
-	fmt_buffer: &mut String
-){
+async fn export_section_header(title: &str, writer: &mut ChannelWriter, fmt_buffer: &mut String) {
 	writer.write_bytes(b"-- ------------------------------\n").await;
 	write_fmt(fmt_buffer, writer, |s| writeln!(s, "-- {}", InlineCommentDisplay(title))).await;
 	writer.write_bytes(b"-- ------------------------------\n").await;
 	writer.write_bytes(b"\n").await;
 }
-
