@@ -14,11 +14,12 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::vector::SerializedVectorHash;
+use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
 use crate::key::index::he::He;
+use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
@@ -77,8 +78,12 @@ impl IndexKeyBase {
 		Hl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, chunk)
 	}
 
-	fn new_hv_key(&self, hash: SerializedVectorHash) -> Hv<'_> {
-		Hv::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, hash)
+	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> Hv<'a> {
+		Hv::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, vec)
+	}
+
+	fn new_hh_key(&self, hash: [u8; 32]) -> Hh<'_> {
+		Hh::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, hash)
 	}
 
 	fn new_hs_key(&self) -> Hs<'_> {

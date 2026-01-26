@@ -1745,6 +1745,7 @@ fn parse_define_index() {
 				extend_candidates: true,
 				keep_pruned_connections: true,
 				ml: 0.5.into(),
+				use_hashed_vector: true,
 			}),
 			comment: Expr::Literal(Literal::None),
 			concurrently: false

@@ -7,7 +7,6 @@ use std::sync::Arc;
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
 use blake3::Hasher as Blake3Hasher;
-use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
@@ -105,76 +104,42 @@ impl From<SerializedVector> for Vector {
 	}
 }
 
-/// A fixed-size hash of a vector used in HSNW vector deduplication.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SerializedVectorHash([u8; 32]);
-
-impl SerializedVectorHash {
-	/// Blake3 hash of SerializedVector
-	fn compute_hash(vec: &SerializedVector) -> [u8; 32] {
+impl SerializedVector {
+	/// Computes a BLAKE3 hash of the vector's bytes.
+	///
+	/// This is used for deduplicating vectors in the HNSW index when `HASHED_VECTOR` is enabled.
+	/// The hash is calculated by iterating over the vector elements and updating the hasher
+	/// with their little-endian byte representation.
+	pub(crate) fn compute_hash(&self) -> [u8; 32] {
 		let mut hasher = Blake3Hasher::new();
-
-		match vec {
-			SerializedVector::F64(v) => {
+		match self {
+			Self::F64(v) => {
 				for &val in v {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
-			SerializedVector::F32(v) => {
+			Self::F32(v) => {
 				for &val in v {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
-			SerializedVector::I64(v) => {
+			Self::I64(v) => {
 				for &val in v {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
-			SerializedVector::I32(v) => {
+			Self::I32(v) => {
 				for &val in v {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
-			SerializedVector::I16(v) => {
+			Self::I16(v) => {
 				for &val in v {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
 		}
-
 		*hasher.finalize().as_bytes()
-	}
-}
-
-impl From<&SerializedVector> for SerializedVectorHash {
-	fn from(vec: &SerializedVector) -> Self {
-		Self(Self::compute_hash(vec))
-	}
-}
-
-impl From<&Vector> for SerializedVectorHash {
-	fn from(vec: &Vector) -> Self {
-		let serialized = SerializedVector::from(vec);
-		Self::from(&serialized)
-	}
-}
-
-impl<F> Encode<F> for SerializedVectorHash {
-	fn encode<W: Write>(&self, w: &mut Writer<W>) -> std::result::Result<(), EncodeError> {
-		w.write_slice(&self.0)?;
-		Ok(())
-	}
-}
-
-impl<'de, F> BorrowDecode<'de, F> for SerializedVectorHash {
-	fn borrow_decode(r: &mut BorrowReader<'de>) -> std::result::Result<Self, DecodeError> {
-		let slice = r.read_cow()?;
-		if slice.len() != 32 {
-			return Err(DecodeError::InvalidFormat);
-		}
-		let mut hash = [0u8; 32];
-		hash.clone_from_slice(&slice);
-		Ok(Self(hash))
 	}
 }
 
