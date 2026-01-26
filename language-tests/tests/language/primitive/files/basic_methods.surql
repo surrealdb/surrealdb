@@ -2,6 +2,9 @@
 
 [test]
 
+[env.capabilities]
+allow-experimental = ["files"]
+
 [[test.results]]
 value = "NONE"
 
@@ -12,6 +15,8 @@ value = "NONE"
 [[test.results]]
 value = "false"
 
+[[test.results]]
+value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
@@ -61,10 +66,6 @@ value = "NONE"
 
 [[test.results]]
 value = "NONE"
-
-[env.capabilities]
-allow-experimental = ["files"]
-
 */
 
 DEFINE BUCKET test BACKEND "memory";
@@ -73,7 +74,8 @@ f"test:/a.txt".get().?.to_string();
 f"test:/a.txt".head();
 f"test:/a.txt".exists();
 
-f"test:/a.txt".put_if_not_exists("abc");
+LET $a = "abc";
+f"test:/a.txt".put_if_not_exists($a);
 f"test:/a.txt".get().?.to_string();
 
 f"test:/a.txt".put_if_not_exists("def");
