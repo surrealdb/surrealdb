@@ -71,12 +71,6 @@ impl ChannelWriter {
 	}
 }
 
-impl Drop for ChannelWriter {
-	fn drop(&mut self) {
-		const { assert!(false, "ChannelWriter can't be dropped") };
-	}
-}
-
 pub async fn export_v3(
 	tx: &Transaction,
 	cfg: &Config,
@@ -88,7 +82,7 @@ pub async fn export_v3(
 	let mut fmt_buffer = String::new();
 	let mut writer = ChannelWriter::new(chn);
 	writer.write_bytes(b"OPTION IMPORT;\n\n").await;
-	let mut path = String::new();
+	let mut path = vec![Value::from("ns"), Value::from(ns), Value::from("db"), Value::from(db)];
 
 	if cfg.users {
 		let users = tx.all_db_users(ns, db).await?;
@@ -190,7 +184,7 @@ async fn export_table_structure(
 	writer: &mut ChannelWriter,
 	fmt_buf: &mut String,
 	issue_buffer: &mut Vec<MigrationIssue>,
-	path: &mut String,
+	path: &mut Vec<Value>,
 	t: &DefineTableStatement,
 ) -> Result<(), Error> {
 	writer.write_bytes(b"-- ------------------------------\n").await;
@@ -236,7 +230,7 @@ async fn export_table_data(
 	writer: &mut ChannelWriter,
 	fmt_buf: &mut String,
 	issue_buffer: &mut Vec<MigrationIssue>,
-	path: &mut String,
+	path: &mut Vec<Value>,
 	t: &DefineTableStatement,
 ) -> Result<(), Error> {
 	writer.write_bytes(b"-- ------------------------------\n").await;
@@ -284,7 +278,7 @@ async fn export_versioned_data(
 	writer: &mut ChannelWriter,
 	fmt_buf: &mut String,
 	issue_buffer: &mut Vec<MigrationIssue>,
-	path: &mut String,
+	path: &mut Vec<Value>,
 ) -> Result<(), Error> {
 	let mut count = 0usize;
 
@@ -341,7 +335,7 @@ async fn export_data(
 	writer: &mut ChannelWriter,
 	fmt_buf: &mut String,
 	issue_buffer: &mut Vec<MigrationIssue>,
-	path: &mut String,
+	path: &mut Vec<Value>,
 ) -> Result<(), Error> {
 	let mut inserting_relation = None;
 
@@ -420,14 +414,14 @@ async fn write_fmt<F: FnOnce(&mut String) -> fmt::Result>(
 
 async fn write_visit<T: for<'a> Visit<MigratorPass<'a>>>(
 	issue_buffer: &mut Vec<MigrationIssue>,
-	path: &mut String,
+	path: &mut Vec<Value>,
 	buf: &mut String,
 	writer: &mut ChannelWriter,
 	t: &T,
 ) {
 	buf.clear();
 	{
-		let mut pass = MigratorPass::new(issue_buffer, path, buf, PassState::default());
+		let mut pass = MigratorPass::new(issue_buffer, buf, path, PassState::default());
 		let _ = t.visit_self(&mut pass);
 	}
 	writer.write_bytes(&buf.as_bytes()).await;

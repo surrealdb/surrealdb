@@ -48,7 +48,7 @@ impl Display for TableType {
 					}
 				}
 				if rel.enforced {
-					write!(f, "ENFORCED")?;
+					write!(f, " ENFORCED")?;
 				}
 			}
 			TableType::Any => {
