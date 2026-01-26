@@ -1727,7 +1727,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS HASHED_VECTOR"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
