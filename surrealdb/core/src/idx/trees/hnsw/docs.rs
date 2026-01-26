@@ -255,7 +255,7 @@ impl VecDocs {
 	}
 
 	/// Retrieves document IDs for a given vector using its hash.
-	async fn get_hashed_docs(
+	async fn get_docs_hashed(
 		&self,
 		tx: &Transaction,
 		ser_vec: SerializedVector,
@@ -275,7 +275,7 @@ impl VecDocs {
 	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
 		let ser_vec: SerializedVector = pt.into();
 		if self.use_hashed_vector {
-			return self.get_hashed_docs(tx, ser_vec).await;
+			return self.get_docs_hashed(tx, ser_vec).await;
 		}
 		// Otherwise we search in the structure
 		let key = self.ikb.new_hv_key(&ser_vec);
@@ -354,7 +354,7 @@ impl VecDocs {
 	}
 
 	/// Removes a vector and its associated document ID using its hash.
-	pub(super) async fn hashed_remove(
+	async fn remove_hashed(
 		&self,
 		tx: &Transaction,
 		ser_vec: SerializedVector,
@@ -362,14 +362,14 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
-		if let Some(mut ed) = tx.get(&key, None).await? {
-			match ed.remove(&ser_vec, d) {
+		if let Some(mut ehd) = tx.get(&key, None).await? {
+			match ehd.remove(&ser_vec, d) {
 				RemoveResult::Empty(deleted_element_id) => {
 					tx.del(&key).await?;
 					h.remove(tx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(deleted_element_id) => {
-					tx.set(&key, &ed, None).await?;
+					tx.set(&key, &ehd, None).await?;
 					if let Some(deleted_element_id) = deleted_element_id {
 						h.remove(tx, deleted_element_id).await?;
 					}
@@ -392,7 +392,7 @@ impl VecDocs {
 	) -> Result<()> {
 		let ser_vec = o.into();
 		if self.use_hashed_vector {
-			return self.hashed_remove(tx, ser_vec, d, h).await;
+			return self.remove_hashed(tx, ser_vec, d, h).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(mut ed) = tx.get(&key, None).await?
