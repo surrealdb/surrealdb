@@ -1102,7 +1102,7 @@ mod tests {
 			),
 			// - 17
 			(
-				// Ensure redirect fails
+				// Ensure FilteringResolver blocks localhost when 127.0.0.1 is denied
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -1114,7 +1114,7 @@ mod tests {
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				"Network target not allowed: 127.0.0.1".to_string(),
 			),
 			// 18 - Ensure redirect succeed
 			(

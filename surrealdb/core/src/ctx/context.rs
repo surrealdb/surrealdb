@@ -737,34 +737,22 @@ impl Context {
 	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
-		let match_any_deny_net = |t| {
-			if self.capabilities.matches_any_deny_net(t) {
-				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
-				bail!(Error::NetTargetNotAllowed(t.to_string()));
-			}
-			Ok(())
-		};
 		match url.host() {
 			Some(host) => {
 				let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
-				// Check the domain name (if any) matches the allow list
-				let host_allowed = self.capabilities.matches_any_allow_net(&target);
-				if !host_allowed {
+				// Check the domain name matches the allow list
+				if !self.capabilities.matches_any_allow_net(&target) {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
 					bail!(Error::NetTargetNotAllowed(target.to_string()));
 				}
 				// Check against the deny list
-				match_any_deny_net(&target)?;
-				// Resolve the domain name to a vector of IP addresses
-				#[cfg(not(target_family = "wasm"))]
-				let targets = target.resolve().await?;
-				#[cfg(target_family = "wasm")]
-				let targets = target.resolve()?;
-				for t in &targets {
-					// For each IP address resolved, check it is allowed
-					match_any_deny_net(t)?;
+				if self.capabilities.matches_any_deny_net(&target) {
+					warn!(
+						"Capabilities denied outgoing network connection attempt, target: '{target}'"
+					);
+					bail!(Error::NetTargetNotAllowed(target.to_string()));
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
 				Ok(())
@@ -857,17 +845,25 @@ mod tests {
 	#[cfg(feature = "http")]
 	#[tokio::test]
 	async fn test_context_check_allowed_net() {
+		// Test that domain name blocking works at the check_allowed_net level
 		let cap = Capabilities::all().without_network_targets(Targets::Some(
-			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
+			[NetTarget::from_str("blocked.example.com").unwrap()].into(),
 		));
 		let mut ctx = Context::background();
 		ctx.capabilities = cap.into();
 		let ctx = ctx.freeze();
-		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
+
+		// Should block the denied domain
+		let r = ctx.check_allowed_net(&Url::parse("http://blocked.example.com").unwrap()).await;
+		assert!(r.is_err());
 		assert_eq!(
 			r.err().unwrap().to_string(),
-			"Access to network target '127.0.0.1/32' is not allowed"
+			"Access to network target 'blocked.example.com' is not allowed"
 		);
+
+		// Should allow other domains
+		let r = ctx.check_allowed_net(&Url::parse("http://allowed.example.com").unwrap()).await;
+		assert!(r.is_ok());
 	}
 
 	#[tokio::test]

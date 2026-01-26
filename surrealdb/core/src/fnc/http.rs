@@ -163,21 +163,43 @@ pub mod resolver {
 			let cap = self.cap.clone();
 			let name_str = name.as_str().to_string();
 			Box::pin(async move {
-				// Check the domain name (if any) matches the allowlist
+				// Check the domain name matches the allowlist
 				let name_target = NetTarget::from_str(&name_str)
 					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
 				let name_is_allowed = cap.matches_any_allow_net(&name_target)
 					&& !cap.matches_any_deny_net(&name_target);
+
+				if !name_is_allowed {
+					return Err(Box::new(std::io::Error::new(
+						std::io::ErrorKind::PermissionDenied,
+						format!("Network target not allowed: {name_str}"),
+					)) as Box<dyn Error + Send + Sync>);
+				}
+
 				// Resolve the addresses
-				let addrs = lookup_host((name_str, 0_u16))
+				let addrs: Vec<_> = lookup_host((name_str.clone(), 0_u16))
 					.await
-					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
-				// Build an iterator checking the addresses
-				let iterator = Box::new(addrs.filter(move |addr| {
+					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?
+					.collect();
+
+				// Check each resolved IP against deny list
+				let mut allowed_addrs = Vec::new();
+				for addr in addrs {
 					let target = IpNet::new_assert(addr.ip(), 0);
-					name_is_allowed && !cap.matches_any_deny_net(&NetTarget::IPNet(target))
-				}));
-				Ok(iterator as Addrs)
+					if cap.matches_any_deny_net(&NetTarget::IPNet(target)) {
+						return Err(Box::new(std::io::Error::new(
+							std::io::ErrorKind::PermissionDenied,
+							format!(
+								"Network target not allowed: {} (resolved from {})",
+								addr.ip(),
+								name_str
+							),
+						)) as Box<dyn Error + Send + Sync>);
+					}
+					allowed_addrs.push(addr);
+				}
+
+				Ok(Box::new(allowed_addrs.into_iter()) as Addrs)
 			}) as Resolving
 		}
 	}
