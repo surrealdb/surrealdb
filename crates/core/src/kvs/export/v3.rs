@@ -290,7 +290,7 @@ async fn export_versioned_data(
 		let v = if v.is_empty() {
 			Value::None
 		} else {
-			revision::from_slice(&v)?
+			revision::from_slice(v)?
 		};
 
 		let ts = Utc.timestamp_nanos(*version as i64);
@@ -343,7 +343,7 @@ async fn export_data(
 		let v = if v.is_empty() {
 			Value::None
 		} else {
-			revision::from_slice(&v)?
+			revision::from_slice(v)?
 		};
 
 		if is_edge(&v) {
@@ -424,7 +424,7 @@ async fn write_visit<T: for<'a> Visit<MigratorPass<'a>>>(
 		let mut pass = MigratorPass::new(issue_buffer, buf, path, PassState::default());
 		let _ = t.visit_self(&mut pass);
 	}
-	writer.write_bytes(&buf.as_bytes()).await;
+	writer.write_bytes(buf.as_bytes()).await;
 }
 
 async fn export_section_header(title: &str, writer: &mut ChannelWriter, fmt_buffer: &mut String) {
