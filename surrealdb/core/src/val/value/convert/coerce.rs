@@ -253,20 +253,17 @@ impl Coerce for Decimal {
 
 impl Coerce for File {
 	fn can_coerce(v: &Value) -> bool {
-		matches!(v, Value::File(_) | Value::String(_))
+		matches!(v, Value::File(_))
 	}
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		match v {
-			Value::File(x) => Ok(x),
-			Value::String(path) => {
-				let file = File::new("".to_string(), path);
-				Ok(file)
-			}
-			_ => Err(CoerceError::InvalidKind {
+		if let Value::File(x) = v {
+			Ok(x)
+		} else {
+			Err(CoerceError::InvalidKind {
 				from: v,
 				into: "file".to_string(),
-			}),
+			})
 		}
 	}
 }
