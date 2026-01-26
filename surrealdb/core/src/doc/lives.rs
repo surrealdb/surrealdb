@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -292,7 +293,7 @@ impl Document {
 
 		// Process any potential `FETCH` clause on the live statement
 		if let Some(fetchs) = live_subscription.fetch {
-			let mut idioms = Vec::with_capacity(fetchs.len());
+			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
 				fetch.compute(stk, &ctx, &opt, &mut idioms).await?;
 			}

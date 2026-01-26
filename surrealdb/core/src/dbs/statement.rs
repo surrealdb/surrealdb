@@ -429,6 +429,17 @@ impl Statement<'_> {
 		}
 	}
 
+	/// Returns any OMIT fields if specified
+	pub(crate) fn omit(&self) -> &[Idiom] {
+		match self {
+			Statement::Select {
+				omit,
+				..
+			} => omit.as_slice(),
+			_ => &[],
+		}
+	}
+
 	pub(crate) fn is_only(&self) -> bool {
 		match self {
 			Statement::Create(v) => v.only,

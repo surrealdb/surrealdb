@@ -82,7 +82,6 @@ static SOURCE: &str = r#"
 	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a
 		WITH INDEX index,index_2
 		WHERE true
-		SPLIT ON foo,bar
 		GROUP foo,bar
 		ORDER BY foo COLLATE NUMERIC ASC
 		START AT { a: true }
@@ -90,6 +89,7 @@ static SOURCE: &str = r#"
 		FETCH foo
 		VERSION d"2012-04-23T18:25:43.0000511Z"
 		EXPLAIN FULL;
+	SELECT foo,bar FROM a SPLIT ON foo,bar;
 	LET $param = 1;
 	SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10;
 	SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z";
@@ -473,10 +473,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			what: vec![Expr::Table("a".to_owned())],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
-			split: Some(Splits(vec![
-				Split(Idiom(vec![Part::Field("foo".to_owned())])),
-				Split(Idiom(vec![Part::Field("bar".to_owned())])),
-			])),
+			split: None,
 			group: Some(Groups(vec![
 				Group(Idiom(vec![Part::Field("foo".to_owned())])),
 				Group(Idiom(vec![Part::Field("bar".to_owned())])),
@@ -500,6 +497,36 @@ fn statements() -> Vec<TopLevelExpr> {
 			timeout: Expr::Literal(Literal::None),
 			tempfiles: false,
 			explain: Some(Explain(true)),
+		}))),
+		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
+			fields: Fields::Select(vec![
+				Field::Single(Selector {
+					expr: ident_field("foo"),
+					alias: None,
+				}),
+				Field::Single(Selector {
+					expr: ident_field("bar"),
+					alias: None,
+				}),
+			]),
+			omit: vec![],
+			only: false,
+			what: vec![Expr::Table("a".to_owned())],
+			with: None,
+			cond: None,
+			split: Some(Splits(vec![
+				Split(Idiom(vec![Part::Field("foo".to_owned())])),
+				Split(Idiom(vec![Part::Field("bar".to_owned())])),
+			])),
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			tempfiles: false,
+			explain: None,
 		}))),
 		TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
 			name: "param".to_owned(),
@@ -581,7 +608,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				timeout: Expr::Literal(Literal::None),
 				version: Expr::Literal(Literal::None),
 			})),
-			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),
 				operator: AssignOperator::Add,

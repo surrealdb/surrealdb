@@ -11,7 +11,7 @@ use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
 use crate::expr::{FlowResultExt as _, Idiom, Operation, SelectStatement};
-use crate::iam::Action;
+use crate::iam::{Action, AuthLimit};
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -155,12 +155,14 @@ impl Document {
 
 				// Loop through all field statements
 				for fd in table_fields.iter() {
+					// Limit auth
+					let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
 						match &fd.select_permission {
 							catalog::Permission::Full => (),
-							catalog::Permission::None => out.del(stk, ctx, opt, k).await?,
+							catalog::Permission::None => out.del(stk, ctx, &opt, k).await?,
 							catalog::Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
@@ -271,8 +273,11 @@ impl Document {
 		}
 
 		// Remove any omitted fields from output
-		for field in omit {
-			out.del(stk, ctx, opt, field).await?;
+		// But skip this if we have a GROUP BY clause, as OMIT will be applied after aggregation
+		if stmt.group.is_none() {
+			for field in omit {
+				out.del(stk, ctx, opt, field).await?;
+			}
 		}
 		// Output result
 		Ok(out)

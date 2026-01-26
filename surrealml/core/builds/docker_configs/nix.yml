@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  nix_surrealml_core:
+    build:
+      context: .
+      dockerfile: builds/Dockerfile.nix
+    restart: unless-stopped
+    command: tail -f /dev/null
+    environment:
+      TEST: test_env
+    ports:
+      - "8001:8001"

@@ -690,8 +690,10 @@ impl Parser<'_> {
 
 				let cond = self.try_parse_condition(stk).await?;
 				let (split, group, order) = if let Some((ref expr, fields_span)) = expr {
+					let split_before = self.peek().span;
 					let split = self.try_parse_split(expr, fields_span)?;
-					let group = self.try_parse_group(expr, fields_span)?;
+					let split_span = split.as_ref().map(|_| split_before.covers(self.last_span()));
+					let group = self.try_parse_group(expr, fields_span, split_span)?;
 					let order = self.try_parse_orders(expr, fields_span)?;
 					(split, group, order)
 				} else {

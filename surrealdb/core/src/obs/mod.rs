@@ -9,7 +9,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use object_store::path::Path;
-use object_store::{ObjectStore, parse_url};
+use object_store::{ObjectStore, ObjectStoreExt, parse_url};
 use sha1::{Digest, Sha1};
 use url::Url;
 

@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -141,12 +143,79 @@ impl Part {
 			_ => self.to_sql(),
 		}
 	}
+
+	// Helper function to get a numeric discriminant for ordering
+	fn discriminant_value(&self) -> u8 {
+		match self {
+			Part::Field(_) => 0,
+			Part::All => 1,
+			Part::Flatten => 2,
+			Part::Last => 3,
+			Part::First => 4,
+			Part::Where(_) => 5,
+			Part::Lookup(_) => 6,
+			Part::Value(_) => 7,
+			Part::Start(_) => 8,
+			Part::Method(_, _) => 9,
+			Part::Destructure(_) => 10,
+			Part::Optional => 11,
+			Part::Recurse(_, _, _) => 12,
+			Part::Doc => 13,
+			Part::RepeatRecurse => 14,
+		}
+	}
 }
 
 impl ToSql for Part {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let part: crate::sql::part::Part = self.clone().into();
 		part.fmt_sql(f, fmt);
+	}
+}
+
+impl PartialOrd for Part {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		let self_disc = self.discriminant_value();
+		let other_disc = other.discriminant_value();
+
+		match self_disc.cmp(&other_disc) {
+			Ordering::Equal => {
+				// Same variant, compare by content
+				match (self, other) {
+					(Part::Field(a), Part::Field(b)) => a.partial_cmp(b),
+					(Part::Method(name_a, args_a), Part::Method(name_b, args_b)) => {
+						// Compare method name first, then argument count
+						match name_a.partial_cmp(name_b) {
+							Some(Ordering::Equal) => args_a.len().partial_cmp(&args_b.len()),
+							other => other,
+						}
+					}
+					// For variants without meaningful internal ordering, consider them equal
+					// when they're the same variant (All, Flatten, Last, First, Optional, Doc,
+					// RepeatRecurse)
+					(Part::All, Part::All)
+					| (Part::Flatten, Part::Flatten)
+					| (Part::Last, Part::Last)
+					| (Part::First, Part::First)
+					| (Part::Optional, Part::Optional)
+					| (Part::Doc, Part::Doc)
+					| (Part::RepeatRecurse, Part::RepeatRecurse) => Some(Ordering::Equal),
+					// For complex variants (Where, Lookup, Value, Start, Destructure, Recurse),
+					// we can't easily compare their contents, so consider them equal when same
+					// variant This is acceptable for FETCH clause sorting since these are
+					// rarely used
+					(Part::Where(_), Part::Where(_))
+					| (Part::Lookup(_), Part::Lookup(_))
+					| (Part::Value(_), Part::Value(_))
+					| (Part::Start(_), Part::Start(_))
+					| (Part::Destructure(_), Part::Destructure(_))
+					| (Part::Recurse(_, _, _), Part::Recurse(_, _, _)) => Some(Ordering::Equal),
+
+					_ => None,
+				}
+			}
+			ordering => Some(ordering),
+		}
 	}
 }
 
