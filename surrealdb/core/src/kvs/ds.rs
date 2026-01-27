@@ -2012,7 +2012,7 @@ impl Datastore {
 				Some(Error::ClAlreadyExists {
 					..
 				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
+				Some(Error::ApiAlreadyExists {
 					..
 				}) => DbResultError::InternalError("API already exists".to_string()),
 				Some(Error::AzAlreadyExists {

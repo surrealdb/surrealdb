@@ -745,8 +745,15 @@ pub(crate) enum Error {
 
 	/// The requested api already exists
 	#[error("The api '/{value}' already exists")]
-	ApAlreadyExists {
+	ApiAlreadyExists {
 		value: String,
+	},
+
+	/// An api action with a duplicate method was defined
+	#[error("The api '{path}' already has an action defined for the {method} method")]
+	ApiDuplicateMethod {
+		path: String,
+		method: String,
 	},
 
 	/// The requested analyzer already exists

@@ -70,8 +70,8 @@ pub async fn process_api_request_with_stack(
 	api: &ApiDefinition,
 	req: ApiRequest,
 ) -> Result<Option<ApiResponse>> {
-	// TODO: Figure out if it is possible if multiple actions can have the same
-	// method, and if so should they all be run?
+	// Find the action for the requested method. Validation ensures only one action
+	// per method exists, so .find() will return at most one match.
 	let method_action = api.actions.iter().find(|x| x.methods.contains(&req.method));
 
 	let (action_expr, method_config) = match (method_action, &api.fallback) {

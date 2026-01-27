@@ -131,5 +131,5 @@ chat:general<~(SELECT author, count() AS count FROM message FIELD chat GROUP BY 
 -- 17
 chat:general<~(SELECT id, priority FROM message FIELD chat WHERE priority IN [1, 3] ORDER BY priority DESC LIMIT 2);
 
--- TODO alias on lookups seem to be useless...
+-- TODO(3.0): alias on lookups seem to be useless...
 -- user:alice<~(message FIELD author AS chat_messages);

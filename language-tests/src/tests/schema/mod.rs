@@ -48,10 +48,7 @@ impl TestConfig {
 
 	/// Returns if this test must be run without other test running.
 	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(
-			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false,
-		)
+		self.env.as_ref().map(|x| x.sequential).unwrap_or(false)
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
