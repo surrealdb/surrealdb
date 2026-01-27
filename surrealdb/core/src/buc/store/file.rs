@@ -369,8 +369,7 @@ impl ObjectStore for FileStore {
 
 			// Check if the source file exists
 			if !Self::path_exists(&source_key).await? {
-				// Silently ignore operations on non-existent source files
-				return Ok(());
+				return Err(format!("Source key does not exist: {}", source_key.display()));
 			}
 
 			Self::ensure_parent_dirs(&target_key).await?;
