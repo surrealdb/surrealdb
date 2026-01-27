@@ -259,7 +259,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.keys(rng, limit).await?;
+		let res = inner.keys(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
@@ -278,7 +278,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.keysr(rng, limit).await?;
+		let res = inner.keysr(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
@@ -302,7 +302,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.scan(rng, limit).await?;
+		let res = inner.scan(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
@@ -326,7 +326,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.scanr(rng, limit).await?;
+		let res = inner.scanr(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
