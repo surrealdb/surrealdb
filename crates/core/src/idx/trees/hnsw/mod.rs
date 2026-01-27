@@ -121,7 +121,7 @@ where
 			self.layers.push(l);
 		}
 		// Remove non-existing layers
-		for _ in self.layers.len()..st.layers.len() {
+		while self.layers.len() > st.layers.len() {
 			self.layers.pop();
 		}
 		// Set the enter_point
