@@ -6,8 +6,10 @@ mod ml_integration {
 
 	use std::time::Duration;
 
+	use hex;
 	use http::{StatusCode, header};
 	use serde::{Deserialize, Serialize};
+	use sha1::{Digest, Sha1};
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -245,6 +247,58 @@ mod ml_integration {
 			let deserialized_data: Vec<Data> = serde_json::from_str(&body)?;
 			assert_eq!(deserialized_data[0].result[0], 177206.21875);
 		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn remove_model_deletes_file() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// Upload a model file
+		upload_file(&addr, &ns, &db).await?;
+
+		// Calculate the expected file path
+		let model_data = std::fs::read("./tests/linear_test.surml")?;
+		let hash = {
+			let mut hasher = Sha1::new();
+			hasher.update(&model_data);
+			let result = hasher.finalize();
+			let mut output = hex::encode(result);
+			output.truncate(6);
+			output
+		};
+		let file_path = format!("store/ml/{}/{}/Prediction-0.0.1-{}.surml", ns, db, hash);
+
+		// Verify the file exists
+		assert!(std::path::Path::new(&file_path).exists(), "Model file should exist after upload");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Remove the model via SQL
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(common::USER, Some(common::PASS))
+			.body(r#"REMOVE MODEL ml::Prediction<0.0.1>;"#)
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+		// Verify the file no longer exists
+		assert!(
+			!std::path::Path::new(&file_path).exists(),
+			"Model file should be deleted after REMOVE MODEL"
+		);
+
 		Ok(())
 	}
 }

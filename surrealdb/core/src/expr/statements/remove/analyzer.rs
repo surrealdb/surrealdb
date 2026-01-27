@@ -1,7 +1,8 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::Index;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -52,6 +53,34 @@ impl RemoveAnalyzerStatement {
 				}
 			}
 		};
+		// Check if the analyzer is used by any full-text indexes
+		let tables = txn.all_tb(ns, db, None).await?;
+		let mut indexes_using_analyzer = Vec::new();
+
+		for table in tables.iter() {
+			let indexes = txn.all_tb_indexes(ns, db, &table.name).await?;
+			for index in indexes.iter() {
+				if let Index::FullText(params) = &index.index
+					&& params.analyzer == az.name
+				{
+					indexes_using_analyzer.push((table.name.clone(), index.name.clone()));
+				}
+			}
+		}
+
+		if !indexes_using_analyzer.is_empty() {
+			let mut message =
+				format!("Cannot delete analyzer `{}` which is used by index(es) ", az.name);
+			for (idx, (table, index)) in indexes_using_analyzer.iter().enumerate() {
+				if idx != 0 {
+					message.push_str(", ");
+				}
+				message.push_str(&format!("`{}.{}`", table, index));
+			}
+			bail!(Error::Query {
+				message
+			});
+		}
 		// Delete the definition
 		let key = crate::key::database::az::new(ns, db, &az.name);
 		txn.del(&key).await?;
@@ -60,7 +89,6 @@ impl RemoveAnalyzerStatement {
 		// Cleanup in-memory mappers if not used anymore
 		let azs = txn.all_db_analyzers(ns, db).await?;
 		ctx.get_index_stores().mappers().cleanup(&azs);
-		// TODO Check that the analyzer is not used in any schema
 		// Ok all good
 		Ok(Value::None)
 	}

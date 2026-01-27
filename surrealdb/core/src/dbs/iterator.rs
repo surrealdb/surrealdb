@@ -208,7 +208,7 @@ impl Iterator {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 			}
 			Expr::Idiom(x) => {
-				// TODO: This needs to be structured better.
+				// TODO(3.0): This needs to be structured better.
 				// match against what previously would be an edge.
 				if x.len() != 2 {
 					return self
@@ -237,8 +237,8 @@ impl Iterator {
 					&& lookup.start.is_none()
 					&& lookup.expr.is_none()
 				{
-					// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
-					// right type?
+					// TODO(3.0): Do we support `RETURN a:b` here? What do we do when it is not of
+					// the right type?
 					let from = match from.compute(stk, ctx, opt, doc).await {
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
@@ -607,6 +607,7 @@ impl Iterator {
 					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 				}
 				Expr::Idiom(x) => {
+					// TODO(3.0): This needs to be structured better.
 					// match against what previously would be an edge.
 					if x.len() != 2 {
 						return self
@@ -635,8 +636,8 @@ impl Iterator {
 						&& lookup.start.is_none()
 						&& lookup.expr.is_none()
 					{
-						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
-						// the right type?
+						// TODO(3.0): Do we support `RETURN a:b` here? What do we do when it is not
+						// of the right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
