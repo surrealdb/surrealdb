@@ -119,6 +119,7 @@ keyword! {
 	Issuer => "ISSUER",
 	Jwt => "JWT",
 	Jwks => "JWKS",
+	HashedVector => "HASHED_VECTOR",
 	Key => "KEY",
 	KeepPrunedConnections => "KEEP_PRUNED_CONNECTIONS",
 	Kill => "KILL",

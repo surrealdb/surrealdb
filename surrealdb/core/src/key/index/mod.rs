@@ -17,6 +17,7 @@ pub mod dc;
 pub mod dl;
 pub mod hd;
 pub mod he;
+pub mod hh;
 pub mod hi;
 pub mod hl;
 pub mod hs;
