@@ -137,7 +137,6 @@ impl Record {
 #[derive(Clone, Debug)]
 pub(crate) enum Data {
 	/// Mutable data that can be directly modified
-	// TODO (DB-655): Switch to `Object`.
 	Mutable(Value),
 	/// Read-only data wrapped in an Arc for shared access
 	ReadOnly(Arc<Value>),

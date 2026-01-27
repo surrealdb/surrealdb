@@ -99,10 +99,10 @@ pub(crate) enum Operable {
 	/// Record is the record we're operating on (eg. )
 	/// Second argument is `ON DUPLICATE KEY` value.
 	Insert(Arc<Record>, Arc<Value>),
-	/// 1. RecordId
-	/// 2. Record
-	/// 3. Relation RecordId
-	/// 4. For update operations if it doesn't exist (TODO: This may be true, maybe not)
+	/// 1. From RecordId
+	/// 2. Relation Record
+	/// 3. To RecordId
+	/// 4. Data for INSERT RELATION statements (None for regular RELATE)
 	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
 
 	Count(usize),

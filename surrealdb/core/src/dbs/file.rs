@@ -117,10 +117,16 @@ impl FileCollector {
 
 					// Then handle the remaining values as they might need to be part of the random
 					// sampling.
+					//
 					// This implementation is taken from the IteratorRandom::choose_multiple. It is
 					// emperically tested to produce n values uniformly sampled from the iterator.
-					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a
-					// uniform sampling.
+					//
+					// This is Reservoir Sampling: each new item has a num/(current_position) chance
+					// of replacing a random reservoir slot. By mathematical induction, this
+					// guarantees every item in the stream has exactly num/total probability of
+					// being selected, producing uniform sampling.
+					//
+					// See: https://en.wikipedia.org/wiki/Reservoir_sampling
 					for (i, v) in iter.enumerate() {
 						let v = v?;
 						// pick an index to insert the value in, swapping existing values if it is

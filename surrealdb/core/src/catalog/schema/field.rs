@@ -22,7 +22,7 @@ pub(crate) enum DefineDefault {
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FieldDefinition {
-	// TODO: Needs to be it's own type.
+	// TODO(3.0): Should probably be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.
 	pub(crate) name: Idiom,
 	pub(crate) table: TableName,
