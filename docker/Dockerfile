@@ -11,6 +11,8 @@ RUN dnf install -y \
     git \
     cmake \
     llvm \
+    clang \
+    clang-devel \
     patch \
     zlib-devel \
     python3 \
