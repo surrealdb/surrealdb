@@ -4,8 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
-use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
-use crate::sql::{Expr, Literal, Lookup, Part};
+use crate::sql::{Expr, Literal, Part};
 
 // TODO: Remove unnecessary newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
