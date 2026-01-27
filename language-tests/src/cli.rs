@@ -1,9 +1,8 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use clap::builder::{EnumValueParser, PossibleValue};
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use semver::Version;
+use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
