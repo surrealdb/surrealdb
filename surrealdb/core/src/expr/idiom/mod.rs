@@ -19,43 +19,6 @@ use crate::fmt::EscapeKwFreeIdent;
 
 pub mod recursion;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-#[allow(dead_code)]
-pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
-
-impl Deref for Idioms {
-	type Target = Vec<Idiom>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl IntoIterator for Idioms {
-	type Item = Idiom;
-	type IntoIter = std::vec::IntoIter<Self::Item>;
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
-	}
-}
-
-impl PartialOrd for Idioms {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for Idioms {
-	fn cmp(&self, other: &Self) -> Ordering {
-		for (a, b) in self.0.iter().zip(other.0.iter()) {
-			let o = a.cmp(b);
-			if o != Ordering::Equal {
-				return o;
-			}
-		}
-		Ordering::Equal
-	}
-}
-
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
@@ -72,13 +35,28 @@ impl Idiom {
 		self
 	}
 	/// Simplifies this Idiom for use in object keys
+	/// Simplifies this Idiom for use in object keys.
+	/// Keeps only leading Part::Value (formerly Start) and then only Field/Lookup parts after.
 	pub(crate) fn simplify(&self) -> Idiom {
-		self.0
-			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Value(_) | Part::Lookup(_)))
-			.cloned()
-			.collect::<Vec<_>>()
-			.into()
+		let mut iter = self.0.iter().peekable();
+		let mut simplified = Vec::new();
+
+		// Retain a single leading Part::Value, if present.
+		if let Some(Part::Value(_)) = iter.peek()
+			&& let Some(p) = iter.next()
+		{
+			simplified.push(p.clone());
+		}
+
+		// Retain only Field/Lookup parts after an initial Value.
+		for p in iter {
+			match p {
+				Part::Field(_) | Part::Lookup(_) => simplified.push(p.clone()),
+				_ => {}
+			}
+		}
+
+		Idiom(simplified)
 	}
 	/// Check if this Idiom is an 'id' field
 	pub(crate) fn is_id(&self) -> bool {

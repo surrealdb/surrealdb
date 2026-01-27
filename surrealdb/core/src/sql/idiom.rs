@@ -1,48 +1,7 @@
-use std::ops::Deref;
+use surrealdb_types::write_sql;
 
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
-
-use crate::expr::idiom::Idioms as ExprIdioms;
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Literal, Part};
-
-// TODO: Remove unnecessary newtype.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[allow(dead_code)]
-pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
-
-impl Deref for Idioms {
-	type Target = Vec<Idiom>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl IntoIterator for Idioms {
-	type Item = Idiom;
-	type IntoIter = std::vec::IntoIter<Self::Item>;
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
-	}
-}
-
-impl ToSql for Idioms {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
-	}
-}
-
-impl From<Idioms> for ExprIdioms {
-	fn from(v: Idioms) -> Self {
-		ExprIdioms(v.0.into_iter().map(Into::into).collect())
-	}
-}
-impl From<ExprIdioms> for Idioms {
-	fn from(v: ExprIdioms) -> Self {
-		Idioms(v.0.into_iter().map(Into::into).collect())
-	}
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
