@@ -79,7 +79,7 @@ impl FileCollector {
 		self.len
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<u64>, limit: Option<u32>) {
 		self.paging.start = start;
 		self.paging.limit = limit;
 	}
@@ -87,7 +87,7 @@ impl FileCollector {
 	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.check_reader()?;
 		if let Some(mut reader) = self.reader.take()
-			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u32)
+			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u64)
 		{
 			if let Some(orders) = self.orders.take() {
 				return self.sort_and_take_vec(reader, orders, start, num).await;
@@ -101,7 +101,7 @@ impl FileCollector {
 		&mut self,
 		reader: FileReader,
 		orders: Ordering,
-		start: u32,
+		start: u64,
 		num: u32,
 	) -> Result<Vec<Value>, Error> {
 		match orders {
@@ -274,7 +274,7 @@ impl FileReader {
 		Ok(u)
 	}
 
-	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, Error> {
+	fn take_vec(&mut self, start: u64, num: u32) -> Result<Vec<Value>, Error> {
 		let mut iter = FileRecordsIterator::new(self.records.clone(), self.len);
 		if start > 0 {
 			// Get the start offset of the first record
@@ -380,21 +380,22 @@ impl ExactSizeIterator for FileRecordsIterator {
 
 #[derive(Default)]
 struct FilePaging {
-	start: Option<u32>,
+	start: Option<u64>,
 	limit: Option<u32>,
 }
 
 impl FilePaging {
-	fn get_start_num(&self, len: u32) -> Option<(u32, u32)> {
+	fn get_start_num(&self, len: u64) -> Option<(u64, u32)> {
 		let start = self.start.unwrap_or(0);
 		if start >= len {
 			return None;
 		}
 		let max = len - start;
+		// Clamp to u32::MAX instead of truncating to prevent silent overflow
 		let num = if let Some(limit) = self.limit {
-			limit.min(max)
+			limit.min(max.min(u32::MAX as u64) as u32)
 		} else {
-			max
+			max.min(u32::MAX as u64) as u32
 		};
 		Some((start, num))
 	}
@@ -437,5 +438,63 @@ impl Iterator for ValueExternalChunk {
 				Err(err) => Some(Err(err)),
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_get_start_num_clamps_to_u32_max() {
+		let paging = FilePaging {
+			start: Some(0),
+			limit: None,
+		};
+
+		// Test with len that would overflow u32
+		let large_len = 10_000_000_000u64; // 10 billion
+		let result = paging.get_start_num(large_len);
+		assert_eq!(result, Some((0, u32::MAX)));
+
+		// Test with start that leaves more than u32::MAX remaining
+		let paging_with_start = FilePaging {
+			start: Some(5_000_000_000),
+			limit: None,
+		};
+		let result = paging_with_start.get_start_num(large_len);
+		assert_eq!(result, Some((5_000_000_000, u32::MAX)));
+
+		// Test normal case within u32 range
+		let paging_normal = FilePaging {
+			start: Some(100),
+			limit: None,
+		};
+		let result = paging_normal.get_start_num(1000);
+		assert_eq!(result, Some((100, 900)));
+
+		// Test with explicit limit
+		let paging_with_limit = FilePaging {
+			start: Some(0),
+			limit: Some(50),
+		};
+		let result = paging_with_limit.get_start_num(large_len);
+		assert_eq!(result, Some((0, 50)));
+
+		// Test limit respects u32::MAX clamp
+		let paging_limit_and_large = FilePaging {
+			start: Some(0),
+			limit: Some(1000),
+		};
+		let result = paging_limit_and_large.get_start_num(large_len);
+		assert_eq!(result, Some((0, 1000)));
+
+		// Test start >= len returns None
+		let paging_beyond = FilePaging {
+			start: Some(1000),
+			limit: None,
+		};
+		let result = paging_beyond.get_start_num(500);
+		assert_eq!(result, None);
 	}
 }

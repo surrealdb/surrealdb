@@ -104,7 +104,9 @@ pub(crate) enum Error {
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
-	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
+	#[error(
+		"Found {value} but the LIMIT clause must evaluate to an integer between 0 and u32::MAX"
+	)]
 	InvalidLimit {
 		value: String,
 	},

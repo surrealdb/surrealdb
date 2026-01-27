@@ -68,6 +68,7 @@ pub struct ListOptions {
 
 impl TryFrom<Object> for ListOptions {
 	type Error = Error;
+
 	fn try_from(mut obj: Object) -> Result<Self, Self::Error> {
 		let mut opts = ListOptions::default();
 
@@ -80,8 +81,13 @@ impl TryFrom<Object> for ListOptions {
 		}
 
 		if let Some(limit) = obj.remove("limit") {
-			// TODO: Fix negative truncation.
-			opts.limit = Some(limit.coerce_to::<i64>()? as usize);
+			let n = limit.coerce_to::<i64>()?;
+			if n < 0 || n > u32::MAX as i64 {
+				return Err(Error::InvalidLimit {
+					value: n.to_string(),
+				});
+			}
+			opts.limit = Some(n as usize);
 		}
 
 		Ok(opts)

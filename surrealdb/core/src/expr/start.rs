@@ -20,18 +20,10 @@ impl Start {
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<u32> {
+	) -> Result<u64> {
 		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return() {
 			// This is a valid starting number
-			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
-				if v > u32::MAX as i64 {
-					Err(anyhow::Error::new(Error::InvalidStart {
-						value: v.to_string(),
-					}))
-				} else {
-					Ok(v as u32)
-				}
-			}
+			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as u64),
 			// An invalid value was specified
 			Ok(v) => Err(anyhow::Error::new(Error::InvalidStart {
 				value: v.into_raw_string(),

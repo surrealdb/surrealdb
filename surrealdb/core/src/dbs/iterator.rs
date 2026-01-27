@@ -140,7 +140,7 @@ pub(crate) struct Iterator {
 	/// Iterator limit value
 	limit: Option<u32>,
 	/// Iterator start value
-	start: Option<u32>,
+	start: Option<u64>,
 	/// Counter of remaining documents that can be skipped processing
 	start_skip: Option<usize>,
 	/// Iterator runtime error
@@ -947,7 +947,7 @@ impl Iterator {
 				// START cannot be applied by the storage iterator. We must accumulate
 				// enough accepted results to later drop `start` of them during
 				// post-processing and still return `limit` items. Hence `start + limit`.
-				self.cancel_threshold = Some((l + self.start.unwrap_or(0)) as usize);
+				self.cancel_threshold = Some((l as u64 + self.start.unwrap_or(0)) as usize);
 			}
 		}
 	}
@@ -1048,8 +1048,8 @@ impl Iterator {
 					Ordering::Order(orders) => {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
-							let effective_limit = self.start.unwrap_or(0) + limit;
-							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+							let effective_limit = self.start.unwrap_or(0) + limit as u64;
+							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as u64 {
 								let mut res = MemoryOrderedLimit::new(
 									effective_limit as usize,
 									orders.clone(),
