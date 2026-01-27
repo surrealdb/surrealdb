@@ -1,3 +1,11 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::UNIX_EPOCH;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+
 use crate::catalog::EventDefinition;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
@@ -6,11 +14,6 @@ use crate::expr::FlowResultExt as _;
 use crate::iam::AuthLimit;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
-use anyhow::Result;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use std::sync::Arc;
-use std::time::UNIX_EPOCH;
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -92,7 +95,7 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let event_context = EventContext {
+			let async_event_record = AsyncEventRecord {
 				attempt: 0,
 				event: evt.into(),
 				doc: doc.doc.as_arc(),
@@ -100,7 +103,7 @@ impl Document {
 				before,
 				input: input.clone().unwrap_or_default(),
 			};
-			let ctx = event_context.build_event_context(ctx);
+			let ctx = async_event_record.build_event_context(ctx);
 			// Process conditional clause
 			let val = stk
 				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
@@ -110,7 +113,7 @@ impl Document {
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				if ev.asynchronous {
-					Self::process_async(ctx, opt, event_context, ev, &self.doc_ctx).await?;
+					Self::process_async(ctx, opt, async_event_record, ev, &self.doc_ctx).await?;
 				} else {
 					Self::process_sync(stk, ctx, opt, ev, doc).await?;
 				}
@@ -123,14 +126,14 @@ impl Document {
 	async fn process_async(
 		ctx: FrozenContext,
 		opt: Options,
-		evt_ctx: EventContext,
+		event_record: AsyncEventRecord,
 		ev: &EventDefinition,
 		doc_ctx: &DocumentContext,
 	) -> Result<()> {
+		let event_id = ctx.try_get_event_manager()?.get_next_event_id()?;
 		let node_id = opt.id();
 		let dur = UNIX_EPOCH.elapsed()?;
 		let ts_id = dur.as_secs() * 1_000_000 + u64::from(dur.subsec_micros());
-		let event_id = ctx.get_next_event_id()?;
 		let db = doc_ctx.db();
 		let tx = ctx.tx();
 		let key = crate::key::table::eq::Eq::new(
@@ -142,7 +145,7 @@ impl Document {
 			event_id,
 			node_id,
 		);
-		tx.put(&key, &evt_ctx, None).await?;
+		tx.put(&key, &event_record, None).await?;
 		Ok(())
 	}
 
@@ -164,7 +167,7 @@ impl Document {
 }
 
 #[revisioned(revision = 1)]
-pub(crate) struct EventContext {
+pub(crate) struct AsyncEventRecord {
 	attempt: u16,
 	event: Arc<Value>,
 	doc: Arc<Value>,
@@ -173,9 +176,9 @@ pub(crate) struct EventContext {
 	input: Arc<Value>,
 }
 
-impl_kv_value_revisioned!(EventContext);
+impl_kv_value_revisioned!(AsyncEventRecord);
 
-impl EventContext {
+impl AsyncEventRecord {
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
 		let mut ctx = Context::new(ctx);
 		ctx.add_value("event", self.event.clone());
@@ -184,5 +187,16 @@ impl EventContext {
 		ctx.add_value("before", self.before.clone());
 		ctx.add_value("input", self.input.clone());
 		ctx.freeze()
+	}
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct EventManager {
+	event_id_sequence: Arc<AtomicU64>,
+}
+
+impl EventManager {
+	fn get_next_event_id(&self) -> Result<u64> {
+		Ok(self.event_id_sequence.fetch_add(1, Ordering::Relaxed))
 	}
 }

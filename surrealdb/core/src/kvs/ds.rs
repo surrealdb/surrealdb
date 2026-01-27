@@ -3,7 +3,6 @@ use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::task::{Poll, ready};
 use std::time::Duration;
 
@@ -46,6 +45,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::doc::EventManager;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -128,8 +128,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
-	// Event id generator
-	event_id_sequence: Arc<AtomicU64>,
+	// The event manager
+	event_manager: EventManager,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -709,7 +709,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
-			event_id_sequence: Default::default(),
+			event_manager: Default::default(),
 		})
 	}
 
@@ -751,7 +751,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
-			event_id_sequence: Default::default(),
+			event_manager: Default::default(),
 		}
 	}
 
@@ -2216,7 +2216,7 @@ impl Datastore {
 			self.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			self.surrealism_cache.clone(),
-			self.event_id_sequence.clone(),
+			self.event_manager.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

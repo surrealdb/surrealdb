@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::doc::EventContext;
+use crate::doc::AsyncEventRecord;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::val::TableName;
@@ -26,13 +26,14 @@ pub(crate) struct Eq<'a> {
 	pub ev: Cow<'a, str>,
 	/// Timestamp when this event was generated (Component 1 of the unique ID)
 	pub ts_id: u64,
-	/// Unique event id within the node that generated the event (Component 2 of the composite unique ID)
+	/// Unique event id within the node that generated the event (Component 2 of the composite
+	/// unique ID)
 	pub event_id: u64,
 	/// The id of the node that generated the event (Component 3 of the composite unique ID)
 	pub node_id: Uuid,
 }
 
-impl_kv_key_storekey!(Eq<'_> => EventContext);
+impl_kv_key_storekey!(Eq<'_> => AsyncEventRecord);
 
 impl Categorise for Eq<'_> {
 	fn categorise(&self) -> Category {

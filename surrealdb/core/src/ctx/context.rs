@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -31,6 +31,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Options, Session, Variables};
+use crate::doc::EventManager;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -92,8 +93,8 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
-	// Event id generator
-	event_id_sequence: Option<Arc<AtomicU64>>,
+	// The event manager
+	event_manager: Option<EventManager>,
 }
 
 impl Default for Context {
@@ -146,7 +147,7 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			event_id_sequence: None,
+			event_manager: None,
 		}
 	}
 
@@ -174,7 +175,7 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			event_id_sequence: parent.event_id_sequence.clone(),
+			event_manager: parent.event_manager.clone(),
 		}
 	}
 
@@ -204,7 +205,7 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			event_id_sequence: parent.event_id_sequence.clone(),
+			event_manager: parent.event_manager.clone(),
 		}
 	}
 
@@ -234,7 +235,7 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			event_id_sequence: from.event_id_sequence.clone(),
+			event_manager: from.event_manager.clone(),
 		}
 	}
 
@@ -251,7 +252,7 @@ impl Context {
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
-		event_id_sequence: Arc<AtomicU64>,
+		event_manager: EventManager,
 	) -> Result<Context> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -275,7 +276,7 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
-			event_id_sequence: Some(event_id_sequence),
+			event_manager: Some(event_manager),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -503,11 +504,11 @@ impl Context {
 		}
 	}
 
-	pub(crate) fn get_next_event_id(&self) -> Result<u64> {
-		if let Some(seq) = &self.event_id_sequence {
-			Ok(seq.fetch_add(1, Ordering::Relaxed))
+	pub(crate) fn try_get_event_manager(&self) -> Result<&EventManager> {
+		if let Some(em) = &self.event_manager {
+			Ok(em)
 		} else {
-			bail!(Error::Internal("Event ID sequence is not initialized".to_string()))
+			bail!(Error::Internal("EventManager is not initialized".to_string()))
 		}
 	}
 
