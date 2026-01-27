@@ -36,7 +36,7 @@ error = false
 
 # 7
 [[test.results]]
-error = "No output strategy was possible for this API request"
+value = "{ body: b'224E6F206F75747075742073747261746567792077617320706F737369626C6520666F72207468697320415049207265717565737422', context: {  }, headers: { 'content-type': 'application/json' }, status: 406 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

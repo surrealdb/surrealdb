@@ -86,8 +86,7 @@ pub async fn process_api_request_with_stack(
 	if let Some(config) = method_config {
 		// Process the action method's specific permissions
 		match &config.permissions {
-			// do we return 403?
-			Permission::None => return Ok(None),
+			Permission::None => return Err(ApiError::PermissionDenied.into()),
 			Permission::Full => (),
 			Permission::Specific(e) => {
 				// Disable permissions
@@ -99,8 +98,7 @@ pub async fn process_api_request_with_stack(
 					.catch_return()?
 					.is_truthy()
 				{
-					// do we return 403?
-					return Ok(None)
+					return Err(ApiError::PermissionDenied.into());
 				}
 			}
 		}
@@ -108,8 +106,7 @@ pub async fn process_api_request_with_stack(
 
 	// Process the entire route's permissions
 	match &api.config.permissions {
-		// do we return 403?
-		Permission::None => return Ok(None),
+		Permission::None => return Err(ApiError::PermissionDenied.into()),
 		Permission::Full => (),
 		Permission::Specific(e) => {
 			// Disable permissions
@@ -121,8 +118,7 @@ pub async fn process_api_request_with_stack(
 				.catch_return()?
 				.is_truthy()
 			{
-				// do we return 403?
-				return Ok(None)
+				return Err(ApiError::PermissionDenied.into());
 			}
 		}
 	}
@@ -140,8 +136,7 @@ pub async fn process_api_request_with_stack(
 	if let Some(config) = global {
 		// Process the global API config's permissions
 		match &config.permissions {
-			// do we return 403?
-			Permission::None => return Ok(None),
+			Permission::None => return Err(ApiError::PermissionDenied.into()),
 			Permission::Full => (),
 			Permission::Specific(e) => {
 				// Disable permissions
@@ -153,8 +148,7 @@ pub async fn process_api_request_with_stack(
 					.catch_return()?
 					.is_truthy()
 				{
-					// do we return 403?
-					return Ok(None)
+					return Err(ApiError::PermissionDenied.into());
 				}
 			}
 		}

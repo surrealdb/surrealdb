@@ -4,8 +4,11 @@ use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
 
 use super::args::Optional;
+use crate::api::err::ApiError;
 use crate::api::format as api_format;
 use crate::api::invocation::process_api_request_with_stack;
+use crate::api::middleware::common::BodyStrategy;
+use crate::api::middleware::res::{convert_response_value, output_body_strategy};
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::catalog::ApiDefinition;
@@ -15,6 +18,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc::args::FromPublic;
+use crate::types::PublicValue;
 use crate::val::{Closure, Duration, Value};
 
 pub mod req;
@@ -85,9 +89,25 @@ pub async fn invoke(
 
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
 		req.params = params.try_into()?;
-		match process_api_request_with_stack(stk, ctx, opt, api, req).await {
+		match process_api_request_with_stack(stk, ctx, opt, api, req.clone()).await {
 			Ok(Some(v)) => Ok(v.into()),
-			Err(e) => Err(e),
+			Err(e) => {
+				// Convert ApiError to ApiResponse
+				if let Some(api_error) = e.downcast_ref::<ApiError>() {
+					let mut response = ApiResponse {
+						status: api_error.status_code(),
+						body: PublicValue::String(api_error.to_string()),
+						..Default::default()
+					};
+
+					let strategy = output_body_strategy(&req.headers, BodyStrategy::Auto).unwrap_or(BodyStrategy::Auto);
+					convert_response_value(&mut response, strategy)?;
+					
+					Ok(response.into())
+				} else {
+					Err(e)
+				}
+			}
 			_ => Ok(ApiResponse {
 				status: StatusCode::NOT_FOUND,
 				..Default::default()

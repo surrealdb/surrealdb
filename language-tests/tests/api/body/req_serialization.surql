@@ -24,7 +24,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
-error = "Failed to decode the request body"
+value = "{ body: 'Failed to decode the request body', context: {  }, headers: { \"content-type\": 'application/vnd.surrealdb.native' }, status: 400 }"
 
 # 6
 [[test.results]]
