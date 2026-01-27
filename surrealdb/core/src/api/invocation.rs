@@ -8,7 +8,7 @@ use super::response::ApiResponse;
 use crate::api::err::ApiError;
 use crate::api::request::ApiRequest;
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{ApiDefinition, MiddlewareDefinition};
+use crate::catalog::{ApiDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -83,13 +83,84 @@ pub async fn process_api_request_with_stack(
 		}
 	};
 
+	if let Some(config) = method_config {
+		// Process the action method's specific permissions
+		match &config.permissions {
+			// do we return 403?
+			Permission::None => return Ok(None),
+			Permission::Full => (),
+			Permission::Specific(e) => {
+				// Disable permissions
+				let opt = &opt.new_with_perms(false);
+				// Process the PERMISSION clause
+				if !stk
+					.run(|stk| e.compute(stk, ctx, opt, None))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
+					// do we return 403?
+					return Ok(None)
+				}
+			}
+		}
+	}
+
+	// Process the entire route's permissions
+	match &api.config.permissions {
+		// do we return 403?
+		Permission::None => return Ok(None),
+		Permission::Full => (),
+		Permission::Specific(e) => {
+			// Disable permissions
+			let opt = &opt.new_with_perms(false);
+			// Process the PERMISSION clause
+			if !stk
+				.run(|stk| e.compute(stk, ctx, opt, None))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
+				// do we return 403?
+				return Ok(None)
+			}
+		}
+	}
+
 	// first run the middleware which is globally configured for the database.
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let global = ctx.tx().get_db_config(ns, db, "api").await?;
-	let middleware: Vec<_> = global
+	let global_entry = ctx.tx()
+		.get_db_config(ns, db, "api")
+		.await?;
+	let global = global_entry
 		.as_ref()
 		.map(|v| v.try_as_api())
-		.transpose()?
+		.transpose()?;
+
+	if let Some(config) = global {
+		// Process the global API config's permissions
+		match &config.permissions {
+			// do we return 403?
+			Permission::None => return Ok(None),
+			Permission::Full => (),
+			Permission::Specific(e) => {
+				// Disable permissions
+				let opt = &opt.new_with_perms(false);
+				// Process the PERMISSION clause
+				if !stk
+					.run(|stk| e.compute(stk, ctx, opt, None))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
+					// do we return 403?
+					return Ok(None)
+				}
+			}
+		}
+	}
+
+	let middleware: Vec<_> = global
 		.into_iter()
 		.flat_map(|cfg| cfg.middleware.iter().cloned())
 		.chain(api.config.middleware.iter().cloned())
