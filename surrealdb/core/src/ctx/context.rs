@@ -31,7 +31,6 @@ use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Options, Session, Variables};
-use crate::doc::EventManager;
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -93,8 +92,6 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
-	// The event manager
-	event_manager: Option<EventManager>,
 }
 
 impl Default for Context {
@@ -147,7 +144,6 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			event_manager: None,
 		}
 	}
 
@@ -175,7 +171,6 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			event_manager: parent.event_manager.clone(),
 		}
 	}
 
@@ -205,7 +200,6 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			event_manager: parent.event_manager.clone(),
 		}
 	}
 
@@ -235,7 +229,6 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			event_manager: from.event_manager.clone(),
 		}
 	}
 
@@ -252,7 +245,6 @@ impl Context {
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
-		event_manager: EventManager,
 	) -> Result<Context> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -276,7 +268,6 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
-			event_manager: Some(event_manager),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -501,14 +492,6 @@ impl Context {
 			Ok(sqs)
 		} else {
 			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
-		}
-	}
-
-	pub(crate) fn try_get_event_manager(&self) -> Result<&EventManager> {
-		if let Some(em) = &self.event_manager {
-			Ok(em)
-		} else {
-			bail!(Error::Internal("EventManager is not initialized".to_string()))
 		}
 	}
 

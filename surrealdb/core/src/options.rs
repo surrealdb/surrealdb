@@ -23,6 +23,8 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
+	/// Default: 5 seconds
+	pub event_processing_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -33,6 +35,7 @@ impl Default for EngineOptions {
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
+			event_processing_interval: Duration::from_secs(5),
 		}
 	}
 }
@@ -57,6 +60,11 @@ impl EngineOptions {
 
 	pub fn with_index_compaction_interval(mut self, interval: Duration) -> Self {
 		self.index_compaction_interval = interval;
+		self
+	}
+
+	pub fn with_event_processing_interval(mut self, interval: Duration) -> Self {
+		self.event_processing_interval = interval;
 		self
 	}
 }

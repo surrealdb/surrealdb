@@ -6,7 +6,7 @@
 //! - `id`: traditionally an integer but can be an object or collection such as an array
 
 pub(crate) use self::document::*;
-pub(crate) use self::event::{AsyncEventRecord, EventManager};
+pub(crate) use self::event::EventRecord;
 pub(crate) use self::lives::DefaultBroker;
 
 mod document; // The entry point for a document to be processed
