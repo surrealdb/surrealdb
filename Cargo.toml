@@ -70,7 +70,7 @@ revision = { version = "0.17.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "0.17.1"
+surrealkv = { git = "https://github.com/surrealdb/surrealkv", branch = "main"}
 surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"

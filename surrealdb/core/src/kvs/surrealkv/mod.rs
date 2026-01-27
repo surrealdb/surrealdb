@@ -181,7 +181,7 @@ impl Transactable for Transaction {
 			None => inner.get(&key)?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.map(|v| v.to_vec()))
 	}
 
 	/// Insert or update a key in the database.
@@ -382,16 +382,16 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || -> Result<_> {
-			// Count the items in the range
-			let res = inner.count(beg, end)?;
-			// Return result
-			Ok(res)
-		})
-		.await?;
+		// Count items using range iterator
+		let mut iter = inner.range(&beg, &end)?;
+		let mut count = 0;
+		iter.seek_first()?;
+		while iter.valid() {
+			count += 1;
+			iter.next()?;
+		}
 		// Return result
-		Ok(res)
+		Ok(count)
 	}
 
 	/// Retrieve a range of keys.
@@ -411,13 +411,18 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
 				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
+				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
-			None => inner
-				.keys(beg, end)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					res.push(iter.key());
+					iter.next()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -441,14 +446,18 @@ impl Transactable for Transaction {
 				.keys_at_version(beg, end, ts)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
+				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
-			None => inner
-				.keys(beg, end)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					res.push(iter.key());
+					iter.prev()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -476,13 +485,20 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
 				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
-			None => inner
-				.range(beg, end)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					res.push((key, value));
+					iter.next()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -511,14 +527,20 @@ impl Transactable for Transaction {
 				.range_at_version(beg, end, ts)?
 				.rev()
 				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
-			None => inner
-				.range(beg, end)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					res.push((key, value));
+					iter.prev()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -541,7 +563,11 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.write().await;
 		// Retrieve the scan range
-		let res = inner.scan_all_versions(beg, end, Some(limit as usize))?.into_iter().collect();
+		let res = inner
+			.scan_all_versions(beg, end, Some(limit as usize))?
+			.into_iter()
+			.map(|(k, v, ts, del)| (k.to_vec(), v.to_vec(), ts, del))
+			.collect();
 		// Return result
 		Ok(res)
 	}
