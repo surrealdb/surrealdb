@@ -269,6 +269,7 @@ chrono.workspace = true
 ciborium.workspace = true
 futures.workspace = true
 futures-util.workspace = true
+hex.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 rand.workspace = true
@@ -280,6 +281,7 @@ reqwest = { workspace = true, default-features = false, features = [
 ] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+sha1.workspace = true
 surrealdb-types.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true

@@ -343,9 +343,7 @@ fn extract_table_and_rid_key(
 		// There is a UUID for the id field
 		Value::Uuid(id) => Some(id.into()),
 		// There is a record id defined
-		Value::RecordId(id) => {
-			Some(id.key)
-		}
+		Value::RecordId(id) => Some(id.key),
 		// There is no record id field
 		Value::None => None,
 		// Any other value cannot be converted to a record id key

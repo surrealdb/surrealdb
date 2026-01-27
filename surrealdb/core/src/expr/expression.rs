@@ -540,7 +540,8 @@ impl Expr {
 			left,
 			op,
 			right,
-		} = expr else {
+		} = expr
+		else {
 			return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
 				"Binary expression not passed into compute_binary",
 			))));

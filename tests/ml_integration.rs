@@ -6,7 +6,6 @@ mod ml_integration {
 
 	use std::time::Duration;
 
-	use hex;
 	use http::{StatusCode, header};
 	use serde::{Deserialize, Serialize};
 	use sha1::{Digest, Sha1};
