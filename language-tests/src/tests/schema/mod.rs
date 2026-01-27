@@ -103,7 +103,8 @@ pub struct TestEnv {
 	pub timeout_surrealkv: Option<BoolOr<u64>>,
 
 	/// Backend-specific context timeout overrides (in milliseconds).
-	/// These take precedence over the base `context_timeout` when running on the corresponding backend.
+	/// These take precedence over the base `context_timeout` when running on the corresponding
+	/// backend.
 	pub context_timeout_tikv: Option<BoolOr<u64>>,
 	pub context_timeout_rocksdb: Option<BoolOr<u64>>,
 	pub context_timeout_surrealkv: Option<BoolOr<u64>>,
@@ -164,8 +165,8 @@ impl TestEnv {
 	}
 
 	/// Returns the context timeout for this test in milliseconds.
-	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base context_timeout, defaulting to 1000ms.
+	/// If a backend-specific context timeout is set and matches the current backend, it takes
+	/// precedence. Falls back to the base context_timeout, defaulting to 1000ms.
 	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
 		// Check for backend-specific override first
 		let override_timeout = match backend {
