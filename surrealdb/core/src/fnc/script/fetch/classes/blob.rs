@@ -78,7 +78,7 @@ fn normalize_type(mut ty: String) -> String {
 #[js::class]
 pub struct Blob {
 	pub(crate) mime: String,
-	// TODO: make bytes?
+
 	#[qjs(skip_trace)]
 	pub(crate) data: Bytes,
 }

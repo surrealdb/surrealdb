@@ -44,7 +44,6 @@ pub(crate) enum Permission {
 	#[default]
 	Full,
 
-	// TODO: This should not be stored on disk as an Expr.
 	Specific(Expr),
 }
 

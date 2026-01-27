@@ -76,7 +76,6 @@ impl Operation {
 			} => {
 				map! {
 					"op".to_owned() => Value::String("add".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
@@ -85,9 +84,7 @@ impl Operation {
 				path,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("remove".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 				}
 			}
@@ -96,9 +93,7 @@ impl Operation {
 				value,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("replace".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
@@ -108,9 +103,7 @@ impl Operation {
 				value,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("change".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
@@ -120,9 +113,7 @@ impl Operation {
 				from,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("copy".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
 				}
@@ -132,9 +123,7 @@ impl Operation {
 				from,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("map".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
 				}
@@ -144,9 +133,7 @@ impl Operation {
 				value,
 			} => {
 				map! {
-					// safety: does not contain null bytes.
 					"op".to_owned() => Value::String("test".to_owned()),
-					// TODO: Ensure null byte correctness
 					"path".to_owned() => path_to_strand(&path),
 					"value".to_owned() => value,
 				}
