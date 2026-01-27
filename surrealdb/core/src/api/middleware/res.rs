@@ -4,18 +4,18 @@ use std::str::FromStr;
 use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue};
-use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::{PublicBytes, PublicValue};
-use crate::val::Bytes;
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM, Mime, Name, TEXT_PLAIN};
-use crate::rpc::format;
-use crate::api::format as api_format;
 
 use crate::api::err::ApiError;
+use crate::api::format as api_format;
 use crate::api::middleware::common::{
 	APPLICATION_CBOR, APPLICATION_SDB_FB, APPLICATION_SDB_NATIVE, BodyStrategy,
 };
 use crate::api::response::ApiResponse;
+use crate::rpc::format;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicBytes, PublicValue};
+use crate::val::Bytes;
 
 pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Option<BodyStrategy> {
 	let Some(accepted) = headers.get(ACCEPT) else {
@@ -66,19 +66,22 @@ pub fn convert_response_value(response: &mut ApiResponse, strategy: BodyStrategy
 	match strategy {
 		BodyStrategy::Auto | BodyStrategy::Json => {
 			response.body = PublicValue::Bytes(PublicBytes::from(
-				format::json::encode(response.body.clone()).map_err(|_| ApiError::BodyEncodeFailure)?,
+				format::json::encode(response.body.clone())
+					.map_err(|_| ApiError::BodyEncodeFailure)?,
 			));
 			response.headers.insert(CONTENT_TYPE, api_format::JSON.try_into()?);
 		}
 		BodyStrategy::Cbor => {
 			response.body = PublicValue::Bytes(PublicBytes::from(
-				format::cbor::encode(response.body.clone()).map_err(|_| ApiError::BodyEncodeFailure)?,
+				format::cbor::encode(response.body.clone())
+					.map_err(|_| ApiError::BodyEncodeFailure)?,
 			));
 			response.headers.insert(CONTENT_TYPE, api_format::CBOR.try_into()?);
 		}
 		BodyStrategy::Flatbuffers => {
 			response.body = PublicValue::Bytes(PublicBytes::from(
-				format::flatbuffers::encode(&response.body).map_err(|_| ApiError::BodyEncodeFailure)?,
+				format::flatbuffers::encode(&response.body)
+					.map_err(|_| ApiError::BodyEncodeFailure)?,
 			));
 			response.headers.insert(CONTENT_TYPE, api_format::FLATBUFFERS.try_into()?);
 		}

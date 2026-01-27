@@ -92,11 +92,7 @@ pub async fn process_api_request_with_stack(
 				// Disable permissions
 				let opt = &opt.new_with_perms(false);
 				// Process the PERMISSION clause
-				if !stk
-					.run(|stk| e.compute(stk, ctx, opt, None))
-					.await
-					.catch_return()?
-					.is_truthy()
+				if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy()
 				{
 					return Err(ApiError::PermissionDenied.into());
 				}
@@ -112,12 +108,7 @@ pub async fn process_api_request_with_stack(
 			// Disable permissions
 			let opt = &opt.new_with_perms(false);
 			// Process the PERMISSION clause
-			if !stk
-				.run(|stk| e.compute(stk, ctx, opt, None))
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
+			if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy() {
 				return Err(ApiError::PermissionDenied.into());
 			}
 		}
@@ -125,13 +116,8 @@ pub async fn process_api_request_with_stack(
 
 	// first run the middleware which is globally configured for the database.
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let global_entry = ctx.tx()
-		.get_db_config(ns, db, "api")
-		.await?;
-	let global = global_entry
-		.as_ref()
-		.map(|v| v.try_as_api())
-		.transpose()?;
+	let global_entry = ctx.tx().get_db_config(ns, db, "api").await?;
+	let global = global_entry.as_ref().map(|v| v.try_as_api()).transpose()?;
 
 	if let Some(config) = global {
 		// Process the global API config's permissions
@@ -142,11 +128,7 @@ pub async fn process_api_request_with_stack(
 				// Disable permissions
 				let opt = &opt.new_with_perms(false);
 				// Process the PERMISSION clause
-				if !stk
-					.run(|stk| e.compute(stk, ctx, opt, None))
-					.await
-					.catch_return()?
-					.is_truthy()
+				if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy()
 				{
 					return Err(ApiError::PermissionDenied.into());
 				}

@@ -100,9 +100,10 @@ pub async fn invoke(
 						..Default::default()
 					};
 
-					let strategy = output_body_strategy(&req.headers, BodyStrategy::Auto).unwrap_or(BodyStrategy::Auto);
+					let strategy = output_body_strategy(&req.headers, BodyStrategy::Auto)
+						.unwrap_or(BodyStrategy::Auto);
 					convert_response_value(&mut response, strategy)?;
-					
+
 					Ok(response.into())
 				} else {
 					Err(e)
