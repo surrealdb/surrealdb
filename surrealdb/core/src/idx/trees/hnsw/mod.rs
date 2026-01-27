@@ -573,6 +573,7 @@ mod tests {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn new_params(
 		dimension: usize,
 		vector_type: VectorType,
@@ -581,6 +582,7 @@ mod tests {
 		efc: usize,
 		extend_candidates: bool,
 		keep_pruned_connections: bool,
+		use_hashed_vector: bool,
 	) -> HnswParams {
 		let m = m as u8;
 		let m0 = m * 2;
@@ -594,6 +596,7 @@ mod tests {
 			ef_construction: efc as u16,
 			extend_candidates,
 			keep_pruned_connections,
+			use_hashed_vector,
 		}
 	}
 
@@ -629,8 +632,14 @@ mod tests {
 				VectorType::I32,
 				VectorType::I16,
 			] {
-				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
-					let p = new_params(dim, vt, dist.clone(), 24, 500, extend, keep);
+				for (extend, keep, use_hashed_vector) in [
+					(false, false, false),
+					(true, false, true),
+					(false, true, false),
+					(true, true, true),
+				] {
+					let p =
+						new_params(dim, vt, dist.clone(), 24, 500, extend, keep, use_hashed_vector);
 					let f = tokio::spawn(async move {
 						test_hnsw(30, p).await;
 					});
@@ -816,9 +825,23 @@ mod tests {
 				VectorType::I32,
 				VectorType::I16,
 			] {
-				for (extend, keep) in [(false, false), (true, false), (false, true), (true, true)] {
+				for (extend, keep, use_hashed_vector) in [
+					(false, false, true),
+					(true, false, false),
+					(false, true, true),
+					(true, true, false),
+				] {
 					for unique in [true, false] {
-						let p = new_params(dim, vt, dist.clone(), 8, 150, extend, keep);
+						let p = new_params(
+							dim,
+							vt,
+							dist.clone(),
+							8,
+							150,
+							extend,
+							keep,
+							use_hashed_vector,
+						);
 						let f = tokio::spawn(async move {
 							test_hnsw_index(30, unique, p).await;
 						});
@@ -849,7 +872,7 @@ mod tests {
 			(10, new_i16_vec(0, 3)),
 		]);
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
-		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let mut h =
 			HnswFlavor::new(TableId(3), ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
@@ -966,7 +989,7 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_recall_euclidean() -> Result<()> {
-		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false);
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
 			1000,
@@ -980,7 +1003,7 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_recall_euclidean_keep_pruned_connections() -> Result<()> {
-		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true);
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true, false);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
 			750,
@@ -994,7 +1017,7 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_recall_euclidean_full() -> Result<()> {
-		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true);
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true, true);
 		test_recall(
 			"hnsw-random-9000-20-euclidean.gz",
 			500,

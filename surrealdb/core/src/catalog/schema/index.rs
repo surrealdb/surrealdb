@@ -346,7 +346,7 @@ impl Display for VectorType {
 }
 
 /// HNSW index parameters.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct HnswParams {
 	/// The dimension of the index.
@@ -367,4 +367,7 @@ pub(crate) struct HnswParams {
 	pub extend_candidates: bool,
 	/// Whether to keep pruned connections.
 	pub keep_pruned_connections: bool,
+	/// Whether to use vector hash for vector retrieval.
+	#[revision(start = 2)]
+	pub use_hashed_vector: bool,
 }
