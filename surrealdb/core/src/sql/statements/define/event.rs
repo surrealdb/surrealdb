@@ -27,12 +27,20 @@ impl ToSql for DefineEventStatement {
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.target_table),);
+		if self.asynchronous {
+			f.push_str(" ASYNC");
+			if let Some(retry) = self.retry {
+				write_sql!(f, fmt, " RETRY {}", retry);
+			}
+			if let Some(max_depth) = self.max_depth {
+				write_sql!(f, fmt, " MAXDEPTH {}", max_depth);
+			}
+		}
 		write_sql!(
 			f,
 			fmt,
-			" {} ON {} WHEN {} THEN {}",
-			CoverStmts(&self.name),
-			CoverStmts(&self.target_table),
+			" WHEN {} THEN {}",
 			CoverStmts(&self.when),
 			Fmt::comma_separated(self.then.iter().map(CoverStmts))
 		);

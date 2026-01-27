@@ -1,5 +1,3 @@
-use reblessive::Stk;
-
 use crate::catalog::ApiMethod;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
@@ -33,6 +31,7 @@ use crate::syn::token::{Token, TokenKind, t};
 use crate::types::PublicDuration;
 #[cfg(feature = "surrealism")]
 use crate::types::PublicFile;
+use reblessive::Stk;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -887,7 +886,6 @@ impl Parser<'_> {
 		}
 		Ok(res)
 	}
-
 	pub(crate) async fn parse_define_field(
 		&mut self,
 		stk: &mut Stk,
