@@ -311,7 +311,7 @@ fn number_method() {
 	})
 	.unwrap();
 	let expected = Expr::Idiom(Idiom(vec![
-		Part::Start(Expr::Literal(Literal::Float(9.7e-5))),
+		Part::Value(Expr::Literal(Literal::Float(9.7e-5))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);
@@ -321,7 +321,7 @@ fn number_method() {
 	})
 	.unwrap();
 	let expected = Expr::Idiom(Idiom(vec![
-		Part::Start(Expr::Literal(Literal::Integer(1))),
+		Part::Value(Expr::Literal(Literal::Integer(1))),
 		Part::Method("sin".to_string(), vec![]),
 	]));
 	assert_eq!(res, expected);

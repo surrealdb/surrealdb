@@ -313,7 +313,7 @@ impl Parser<'_> {
 					self.pop_peek();
 					let idiom = match self.parse_expr_field(stk).await? {
 						Expr::Idiom(x) => x,
-						v => Idiom(vec![Part::Start(v)]),
+						v => Idiom(vec![Part::Value(v)]),
 					};
 					DestructurePart::Aliased(field, idiom)
 				}
@@ -978,7 +978,7 @@ mod tests {
 		assert_eq!(
 			out,
 			sql::Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Param(Param::new("test".to_owned()))),
+				Part::Value(Expr::Param(Param::new("test".to_owned()))),
 				f("temporary"),
 				Part::Value(Expr::Literal(sql::Literal::Integer(0))),
 				f("embedded"),
@@ -995,7 +995,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
+				Part::Value(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "person".to_owned(),
 					key: RecordIdKeyLit::String("test".to_owned())
 				}))),
@@ -1028,7 +1028,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::All
 			]))
 		);
@@ -1042,7 +1042,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Last
 			]))
 		);
@@ -1056,7 +1056,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Value(Expr::Param(Param::new("param".to_owned())))
 			]))
 		);
@@ -1070,7 +1070,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Flatten
 			]))
 		);
@@ -1084,7 +1084,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Flatten
 			]))
 		);
@@ -1098,7 +1098,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Value(Expr::Literal(Literal::Integer(0)))
 			]))
 		);
@@ -1112,7 +1112,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Where(Expr::Binary {
 					left: Box::new(Expr::Idiom(Idiom(vec![f("test")]))),
 					op: BinaryOperator::Equal,
@@ -1130,7 +1130,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::Object(Vec::new()))),
+				Part::Value(Expr::Literal(Literal::Object(Vec::new()))),
 				Part::Where(Expr::Binary {
 					left: Box::new(Expr::Idiom(Idiom(vec![f("test")]))),
 					op: BinaryOperator::Equal,
@@ -1147,7 +1147,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
+				Part::Value(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "test".to_owned(),
 					key: RecordIdKeyLit::Number(1),
 				}))),
@@ -1163,7 +1163,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
+				Part::Value(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "test".to_owned(),
 					key: RecordIdKeyLit::Number(1),
 				}))),
@@ -1179,7 +1179,7 @@ mod tests {
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
+				Part::Value(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "test".to_owned(),
 					key: RecordIdKeyLit::Number(1),
 				}))),

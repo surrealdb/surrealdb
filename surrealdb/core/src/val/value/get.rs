@@ -400,7 +400,7 @@ impl Value {
 							let last_part = path.len() == 1;
 							let fields = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
-								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
+								Part::Value(Expr::Literal(Literal::RecordId(val.into_literal()))),
 								Part::Lookup(Lookup {
 									what: g.what.clone(),
 									kind: g.kind.clone(),

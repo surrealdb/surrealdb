@@ -1806,7 +1806,7 @@ fn parse_delete_2() {
 		Expr::Delete(Box::new(DeleteStatement {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
-				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
+				Part::Value(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "a".to_owned(),
 					key: RecordIdKeyLit::String("b".to_owned()),
 				}))),

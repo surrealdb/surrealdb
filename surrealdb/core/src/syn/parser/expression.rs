@@ -222,7 +222,7 @@ impl Parser<'_> {
 					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
+							.parse_remaining_value_idiom(stk, vec![Part::Value(expr)])
 							.await;
 					} else {
 						return Ok(expr);
@@ -259,7 +259,7 @@ impl Parser<'_> {
 					};
 					if self.peek_continues_idiom() {
 						return self
-							.parse_remaining_value_idiom(stk, vec![Part::Start(expr)])
+							.parse_remaining_value_idiom(stk, vec![Part::Value(expr)])
 							.await;
 					} else {
 						return Ok(expr);

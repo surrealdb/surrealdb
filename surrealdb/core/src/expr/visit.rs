@@ -1365,12 +1365,12 @@ implement_visitor! {
 				Part::Last |
 				Part::First |
 				Part::Optional |
-				Part::Field(_) |
-				Part::Doc |
-				Part::RepeatRecurse  => {}
-			Part::Where(value) | Part::Value(value) | Part::Start(value) => {
-				this.visit_expr(value)?;
-			},
+			Part::Field(_) |
+			Part::Doc |
+			Part::RepeatRecurse  => {}
+		Part::Where(value) | Part::Value(value) => {
+			this.visit_expr(value)?;
+		},
 			Part::Method(_, values) => {
 				for v in values {
 					this.visit_expr(v)?;
@@ -2777,13 +2777,13 @@ implement_visitor_mut! {
 				Part::Flatten |
 				Part::Last |
 				Part::First |
-				Part::Optional |
-				Part::Field(_) |
-				Part::Doc |
-				Part::RepeatRecurse  => {}
-			Part::Where(value) | Part::Value(value) | Part::Start(value) => {
-				this.visit_mut_expr(value)?;
-			},
+			Part::Optional |
+			Part::Field(_) |
+			Part::Doc |
+			Part::RepeatRecurse  => {}
+		Part::Where(value) | Part::Value(value) => {
+			this.visit_mut_expr(value)?;
+		},
 			Part::Method(_, values) => {
 				for v in values {
 					this.visit_mut_expr(v)?;

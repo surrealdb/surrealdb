@@ -20,6 +20,7 @@ use crate::sql::{
 	KillStatement, Literal, LiveStatement, Mock, Param, PostfixOperator, PrefixOperator,
 	RecordIdKeyLit, RecordIdLit, TopLevelExpr,
 };
+use crate::syn;
 use crate::types::{PublicBytes, PublicDuration, PublicFile, PublicGeometry};
 use crate::val::range::TypedRange;
 use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set, Value};
@@ -86,7 +87,29 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Params
 #[case::expr_param(Expr::Param(Param::new("x".to_string())), "$x", "$x")]
 // Expression: Idioms
-#[case::expr_idiom_field(Expr::Idiom(Idiom::field("x".to_string())), "x", "x")]
+#[case::expr_idiom_field(syn::idiom("x").unwrap(), "x", "x")]
+#[case::expr_idiom_nested_field(syn::idiom("user.name").unwrap(), "user.name", "user.name")]
+#[case::expr_idiom_deeply_nested(syn::idiom("user.address.city").unwrap(), "user.address.city", "user.address.city")]
+#[case::expr_idiom_array_index(syn::idiom("arr[0]").unwrap(), "arr[0]", "arr[0]")]
+#[case::expr_idiom_field_array(syn::idiom("user.tags[0]").unwrap(), "user.tags[0]", "user.tags[0]")]
+#[case::expr_idiom_nested_array(syn::idiom("user.posts[0].title").unwrap(), "user.posts[0].title", "user.posts[0].title")]
+#[case::expr_idiom_multiple_arrays(syn::idiom("matrix[0][1]").unwrap(), "matrix[0][1]", "matrix[0][1]")]
+#[case::expr_idiom_complex_path(syn::idiom("user.posts[0].comments[5].author.name").unwrap(), "user.posts[0].comments[5].author.name", "user.posts[0].comments[5].author.name")]
+#[case::expr_idiom_wildcard(syn::idiom("user.*").unwrap(), "user.*", "user.*")]
+#[case::expr_idiom_array_range(syn::idiom("arr[0..5]").unwrap(), "arr[0..5]", "arr[0..5]")]
+#[case::expr_idiom_array_range_open(syn::idiom("arr[5..]").unwrap(), "arr[5..]", "arr[5..]")]
+#[case::expr_idiom_array_range_to(syn::idiom("arr[..10]").unwrap(), "arr[..10]", "arr[..10]")]
+#[case::expr_idiom_array_where(syn::idiom("users[WHERE age > 18]").unwrap(), "users[WHERE age > 18]", "users[WHERE age > 18]")]
+#[case::expr_idiom_array_where_nested(syn::idiom("users[WHERE address.city = 'NYC'].name").unwrap(), "users[WHERE address.city = 'NYC'].name", "users[WHERE address.city = 'NYC'].name")]
+#[case::expr_idiom_graph_simple(syn::idiom("person->likes").unwrap(), "person->likes", "person->likes")]
+#[case::expr_idiom_graph_bidirectional(syn::idiom("person<->friends").unwrap(), "person<->friends", "person<->friends")]
+#[case::expr_idiom_graph_nested(syn::idiom("person->likes->product.name").unwrap(), "person->likes->product.name", "person->likes->product.name")]
+#[case::expr_idiom_graph_array(syn::idiom("person->likes[0]->product").unwrap(), "person->likes[0]->product", "person->likes[0]->product")]
+#[case::expr_idiom_graph_where(syn::idiom("person->likes[WHERE rating > 4]->product").unwrap(), "person->likes[WHERE rating > 4]->product", "person->likes[WHERE rating > 4]->product")]
+#[case::expr_idiom_graph_multiple(syn::idiom("person->likes->product->category.name").unwrap(), "person->likes->product->category.name", "person->likes->product->category.name")]
+#[case::expr_idiom_special_chars(syn::idiom("`field-with-dashes`").unwrap(), "`field-with-dashes`", "`field-with-dashes`")]
+#[case::expr_idiom_special_chars_nested(syn::idiom("`table-name`.`field-name`").unwrap(), "`table-name`.`field-name`", "`table-name`.`field-name`")]
+#[case::expr_idiom_subquery(syn::idiom("->(SELECT amount FROM likes WHERE amount > 10)").unwrap(), "->(SELECT amount FROM likes WHERE amount > 10)", "->(SELECT amount FROM likes WHERE amount > 10)")]
 // Expression: Tables
 #[case::expr_table(Expr::Table("table".to_string()), "`table`", "`table`")]
 // Expression: Mocks

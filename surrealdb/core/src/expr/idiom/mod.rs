@@ -75,7 +75,7 @@ impl Idiom {
 	pub(crate) fn simplify(&self) -> Idiom {
 		self.0
 			.iter()
-			.filter(|&p| matches!(p, Part::Field(_) | Part::Start(_) | Part::Lookup(_)))
+			.filter(|&p| matches!(p, Part::Field(_) | Part::Value(_) | Part::Lookup(_)))
 			.cloned()
 			.collect::<Vec<_>>()
 			.into()
@@ -139,7 +139,7 @@ impl Idiom {
 	) -> FlowResult<Value> {
 		match self.first() {
 			// The starting part is a value
-			Some(Part::Start(v)) => {
+			Some(Part::Value(v)) => {
 				stk.run(|stk| v.compute(stk, ctx, opt, doc))
 					.await?
 					.get(stk, ctx, opt, doc, self.as_ref().next())

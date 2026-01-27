@@ -8,14 +8,14 @@ use crate::sql::{Expr, Idiom, Literal, Part, RecordIdLit};
 impl<'a> Arbitrary<'a> for Idiom {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		let res = match u.int_in_range(0..=2)? {
-			0 => Part::Start(u.arbitrary()?),
+			0 => Part::Value(u.arbitrary()?),
 			1 => Part::Field(u.arbitrary()?),
 			2 => Part::Graph(u.arbitrary()?),
 
 			_ => unreachable!(),
 		};
 		let mut res = vec![res];
-		if matches!(res[0], Part::Start(_)) {
+		if matches!(res[0], Part::Value(_)) {
 			res.push(u.arbitrary()?);
 		}
 
