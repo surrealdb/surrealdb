@@ -611,7 +611,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				timeout: Expr::Literal(Literal::None),
 				version: Expr::Literal(Literal::None),
 			})),
-			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),
 				operator: AssignOperator::Add,
