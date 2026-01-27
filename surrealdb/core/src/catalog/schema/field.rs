@@ -26,7 +26,6 @@ pub struct FieldDefinition {
 	// Idiom::Value/Idiom::Start are for example not allowed.
 	pub(crate) name: Idiom,
 	pub(crate) table: TableName,
-	// TODO: Optionally also be a seperate type from expr::Kind
 	pub(crate) field_kind: Option<Kind>,
 	pub(crate) flexible: bool,
 	pub(crate) readonly: bool,
