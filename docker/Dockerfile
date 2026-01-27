@@ -6,14 +6,15 @@
 FROM docker.io/rockylinux/rockylinux:10.1 AS builder
 
 RUN dnf install -y \
-    gcc-toolset-13 \
-    gcc-toolset-13-gcc-c++ \
+    gcc \
+    gcc-c++ \
+    gcc-aarch64-linux-gnu \
     git \
     cmake \
-    llvm-toolset \
+    llvm \
     patch \
     zlib-devel \
-    python3.11 \
+    python3 \
     openssl-devel \
     pkg-config \
     libatomic
@@ -27,7 +28,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN rustup target add x86_64-unknown-linux-gnu
 RUN rustup target add aarch64-unknown-linux-gnu
 
-ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=/opt/rh/gcc-toolset-13/root/usr/bin/aarch64-redhat-linux-gcc
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 
 WORKDIR /surrealdb
 
