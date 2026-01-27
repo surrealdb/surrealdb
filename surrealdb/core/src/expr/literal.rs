@@ -31,11 +31,9 @@ pub(crate) enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
 	String(String),
 	Bytes(Bytes),
-	//TODO: Possibly remove wrapper.
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),

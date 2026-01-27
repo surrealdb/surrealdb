@@ -19,6 +19,7 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 
 #[revisioned(revision = 1)]
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct Regex(pub regex::Regex);
 
 impl Regex {

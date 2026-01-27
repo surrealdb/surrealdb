@@ -50,7 +50,7 @@ pub(crate) enum Expr {
 		op: BinaryOperator,
 		right: Box<Expr>,
 	},
-	// TODO: Factor out the call from the function expression.
+	// TODO(3.0): Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
 
 	Closure(Box<ClosureExpr>),
@@ -275,7 +275,7 @@ impl Expr {
 				// This is not correct as functions like http::get are not 'pure' but this is
 				// replicating previous behavior.
 				//
-				// TODO: Fix this discrepency and weird static/non-static behavior.
+				// TODO(3.0): Fix this discrepency and weird static/non-static behavior.
 				x.arguments.iter().all(|x| x.is_static())
 			}
 			Expr::Param(_)
@@ -431,10 +431,10 @@ impl Expr {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
 			Expr::Let(_) => {
-				//TODO: This error needs to be improved or it needs to be rejected in the
+				// TODO(3.0): This error needs to be improved or it needs to be rejected in the
 				// parser.
 				Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
-					"Set statement outside of block",
+					"Let statement outside of block",
 				))))
 			}
 			Expr::Sleep(sleep_statement) => {
@@ -540,9 +540,10 @@ impl Expr {
 			left,
 			op,
 			right,
-		} = expr
-		else {
-			unreachable!()
+		} = expr else {
+			return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+				"Binary expression not passed into compute_binary",
+			))));
 		};
 
 		if let BinaryOperator::NearestNeighbor(_) = op {
