@@ -5,6 +5,10 @@
 
 FROM docker.io/rockylinux/rockylinux:10.1 AS builder
 
+# Enable CRB repository for additional development packages
+RUN dnf install -y 'dnf-command(config-manager)' \
+    && dnf config-manager --set-enabled crb
+
 RUN dnf install -y \
     gcc \
     gcc-c++ \
@@ -18,7 +22,8 @@ RUN dnf install -y \
     python3 \
     openssl-devel \
     pkg-config \
-    libatomic
+    libatomic \
+    libstdc++-static
 
 # Install rust
 ARG RUST_VERSION=1.91.1
