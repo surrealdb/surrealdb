@@ -450,7 +450,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
 		// Initialize a vector to hold graph edge records.
-		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
+		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE);
 
 		// Initialize a counter for the number of processed records.
 		let mut counter = 0;
@@ -542,8 +542,8 @@ impl Transaction {
 		// Initialize vectors to hold normal records and graph edge records.
 		// TODO: these buffer are unnecessary, we just use them to then join into a string.
 		// Just write into a string from the start and you avoid a lot of allocs.
-		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
-		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
+		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE);
+		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE);
 
 		// Process each regular value.
 		for (k, v) in regular_values {

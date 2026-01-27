@@ -143,7 +143,7 @@ impl RecordIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		txn: &Transaction,
-		size: u32,
+		size: usize,
 	) -> Result<B> {
 		match self {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
@@ -172,7 +172,7 @@ impl RecordIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		txn: &Transaction,
-		size: u32,
+		size: usize,
 	) -> Result<usize> {
 		match self {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
@@ -295,7 +295,7 @@ impl IndexEqualThingIterator {
 		tx: &Transaction,
 		beg: &mut Vec<u8>,
 		end: &[u8],
-		limit: u32,
+		limit: usize,
 	) -> Result<Vec<(Key, Val)>> {
 		let min = beg.clone();
 		let max = end.to_owned();
@@ -315,7 +315,7 @@ impl IndexEqualThingIterator {
 		irf: IteratorRef,
 		beg: &mut Vec<u8>,
 		end: &[u8],
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
 		let res = Self::next_scan(tx, beg, end, limit).await?;
 		let mut records = B::with_capacity(res.len());
@@ -326,11 +326,11 @@ impl IndexEqualThingIterator {
 		Ok(records)
 	}
 
-	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: usize) -> Result<B> {
 		Self::next_scan_batch(tx, self.irf, &mut self.beg, &self.end, limit).await
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+	async fn next_count(&mut self, tx: &Transaction, limit: usize) -> Result<usize> {
 		Ok(Self::next_scan(tx, &mut self.beg, &self.end, limit).await?.len())
 	}
 }
@@ -701,7 +701,7 @@ impl IndexRangeThingIterator {
 	/// We update `self.r.beg` to be one byte past the last returned key
 	/// (by appending 0x00), which works with lexicographic ordering to ensure
 	/// the next call starts strictly after the last result.
-	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
+	async fn next_scan(&mut self, tx: &Transaction, limit: usize) -> Result<Vec<(Key, Val)>> {
 		let res = tx.scan(self.r.range(), limit, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
@@ -717,7 +717,7 @@ impl IndexRangeThingIterator {
 	/// the begin key to resume on the next call without duplicates. This
 	/// mirrors `next_scan` but avoids fetching values for count-only
 	/// operations.
-	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
+	async fn next_keys(&mut self, tx: &Transaction, limit: usize) -> Result<Vec<Key>> {
 		let res = tx.keys(self.r.range(), limit, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
@@ -728,7 +728,7 @@ impl IndexRangeThingIterator {
 		Ok(res)
 	}
 
-	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: usize) -> Result<B> {
 		let res = self.next_scan(tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
 		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
@@ -740,7 +740,7 @@ impl IndexRangeThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+	async fn next_count(&mut self, tx: &Transaction, limit: usize) -> Result<usize> {
 		let res = self.next_keys(tx, limit).await?;
 		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
 		Ok(count)
@@ -781,7 +781,7 @@ impl IndexRangeReverseThingIterator {
 	async fn check_batch_ending(
 		&mut self,
 		tx: &Transaction,
-		limit: &mut u32,
+		limit: &mut usize,
 	) -> Result<Option<IndexItemRecord>> {
 		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(None);
@@ -795,7 +795,7 @@ impl IndexRangeReverseThingIterator {
 		}
 	}
 
-	async fn check_keys_ending(&mut self, tx: &Transaction, limit: &mut u32) -> Result<bool> {
+	async fn check_keys_ending(&mut self, tx: &Transaction, limit: &mut usize) -> Result<bool> {
 		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
 			return Ok(false);
 		}
@@ -811,7 +811,7 @@ impl IndexRangeReverseThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		tx: &Transaction,
-		mut limit: u32,
+		mut limit: usize,
 	) -> Result<B> {
 		// Check if we need to retrieve the key at end of the range (not returned by the
 		// scanr)
@@ -855,7 +855,7 @@ impl IndexRangeReverseThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: usize) -> Result<usize> {
 		// Check if we need to retrieve the key at end of the range (not returned by the
 		// keysr)
 		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
@@ -917,7 +917,7 @@ impl IndexUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
 		while let Some(r) = &mut self.current {
 			if ctx.is_done(None).await? {
@@ -938,7 +938,7 @@ impl IndexUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<usize> {
 		while let Some(r) = &mut self.current {
 			if ctx.is_done(None).await? {
@@ -990,7 +990,7 @@ impl JoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<bool> {
 		while !ctx.is_done(None).await? {
 			if let Some(it) = &mut self.current_remote {
@@ -1011,7 +1011,7 @@ impl JoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 		new_iter: F,
 	) -> Result<bool>
 	where
@@ -1043,7 +1043,7 @@ impl JoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 		new_iter: F,
 	) -> Result<B>
 	where
@@ -1067,7 +1067,7 @@ impl JoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 		new_iter: F,
 	) -> Result<usize>
 	where
@@ -1105,7 +1105,7 @@ impl IndexJoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let fd = Array::from(vec![value]);
@@ -1119,7 +1119,7 @@ impl IndexJoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<usize> {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let fd = Array::from(vec![value]);
@@ -1261,7 +1261,7 @@ impl UniqueRangeThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		tx: &Transaction,
-		mut limit: u32,
+		mut limit: usize,
 	) -> Result<B> {
 		if self.done {
 			return Ok(B::empty());
@@ -1291,7 +1291,7 @@ impl UniqueRangeThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: usize) -> Result<usize> {
 		if self.done {
 			return Ok(0);
 		}
@@ -1351,7 +1351,7 @@ impl UniqueRangeReverseThingIterator {
 	async fn next_batch<B: IteratorBatch>(
 		&mut self,
 		tx: &Transaction,
-		mut limit: u32,
+		mut limit: usize,
 	) -> Result<B> {
 		if self.done {
 			return Ok(B::empty());
@@ -1401,7 +1401,7 @@ impl UniqueRangeReverseThingIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
+	async fn next_count(&mut self, tx: &Transaction, mut limit: usize) -> Result<usize> {
 		if self.done {
 			return Ok(0);
 		}
@@ -1466,9 +1466,8 @@ impl UniqueUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
-		let limit = limit as usize;
 		let mut results = B::with_capacity(limit.min(self.keys.len()));
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
@@ -1491,9 +1490,8 @@ impl UniqueUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<usize> {
-		let limit = limit as usize;
 		let mut count = 0;
 		while let Some(key) = self.keys.pop_front() {
 			if ctx.is_done(Some(count)).await? {
@@ -1527,7 +1525,7 @@ impl UniqueJoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let array = Array::from(vec![value]);
@@ -1541,7 +1539,7 @@ impl UniqueJoinThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<usize> {
 		let new_iter = |ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition, value: Value| {
 			let array = Array::from(vec![value]);
@@ -1583,10 +1581,9 @@ where
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<B> {
 		if let Some(hits) = &mut self.hits {
-			let limit = limit as usize;
 			let mut count = 0;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
 			while limit > records.len() {
@@ -1616,10 +1613,9 @@ where
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		limit: usize,
 	) -> Result<usize> {
 		if let Some(hits) = &mut self.hits {
-			let limit = limit as usize;
 			let mut count = 0;
 			while limit > count {
 				if ctx.is_done(Some(count)).await? {
@@ -1653,8 +1649,11 @@ impl KnnIterator {
 			res,
 		}
 	}
-	async fn next_batch<B: IteratorBatch>(&mut self, ctx: &FrozenContext, limit: u32) -> Result<B> {
-		let limit = limit as usize;
+	async fn next_batch<B: IteratorBatch>(
+		&mut self,
+		ctx: &FrozenContext,
+		limit: usize,
+	) -> Result<B> {
 		let mut count = 0;
 		let mut records = B::with_capacity(limit.min(self.res.len()));
 		while limit > records.len() {
@@ -1676,8 +1675,7 @@ impl KnnIterator {
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, ctx: &FrozenContext, limit: u32) -> Result<usize> {
-		let limit = limit as usize;
+	async fn next_count(&mut self, ctx: &FrozenContext, limit: usize) -> Result<usize> {
 		let mut count = 0;
 		while limit > count {
 			if ctx.is_done(Some(count)).await? {
@@ -1708,7 +1706,7 @@ impl IndexCountThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		txn: &Transaction,
-		_limit: u32,
+		_limit: usize,
 	) -> Result<usize> {
 		if let Some(range) = self.0.take() {
 			let mut count: i64 = 0;

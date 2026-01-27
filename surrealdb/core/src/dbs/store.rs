@@ -28,7 +28,7 @@ impl MemoryCollector {
 		self.0.len()
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u64>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<usize>, limit: Option<usize>) {
 		vec_start_limit(&mut self.0, start, limit);
 	}
 
@@ -136,7 +136,7 @@ impl MemoryRandom {
 		self.ordered.clear();
 	}
 
-	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u64>, limit: Option<u32>) {
+	pub(in crate::dbs) fn start_limit(&mut self, start: Option<usize>, limit: Option<usize>) {
 		// Only apply if sorted (ordered is empty)
 		if self.ordered.is_empty() {
 			vec_start_limit(&mut self.values, start, limit);
@@ -251,7 +251,7 @@ impl MemoryOrdered {
 		Ok(())
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u64>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<usize>, limit: Option<usize>) {
 		// Only apply if sorted (ordered is empty)
 		if self.ordered.is_empty() {
 			vec_start_limit(&mut self.values, start, limit);
@@ -348,7 +348,7 @@ impl MemoryOrderedLimit {
 		self.heap.len()
 	}
 
-	pub(in crate::dbs) fn start_limit(&mut self, start: Option<u64>, limit: Option<u32>) {
+	pub(in crate::dbs) fn start_limit(&mut self, start: Option<usize>, limit: Option<usize>) {
 		if let Some(ref mut result) = self.result {
 			vec_start_limit(result, start, limit);
 		}
@@ -374,19 +374,17 @@ impl MemoryOrderedLimit {
 	}
 }
 
-fn vec_start_limit<T>(vec: &mut Vec<T>, start: Option<u64>, limit: Option<u32>) {
-	if let Some(start) = start {
-		let start = start as usize;
-		if start > 0 {
-			let drain_end = start.min(vec.len());
-			vec.drain(..drain_end);
-		}
+fn vec_start_limit<T>(vec: &mut Vec<T>, start: Option<usize>, limit: Option<usize>) {
+	if let Some(start) = start
+		&& start > 0
+	{
+		let drain_end = start.min(vec.len());
+		vec.drain(..drain_end);
 	}
-	if let Some(limit) = limit {
-		let limit = limit as usize;
-		if vec.len() > limit {
-			vec.truncate(limit);
-		}
+	if let Some(limit) = limit
+		&& vec.len() > limit
+	{
+		vec.truncate(limit);
 	}
 }
 
@@ -502,8 +500,8 @@ mod tests {
 	#[case::start_limit_overflow(vec![1, 2], Some(3), Some(0), vec![])]
 	fn test_vec_start_limit(
 		#[case] mut vec: Vec<i32>,
-		#[case] start: Option<u64>,
-		#[case] limit: Option<u32>,
+		#[case] start: Option<usize>,
+		#[case] limit: Option<usize>,
 		#[case] expected: Vec<i32>,
 	) {
 		vec_start_limit(&mut vec, start, limit);

@@ -576,7 +576,7 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collectable) -> Result<()>;
 
-	fn max_fetch_size(&mut self) -> u32 {
+	fn max_fetch_size(&mut self) -> usize {
 		if let Some(l) = self.iterator().start_limit() {
 			*l
 		} else {

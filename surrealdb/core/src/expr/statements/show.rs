@@ -19,7 +19,7 @@ pub enum ShowSince {
 pub(crate) struct ShowStatement {
 	pub table: Option<TableName>,
 	pub since: ShowSince,
-	pub limit: Option<u32>,
+	pub limit: Option<usize>,
 }
 
 impl ShowStatement {

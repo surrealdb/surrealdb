@@ -363,7 +363,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -375,8 +375,8 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner.keys_at_version(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.keys(beg..end, None, Some(limit as usize))?,
+			Some(ts) => inner.keys_at_version(beg..end, None, Some(limit), ts)?,
+			None => inner.keys(beg..end, None, Some(limit))?,
 		};
 		// Return result
 		Ok(res.into_iter().map(Key::from).collect())
@@ -384,7 +384,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -396,8 +396,8 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner.keys_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.keys_reverse(beg..end, None, Some(limit as usize))?,
+			Some(ts) => inner.keys_at_version_reverse(beg..end, None, Some(limit), ts)?,
+			None => inner.keys_reverse(beg..end, None, Some(limit))?,
 		};
 		// Return result
 		Ok(res.into_iter().map(Key::from).collect())
@@ -408,7 +408,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -422,8 +422,8 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner.scan_at_version(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.scan(beg..end, None, Some(limit as usize))?,
+			Some(ts) => inner.scan_at_version(beg..end, None, Some(limit), ts)?,
+			None => inner.scan(beg..end, None, Some(limit))?,
 		};
 		// Return result
 		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
@@ -434,7 +434,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -448,8 +448,8 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner.scan_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.scan_reverse(beg..end, None, Some(limit as usize))?,
+			Some(ts) => inner.scan_at_version_reverse(beg..end, None, Some(limit), ts)?,
+			None => inner.scan_reverse(beg..end, None, Some(limit))?,
 		};
 		// Return result
 		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
@@ -460,7 +460,7 @@ impl Transactable for Transaction {
 	async fn scan_all_versions(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
 		// Check to see if transaction is closed
 		if self.closed() {
@@ -473,7 +473,7 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = inner
-			.scan_all_versions(beg..end, None, Some(limit as usize))?
+			.scan_all_versions(beg..end, None, Some(limit))?
 			.into_iter()
 			.map(|(k, ts, v)| match v {
 				Some(v) => (k.to_vec(), v.to_vec(), ts, false),

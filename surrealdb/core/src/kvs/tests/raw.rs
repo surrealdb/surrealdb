@@ -207,7 +207,7 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", u32::MAX, None).await.unwrap();
+	let val = tx.keys("test1".."test9", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test1");
 	assert_eq!(val[1], b"test2");
@@ -217,7 +217,7 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test2".."test4", u32::MAX, None).await.unwrap();
+	let val = tx.keys("test2".."test4", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test2");
 	assert_eq!(val[1], b"test3");
@@ -246,7 +246,7 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test1".."test9", u32::MAX, None).await.unwrap();
+	let val = tx.keysr("test1".."test9", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test5");
 	assert_eq!(val[1], b"test4");
@@ -256,7 +256,7 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test2".."test4", u32::MAX, None).await.unwrap();
+	let val = tx.keysr("test2".."test4", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test2");
@@ -285,7 +285,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test1".."test9", u32::MAX, None).await.unwrap();
+	let val = tx.scan("test1".."test9", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
 	assert_eq!(val[0].1, b"1");
@@ -300,7 +300,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test2".."test4", u32::MAX, None).await.unwrap();
+	let val = tx.scan("test2".."test4", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
 	assert_eq!(val[0].1, b"2");
@@ -333,7 +333,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test1".."test9", u32::MAX, None).await.unwrap();
+	let val = tx.scanr("test1".."test9", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test5");
 	assert_eq!(val[0].1, b"5");
@@ -348,7 +348,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test2".."test4", u32::MAX, None).await.unwrap();
+	let val = tx.scanr("test2".."test4", u32::MAX as usize, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test3");
 	assert_eq!(val[0].1, b"3");
@@ -382,7 +382,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test1".."test9";
-	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
+	let res = tx.batch_keys_vals(rng, u32::MAX as usize, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
@@ -399,7 +399,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test2".."test4";
-	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
+	let res = tx.batch_keys_vals(rng, u32::MAX as usize, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
@@ -410,7 +410,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test2".."test4";
-	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
+	let res = tx.batch_keys_vals(rng, u32::MAX as usize, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");

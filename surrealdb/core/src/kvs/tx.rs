@@ -352,7 +352,12 @@ impl Transaction {
 	/// This function fetches the full range of keys, in a single request to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: usize,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>
 	where
 		K: KVKey + Debug,
 	{
@@ -373,7 +378,7 @@ impl Transaction {
 	pub async fn keysr<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -392,7 +397,7 @@ impl Transaction {
 	pub async fn scan<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -407,7 +412,7 @@ impl Transaction {
 	pub async fn scanr<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -444,7 +449,7 @@ impl Transaction {
 	pub async fn batch_keys<K>(
 		&self,
 		rng: Range<K>,
-		batch: u32,
+		batch: usize,
 		version: Option<u64>,
 	) -> Result<Batch<Key>>
 	where
@@ -463,7 +468,7 @@ impl Transaction {
 	pub async fn batch_keys_vals<K>(
 		&self,
 		rng: Range<K>,
-		batch: u32,
+		batch: usize,
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>>
 	where
@@ -482,7 +487,7 @@ impl Transaction {
 	pub async fn batch_keys_vals_versions<K>(
 		&self,
 		rng: Range<K>,
-		batch: u32,
+		batch: usize,
 	) -> Result<Batch<(Key, Val, Version, bool)>>
 	where
 		K: KVKey + Debug,

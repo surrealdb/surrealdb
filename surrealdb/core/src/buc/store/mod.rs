@@ -82,11 +82,12 @@ impl TryFrom<Object> for ListOptions {
 
 		if let Some(limit) = obj.remove("limit") {
 			let n = limit.coerce_to::<i64>()?;
-			if n < 0 || n > u32::MAX as i64 {
+			if n < 0 {
 				return Err(Error::InvalidLimit {
 					value: n.to_string(),
 				});
 			}
+
 			opts.limit = Some(n as usize);
 		}
 

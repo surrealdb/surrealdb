@@ -396,7 +396,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -410,12 +410,12 @@ impl Transactable for Transaction {
 		let res = match version {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -425,7 +425,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -440,13 +440,13 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
 				.rev()
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
 				.rev()
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -459,7 +459,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -475,12 +475,12 @@ impl Transactable for Transaction {
 		let res = match version {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -493,7 +493,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -510,13 +510,13 @@ impl Transactable for Transaction {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
 				.rev()
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
 				.rev()
-				.take(limit as usize)
+				.take(limit)
 				.map(|r| r.map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -529,7 +529,7 @@ impl Transactable for Transaction {
 	async fn scan_all_versions(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
 		// Check to see if transaction is closed
 		if self.closed() {
@@ -541,7 +541,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.write().await;
 		// Retrieve the scan range
-		let res = inner.scan_all_versions(beg, end, Some(limit as usize))?.into_iter().collect();
+		let res = inner.scan_all_versions(beg, end, Some(limit))?.into_iter().collect();
 		// Return result
 		Ok(res)
 	}

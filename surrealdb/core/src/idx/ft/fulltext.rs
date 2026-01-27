@@ -438,7 +438,7 @@ impl FullTextIndex {
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 
 		// Scan all term-document transaction logs for this term
-		for k in tx.keys(beg..end, u32::MAX, None).await? {
+		for k in tx.keys(beg..end, u32::MAX as usize, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
 			// Increment or decrement the counter based on whether we're adding or removing
@@ -521,7 +521,7 @@ impl FullTextIndex {
 		let mut has_log = false;
 
 		// Process all term transaction logs, grouped by term
-		for k in tx.keys(range.clone(), u32::MAX, None).await? {
+		for k in tx.keys(range.clone(), u32::MAX as usize, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			has_log = true;
 

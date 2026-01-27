@@ -71,31 +71,32 @@ pub static SURREALISM_CACHE_SIZE: LazyLock<usize> =
 
 /// The maximum number of keys that should be scanned at once in general queries
 /// (default: 500)
-pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 500);
+pub static NORMAL_FETCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", usize, 500);
 
 /// The maximum number of keys that should be scanned at once for export queries
 /// (default: 1000)
-pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
+pub static EXPORT_BATCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", usize, 1000);
 
 /// The maximum number of keys that should be scanned at once for count queries
 /// (default: 10,000)
-pub static COUNT_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", u32, 10_000);
+pub static COUNT_BATCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", usize, 10_000);
 
 /// The maximum number of keys to scan at once per concurrent indexing batch
 /// (default: 250)
-pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
+pub static INDEXING_BATCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", usize, 250);
 
 /// The maximum batch size for Scanner adaptive fetching (default: 10,000)
-pub static MAX_BATCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", u32, 5_000);
+pub static MAX_BATCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", usize, 5_000);
 
 /// The maximum size of the priority queue triggering usage of the priority
 /// queue for the result collector.
-pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE", u32, 1000);
+pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE", usize, 1000);
 
 /// The maximum stack size of the JavaScript function runtime (default: 256 KiB)
 pub static SCRIPTING_MAX_STACK_SIZE: LazyLock<usize> =

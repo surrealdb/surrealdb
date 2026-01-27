@@ -27,7 +27,7 @@ pub struct Scanner<'a, I> {
 	/// The store which started this range scan
 	store: &'a Transactor,
 	/// The current adaptive batch size for fetching
-	current_batch_size: u32,
+	current_batch_size: usize,
 	/// The key range for this range scan
 	range: Range<Key>,
 	/// The results from the last range scan
@@ -83,7 +83,7 @@ impl<'a, I> Scanner<'a, I> {
 
 	fn next_poll<S, K>(&mut self, cx: &mut Context, scan: S, key: K) -> Poll<Option<Result<I>>>
 	where
-		S: Fn(Range<Key>, u32) -> FutureResult<'a, I>,
+		S: Fn(Range<Key>, usize) -> FutureResult<'a, I>,
 		K: Fn(&I) -> &Key,
 	{
 		// Check if we have prefetched results ready to use when main buffer is empty
@@ -106,7 +106,7 @@ impl<'a, I> Scanner<'a, I> {
 			// Perform a prefetch if the conditions are met
 			if should_prefetch {
 				// Compute the next batch size (double it, capped at MAX_BATCH_SIZE and limit)
-				let batch_size = match self.limit.map(|v| v as u32) {
+				let batch_size = match self.limit {
 					Some(l) => (self.current_batch_size * 2).min(*MAX_BATCH_SIZE).min(l),
 					None => (self.current_batch_size * 2).min(*MAX_BATCH_SIZE),
 				};
@@ -139,7 +139,7 @@ impl<'a, I> Scanner<'a, I> {
 								}
 							}
 							// Check if we got less than requested (end of range)
-							if v.len() < self.current_batch_size as usize {
+							if v.len() < self.current_batch_size {
 								self.exhausted = true;
 							}
 							// Update the range for the next batch
@@ -187,7 +187,7 @@ impl<'a, I> Scanner<'a, I> {
 		// to avoid fetching the same range twice
 		if self.future.is_none() && self.prefetch_future.is_none() {
 			// Compute the next batch size (double it, capped at MAX_BATCH_SIZE and limit)
-			let batch_size = match self.limit.map(|v| v as u32) {
+			let batch_size = match self.limit {
 				Some(l) => (self.current_batch_size * 2).min(*MAX_BATCH_SIZE).min(l),
 				None => (self.current_batch_size * 2).min(*MAX_BATCH_SIZE),
 			};
@@ -216,7 +216,7 @@ impl<'a, I> Scanner<'a, I> {
 							}
 						}
 						// Check if we fetched less than requested
-						if v.len() < self.current_batch_size as usize {
+						if v.len() < self.current_batch_size {
 							self.exhausted = true;
 						}
 						// Get the last element to update range

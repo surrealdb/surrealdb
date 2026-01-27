@@ -31,8 +31,8 @@ impl Results {
 		&mut self,
 		#[cfg(storage)] ctx: &FrozenContext,
 		stm: &Statement<'_>,
-		start: Option<u64>,
-		limit: Option<u32>,
+		start: Option<usize>,
+		limit: Option<usize>,
 	) -> Result<Self> {
 		if stm.expr().is_some() && stm.group().is_some() {
 			return Ok(Self::Groups(GroupCollector::new(stm)?));
@@ -48,7 +48,7 @@ impl Results {
 				Ordering::Random => Ok(Self::MemoryRandom(MemoryRandom::new(None))),
 				Ordering::Order(orders) => {
 					if let Some(limit) = limit {
-						let effective_limit = start.unwrap_or(0) + limit as u64;
+						let effective_limit = start.unwrap_or(0) + limit;
 						// Use the priority-queue optimization only when both conditions hold:
 						// - the effective limit (start + limit) does not exceed
 						//   MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE
@@ -56,10 +56,10 @@ impl Results {
 						//   records)
 						// Otherwise, fall back to full in-memory ordering.
 						if stm.split().is_none()
-							&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as u64
+							&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE
 						{
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
-								effective_limit as usize,
+								effective_limit,
 								orders.clone(),
 							)));
 						}
@@ -126,8 +126,8 @@ impl Results {
 	pub(super) async fn start_limit(
 		&mut self,
 		skip: Option<usize>,
-		start: Option<u64>,
-		limit: Option<u32>,
+		start: Option<usize>,
+		limit: Option<usize>,
 	) -> Result<()> {
 		let start = if skip.is_some() {
 			None

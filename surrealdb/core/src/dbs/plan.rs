@@ -73,7 +73,7 @@ impl Explanation {
 	pub(super) fn add_start_limit(
 		&mut self,
 		start_skip: Option<usize>,
-		cancel_on_limit: Option<u32>,
+		cancel_on_limit: Option<usize>,
 	) {
 		self.0.push(ExplainItem::new_start_limit(start_skip, cancel_on_limit));
 	}
@@ -235,7 +235,10 @@ impl ExplainItem {
 		}
 	}
 
-	pub(super) fn new_start_limit(start_skip: Option<usize>, cancel_on_limit: Option<u32>) -> Self {
+	pub(super) fn new_start_limit(
+		start_skip: Option<usize>,
+		cancel_on_limit: Option<usize>,
+	) -> Self {
 		let mut details = vec![];
 		if let Some(s) = start_skip {
 			details.push(("SkipStart", s.into()));

@@ -111,13 +111,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -126,7 +126,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -137,7 +137,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -340,7 +340,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scan_all_versions(
 		&self,
 		_rng: Range<Key>,
-		_limit: u32,
+		_limit: usize,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
 		Err(Error::UnsupportedVersionedQueries)
 	}
@@ -357,7 +357,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn batch_keys(
 		&self,
 		rng: Range<Key>,
-		batch: u32,
+		batch: usize,
 		version: Option<u64>,
 	) -> Result<Batch<Key>> {
 		// Check to see if transaction is closed
@@ -369,7 +369,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Scan for the next batch
 		let res = self.keys(rng, batch, version).await?;
 		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
+		if res.len() < batch && batch > 0 {
 			Ok(Batch::<Key>::new(None, res))
 		} else {
 			match res.last() {
@@ -400,7 +400,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn batch_keys_vals(
 		&self,
 		rng: Range<Key>,
-		batch: u32,
+		batch: usize,
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -412,7 +412,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Scan for the next batch
 		let res = self.scan(rng, batch, version).await?;
 		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
+		if res.len() < batch && batch > 0 {
 			Ok(Batch::<(Key, Val)>::new(None, res))
 		} else {
 			match res.last() {
@@ -443,7 +443,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn batch_keys_vals_versions(
 		&self,
 		rng: Range<Key>,
-		batch: u32,
+		batch: usize,
 	) -> Result<Batch<(Key, Val, Version, bool)>> {
 		// Check to see if transaction is closed
 		if self.closed() {
@@ -454,7 +454,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Scan for the next batch
 		let res = self.scan_all_versions(rng, batch).await?;
 		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
+		if res.len() < batch && batch > 0 {
 			Ok(Batch::<(Key, Val, Version, bool)>::new(None, res))
 		} else {
 			match res.last() {

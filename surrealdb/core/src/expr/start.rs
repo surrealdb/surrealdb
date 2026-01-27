@@ -14,16 +14,16 @@ use crate::val::{Number, Value};
 pub(crate) struct Start(pub(crate) Expr);
 
 impl Start {
-	pub(crate) async fn process(
+	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<u64> {
+	) -> Result<usize> {
 		match stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return() {
 			// This is a valid starting number
-			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as u64),
+			Ok(Value::Number(Number::Int(v))) if v >= 0 => Ok(v as usize),
 			// An invalid value was specified
 			Ok(v) => Err(anyhow::Error::new(Error::InvalidStart {
 				value: v.into_raw_string(),

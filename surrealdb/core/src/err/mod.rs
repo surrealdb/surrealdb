@@ -104,9 +104,7 @@ pub(crate) enum Error {
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
-	#[error(
-		"Found {value} but the LIMIT clause must evaluate to an integer between 0 and u32::MAX"
-	)]
+	#[error("Found {value} but the LIMIT clause must evaluate to a positive integer")]
 	InvalidLimit {
 		value: String,
 	},
@@ -1059,7 +1057,7 @@ pub(crate) enum Error {
 	/// Found an unexpected value in a range
 	#[error("Exceeded the idiom recursion limit of {limit}.")]
 	IdiomRecursionLimitExceeded {
-		limit: u32,
+		limit: usize,
 	},
 
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not

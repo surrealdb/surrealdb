@@ -138,9 +138,9 @@ pub(crate) struct Iterator {
 	/// Iterator status
 	canceller: Canceller,
 	/// Iterator limit value
-	limit: Option<u32>,
+	limit: Option<usize>,
 	/// Iterator start value
-	start: Option<u64>,
+	start: Option<usize>,
 	/// Counter of remaining documents that can be skipped processing
 	start_skip: Option<usize>,
 	/// Iterator runtime error
@@ -152,7 +152,7 @@ pub(crate) struct Iterator {
 	/// Should we always return a record?
 	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
-	cancel_on_limit: Option<u32>,
+	cancel_on_limit: Option<usize>,
 	/// Precomputed number of accepted results after which we can stop iterating early.
 	/// - When storage-level START skip is active (`start_skip.is_some()`), this is just `limit`.
 	/// - Otherwise, we must collect `start + limit` results so that the final START can be applied
@@ -166,7 +166,7 @@ impl Clone for Iterator {
 			canceller: self.canceller.clone(),
 			limit: self.limit,
 			start: self.start,
-			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0) as usize),
+			start_skip: self.start_skip.map(|_| self.start.unwrap_or(0)),
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
@@ -794,7 +794,7 @@ impl Iterator {
 		if self.limit.is_none()
 			&& let Some(v) = stm.limit()
 		{
-			self.limit = Some(v.process(stk, ctx, opt, None).await?);
+			self.limit = Some(v.compute(stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -813,7 +813,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(stk, ctx, opt, None).await?);
+			self.start = Some(v.compute(stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -923,7 +923,7 @@ impl Iterator {
 	) {
 		// Determine if we can skip records at the storage level for START
 		if !is_specific_permission && self.can_start_skip(ctx, stm) {
-			let s = self.start.unwrap_or(0) as usize;
+			let s = self.start.unwrap_or(0);
 			if s > 0 {
 				self.start_skip = Some(s);
 			}
@@ -943,17 +943,17 @@ impl Iterator {
 			if self.start_skip.is_some() {
 				// START is applied by the storage iterator. We are only collecting
 				// post-START results, so we can cancel as soon as we accepted `limit`.
-				self.cancel_threshold = Some(l as usize)
+				self.cancel_threshold = Some(l)
 			} else {
 				// START cannot be applied by the storage iterator. We must accumulate
 				// enough accepted results to later drop `start` of them during
 				// post-processing and still return `limit` items. Hence `start + limit`.
-				self.cancel_threshold = Some((l as u64 + self.start.unwrap_or(0)) as usize);
+				self.cancel_threshold = Some(l + self.start.unwrap_or(0));
 			}
 		}
 	}
 
-	pub(super) fn start_limit(&self) -> Option<&u32> {
+	pub(super) fn start_limit(&self) -> Option<&usize> {
 		self.cancel_on_limit.as_ref()
 	}
 
@@ -1049,12 +1049,10 @@ impl Iterator {
 					Ordering::Order(orders) => {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
-							let effective_limit = self.start.unwrap_or(0) + limit as u64;
-							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as u64 {
-								let mut res = MemoryOrderedLimit::new(
-									effective_limit as usize,
-									orders.clone(),
-								);
+							let effective_limit = self.start.unwrap_or(0) + limit;
+							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+								let mut res =
+									MemoryOrderedLimit::new(effective_limit, orders.clone());
 								for val in values {
 									res.push(val);
 								}
