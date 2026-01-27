@@ -114,6 +114,8 @@ pub enum Category {
 	TableRoot,
 	/// crate::key::table::ev                /*{ns}*{db}*{tb}!ev{ev}
 	TableEvent,
+	/// crate::key::table::eq                /*{ns}*{db}*{tb}!eq{ev}{id}
+	TableEventQueue,
 	/// crate::key::table::fd                /*{ns}*{db}*{tb}!fd{fd}
 	TableField,
 	/// crate::key::table::ft                /*{ns}*{db}*{tb}!ft{ft}
@@ -285,6 +287,7 @@ impl Display for Category {
 			Self::IndexCountState => "IndexCountState",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
+			Self::TableEventQueue => "TableEventQueue",
 		};
 		write!(f, "{}", name)
 	}

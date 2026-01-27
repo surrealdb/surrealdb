@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::task::{Poll, ready};
 use std::time::Duration;
 
@@ -127,6 +128,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Event id generator
+	event_id_sequence: Arc<AtomicU64>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -706,6 +709,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			event_id_sequence: Default::default(),
 		})
 	}
 
@@ -747,6 +751,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			event_id_sequence: Default::default(),
 		}
 	}
 
@@ -2211,6 +2216,7 @@ impl Datastore {
 			self.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			self.surrealism_cache.clone(),
+			self.event_id_sequence.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

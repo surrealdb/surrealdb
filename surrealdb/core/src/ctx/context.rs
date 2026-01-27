@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -92,6 +92,8 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
+	// Event id generator
+	event_id_sequence: Option<Arc<AtomicU64>>,
 }
 
 impl Default for Context {
@@ -144,6 +146,7 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
+			event_id_sequence: None,
 		}
 	}
 
@@ -171,6 +174,7 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			event_id_sequence: parent.event_id_sequence.clone(),
 		}
 	}
 
@@ -200,6 +204,7 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			event_id_sequence: parent.event_id_sequence.clone(),
 		}
 	}
 
@@ -229,6 +234,7 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
+			event_id_sequence: from.event_id_sequence.clone(),
 		}
 	}
 
@@ -245,6 +251,7 @@ impl Context {
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
+		event_id_sequence: Arc<AtomicU64>,
 	) -> Result<Context> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -268,6 +275,7 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
+			event_id_sequence: Some(event_id_sequence),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -492,6 +500,14 @@ impl Context {
 			Ok(sqs)
 		} else {
 			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+		}
+	}
+
+	pub(crate) fn get_next_event_id(&self) -> Result<u64> {
+		if let Some(seq) = &self.event_id_sequence {
+			Ok(seq.fetch_add(1, Ordering::Relaxed))
+		} else {
+			bail!(Error::Internal("Event ID sequence is not initialized".to_string()))
 		}
 	}
 
