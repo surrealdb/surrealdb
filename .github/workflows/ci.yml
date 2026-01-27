@@ -207,24 +207,6 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
-  check-revision:
-    name: Check revision
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install revision-lock
-        run: cargo install revision-lock
-
-      - name: Check revision.lock
-        run: revision-lock --check
-
   check-docs:
     name: Check docs
     runs-on: ubuntu-latest
@@ -1015,7 +997,6 @@ jobs:
       - check-release
       - check-msrv
       - check-wasm
-      - check-revision
       - check-docs
       - unused-deps
       # Integration tests
@@ -1051,7 +1032,6 @@ jobs:
             "${{ needs.check-release.result }}"
             "${{ needs.check-msrv.result }}"
             "${{ needs.check-wasm.result }}"
-            "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
             "${{ needs.unused-deps.result }}"
             "${{ needs.cli-integration.result }}"

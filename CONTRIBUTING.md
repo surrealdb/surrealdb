@@ -224,12 +224,7 @@ Please avoid introducing new dependencies to SurrealDB without consulting the te
 
 ## Revisioned structs
 
-SurrealDB uses Revision to manage versions of internal types, if these types are changed then the revisioning must be updated accordingly.
-To keep track of these versions revision-lock is used generate a lock file. If the revision.lock check fails in CI you can install and run it with:
-```bash
-cargo install revision-lock
-revision-lock
-```
+SurrealDB uses Revision to manage versions of internal types, if these types are changed then the fixtures under the `surrealdb/core/src/catalog/compat/` directory must be updated to reflect the new version. See the [catalog compatibility test documentation](surrealdb/core/src/catalog/compat/README.md) for more details.
 
 ## Check existing topic labels
 
