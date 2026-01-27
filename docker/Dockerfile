@@ -19,11 +19,14 @@ RUN dnf install -y \
     clang-devel \
     patch \
     zlib-devel \
+    zlib-static \
     python3 \
     openssl-devel \
+    openssl-static \
     pkg-config \
     libatomic \
-    libstdc++-static
+    libstdc++-static \
+    glibc-static
 
 # Install rust
 ARG RUST_VERSION=1.91.1
