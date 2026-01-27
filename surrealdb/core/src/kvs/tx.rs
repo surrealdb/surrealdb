@@ -572,62 +572,6 @@ impl Transaction {
 			.map_err(Into::into)
 	}
 
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys_no_prefetch(
-		&self,
-		rng: Range<Key>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: ScanDirection,
-	) -> impl Stream<Item = Result<Key>> + '_ {
-		self.tr
-			.stream_keys_no_prefetch(
-				rng,
-				version,
-				limit,
-				match dir {
-					ScanDirection::Forward => Direction::Forward,
-					ScanDirection::Backward => Direction::Backward,
-				},
-			)
-			.map_err(Error::from)
-			.map_err(Into::into)
-	}
-
-	/// Retrieve a stream over a specific range of key-value pairs in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys_vals_no_prefetch(
-		&self,
-		rng: Range<Key>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: ScanDirection,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
-		self.tr
-			.stream_keys_vals_no_prefetch(
-				rng,
-				version,
-				limit,
-				match dir {
-					ScanDirection::Forward => Direction::Forward,
-					ScanDirection::Backward => Direction::Backward,
-				},
-			)
-			.map_err(Error::from)
-			.map_err(Into::into)
-	}
-
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------

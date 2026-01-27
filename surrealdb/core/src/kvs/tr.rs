@@ -520,50 +520,6 @@ impl Transactor {
 		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, true)
 	}
 
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys_no_prefetch<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: Direction,
-	) -> impl Stream<Item = Result<Key>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		Scanner::<Key>::new(self, beg..end, version, limit, dir, false)
-	}
-
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys_vals_no_prefetch<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: Direction,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, false)
-	}
-
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
