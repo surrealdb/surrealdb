@@ -2,6 +2,9 @@
 
 [test]
 
+[env.capabilities]
+allow-experimental = ["files"]
+
 [[test.results]]
 value = 'f"test:/a.txt"'
 
@@ -10,9 +13,6 @@ value = "'test'"
 
 [[test.results]]
 value = "'/b.txt'"
-
-[env.capabilities]
-allow-experimental = ["files"]
 
 */
 
