@@ -26,6 +26,10 @@ let
     doCheck = false;
     cargoExtraArgs = let flags = [ "--no-default-features" ] ++ featureFlags;
     in builtins.concatStringsSep " " flags;
+    
+    # Add autoPatchelfHook to fix dynamic library linking for non-static builds
+    nativeBuildInputs = (spec.buildSpec.nativeBuildInputs or []) 
+      ++ lib.lists.optional (pkgs.stdenv.isLinux && !pkgs.stdenv.hostPlatform.isStatic) pkgs.autoPatchelfHook;
   };
 
   cargoArtifacts = craneLib.buildDepsOnly buildSpec;
