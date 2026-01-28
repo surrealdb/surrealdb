@@ -352,10 +352,9 @@ impl Transaction {
 	///
 	/// * `k` - The record key.
 	/// * `record` - The record to be processed.
-	/// * `records_relate` - A mutable reference to a vector that holds graph edge records.
-	/// * `records_normal` - A mutable reference to a vector that holds normal records.
+	/// * `records_relate` - A mutable reference to a string buffer for graph edge records.
+	/// * `records_normal` - A mutable reference to a string buffer for normal records.
 	/// * `is_tombstone` - An optional boolean indicating if the record is a tombstone.
-	/// * `version` - An optional version number for the record (currently unused in SQL export).
 	///
 	/// # Returns
 	///
@@ -364,8 +363,8 @@ impl Transaction {
 	fn process_record(
 		k: record::RecordKey,
 		mut record: Record,
-		records_relate: &mut Vec<String>,
-		records_normal: &mut Vec<String>,
+		records_relate: &mut String,
+		records_normal: &mut String,
 		is_tombstone: Option<bool>,
 	) -> String {
 		// Inject the id field into the document before processing.
@@ -381,8 +380,11 @@ impl Transaction {
 			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*OUT)
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			// Push the value to the records_relate vector (version info is not exported in SQL).
-			records_relate.push(record.data.as_ref().to_sql());
+			// Write the value to the records_relate string (version info is not exported in SQL).
+			if !records_relate.is_empty() {
+				records_relate.push_str(", ");
+			}
+			records_relate.push_str(&record.data.as_ref().to_sql());
 			String::new()
 			// If the value is a normal record:
 		} else if let Some(is_tombstone) = is_tombstone {
@@ -395,9 +397,12 @@ impl Transaction {
 				format!("INSERT {};", record.data.as_ref().to_sql())
 			}
 		} else {
-			// If no tombstone or version information is provided, push the value to the
-			// records_normal vector.
-			records_normal.push(record.data.as_ref().to_sql());
+			// If no tombstone or version information is provided, write the value to the
+			// records_normal string.
+			if !records_normal.is_empty() {
+				records_normal.push_str(", ");
+			}
+			records_normal.push_str(&record.data.as_ref().to_sql());
 			String::new()
 		}
 	}
@@ -424,11 +429,10 @@ impl Transaction {
 		regular_values: Vec<(Vec<u8>, Vec<u8>)>,
 		chn: &Sender<Vec<u8>>,
 	) -> Result<()> {
-		// Initialize vectors to hold normal records and graph edge records.
-		// TODO: these buffer are unnecessary, we just use them to then join into a string.
-		// Just write into a string from the start and you avoid a lot of allocs.
-		let mut records_normal = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
-		let mut records_relate = Vec::with_capacity(*EXPORT_BATCH_SIZE as usize);
+		// Initialize strings to hold normal records and graph edge records.
+		// Write directly to strings to avoid unnecessary allocations.
+		let mut records_normal = String::new();
+		let mut records_relate = String::new();
 
 		// Process each regular value.
 		for (k, v) in regular_values {
@@ -440,16 +444,14 @@ impl Transaction {
 
 		// If there are normal records, generate and send the INSERT SQL command.
 		if !records_normal.is_empty() {
-			let values = records_normal.join(", ");
-			let sql = format!("INSERT [ {} ];", values);
+			let sql = format!("INSERT [ {} ];", records_normal);
 			chn.send(bytes!(sql)).await?;
 		}
 
 		// If there are graph edge records, generate and send the INSERT RELATION SQL
 		// command.
 		if !records_relate.is_empty() {
-			let values = records_relate.join(", ");
-			let sql = format!("INSERT RELATION [ {} ];", values);
+			let sql = format!("INSERT RELATION [ {} ];", records_relate);
 			chn.send(bytes!(sql)).await?;
 		}
 
