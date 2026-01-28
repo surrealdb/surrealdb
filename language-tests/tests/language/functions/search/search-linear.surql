@@ -47,7 +47,7 @@ DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
 DEFINE INDEX idx_text ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
 
 -- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance
-DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
+DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE HASHED_VECTOR;
 
 -- Query vector (whatever your embedding model produced for "graph databases")
 LET $qvec = [0.12, 0.18, 0.27];

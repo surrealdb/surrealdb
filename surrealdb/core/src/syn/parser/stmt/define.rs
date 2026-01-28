@@ -1078,6 +1078,7 @@ impl Parser<'_> {
 					let mut ef_construction = 150;
 					let mut extend_candidates = false;
 					let mut keep_pruned_connections = false;
+					let mut use_hashed_vector = false;
 					loop {
 						match self.peek_kind() {
 							t!("DISTANCE") => {
@@ -1114,6 +1115,10 @@ impl Parser<'_> {
 								self.pop_peek();
 								keep_pruned_connections = true;
 							}
+							t!("HASHED_VECTOR") => {
+								self.pop_peek();
+								use_hashed_vector = true;
+							}
 							_ => {
 								break;
 							}
@@ -1141,6 +1146,7 @@ impl Parser<'_> {
 						ef_construction,
 						extend_candidates,
 						keep_pruned_connections,
+						use_hashed_vector,
 					});
 				}
 				t!("CONCURRENTLY") => {
