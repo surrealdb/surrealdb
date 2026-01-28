@@ -70,7 +70,7 @@ use async_channel::{Receiver, Sender};
 pub use err::Error;
 // Removed anyhow::ensure - will implement custom ensure macro if needed
 use method::BoxFuture;
-use semver::{BuildMetadata, Version, VersionReq};
+use semver::{Version, VersionReq};
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -80,7 +80,7 @@ use self::opt::{Endpoint, EndpointKind, WaitFor};
 // Channel for waiters
 type Waiter = (watch::Sender<Option<WaitFor>>, watch::Receiver<Option<WaitFor>>);
 
-const SUPPORTED_VERSIONS: (&str, &str) = (">=1.2.0, <4.0.0", "20230701.55918b7c");
+const SUPPORTED_VERSIONS: &str = ">=3.0.0-alpha.1, <4.0.0";
 
 /// Connection trait implemented by supported engines
 pub trait Connection: conn::Sealed {}
@@ -306,24 +306,15 @@ where
 	C: Connection,
 {
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
-		let (versions, build_meta) = SUPPORTED_VERSIONS;
 		// invalid version requirements should be caught during development
-		let req = VersionReq::parse(versions).expect("valid supported versions");
-		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
-		let server_build = &version.build;
+		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
 		if !req.matches(version) {
 			return Err(Error::VersionMismatch {
 				server_version: version.clone(),
-				supported_versions: versions.to_owned(),
+				supported_versions: SUPPORTED_VERSIONS.to_owned(),
 			});
 		}
 
-		if !server_build.is_empty() && server_build < &build_meta {
-			return Err(Error::BuildMetadataMismatch {
-				server_metadata: server_build.clone(),
-				supported_metadata: build_meta,
-			});
-		}
 		Ok(())
 	}
 }
@@ -381,5 +372,24 @@ impl OnceLockExt for OnceLock<Router> {
 	fn extract(&self) -> Result<&Router> {
 		let router = self.get().ok_or(Error::ConnectionUninitialised)?;
 		Ok(router)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_supported_versions() {
+		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
+		assert!(req.matches(&Version::parse("3.0.0-alpha.1").unwrap()));
+		assert!(req.matches(&Version::parse("3.0.0-beta.3").unwrap()));
+		assert!(req.matches(&Version::parse("3.0.0-rc.2").unwrap()));
+		assert!(req.matches(&Version::parse("3.0.0").unwrap()));
+		assert!(req.matches(&Version::parse("3.0.1").unwrap()));
+		assert!(req.matches(&Version::parse("3.9.0").unwrap()));
+
+		assert!(!req.matches(&Version::parse("2.9.0").unwrap()));
+		assert!(!req.matches(&Version::parse("4.0.0").unwrap()));
 	}
 }
