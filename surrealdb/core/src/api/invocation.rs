@@ -14,7 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::fnc::args::{Any, FromArgs, FromPublic};
-use crate::iam::AuthLimit;
+use crate::iam::{Action, AuthLimit};
 use crate::syn::function_with_capabilities;
 use crate::val::{Closure, Value};
 
@@ -83,54 +83,36 @@ pub async fn process_api_request_with_stack(
 		}
 	};
 
-	if let Some(config) = method_config {
-		// Process the action method's specific permissions
-		match &config.permissions {
-			Permission::None => return Err(ApiError::PermissionDenied.into()),
-			Permission::Full => (),
-			Permission::Specific(e) => {
-				// Disable permissions
-				let opt = &opt.new_with_perms(false);
-				// Process the PERMISSION clause
-				if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy()
-				{
-					return Err(ApiError::PermissionDenied.into());
-				}
-			}
-		}
-	}
-
-	// Process the entire route's permissions
-	match &api.config.permissions {
-		Permission::None => return Err(ApiError::PermissionDenied.into()),
-		Permission::Full => (),
-		Permission::Specific(e) => {
-			// Disable permissions
-			let opt = &opt.new_with_perms(false);
-			// Process the PERMISSION clause
-			if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy() {
-				return Err(ApiError::PermissionDenied.into());
-			}
-		}
-	}
-
-	// first run the middleware which is globally configured for the database.
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let global_entry = ctx.tx().get_db_config(ns, db, "api").await?;
 	let global = global_entry.as_ref().map(|v| v.try_as_api()).transpose()?;
 
-	if let Some(config) = global {
-		// Process the global API config's permissions
-		match &config.permissions {
-			Permission::None => return Err(ApiError::PermissionDenied.into()),
-			Permission::Full => (),
-			Permission::Specific(e) => {
-				// Disable permissions
-				let opt = &opt.new_with_perms(false);
-				// Process the PERMISSION clause
-				if !stk.run(|stk| e.compute(stk, ctx, opt, None)).await.catch_return()?.is_truthy()
-				{
-					return Err(ApiError::PermissionDenied.into());
+	// Check permissions
+	if opt.check_perms(Action::Edit)? {
+		let permissions: Vec<&Permission> = method_config
+			.map(|config| &config.permissions)
+			.into_iter()
+			.chain(std::iter::once(&api.config.permissions))
+			.chain(global.as_ref().map(|config| &config.permissions))
+			.collect();
+
+		// Iterate through permissions and process them
+		for permission in permissions {
+			match permission {
+				Permission::None => return Err(ApiError::PermissionDenied.into()),
+				Permission::Full => (),
+				Permission::Specific(e) => {
+					// Disable permissions
+					let opt = &opt.new_with_perms(false);
+					// Process the PERMISSION clause
+					if !stk
+						.run(|stk| e.compute(stk, ctx, opt, None))
+						.await
+						.catch_return()?
+						.is_truthy()
+					{
+						return Err(ApiError::PermissionDenied.into());
+					}
 				}
 			}
 		}
