@@ -81,7 +81,6 @@ pub async fn any(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array {
-					// TODO: Don't clone the closure every time the function is called.
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
@@ -379,7 +378,6 @@ pub async fn find_index(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for (i, arg) in array.into_iter().enumerate() {
-					// TODO: Don't clone the closure every time the function is called.
 					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
@@ -580,7 +578,6 @@ pub async fn map(
 	if let Some(opt) = opt {
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
-			// TODO: Don't clone the closure every time the function is called.
 			res.push(mapper.invoke(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
