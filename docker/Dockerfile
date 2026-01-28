@@ -5,13 +5,10 @@
 
 FROM docker.io/rockylinux/rockylinux:10.1 AS builder
 
-# Enable CRB repository for additional development packages
-RUN dnf install -y 'dnf-command(config-manager)' \
-    && dnf config-manager --set-enabled crb
-
 RUN dnf install -y \
     gcc \
     gcc-c++ \
+    libstdc++-devel \
     git \
     cmake \
     llvm \
@@ -19,14 +16,10 @@ RUN dnf install -y \
     clang-devel \
     patch \
     zlib-devel \
-    zlib-static \
     python3 \
     openssl-devel \
-    openssl-static \
     pkg-config \
-    libatomic \
-    libstdc++-static \
-    glibc-static
+    libatomic
 
 # Install rust
 ARG RUST_VERSION=1.91.1
@@ -39,6 +32,10 @@ RUN rustup target add aarch64-unknown-linux-gnu
 
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=gcc
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc
+
+# Ensure C++ standard library is in library path for ONNX Runtime linking
+ENV LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
+ENV LIBRARY_PATH=/usr/lib64:$LIBRARY_PATH
 
 WORKDIR /surrealdb
 
