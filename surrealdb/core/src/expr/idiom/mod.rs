@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use priority_lfu::DeepSizeOf;
 use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
@@ -57,7 +58,7 @@ impl Ord for Idioms {
 }
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {

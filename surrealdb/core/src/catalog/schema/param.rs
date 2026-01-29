@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -9,7 +10,7 @@ use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 #[non_exhaustive]
 pub struct ParamDefinition {
 	pub(crate) name: String,

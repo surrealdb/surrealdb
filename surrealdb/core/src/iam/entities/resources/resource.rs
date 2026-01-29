@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -5,7 +6,9 @@ use super::Level;
 use crate::catalog::base::Base;
 
 #[revisioned(revision = 5)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+	Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ResourceKind {
 	#[default]
@@ -38,7 +41,7 @@ pub enum ResourceKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigKind {
 	GraphQL,
@@ -115,7 +118,7 @@ impl ResourceKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Resource {
 	id: String,

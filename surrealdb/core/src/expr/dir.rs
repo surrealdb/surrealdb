@@ -14,6 +14,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 	Hash,
 	Encode,
 	BorrowDecode,
+	priority_lfu::DeepSizeOf,
 )]
 pub enum Dir {
 	/// `<-`

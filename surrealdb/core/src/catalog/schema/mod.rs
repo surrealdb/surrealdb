@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::ToSql;
 
@@ -38,7 +39,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Permission {
 	None,
 	#[default]
@@ -89,7 +90,7 @@ impl ToSql for Permissions {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct Permissions {
 	pub(crate) select: Permission,
 	pub(crate) create: Permission,

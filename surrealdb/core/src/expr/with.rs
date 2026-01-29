@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub enum With {
 	NoIndex,
 	Index(Vec<String>),

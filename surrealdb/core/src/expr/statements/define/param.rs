@@ -12,7 +12,7 @@ use crate::expr::{Base, Expr, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,

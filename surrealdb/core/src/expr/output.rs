@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::expr::field::{Fields, Selector};
 use crate::expr::{Expr, Field, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum Output {
 	#[default]
 	None,

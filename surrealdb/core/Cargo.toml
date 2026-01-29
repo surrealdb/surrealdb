@@ -138,7 +138,7 @@ path-clean.workspace = true
 pbkdf2 = { workspace = true, features = ["simple"] }
 phf = { workspace = true, features = ["macros", "unicase"] }
 pin-project-lite.workspace = true
-quick_cache.workspace = true
+priority-lfu.workspace = true
 radix_trie = { workspace = true, features = ["serde"] }
 rand.workspace = true
 rayon.workspace = true

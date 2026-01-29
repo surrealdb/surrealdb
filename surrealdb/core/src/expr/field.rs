@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::slice::Iter;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -17,7 +18,7 @@ use crate::val::{Array, Value};
 
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
@@ -335,7 +336,7 @@ impl<'a> Iterator for FieldsIter<'a> {
 impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
@@ -364,7 +365,7 @@ impl ToSql for Field {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Selector {
 	pub expr: Expr,
 	/// The `quality` in `SELECT rating AS quality FROM ...`

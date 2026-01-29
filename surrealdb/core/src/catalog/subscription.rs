@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
@@ -13,7 +14,7 @@ use crate::sql::statements::live::LiveFields;
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum SubscriptionFields {
 	Diff,
 	Select(Fields),
@@ -29,7 +30,7 @@ impl InfoStructure for SubscriptionFields {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct SubscriptionDefinition {
 	pub(crate) id: Uuid,
 	pub(crate) node: Uuid,

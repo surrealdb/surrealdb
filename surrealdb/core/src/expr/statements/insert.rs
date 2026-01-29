@@ -15,7 +15,7 @@ use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, Duration, RecordIdKey, TableName};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,

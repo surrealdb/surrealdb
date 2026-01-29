@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::val::range::{IntegerRangeIter, TypedRange};
@@ -64,7 +65,7 @@ impl Iterator for IntoIter {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Mock {
 	Count(TableName, i64),
 	Range(TableName, TypedRange<i64>),

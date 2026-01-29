@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 
 use nanoid::nanoid;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -18,7 +19,7 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode, DeepSizeOf)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordIdKeyRange {
@@ -179,7 +180,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode, DeepSizeOf)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum RecordIdKey {
@@ -384,7 +385,7 @@ impl ToSql for RecordIdKey {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode, DeepSizeOf)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct RecordId {

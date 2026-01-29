@@ -42,7 +42,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, priority_lfu::DeepSizeOf)]
 pub enum DefineKind {
 	#[default]
 	Default,
@@ -50,7 +50,7 @@ pub enum DefineKind {
 	IfNotExists,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),

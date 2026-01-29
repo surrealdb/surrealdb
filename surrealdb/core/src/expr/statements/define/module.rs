@@ -14,7 +14,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,

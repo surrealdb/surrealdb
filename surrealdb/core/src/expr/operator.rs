@@ -1,10 +1,11 @@
+use priority_lfu::DeepSizeOf;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Distance;
 use crate::expr::{Expr, Kind};
 use crate::idx::ft::MatchRef;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum PrefixOperator {
 	/// `!`
 	Not,
@@ -26,7 +27,7 @@ impl ToSql for PrefixOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum PostfixOperator {
 	Range,
 	RangeSkip,
@@ -42,7 +43,7 @@ impl ToSql for PostfixOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum BinaryOperator {
 	/// `-`
 	Subtract,
@@ -126,7 +127,7 @@ pub(crate) enum BinaryOperator {
 	NearestNeighbor(Box<NearestNeighbor>),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct MatchesOperator {
 	pub rf: Option<MatchRef>,
 	pub operator: BooleanOperator,
@@ -141,7 +142,7 @@ impl ToSql for MatchesOperator {
 
 /// Boolean operation executed by the full-text index
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum BooleanOperator {
 	And,
 	Or,
@@ -156,7 +157,7 @@ impl ToSql for BooleanOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
@@ -180,7 +181,7 @@ impl ToSql for BinaryOperator {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub enum AssignOperator {
 	Assign,
 	Add,

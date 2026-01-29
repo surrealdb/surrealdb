@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::{Bound, RangeBounds};
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -15,7 +16,7 @@ use crate::val::{Array, IndexFormat, Number, Value};
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Clone, Hash, Encode, BorrowDecode)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash, Encode, BorrowDecode, priority_lfu::DeepSizeOf)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Range {
@@ -171,7 +172,7 @@ impl Range {
 
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
-#[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,

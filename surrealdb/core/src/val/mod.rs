@@ -7,6 +7,7 @@ use std::ops::Bound;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use geo::Point;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
@@ -66,7 +67,7 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode, DeepSizeOf)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum Value {

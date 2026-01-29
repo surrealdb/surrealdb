@@ -13,7 +13,7 @@ use crate::expr::{Base, Block, Expr, FlowResultExt, Kind};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,

@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -8,7 +9,7 @@ use crate::sql;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct AnalyzerDefinition {
 	pub name: String,
 	pub function: Option<String>,

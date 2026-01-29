@@ -1,5 +1,6 @@
 use std::ops::Bound;
 
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{RecordId, SqlFormat, ToSql};
@@ -26,7 +27,7 @@ use crate::fnc;
 use crate::types::PublicValue;
 use crate::val::{Array, Range, TableName, Value};
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, DeepSizeOf)]
 pub(crate) enum Expr {
 	Literal(Literal),
 	Param(Param),

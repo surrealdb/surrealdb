@@ -2,29 +2,25 @@ use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use anyhow::{Error, Result};
-use quick_cache::{Equivalent, Weighter};
+use anyhow::Result;
+use priority_lfu::CacheKey;
 use surrealism_runtime::controller::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 
 pub struct SurrealismCache {
-	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
+	cache: priority_lfu::Cache,
 }
 
 impl SurrealismCache {
 	pub fn new() -> Self {
 		Self {
-			cache: quick_cache::sync::Cache::with_weighter(
-				*crate::cnf::SURREALISM_CACHE_SIZE,
-				*crate::cnf::SURREALISM_CACHE_SIZE as u64,
-				Weight,
-			),
+			cache: priority_lfu::Cache::new(*crate::cnf::SURREALISM_CACHE_SIZE),
 		}
 	}
 
 	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
-		self.cache.remove(lookup);
+		self.cache.remove(&lookup.to_key());
 	}
 
 	/// Gets the runtime from the cache or computes it if not present using the provided function
@@ -37,22 +33,20 @@ impl SurrealismCache {
 		F: FnOnce() -> Fut,
 		Fut: Future<Output = Result<Arc<Runtime>>>,
 	{
-		// This match is only needed to avoid allocating for the key in the fast path
-		let value = match self.cache.get(lookup) {
-			Some(runtime) => runtime,
-			None => {
-				let compute = async {
-					let value = SurrealismCacheValue {
-						runtime: compute().await?,
-					};
-					Result::<_, Error>::Ok(value)
-				};
+		let key = lookup.to_key();
 
-				self.cache.get_or_insert_async(&lookup.to_key(), compute).await?
-			}
-		};
+		// Try fast path first
+		if let Some(runtime) = self.cache.get_clone(&key) {
+			return Ok(runtime);
+		}
 
-		Ok(value.runtime)
+		// Slow path: compute and insert
+		// Note: There's a potential race condition here where multiple concurrent
+		// calls might compute the same value. This is acceptable as the cache
+		// will use one of the computed values.
+		let runtime = compute().await?;
+		self.cache.insert(key, Arc::clone(&runtime));
+		Ok(runtime)
 	}
 }
 
@@ -91,35 +85,7 @@ impl<'a> From<SurrealismCacheLookup<'a>> for SurrealismCacheKey {
 	}
 }
 
-impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
-	fn equivalent(&self, key: &SurrealismCacheKey) -> bool {
-		match (self, key) {
-			(Self::File(a1, b1, c1, d1), SurrealismCacheKey::File(a2, b2, c2, d2)) => {
-				a1.0 == a2.0 && b1.0 == b2.0 && c1 == c2 && d1 == d2
-			}
-			(Self::Silo(a1, b1, c1, d1, e1), SurrealismCacheKey::Silo(a2, b2, c2, d2, e2)) => {
-				a1 == a2 && b1 == b2 && c1 == c2 && d1 == d2 && e1 == e2
-			}
-			_ => false,
-		}
-	}
-}
-
-#[derive(Clone)]
-pub struct SurrealismCacheValue {
-	pub(crate) runtime: Arc<Runtime>,
-}
-
-#[derive(Clone)]
-pub(crate) struct Weight;
-
-impl Weighter<SurrealismCacheKey, SurrealismCacheValue> for Weight {
-	fn weight(&self, _key: &SurrealismCacheKey, _val: &SurrealismCacheValue) -> u64 {
-		// For the moment all entries have the
-		// same weight, and can be evicted when
-		// necessary. In the future we will
-		// compute the actual size of the value
-		// in memory and use that for the weight.
-		1
-	}
+// Implement CacheKey to link the key type to the value type
+impl CacheKey for SurrealismCacheKey {
+	type Value = Arc<Runtime>;
 }

@@ -5,7 +5,7 @@ use std::str;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use quick_cache::sync::{Cache, GuardResult};
+use priority_lfu::{Cache, CacheKey, DeepSizeOf};
 use regex::RegexBuilder;
 use revision::revisioned;
 use serde::de::{self, Visitor};
@@ -15,10 +15,14 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
+// Newtype wrapper for String to implement CacheKey
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct RegexCacheKey(String);
+
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 
 #[revisioned(revision = 1)]
-#[derive(Clone)]
+#[derive(Clone, DeepSizeOf)]
 pub struct Regex(pub regex::Regex);
 
 impl Regex {
@@ -29,21 +33,25 @@ impl Regex {
 	}
 }
 
+// Implement CacheKey for the newtype wrapper
+impl CacheKey for RegexCacheKey {
+	type Value = Regex;
+}
+
 pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
-	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
-		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
-	match REGEX_CACHE.get_value_or_guard(str, None) {
-		GuardResult::Value(v) => Ok(v),
-		GuardResult::Guard(g) => {
-			let re = RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()?;
-			g.insert(re.clone()).ok();
-			Ok(re)
-		}
-		GuardResult::Timeout => {
-			warn!("Regex cache timeout");
-			RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()
-		}
+	static REGEX_CACHE: LazyLock<Cache> = LazyLock::new(|| Cache::new(*REGEX_CACHE_SIZE));
+
+	let key = RegexCacheKey(str.to_string());
+
+	// Try to get from cache first
+	if let Some(cached) = REGEX_CACHE.get_clone(&key) {
+		return Ok(cached.0);
 	}
+
+	// Not in cache, compile and insert
+	let re = RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()?;
+	REGEX_CACHE.insert(key, Regex(re.clone()));
+	Ok(re)
 }
 
 impl FromStr for Regex {

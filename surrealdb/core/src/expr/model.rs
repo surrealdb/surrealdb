@@ -1,6 +1,7 @@
 #[cfg(feature = "ml")]
 use std::collections::HashMap;
 
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
@@ -30,7 +31,7 @@ pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str)
 	format!("ml/{ns}/{db}/{name}-{version}-{hash}.surml")
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Model {
 	pub name: String,
 	pub version: String,

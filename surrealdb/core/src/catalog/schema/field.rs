@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -11,7 +12,7 @@ use crate::sql::{self, DefineFieldStatement};
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum DefineDefault {
 	#[default]
 	None,
@@ -20,7 +21,7 @@ pub(crate) enum DefineDefault {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.

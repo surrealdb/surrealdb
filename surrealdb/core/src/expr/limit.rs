@@ -10,7 +10,7 @@ use crate::err::Error;
 use crate::expr::Expr;
 use crate::val::{Number, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct Limit(pub(crate) Expr);
 
 impl Limit {

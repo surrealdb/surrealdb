@@ -6,7 +6,7 @@ use crate::doc::CursorDoc;
 use crate::expr::parameterize::expr_to_optional_ident;
 use crate::expr::{Expr, Literal};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefaultConfig {
 	pub namespace: Expr,
 	pub database: Expr,

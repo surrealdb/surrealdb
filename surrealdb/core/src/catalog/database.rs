@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
@@ -26,6 +27,7 @@ use crate::val::Value;
 	Deserialize,
 	Encode,
 	BorrowDecode,
+	DeepSizeOf,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DatabaseId(pub u32);
@@ -68,7 +70,7 @@ impl From<u32> for DatabaseId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct DatabaseDefinition {
 	pub(crate) namespace_id: NamespaceId,
 	pub(crate) database_id: DatabaseId,
@@ -108,3 +110,6 @@ impl InfoStructure for DatabaseDefinition {
 		})
 	}
 }
+
+// Note: DatabaseDefinition is cached with weight specified on the CacheKey.
+// DeepSizeOf can be derived if needed for better memory tracking.

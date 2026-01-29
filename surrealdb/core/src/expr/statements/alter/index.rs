@@ -24,7 +24,7 @@ use crate::val::TableName;
 /// - Stops updating the index on record changes
 ///
 /// This allows administrators to verify query performance before permanently removing an index.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct AlterIndexStatement {
 	pub name: String,
 	pub table: TableName,

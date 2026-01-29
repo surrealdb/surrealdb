@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -8,7 +9,7 @@ use crate::sql::{Cond, View};
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum ViewDefinition {
 	/// The view is cached, and has no aggregation.
 	/// It is only updated any of the target tables are updated.

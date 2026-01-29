@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
@@ -90,7 +90,7 @@ impl DefineApiStatement {
 		Ok(Value::None)
 	}
 }
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,

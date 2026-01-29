@@ -1,4 +1,5 @@
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +8,9 @@ use crate::iam::AuthLimit;
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(
+	Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Auth {
 	actor: Actor,

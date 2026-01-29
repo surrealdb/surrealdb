@@ -49,25 +49,25 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> =
 pub static REGEX_SIZE_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_REGEX_SIZE_LIMIT", usize, 10 * 1024 * 1024);
 
-/// Specifies the number of computed regexes which can be cached in the engine
-/// (default: 1000)
+/// Specifies the size of the regex cache in bytes
+/// (default: 1 MiB)
 pub static REGEX_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
+	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1024 * 1024);
 
-/// Specifies the number of items which can be cached within a single
-/// transaction (default: 10,000)
+/// Specifies the size of the transaction cache in bytes
+/// (default: 10 MiB)
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
+	lazy_env_parse!(bytes, "SURREAL_TRANSACTION_CACHE_SIZE", usize, 10 * 1024 * 1024);
 
-/// Specifies the number of definitions which can be cached across transactions
-/// (default: 1,000)
+/// Specifies the size of the datastore cache in bytes
+/// (default: 100 MiB)
 pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
+	lazy_env_parse!(bytes, "SURREAL_DATASTORE_CACHE_SIZE", usize, 100 * 1024 * 1024);
 
-/// Specifies the number of surrealism modules which can be cached across transactions
-/// (default: 100)
+/// Specifies the size of the surrealism cache
+/// (default: 500 MiB)
 pub static SURREALISM_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_SURREALISM_CACHE_SIZE", usize, 100);
+	lazy_env_parse!(bytes, "SURREAL_SURREALISM_CACHE_SIZE", usize, 500 * 1024 * 1024);
 
 /// The maximum number of keys that should be scanned at once in general queries
 /// (default: 500)

@@ -1,6 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -13,7 +14,7 @@ use crate::val::Value;
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
@@ -71,7 +72,7 @@ impl InfoStructure for AccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
@@ -80,7 +81,7 @@ pub(crate) struct RecordAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
@@ -88,21 +89,21 @@ pub struct BearerAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, DeepSizeOf)]
 pub enum BearerAccessType {
 	Bearer,
 	Refresh,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, DeepSizeOf)]
 pub enum BearerAccessSubject {
 	Record,
 	User,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
@@ -141,34 +142,34 @@ impl InfoStructure for JwtAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct JwtAccessVerifyJwks {
 	pub url: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Algorithm {
 	EdDSA,
 	Es256,
@@ -219,7 +220,7 @@ impl ToSql for Algorithm {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct AccessDefinition {
 	pub(crate) name: String,
 	pub(crate) access_type: AccessType,

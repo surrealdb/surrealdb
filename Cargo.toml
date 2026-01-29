@@ -143,7 +143,6 @@ pbkdf2 = "0.12.2"
 phf = "0.13.1"
 pin-project-lite = "0.2.16"
 pprof = "0.15.0"
-quick_cache = "0.6.18"
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
 rand = "0.8.5"
 rayon = "1.11.0"
@@ -180,6 +179,7 @@ url = "2.5.8"
 uuid = "1.19.0"
 wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
+priority-lfu = { version = "0.1.0" }
 
 # Dev dependencies
 criterion = "0.8.1"

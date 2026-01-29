@@ -3,7 +3,7 @@ use std::fmt;
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub enum Algorithm {
 	EdDSA,
 	Es256,

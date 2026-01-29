@@ -10,7 +10,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct View {
 	pub(crate) materialize: bool,
 	pub(crate) expr: Fields,

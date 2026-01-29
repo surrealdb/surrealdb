@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::fmt::Debug;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
@@ -741,8 +740,8 @@ impl Transaction {
 		record: Arc<Record>,
 	) {
 		// Set the value in the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.insert(qey, cache::tx::Entry::Val(record));
+		let key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
+		self.cache.insert(key, Arc::clone(&record));
 	}
 
 	/// Clears all keys from the transaction cache.
@@ -770,16 +769,15 @@ impl NodeProvider for Transaction {
 	/// Retrieve all nodes belonging to this cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_nodes(&self) -> Result<Arc<[Node]>> {
-		let qey = cache::tx::Lookup::Nds;
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_nds(),
+		let key = cache::tx::key::NodesCacheKey;
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::nd::prefix();
 				let end = crate::key::root::nd::suffix();
-				let val = self.getr(beg..end, None).await?;
-				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Nds(val.clone());
-				self.cache.insert(qey, entry);
+				let raw_val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(raw_val.iter().map(|x| x.1.as_slice()))?;
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -788,20 +786,19 @@ impl NodeProvider for Transaction {
 	/// Retrieve a specific node in the cluster.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_node(&self, id: Uuid) -> Result<Arc<Node>> {
-		let qey = cache::tx::Lookup::Nd(id);
-		match self.cache.get(&qey) {
-			Some(val) => val,
+		let key = cache::tx::key::NodeCacheKey(id);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::root::nd::new(id);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::NdNotFound {
+				let node_key = crate::key::root::nd::new(id);
+				let val = self.get(&node_key, None).await?.ok_or_else(|| Error::NdNotFound {
 					uuid: id.to_string(),
 				})?;
-				let val = cache::tx::Entry::Any(Arc::new(val));
-				self.cache.insert(qey, val.clone());
-				val
+				let val = Arc::new(val);
+				self.cache.insert(key, Arc::clone(&val));
+				Ok(val)
 			}
 		}
-		.try_into_type()
 	}
 }
 
@@ -809,38 +806,42 @@ impl NodeProvider for Transaction {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl RootProvider for Transaction {
 	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>> {
-		let qey = cache::tx::Lookup::Rcg("default");
-		match self.cache.get(&qey) {
-			Some(val) => val,
+		let key = cache::tx::key::RootConfigCacheKey("default".to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => {
+				// Since we store ConfigDefinition but need DefaultConfig, extract it
+				match &*val {
+					ConfigDefinition::Default(default) => Ok(Some(Arc::new(default.clone()))),
+					_ => fail!("Expected a default config but found something else"),
+				}
+			}
 			None => {
-				let key = crate::key::root::root_config::new("default");
-				let Some(val) = self.get(&key, None).await? else {
+				let cfg_key = crate::key::root::root_config::new("default");
+				let Some(val) = self.get(&cfg_key, None).await? else {
 					return Ok(None);
 				};
-				let ConfigDefinition::Default(val) = val else {
+				let ConfigDefinition::Default(default_config) = &val else {
 					fail!("Expected a default config but found {val:?} instead");
 				};
-				let val = cache::tx::Entry::Any(Arc::new(val));
-				self.cache.insert(qey, val.clone());
-				val
+				let result = Arc::new(default_config.clone());
+				let val = Arc::new(val);
+				self.cache.insert(key, Arc::clone(&val));
+				Ok(Some(result))
 			}
 		}
-		.try_into_type()
-		.map(Option::Some)
 	}
 
 	/// Retrieve a specific config definition from the root.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<ConfigDefinition>>> {
-		let qey = cache::tx::Lookup::Rcg(cg);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Option::Some),
+		let key = cache::tx::key::RootConfigCacheKey(cg.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::root::root_config::new(cg);
-				if let Some(val) = self.get(&key, None).await? {
+				let cfg_key = crate::key::root::root_config::new(cg);
+				if let Some(val) = self.get(&cfg_key, None).await? {
 					let val = Arc::new(val);
-					let entr = cache::tx::Entry::Any(val.clone());
-					self.cache.insert(qey, entr);
+					self.cache.insert(key, Arc::clone(&val));
 					Ok(Some(val))
 				} else {
 					Ok(None)
@@ -856,34 +857,33 @@ impl NamespaceProvider for Transaction {
 	/// Retrieve all namespace definitions in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>> {
-		let qey = cache::tx::Lookup::Nss;
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_nss(),
+		let key = cache::tx::key::NamespacesCacheKey;
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::ns::prefix();
 				let end = crate::key::root::ns::suffix();
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Nss(val.clone());
-				self.cache.insert(qey, entry);
+
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
 	}
 
 	async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>> {
-		let qey = cache::tx::Lookup::NsByName(ns);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::NamespaceByNameCacheKey(ns.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::root::ns::new(ns);
-				let Some(ns) = self.get(&key, None).await? else {
+				let ns_key = crate::key::root::ns::new(ns);
+				let Some(ns) = self.get(&ns_key, None).await? else {
 					return Ok(None);
 				};
 
 				let ns = Arc::new(ns);
-				let entr = cache::tx::Entry::Any(ns.clone());
-				self.cache.insert(qey, entr);
+				self.cache.insert(key, Arc::clone(&ns));
 				Ok(Some(ns))
 			}
 		}
@@ -904,10 +904,8 @@ impl NamespaceProvider for Transaction {
 
 		// Populate cache
 		let cached_ns = Arc::new(ns.clone());
-
-		let entry = cache::tx::Entry::Any(Arc::clone(&cached_ns) as Arc<dyn Any + Send + Sync>);
-		let qey = cache::tx::Lookup::NsByName(&ns.name);
-		self.cache.insert(qey, entry);
+		let cache_key = cache::tx::key::NamespaceByNameCacheKey(ns.name.clone());
+		self.cache.insert(cache_key, Arc::clone(&cached_ns));
 
 		Ok(cached_ns)
 	}
@@ -923,16 +921,15 @@ impl DatabaseProvider for Transaction {
 	/// Retrieve all database definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>> {
-		let qey = cache::tx::Lookup::Dbs(ns);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_dbs(),
+		let key = cache::tx::key::DatabasesCacheKey(ns);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::namespace::db::prefix(ns)?;
 				let end = crate::key::namespace::db::suffix(ns)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Dbs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -941,22 +938,21 @@ impl DatabaseProvider for Transaction {
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>> {
-		let qey = cache::tx::Lookup::DbByName(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
 				let Some(ns) = self.get_ns_by_name(ns).await? else {
 					return Ok(None);
 				};
 
-				let key = crate::key::namespace::db::new(ns.namespace_id, db);
-				let Some(db_def) = self.get(&key, None).await? else {
+				let db_key = crate::key::namespace::db::new(ns.namespace_id, db);
+				let Some(db_def) = self.get(&db_key, None).await? else {
 					return Ok(None);
 				};
 
 				let val = Arc::new(db_def);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -972,13 +968,10 @@ impl DatabaseProvider for Transaction {
 		db: &str,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		let qey = cache::tx::Lookup::DbByName(ns, db);
-		match self.cache.get(&qey) {
+		let key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.to_string());
+		match self.cache.get_clone(&key) {
 			// The entry is in the cache
-			Some(val) => {
-				let t = val.try_into_type()?;
-				Ok(t)
-			}
+			Some(val) => Ok(val),
 			// The entry is not in the cache
 			None => {
 				let db_def = self.get_db_by_name(ns, db).await?;
@@ -1023,11 +1016,9 @@ impl DatabaseProvider for Transaction {
 		self.set(&key, &db, None).await?;
 
 		// Populate cache
-		let cached_db = Arc::new(db.clone());
-
-		let entry = cache::tx::Entry::Any(Arc::clone(&cached_db) as Arc<dyn Any + Send + Sync>);
-		let qey = cache::tx::Lookup::DbByName(ns, &db.name);
-		self.cache.insert(qey, entry);
+		let cache_key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.name.clone());
+		let cached_db = Arc::new(db);
+		self.cache.insert(cache_key, Arc::clone(&cached_db));
 
 		Ok(cached_db)
 	}
@@ -1056,16 +1047,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::AnalyzerDefinition]>> {
-		let qey = cache::tx::Lookup::Azs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_azs(),
+		let key = cache::tx::key::AnalyzersCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::az::prefix(ns, db)?;
 				let end = crate::key::database::az::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Azs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1078,16 +1068,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::SequenceDefinition]>> {
-		let qey = cache::tx::Lookup::Sqs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_sqs(),
+		let key = cache::tx::key::SequencesCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::sq::prefix(ns, db)?;
 				let end = crate::key::database::sq::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Sqs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1100,16 +1089,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::FunctionDefinition]>> {
-		let qey = cache::tx::Lookup::Fcs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_fcs(),
+		let key = cache::tx::key::FunctionsCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::fc::prefix(ns, db)?;
 				let end = crate::key::database::fc::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Fcs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1122,16 +1110,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::ModuleDefinition]>> {
-		let qey = cache::tx::Lookup::Mds(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_mds(),
+		let key = cache::tx::key::ModulesCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::md::prefix(ns, db)?;
 				let end = crate::key::database::md::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Mds(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1144,16 +1131,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::ParamDefinition]>> {
-		let qey = cache::tx::Lookup::Pas(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_pas(),
+		let key = cache::tx::key::ParamsCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::pa::prefix(ns, db)?;
 				let end = crate::key::database::pa::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Pas(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1166,16 +1152,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::MlModelDefinition]>> {
-		let qey = cache::tx::Lookup::Mls(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_mls(),
+		let key = cache::tx::key::ModelsCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::ml::prefix(ns, db)?;
 				let end = crate::key::database::ml::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Mls(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1188,16 +1173,15 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[ConfigDefinition]>> {
-		let qey = cache::tx::Lookup::Cgs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_cgs(),
+		let key = cache::tx::key::ConfigsCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::cg::prefix(ns, db)?;
 				let end = crate::key::database::cg::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Cgs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1212,17 +1196,16 @@ impl DatabaseProvider for Transaction {
 		ml: &str,
 		vn: &str,
 	) -> Result<Option<Arc<catalog::MlModelDefinition>>> {
-		let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::ModelCacheKey(ns, db, ml.to_string(), vn.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::ml::new(ns, db, ml, vn);
-				let Some(val) = self.get(&key, None).await? else {
+				let ml_key = crate::key::database::ml::new(ns, db, ml, vn);
+				let Some(val) = self.get(&ml_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1236,17 +1219,16 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		az: &str,
 	) -> Result<Arc<catalog::AnalyzerDefinition>> {
-		let qey = cache::tx::Lookup::Az(ns, db, az);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::AnalyzerCacheKey(ns, db, az.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::database::az::new(ns, db, az);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::AzNotFound {
+				let az_key = crate::key::database::az::new(ns, db, az);
+				let val = self.get(&az_key, None).await?.ok_or_else(|| Error::AzNotFound {
 					name: az.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1260,17 +1242,16 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		sq: &str,
 	) -> Result<Arc<catalog::SequenceDefinition>> {
-		let qey = cache::tx::Lookup::Sq(ns, db, sq);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::SequenceCacheKey(ns, db, sq.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = Sq::new(ns, db, sq);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::SeqNotFound {
+				let sq_key = Sq::new(ns, db, sq);
+				let val = self.get(&sq_key, None).await?.ok_or_else(|| Error::SeqNotFound {
 					name: sq.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1284,17 +1265,16 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		fc: &str,
 	) -> Result<Arc<catalog::FunctionDefinition>> {
-		let qey = cache::tx::Lookup::Fc(ns, db, fc);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::FunctionCacheKey(ns, db, fc.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::database::fc::new(ns, db, fc);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::FcNotFound {
+				let fc_key = crate::key::database::fc::new(ns, db, fc);
+				let val = self.get(&fc_key, None).await?.ok_or_else(|| Error::FcNotFound {
 					name: fc.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1308,17 +1288,16 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		md: &str,
 	) -> Result<Arc<catalog::ModuleDefinition>> {
-		let qey = cache::tx::Lookup::Md(ns, db, md);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::ModuleCacheKey(ns, db, md.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::database::md::new(ns, db, md);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::MdNotFound {
+				let md_key = crate::key::database::md::new(ns, db, md);
+				let val = self.get(&md_key, None).await?.ok_or_else(|| Error::MdNotFound {
 					name: md.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1332,17 +1311,16 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		pa: &str,
 	) -> Result<Arc<catalog::ParamDefinition>> {
-		let qey = cache::tx::Lookup::Pa(ns, db, pa);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::ParamCacheKey(ns, db, pa.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::database::pa::new(ns, db, pa);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::PaNotFound {
+				let pa_key = crate::key::database::pa::new(ns, db, pa);
+				let val = self.get(&pa_key, None).await?.ok_or_else(|| Error::PaNotFound {
 					name: pa.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1356,15 +1334,14 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		cg: &str,
 	) -> Result<Option<Arc<ConfigDefinition>>> {
-		let qey = cache::tx::Lookup::Cg(ns, db, cg);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Option::Some),
+		let key = cache::tx::key::ConfigCacheKey(ns, db, cg.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::cg::new(ns, db, cg);
-				if let Some(val) = self.get(&key, None).await? {
+				let cg_key = crate::key::database::cg::new(ns, db, cg);
+				if let Some(val) = self.get(&cg_key, None).await? {
 					let val = Arc::new(val);
-					let entr = cache::tx::Entry::Any(val.clone());
-					self.cache.insert(qey, entr);
+					self.cache.insert(key, Arc::clone(&val));
 					Ok(Some(val))
 				} else {
 					Ok(None)
@@ -1419,16 +1396,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		version: Option<u64>,
 	) -> Result<Arc<[TableDefinition]>> {
-		let qey = cache::tx::Lookup::Tbs(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_tbs(),
+		let key = cache::tx::key::TablesCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::tb::prefix(ns, db)?;
 				let end = crate::key::database::tb::suffix(ns, db)?;
 				let val = self.getr(beg..end, version).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Tbs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1441,17 +1417,16 @@ impl TableProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
-	) -> Result<Arc<[catalog::TableDefinition]>> {
-		let qey = cache::tx::Lookup::Fts(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_fts(),
+	) -> Result<Arc<[TableDefinition]>> {
+		let key = cache::tx::key::TableViewsCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ft::prefix(ns, db, tb)?;
 				let end = crate::key::table::ft::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Fts(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1467,10 +1442,11 @@ impl TableProvider for Transaction {
 		db: &str,
 		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
-		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
-		match self.cache.get(&qey) {
+		let key =
+			cache::tx::key::TableByNameCacheKey(ns.to_string(), db.to_string(), tb.to_string());
+		match self.cache.get_clone(&key) {
 			// The entry is in the cache
-			Some(val) => val.try_into_type(),
+			Some(val) => Ok(val),
 			// The entry is not in the cache
 			None => {
 				let Some(db_def) = self.get_db_by_name(ns, db).await? else {
@@ -1483,9 +1459,7 @@ impl TableProvider for Transaction {
 					crate::key::database::tb::new(db_def.namespace_id, db_def.database_id, tb);
 				if let Some(tb_def) = self.get(&table_key, None).await? {
 					let cached_tb = Arc::new(tb_def);
-					let cached_entry =
-						cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
-					self.cache.insert(qey, cached_entry);
+					self.cache.insert(key, Arc::clone(&cached_tb));
 					return Ok(cached_tb);
 				}
 
@@ -1513,22 +1487,22 @@ impl TableProvider for Transaction {
 		db: &str,
 		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
-		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key =
+			cache::tx::key::TableByNameCacheKey(ns.to_string(), db.to_string(), tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
 				let Some(db) = self.get_db_by_name(ns, db).await? else {
 					return Ok(None);
 				};
 
-				let key = crate::key::database::tb::new(db.namespace_id, db.database_id, tb);
-				let Some(tb) = self.get(&key, None).await? else {
+				let tb_key = crate::key::database::tb::new(db.namespace_id, db.database_id, tb);
+				let Some(tb) = self.get(&tb_key, None).await? else {
 					return Ok(None);
 				};
 
 				let tb = Arc::new(tb);
-				let entr = cache::tx::Entry::Any(tb.clone());
-				self.cache.insert(qey, entr);
+				self.cache.insert(key, Arc::clone(&tb));
 				Ok(Some(tb))
 			}
 		}
@@ -1559,14 +1533,17 @@ impl TableProvider for Transaction {
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
-		let cached_entry =
-			cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
 
-		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
-		self.cache.insert(qey, cached_entry.clone());
+		let key1 =
+			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
+		self.cache.insert(key1, Arc::clone(&cached_tb));
 
-		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.insert(qey, cached_entry);
+		let key2 = cache::tx::key::TableByNameCacheKey(
+			ns.to_string(),
+			db.to_string(),
+			tb.name.to_string(),
+		);
+		self.cache.insert(key2, Arc::clone(&cached_tb));
 
 		Ok(cached_tb)
 	}
@@ -1583,10 +1560,15 @@ impl TableProvider for Transaction {
 		self.del(&key).await?;
 
 		// Clear the cache
-		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
-		self.cache.remove(qey);
-		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.remove(qey);
+		let key1 =
+			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
+		self.cache.remove(&key1);
+		let key2 = cache::tx::key::TableByNameCacheKey(
+			ns.to_string(),
+			db.to_string(),
+			tb.name.to_string(),
+		);
+		self.cache.remove(&key2);
 
 		Ok(())
 	}
@@ -1603,10 +1585,15 @@ impl TableProvider for Transaction {
 		self.clr(&key).await?;
 
 		// Clear the cache
-		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
-		self.cache.remove(qey);
-		let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
-		self.cache.remove(qey);
+		let key1 =
+			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
+		self.cache.remove(&key1);
+		let key2 = cache::tx::key::TableByNameCacheKey(
+			ns.to_string(),
+			db.to_string(),
+			tb.name.to_string(),
+		);
+		self.cache.remove(&key2);
 
 		Ok(())
 	}
@@ -1619,16 +1606,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
-		let qey = cache::tx::Lookup::Evs(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_evs(),
+		let key = cache::tx::key::TableEventsCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ev::prefix(ns, db, tb)?;
 				let end = crate::key::table::ev::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Evs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1643,16 +1629,15 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
-		let qey = cache::tx::Lookup::Fds(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_fds(),
+		let key = cache::tx::key::TableFieldsCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::fd::prefix(ns, db, tb)?;
 				let end = crate::key::table::fd::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, version).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Fds(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1666,16 +1651,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
-		let qey = cache::tx::Lookup::Ixs(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_ixs(),
+		let key = cache::tx::key::TableIndexesCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ix::prefix(ns, db, tb)?;
 				let end = crate::key::table::ix::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Ixs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1689,16 +1673,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
-		let qey = cache::tx::Lookup::Lvs(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_lvs(),
+		let key = cache::tx::key::TableLivesCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::lq::prefix(ns, db, tb)?;
 				let end = crate::key::table::lq::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Lvs(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1712,17 +1695,16 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
-		let qey = cache::tx::Lookup::Tb(ns, db, tb);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::TableCacheKey(ns, db, tb.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::tb::new(ns, db, tb);
-				let Some(val) = self.get(&key, None).await? else {
+				let tb_key = crate::key::database::tb::new(ns, db, tb);
+				let Some(val) = self.get(&tb_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1737,17 +1719,16 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		ev: &str,
 	) -> Result<Arc<catalog::EventDefinition>> {
-		let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type(),
+		let key = cache::tx::key::EventCacheKey(ns, db, tb.to_string(), ev.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
-				let key = crate::key::table::ev::new(ns, db, tb, ev);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::EvNotFound {
+				let ev_key = crate::key::table::ev::new(ns, db, tb, ev);
+				let val = self.get(&ev_key, None).await?.ok_or_else(|| Error::EvNotFound {
 					name: ev.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1762,17 +1743,16 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>> {
-		let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::FieldCacheKey(ns, db, tb.to_string(), fd.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::table::fd::new(ns, db, tb, fd);
-				let Some(val) = self.get(&key, None).await? else {
+				let fd_key = crate::key::table::fd::new(ns, db, tb, fd);
+				let Some(val) = self.get(&fd_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1800,17 +1780,16 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		ix: &str,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
-		let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::IndexCacheKey(ns, db, tb.to_string(), ix.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::table::ix::new(ns, db, tb, ix);
-				let Some(val) = self.get(&key, None).await? else {
+				let ix_key = crate::key::table::ix::new(ns, db, tb, ix);
+				let Some(val) = self.get(&ix_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1846,9 +1825,8 @@ impl TableProvider for Transaction {
 		self.set(&name_lookup_key, &ix.name, None).await?;
 
 		// Set the entry in the cache
-		let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
-		let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
-		self.cache.insert(qey, entry);
+		let key = cache::tx::key::IndexCacheKey(ns, db, tb.to_string(), ix.name.clone());
+		self.cache.insert(key, Arc::new(ix.clone()));
 		Ok(())
 	}
 
@@ -1907,15 +1885,15 @@ impl TableProvider for Transaction {
 				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
-			let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-			match self.cache.get(&qey) {
+			let key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
+			match self.cache.get_clone(&key) {
 				// The entry is in the cache
-				Some(val) => val.try_into_record(),
+				Some(val) => Ok(val),
 				// The entry is not in the cache
 				None => {
 					// Fetch the record from the datastore
-					let key = crate::key::record::new(ns, db, tb, id);
-					match self.get(&key, None).await? {
+					let rec_key = crate::key::record::new(ns, db, tb, id);
+					match self.get(&rec_key, None).await? {
 						// The value exists in the datastore
 						Some(mut record) => {
 							// Inject the id field into the document
@@ -1926,8 +1904,7 @@ impl TableProvider for Transaction {
 							record.data.to_mut().def(&rid);
 							// Convert to read-only format for better sharing and performance
 							let record = record.into_read_only();
-							let entry = cache::tx::Entry::Val(record.clone());
-							self.cache.insert(qey, entry);
+							self.cache.insert(key, Arc::clone(&record));
 							Ok(record)
 						}
 						// The value is not in the datastore
@@ -1996,8 +1973,8 @@ impl TableProvider for Transaction {
 		let key = crate::key::record::new(ns, db, tb, id);
 		self.del(&key).await?;
 		// Clear the value from the cache
-		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
-		self.cache.remove(qey);
+		let cache_key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
+		self.cache.remove(&cache_key);
 		// Return nothing
 		Ok(())
 	}
@@ -2018,16 +1995,15 @@ impl UserProvider for Transaction {
 	/// Retrieve all ROOT level users in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_root_users(&self) -> Result<Arc<[catalog::UserDefinition]>> {
-		let qey = cache::tx::Lookup::Rus;
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_rus(),
+		let key = cache::tx::key::RootUsersCacheKey;
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::us::prefix();
 				let end = crate::key::root::us::suffix();
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Rus(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2036,16 +2012,15 @@ impl UserProvider for Transaction {
 	/// Retrieve all namespace user definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_ns_users(&self, ns: NamespaceId) -> Result<Arc<[catalog::UserDefinition]>> {
-		let qey = cache::tx::Lookup::Nus(ns);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_nus(),
+		let key = cache::tx::key::NamespaceUsersCacheKey(ns);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::namespace::us::prefix(ns)?;
 				let end = crate::key::namespace::us::suffix(ns)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Nus(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2058,16 +2033,15 @@ impl UserProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::UserDefinition]>> {
-		let qey = cache::tx::Lookup::Dus(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_dus(),
+		let key = cache::tx::key::DatabaseUsersCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::us::prefix(ns, db)?;
 				let end = crate::key::database::us::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Dus(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2076,17 +2050,16 @@ impl UserProvider for Transaction {
 	/// Retrieve a specific root user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_user(&self, us: &str) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let qey = cache::tx::Lookup::Ru(us);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::RootUserCacheKey(us.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::root::us::new(us);
-				let Some(val) = self.get(&key, None).await? else {
+				let us_key = crate::key::root::us::new(us);
+				let Some(val) = self.get(&us_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2099,18 +2072,17 @@ impl UserProvider for Transaction {
 		ns: NamespaceId,
 		us: &str,
 	) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let qey = cache::tx::Lookup::Nu(ns, us);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::NamespaceUserCacheKey(ns, us.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::namespace::us::new(ns, us);
-				let Some(val) = self.get(&key, None).await? else {
+				let us_key = crate::key::namespace::us::new(ns, us);
+				let Some(val) = self.get(&us_key, None).await? else {
 					return Ok(None);
 				};
 
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2124,18 +2096,17 @@ impl UserProvider for Transaction {
 		db: DatabaseId,
 		us: &str,
 	) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let qey = cache::tx::Lookup::Du(ns, db, us);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::DatabaseUserCacheKey(ns, db, us.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::us::new(ns, db, us);
-				let Some(val) = self.get(&key, None).await? else {
+				let us_key = crate::key::database::us::new(ns, db, us);
+				let Some(val) = self.get(&us_key, None).await? else {
 					return Ok(None);
 				};
 
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2171,16 +2142,15 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve all ROOT level accesses in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_root_accesses(&self) -> Result<Arc<[catalog::AccessDefinition]>> {
-		let qey = cache::tx::Lookup::Ras;
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_ras(),
+		let key = cache::tx::key::RootAccessesCacheKey;
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::ac::prefix();
 				let end = crate::key::root::ac::suffix();
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Ras(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2189,16 +2159,15 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[catalog::AccessGrant]>> {
-		let qey = cache::tx::Lookup::Rgs(ra);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_rag(),
+		let key = cache::tx::key::RootAccessGrantsCacheKey(ra.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::access::gr::prefix(ra)?;
 				let end = crate::key::root::access::gr::suffix(ra)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Rag(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2207,16 +2176,15 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve all namespace access definitions for a specific namespace.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_ns_accesses(&self, ns: NamespaceId) -> Result<Arc<[catalog::AccessDefinition]>> {
-		let qey = cache::tx::Lookup::Nas(ns);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_nas(),
+		let key = cache::tx::key::NamespaceAccessesCacheKey(ns);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::namespace::ac::prefix(ns)?;
 				let end = crate::key::namespace::ac::suffix(ns)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Nas(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2229,16 +2197,15 @@ impl AuthorisationProvider for Transaction {
 		ns: NamespaceId,
 		na: &str,
 	) -> Result<Arc<[catalog::AccessGrant]>> {
-		let qey = cache::tx::Lookup::Ngs(ns, na);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_nag(),
+		let key = cache::tx::key::NamespaceAccessGrantsCacheKey(ns, na.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::namespace::access::gr::prefix(ns, na)?;
 				let end = crate::key::namespace::access::gr::suffix(ns, na)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Nag(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2251,16 +2218,15 @@ impl AuthorisationProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::AccessDefinition]>> {
-		let qey = cache::tx::Lookup::Das(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_das(),
+		let key = cache::tx::key::DatabaseAccessesCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::ac::prefix(ns, db)?;
 				let end = crate::key::database::ac::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Das(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2274,16 +2240,15 @@ impl AuthorisationProvider for Transaction {
 		db: DatabaseId,
 		da: &str,
 	) -> Result<Arc<[catalog::AccessGrant]>> {
-		let qey = cache::tx::Lookup::Dgs(ns, db, da);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_dag(),
+		let key = cache::tx::key::DatabaseAccessGrantsCacheKey(ns, db, da.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::access::gr::prefix(ns, db, da)?;
 				let end = crate::key::database::access::gr::suffix(ns, db, da)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Dag(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2292,17 +2257,16 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let qey = cache::tx::Lookup::Ra(ra);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::RootAccessCacheKey(ra.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::root::ac::new(ra);
-				let Some(val) = self.get(&key, None).await? else {
+				let ac_key = crate::key::root::ac::new(ra);
+				let Some(val) = self.get(&ac_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2315,17 +2279,16 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let qey = cache::tx::Lookup::Rg(ac, gr);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::RootAccessGrantCacheKey(ac.to_string(), gr.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::root::access::gr::new(ac, gr);
-				let Some(val) = self.get(&key, None).await? else {
+				let gr_key = crate::key::root::access::gr::new(ac, gr);
+				let Some(val) = self.get(&gr_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2338,17 +2301,16 @@ impl AuthorisationProvider for Transaction {
 		ns: NamespaceId,
 		na: &str,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let qey = cache::tx::Lookup::Na(ns, na);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::NamespaceAccessCacheKey(ns, na.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::namespace::ac::new(ns, na);
-				let Some(val) = self.get(&key, None).await? else {
+				let ac_key = crate::key::namespace::ac::new(ns, na);
+				let Some(val) = self.get(&ac_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2362,17 +2324,16 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let qey = cache::tx::Lookup::Ng(ns, ac, gr);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::NamespaceAccessGrantCacheKey(ns, ac.to_string(), gr.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::namespace::access::gr::new(ns, ac, gr);
-				let Some(val) = self.get(&key, None).await? else {
+				let gr_key = crate::key::namespace::access::gr::new(ns, ac, gr);
+				let Some(val) = self.get(&gr_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2386,17 +2347,16 @@ impl AuthorisationProvider for Transaction {
 		db: DatabaseId,
 		da: &str,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let qey = cache::tx::Lookup::Da(ns, db, da);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::DatabaseAccessCacheKey(ns, db, da.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::ac::new(ns, db, da);
-				let Some(val) = self.get(&key, None).await? else {
+				let ac_key = crate::key::database::ac::new(ns, db, da);
+				let Some(val) = self.get(&ac_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2411,17 +2371,17 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let qey = cache::tx::Lookup::Dg(ns, db, ac, gr);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key =
+			cache::tx::key::DatabaseAccessGrantCacheKey(ns, db, ac.to_string(), gr.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::access::gr::new(ns, db, ac, gr);
-				let Some(val) = self.get(&key, None).await? else {
+				let gr_key = crate::key::database::access::gr::new(ns, db, ac, gr);
+				let Some(val) = self.get(&gr_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2467,20 +2427,18 @@ impl ApiProvider for Transaction {
 	/// Retrieve all api definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_apis(&self, ns: NamespaceId, db: DatabaseId) -> Result<Arc<[ApiDefinition]>> {
-		let qey = cache::tx::Lookup::Aps(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val,
+		let key = cache::tx::key::ApisCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::ap::prefix(ns, db)?;
 				let end = crate::key::database::ap::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let val = cache::tx::Entry::Aps(Arc::clone(&val));
-				self.cache.insert(qey, val.clone());
-				val
+				self.cache.insert(key, Arc::clone(&val));
+				Ok(val)
 			}
 		}
-		.try_into_aps()
 	}
 
 	/// Retrieve a specific api definition.
@@ -2491,17 +2449,16 @@ impl ApiProvider for Transaction {
 		db: DatabaseId,
 		ap: &str,
 	) -> Result<Option<Arc<ApiDefinition>>> {
-		let qey = cache::tx::Lookup::Ap(ns, db, ap);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::ApiCacheKey(ns, db, ap.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::ap::new(ns, db, ap);
-				let Some(val) = self.get(&key, None).await? else {
+				let ap_key = crate::key::database::ap::new(ns, db, ap);
+				let Some(val) = self.get(&ap_key, None).await? else {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				let entry = cache::tx::Entry::Any(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2526,16 +2483,15 @@ impl BucketProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::BucketDefinition]>> {
-		let qey = cache::tx::Lookup::Bus(ns, db);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_bus(),
+		let key = cache::tx::key::BucketsCacheKey(ns, db);
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::bu::prefix(ns, db)?;
 				let end = crate::key::database::bu::suffix(ns, db)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				let entry = cache::tx::Entry::Bus(val.clone());
-				self.cache.insert(qey, entry);
+				self.cache.insert(key, Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2549,17 +2505,16 @@ impl BucketProvider for Transaction {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Option<Arc<catalog::BucketDefinition>>> {
-		let qey = cache::tx::Lookup::Bu(ns, db, bu);
-		match self.cache.get(&qey) {
-			Some(val) => val.try_into_type().map(Some),
+		let key = cache::tx::key::BucketCacheKey(ns, db, bu.to_string());
+		match self.cache.get_clone(&key) {
+			Some(val) => Ok(Some(val)),
 			None => {
-				let key = crate::key::database::bu::new(ns, db, bu);
-				let Some(val) = self.get(&key, None).await? else {
+				let bu_key = crate::key::database::bu::new(ns, db, bu);
+				let Some(val) = self.get(&bu_key, None).await? else {
 					return Ok(None);
 				};
 				let bucket_def = Arc::new(val);
-				let entr = cache::tx::Entry::Any(bucket_def.clone());
-				self.cache.insert(qey, entr);
+				self.cache.insert(key, Arc::clone(&bucket_def));
 				Ok(Some(bucket_def))
 			}
 		}

@@ -6,6 +6,7 @@ use std::{ops, str};
 use anyhow::{Result, anyhow};
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -16,7 +17,7 @@ use crate::syn;
 use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Datetime(pub DateTime<Utc>);
 

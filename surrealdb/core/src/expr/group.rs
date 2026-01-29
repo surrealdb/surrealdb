@@ -1,12 +1,13 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 
 use crate::expr::idiom::Idiom;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Groups(pub(crate) Vec<Group>);
 
 impl Groups {
@@ -20,7 +21,7 @@ impl Groups {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Group(pub(crate) Idiom);
 
 impl Deref for Group {

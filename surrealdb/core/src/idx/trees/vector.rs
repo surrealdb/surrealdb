@@ -372,6 +372,7 @@ impl Vector {
 /// caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
 pub struct SharedVector(Arc<Vector>, u64);
+
 impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = AHasher::default();
@@ -405,6 +406,12 @@ impl SharedVector {
 	pub(super) fn mem_size(&self) -> usize {
 		// SharedVector stack size + Vector heap size + Arc heap overhead
 		std::mem::size_of::<Self>() + self.0.mem_size() + 16
+	}
+}
+
+impl priority_lfu::DeepSizeOf for SharedVector {
+	fn deep_size_of_children(&self, _context: &mut priority_lfu::Context) -> usize {
+		self.mem_size()
 	}
 }
 

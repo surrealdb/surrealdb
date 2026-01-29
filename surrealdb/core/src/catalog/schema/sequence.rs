@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -11,7 +12,7 @@ use crate::types::PublicDuration;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct SequenceDefinition {
 	pub name: String,
 	pub batch: u32,

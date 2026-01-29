@@ -1,6 +1,7 @@
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -16,7 +17,7 @@ use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName};
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Lookup {
 	pub(crate) kind: LookupKind,
 	pub(crate) expr: Option<Fields>,
@@ -38,7 +39,7 @@ impl ToSql for Lookup {
 }
 
 /// This enum instructs whether the lookup is a graph edge or a record reference
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum LookupKind {
 	Graph(Dir),
 	Reference,
@@ -60,7 +61,7 @@ impl ToSql for LookupKind {
 }
 
 /// This enum instructs whether we scan all edges on a table or just a specific range
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum LookupSubject {
 	Table {
 		table: TableName,
@@ -104,7 +105,7 @@ impl LookupSubject {
 }
 
 /// This enum instructs whether we scan all edges on a table or just a specific range
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum ComputedLookupSubject {
 	Table {
 		table: TableName,

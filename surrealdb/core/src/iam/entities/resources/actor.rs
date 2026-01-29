@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::str::FromStr as _;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ use crate::iam::{AuthLimit, Role};
 // User
 //
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Actor {
 	res: Resource,

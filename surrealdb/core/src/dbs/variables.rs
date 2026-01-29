@@ -45,7 +45,7 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 #[repr(transparent)]
 pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
 

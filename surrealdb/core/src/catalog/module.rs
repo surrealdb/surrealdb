@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 
 use crate::catalog::ModuleDefinition;
@@ -7,7 +8,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
@@ -23,7 +24,7 @@ impl InfoStructure for ModuleExecutable {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct SurrealismExecutable {
 	pub bucket: String,
 	pub key: String,
@@ -40,7 +41,7 @@ impl InfoStructure for SurrealismExecutable {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct SiloExecutable {
 	pub organisation: String,
 	pub package: String,
@@ -65,7 +66,7 @@ impl InfoStructure for SiloExecutable {
 // This enum is not actually stored, but is used to generate the storage name of a module
 // Therefor I found it to fit better inside catalog, and to then let expr use this enum aswell,
 // to have a single point where the storage name is generated.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum ModuleName {
 	Module(String),
 	Silo(String, String, u32, u32, u32),

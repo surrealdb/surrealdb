@@ -8,7 +8,7 @@ use crate::expr::{Algorithm, Expr, Literal};
 
 /// The type of access methods available
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
@@ -50,7 +50,7 @@ impl AccessType {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
@@ -78,7 +78,7 @@ impl Default for JwtAccess {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct JwtAccessIssue {
 	pub(crate) alg: Algorithm,
 	pub(crate) key: Expr,
@@ -95,7 +95,7 @@ impl Default for JwtAccessIssue {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
@@ -108,7 +108,7 @@ impl Default for JwtAccessVerify {
 		})
 	}
 }
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct JwtAccessVerifyKey {
 	pub(crate) alg: Algorithm,
 	pub(crate) key: Expr,
@@ -125,12 +125,12 @@ impl Default for JwtAccessVerifyKey {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct JwtAccessVerifyJwks {
 	pub(crate) url: Expr,
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
@@ -151,7 +151,7 @@ impl Default for RecordAccess {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
@@ -170,7 +170,7 @@ impl Default for BearerAccess {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub(crate) enum BearerAccessType {
 	Bearer,
 	Refresh,
@@ -197,7 +197,7 @@ impl FromStr for BearerAccessType {
 	}
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, priority_lfu::DeepSizeOf)]
 pub enum BearerAccessSubject {
 	Record,
 	User,

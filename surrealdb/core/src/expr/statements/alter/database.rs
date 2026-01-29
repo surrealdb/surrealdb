@@ -6,7 +6,7 @@ use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 /// Executes `ALTER DATABASE` operations.
 ///
 /// Supported options:

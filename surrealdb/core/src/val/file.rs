@@ -5,7 +5,9 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode, priority_lfu::DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]

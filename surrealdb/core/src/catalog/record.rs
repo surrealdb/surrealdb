@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::Arc;
 
+use priority_lfu::DeepSizeOf;
 use revision::error::Error;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 
@@ -36,7 +37,7 @@ use crate::val::Value;
 /// assert!(!record.is_edge());
 /// ```
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, DeepSizeOf)]
 pub struct Record {
 	/// Optional metadata about the record (e.g., record type)
 	pub(crate) metadata: Option<Metadata>,
@@ -134,7 +135,7 @@ impl Record {
 /// Mutable data is used when the value needs to be modified, while read-only
 /// data is used when the value will only be read, allowing for better sharing
 /// and reduced memory usage.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub(crate) enum Data {
 	/// Mutable data that can be directly modified
 	// TODO (DB-655): Switch to `Object`.
@@ -278,7 +279,7 @@ impl From<Arc<Value>> for Data {
 /// Currently, only Edge is supported, but this can be extended to support
 /// other record types in the future.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, DeepSizeOf)]
 pub(crate) enum RecordType {
 	/// Represents a normal table record
 	#[default]
@@ -294,7 +295,7 @@ pub(crate) enum RecordType {
 /// The metadata is revisioned to ensure compatibility across different versions
 /// of the database.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 pub(crate) struct Metadata {
 	/// The type of the record (e.g., Edge for graph edges)
 	pub(crate) record_type: RecordType,

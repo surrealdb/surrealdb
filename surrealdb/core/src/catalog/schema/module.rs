@@ -1,4 +1,5 @@
 use anyhow::bail;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -10,7 +11,7 @@ use crate::sql::{self, DefineModuleStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct ModuleDefinition {
 	pub(crate) name: Option<String>,
 	pub(crate) comment: Option<String>,

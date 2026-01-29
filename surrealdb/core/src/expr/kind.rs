@@ -5,6 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -17,7 +18,7 @@ use crate::val::{
 };
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum GeometryKind {
 	Point,
 	Line,
@@ -89,7 +90,7 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Kind {
 	/// The most generic type, can be anything.
 	#[default]
@@ -551,7 +552,7 @@ impl From<Kind> for crate::types::PublicKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub enum KindLiteral {
 	String(String),
 	Integer(i64),

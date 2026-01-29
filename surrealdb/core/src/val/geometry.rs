@@ -8,6 +8,7 @@ use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -17,7 +18,7 @@ use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Geometry {
 	Point(Point<f64>),

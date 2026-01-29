@@ -13,7 +13,7 @@ use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Duration, RecordId, RecordIdKey, TableName};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RelateStatement {
 	pub only: bool,
 	/// The expression resulting in the table through which we create a relation

@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -11,7 +12,7 @@ use crate::sql::{self, DefineFunctionStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct FunctionDefinition {
 	pub(crate) name: String,
 	pub(crate) args: Vec<(String, Kind)>,

@@ -3086,6 +3086,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "priority-lfu"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61a0f26fd6be0071bf7a53c65e7b7b420651a594863a7f1e2dc4e152c7265814"
+dependencies = [
+ "ahash 0.8.12",
+ "bytes",
+ "chrono",
+ "geo 0.32.0",
+ "hashbrown 0.16.1",
+ "indexmap 2.13.0",
+ "parking_lot",
+ "priority-lfu-derive",
+ "regex",
+ "rust_decimal",
+ "uuid",
+]
+
+[[package]]
+name = "priority-lfu-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6f4d2a2fa69ca4a2e3458bf9e2f1757b2a468b0aa1c492180053a8a840700a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4210,7 +4240,7 @@ dependencies = [
  "pbkdf2",
  "phf 0.13.1",
  "pin-project-lite",
- "quick_cache",
+ "priority-lfu",
  "radix_trie",
  "rand 0.8.5",
  "rayon",

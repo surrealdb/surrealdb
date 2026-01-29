@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
@@ -15,7 +16,7 @@ use crate::val::{Array, Object, Value};
 
 /// The API definition.
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 #[non_exhaustive]
 pub struct ApiDefinition {
 	/// The URL path of the API.
@@ -105,7 +106,9 @@ impl InfoStructure for ApiDefinition {
 
 /// REST API method.
 #[revisioned(revision = 1)]
-#[derive(SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(
+	SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[surreal(untagged, lowercase)]
 pub enum ApiMethod {
@@ -150,7 +153,7 @@ impl InfoStructure for ApiMethod {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct ApiActionDefinition {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
@@ -181,7 +184,7 @@ impl InfoStructure for ApiActionDefinition {
 
 /// The API config definition.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct ApiConfigDefinition {
 	/// The middleware of the API.
 	pub(crate) middleware: Vec<MiddlewareDefinition>,
@@ -244,7 +247,7 @@ impl ToSql for ApiConfigDefinition {
 
 /// API Middleware definition.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct MiddlewareDefinition {
 	/// The name of function to invoke.
 	pub name: String,

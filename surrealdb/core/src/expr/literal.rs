@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -22,7 +23,7 @@ use crate::val::{
 /// to `Literal::Float(b)` in the case of `NaN` floats for example. Also
 /// surrealql rules regarding number equality are not observed, 1f != 1dec.
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub(crate) enum Literal {
 	None,
 	Null,
@@ -190,7 +191,7 @@ impl ToSql for Literal {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,

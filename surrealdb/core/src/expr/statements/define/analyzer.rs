@@ -15,7 +15,7 @@ use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

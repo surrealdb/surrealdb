@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{SqlFormat, ToSql};
@@ -10,12 +11,14 @@ use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BucketId(pub u32);
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct BucketDefinition {
 	pub(crate) id: Option<BucketId>,
 	pub(crate) name: String,

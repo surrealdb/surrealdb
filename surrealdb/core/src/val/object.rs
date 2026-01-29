@@ -14,7 +14,19 @@ use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Hash,
+	Encode,
+	BorrowDecode,
+	priority_lfu::DeepSizeOf,
+)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);

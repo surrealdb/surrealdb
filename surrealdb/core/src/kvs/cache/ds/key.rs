@@ -1,37 +1,76 @@
+use std::sync::Arc;
+
+use priority_lfu::{CacheKey, CachePolicy};
 use uuid::Uuid;
 
-use super::lookup::Lookup;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, EventDefinition, IndexDefinition, NamespaceId,
+	SubscriptionDefinition, TableDefinition,
+};
 use crate::val::TableName;
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub(crate) enum Key {
-	/// A cache key for a database
-	Db(String, String),
-	/// A cache key for a table
-	Tb(NamespaceId, DatabaseId, TableName),
-	/// A cache key for events (on a table)
-	Evs(NamespaceId, DatabaseId, String, Uuid),
-	/// A cache key for views (on a table)
-	Fts(NamespaceId, DatabaseId, String, Uuid),
-	/// A cache key for indexes (on a table)
-	Ixs(NamespaceId, DatabaseId, String, Uuid),
-	/// A cache key for live queries (on a table)
-	Lvs(NamespaceId, DatabaseId, String, Uuid),
-	/// A cache key for live queries version (on a table)
-	Lvv(NamespaceId, DatabaseId, TableName),
+pub struct DbCacheKey(pub String, pub String);
+
+impl CacheKey for DbCacheKey {
+	type Value = Arc<DatabaseDefinition>;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
 }
 
-impl<'a> From<Lookup<'a>> for Key {
-	fn from(value: Lookup<'a>) -> Self {
-		match value {
-			Lookup::Db(a, b) => Key::Db(a.to_string(), b.to_string()),
-			Lookup::Tb(a, b, c) => Key::Tb(a, b, c.clone()),
-			Lookup::Evs(a, b, c, d) => Key::Evs(a, b, c.to_string(), d),
-			Lookup::Fts(a, b, c, d) => Key::Fts(a, b, c.to_string(), d),
-			Lookup::Ixs(a, b, c, d) => Key::Ixs(a, b, c.to_string(), d),
-			Lookup::Lvs(a, b, c, d) => Key::Lvs(a, b, c.to_string(), d),
-			Lookup::Lvv(a, b, c) => Key::Lvv(a, b, c.clone()),
-		}
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ForiegnTablesCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
+
+impl CacheKey for ForiegnTablesCacheKey {
+	type Value = Arc<[TableDefinition]>;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct EventsCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+
+impl CacheKey for EventsCacheKey {
+	type Value = Arc<[EventDefinition]>;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct IndexesCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+
+impl CacheKey for IndexesCacheKey {
+	type Value = Arc<[IndexDefinition]>;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct LiveQueriesCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+
+impl CacheKey for LiveQueriesCacheKey {
+	type Value = Arc<[SubscriptionDefinition]>;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct LiveQueriesVersionCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
+
+impl CacheKey for LiveQueriesVersionCacheKey {
+	type Value = Uuid;
+
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
 	}
 }

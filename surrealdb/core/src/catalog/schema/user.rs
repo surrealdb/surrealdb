@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -10,7 +11,7 @@ use crate::sql;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct UserDefinition {
 	pub name: String,
 	pub hash: String,

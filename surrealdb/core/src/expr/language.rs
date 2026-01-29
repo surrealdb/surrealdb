@@ -4,7 +4,7 @@ use std::fmt::Display;
 use revision::revisioned;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub enum Language {
 	Arabic,
 	Danish,

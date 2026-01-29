@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
@@ -15,7 +16,7 @@ use crate::expr::{
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct SelectStatement {
 	/// The fields to extract from the records.
 	///

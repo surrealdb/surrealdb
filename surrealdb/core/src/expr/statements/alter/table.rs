@@ -14,7 +14,7 @@ use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 /// Executes `ALTER TABLE` operations against an existing table.
 ///
 /// Supported operations include:

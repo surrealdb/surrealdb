@@ -1,184 +1,573 @@
+use std::sync::Arc;
+
+use priority_lfu::{CacheKey, CachePolicy};
 use uuid::Uuid;
 
-use super::lookup::Lookup;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{
+	AccessDefinition, AccessGrant, AnalyzerDefinition, ApiDefinition, BucketDefinition,
+	ConfigDefinition, DatabaseDefinition, DatabaseId, EventDefinition, FieldDefinition,
+	FunctionDefinition, IndexDefinition, MlModelDefinition, ModuleDefinition, NamespaceDefinition,
+	NamespaceId, ParamDefinition, Record, SequenceDefinition, SubscriptionDefinition,
+	TableDefinition, UserDefinition,
+};
+use crate::dbs::node::Node;
 use crate::val::RecordIdKey;
 
+// Root level collections (all items)
+
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub(crate) enum Key {
-	/// A cache key for nodes
-	Nds,
-	/// A cache key for root users
-	Rus,
-	/// A cache key for root accesses
-	Ras,
-	/// A cache key for root access grants
-	Rgs(String),
-	/// A cache key for namespaces
-	Nss,
-	/// A cache key for namespace users
-	Nus(NamespaceId),
-	/// A cache key for namespace accesses
-	Nas(NamespaceId),
-	/// A cache key for namespace access grants
-	Ngs(NamespaceId, String),
-	/// A cache key for databases
-	Dbs(NamespaceId),
-	/// A cache key for database users
-	Dus(NamespaceId, DatabaseId),
-	/// A cache key for database accesses
-	Das(NamespaceId, DatabaseId),
-	/// A cache key for database access grants
-	Dgs(NamespaceId, DatabaseId, String),
-	/// A cache key for apis (on a database)
-	Aps(NamespaceId, DatabaseId),
-	/// A cache key for analyzers (on a database)
-	Azs(NamespaceId, DatabaseId),
-	/// A cache key for buckets (on a database)
-	Bus(NamespaceId, DatabaseId),
-	/// A cache key for functions (on a database)
-	Fcs(NamespaceId, DatabaseId),
-	/// A cache key for modules (on a database)
-	Mds(NamespaceId, DatabaseId),
-	/// A cache key for models (on a database)
-	Mls(NamespaceId, DatabaseId),
-	/// A cache key for configs (on a database)
-	Cgs(NamespaceId, DatabaseId),
-	/// A cache key for parameters (on a database)
-	Pas(NamespaceId, DatabaseId),
-	/// A cache key for tables
-	Tbs(NamespaceId, DatabaseId),
-	/// A cache key for sequences (on a database)
-	Sqs(NamespaceId, DatabaseId),
-	/// A cache key for events (on a table)
-	Evs(NamespaceId, DatabaseId, String),
-	/// A cache key for fieds (on a table)
-	Fds(NamespaceId, DatabaseId, String),
-	/// A cache key for views (on a table)
-	Fts(NamespaceId, DatabaseId, String),
-	/// A cache key for indexes (on a table)
-	Ixs(NamespaceId, DatabaseId, String),
-	/// A cache key for live queries (on a table)
-	Lvs(NamespaceId, DatabaseId, String),
-	/// A cache key for a node
-	Nd(Uuid),
-	/// A cache key for a root config
-	Rcg(String),
-	/// A cache key for a root user
-	Ru(String),
-	/// A cache key for a root access
-	Ra(String),
-	/// A cache key for a root access grant
-	Rg(String, String),
-	/// A cache key for a namespace
-	NsByName(String),
-	/// A cache key for a namespace user
-	Nu(NamespaceId, String),
-	/// A cache key for a namespace access
-	Na(NamespaceId, String),
-	/// A cache key for a namespace access grant
-	Ng(NamespaceId, String, String),
-	/// A cache key for a database
-	DbByName(String, String),
-	/// A cache key for a database user
-	Du(NamespaceId, DatabaseId, String),
-	/// A cache key for a database access
-	Da(NamespaceId, DatabaseId, String),
-	/// A cache key for a database access grant
-	Dg(NamespaceId, DatabaseId, String, String),
-	/// A cache key for an api (on a database)
-	Ap(NamespaceId, DatabaseId, String),
-	/// A cache key for an analyzer (on a database)
-	Az(NamespaceId, DatabaseId, String),
-	/// A cache key for a bucket (on a database)
-	Bu(NamespaceId, DatabaseId, String),
-	/// A cache key for a function (on a database)
-	Fc(NamespaceId, DatabaseId, String),
-	/// A cache key for a module (on a database)
-	Md(NamespaceId, DatabaseId, String),
-	/// A cache key for a model (on a database)
-	Ml(NamespaceId, DatabaseId, String, String),
-	/// A cache key for a config (on a database)
-	Cg(NamespaceId, DatabaseId, String),
-	/// A cache key for a parameter (on a database)
-	Pa(NamespaceId, DatabaseId, String),
-	/// A cache key for a sequence (on a database)
-	Sq(NamespaceId, DatabaseId, String),
-	/// A cache key for a table
-	TbByName(String, String, String),
-	/// A cache key for a table by id.
-	Tb(NamespaceId, DatabaseId, String),
-	/// A cache key for an event (on a table)
-	Ev(NamespaceId, DatabaseId, String, String),
-	/// A cache key for a fied (on a table)
-	Fd(NamespaceId, DatabaseId, String, String),
-	/// A cache key for an index (on a table)
-	Ix(NamespaceId, DatabaseId, String, String),
-	/// A cache key for a record
-	Record(NamespaceId, DatabaseId, String, RecordIdKey),
+pub struct NodesCacheKey;
+
+impl CacheKey for NodesCacheKey {
+	type Value = Arc<[Node]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
 }
 
-impl<'a> From<Lookup<'a>> for Key {
-	#[rustfmt::skip]
-	fn from(value: Lookup<'a>) -> Self {
-		match value {
-			//
-			Lookup::Nds => Key::Nds,
-			Lookup::Rus => Key::Rus,
-			Lookup::Ras => Key::Ras,
-			Lookup::Rgs(a) => Key::Rgs(a.to_string()),
-			Lookup::Nss => Key::Nss,
-			Lookup::Nus(a) => Key::Nus(a),
-			Lookup::Nas(a) => Key::Nas(a),
-			Lookup::Ngs(a, b) => Key::Ngs(a, b.to_string()),
-			Lookup::Dbs(a) => Key::Dbs(a),
-			Lookup::Dus(a, b) => Key::Dus(a, b),
-			Lookup::Das(a, b) => Key::Das(a, b),
-			Lookup::Dgs(a, b, c) => Key::Dgs(a, b, c.to_string()),
-			Lookup::Aps(a, b) => Key::Aps(a, b),
-			Lookup::Azs(a, b) => Key::Azs(a, b),
-			Lookup::Bus(a, b) => Key::Bus(a, b),
-			Lookup::Fcs(a, b) => Key::Fcs(a, b),
-			Lookup::Mds(a, b) => Key::Mds(a, b),
-			Lookup::Mls(a, b) => Key::Mls(a, b),
-			Lookup::Cgs(a, b) => Key::Cgs(a, b),
-			Lookup::Pas(a, b) => Key::Pas(a, b),
-			Lookup::Sqs(a, b) => Key::Sqs(a, b),
-			Lookup::Tbs(a, b) => Key::Tbs(a, b),
-			Lookup::Evs(a, b, c) => Key::Evs(a, b, c.to_string()),
-			Lookup::Fds(a, b, c) => Key::Fds(a, b, c.to_string()),
-			Lookup::Fts(a, b, c) => Key::Fts(a, b, c.to_string()),
-			Lookup::Ixs(a, b, c) => Key::Ixs(a, b, c.to_string()),
-			Lookup::Lvs(a, b, c) => Key::Lvs(a, b, c.to_string()),
-			//
-			Lookup::Nd(a) => Key::Nd(a),
-			Lookup::Rcg(a) => Key::Rcg(a.to_string()),
-			Lookup::Ru(a) => Key::Ru(a.to_string()),
-			Lookup::Ra(a) => Key::Ra(a.to_string()),
-			Lookup::Rg(a, b) => Key::Rg(a.to_string(), b.to_string()),
-			Lookup::NsByName(a) => Key::NsByName(a.to_string()),
-			Lookup::Nu(a, b) => Key::Nu(a, b.to_string()),
-			Lookup::Na(a, b) => Key::Na(a, b.to_string()),
-			Lookup::Ng(a, b, c) => Key::Ng(a, b.to_string(), c.to_string()),
-			Lookup::DbByName(a, b) => Key::DbByName(a.to_string(), b.to_string()),
-			Lookup::Du(a, b, c) => Key::Du(a, b, c.to_string()),
-			Lookup::Da(a, b, c) => Key::Da(a, b, c.to_string()),
-			Lookup::Dg(a, b, c, d) => Key::Dg(a, b, c.to_string(), d.to_string()),
-			Lookup::Ap(a, b, c) => Key::Ap(a, b, c.to_string()),
-			Lookup::Az(a, b, c) => Key::Az(a, b, c.to_string()),
-			Lookup::Bu(a, b, c) => Key::Bu(a, b, c.to_string()),
-			Lookup::Fc(a, b, c) => Key::Fc(a, b, c.to_string()),
-			Lookup::Md(a, b, c) => Key::Md(a, b, c.to_string()),
-			Lookup::Ml(a, b, c, d) => Key::Ml(a, b, c.to_string(), d.to_string()),
-			Lookup::Cg(a, b, c) => Key::Cg(a, b, c.to_string()),
-			Lookup::Pa(a, b, c) => Key::Pa(a, b, c.to_string()),
-			Lookup::Sq(a, b,c) => Key::Sq(a, b, c.to_string()),
-			Lookup::Tb(a, b, c) => Key::Tb(a, b, c.to_string()),
-			Lookup::TbByName(a, b, c) => Key::TbByName(a.to_string(), b.to_string(), c.to_string()),
-			Lookup::Ev(a, b, c, d) => Key::Ev(a, b, c.to_string(), d.to_string()),
-			Lookup::Fd(a, b, c, d) => Key::Fd(a, b, c.to_string(), d.to_string()),
-			Lookup::Ix(a, b, c, d) => Key::Ix(a, b, c.to_string(), d.to_string()),
-			Lookup::Record(a, b, c, d) => Key::Record(a, b, c.to_string(), d.to_owned()),
-		}
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RootUsersCacheKey;
+
+impl CacheKey for RootUsersCacheKey {
+	type Value = Arc<[UserDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RootAccessesCacheKey;
+
+impl CacheKey for RootAccessesCacheKey {
+	type Value = Arc<[AccessDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct RootAccessGrantsCacheKey(pub String);
+
+impl CacheKey for RootAccessGrantsCacheKey {
+	type Value = Arc<[AccessGrant]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespacesCacheKey;
+
+impl CacheKey for NamespacesCacheKey {
+	type Value = Arc<[NamespaceDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespaceUsersCacheKey(pub NamespaceId);
+
+impl CacheKey for NamespaceUsersCacheKey {
+	type Value = Arc<[UserDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespaceAccessesCacheKey(pub NamespaceId);
+
+impl CacheKey for NamespaceAccessesCacheKey {
+	type Value = Arc<[AccessDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct NamespaceAccessGrantsCacheKey(pub NamespaceId, pub String);
+
+impl CacheKey for NamespaceAccessGrantsCacheKey {
+	type Value = Arc<[AccessGrant]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabasesCacheKey(pub NamespaceId);
+
+impl CacheKey for DatabasesCacheKey {
+	type Value = Arc<[DatabaseDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabaseUsersCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for DatabaseUsersCacheKey {
+	type Value = Arc<[UserDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabaseAccessesCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for DatabaseAccessesCacheKey {
+	type Value = Arc<[AccessDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct DatabaseAccessGrantsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for DatabaseAccessGrantsCacheKey {
+	type Value = Arc<[AccessGrant]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ApisCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for ApisCacheKey {
+	type Value = Arc<[ApiDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct AnalyzersCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for AnalyzersCacheKey {
+	type Value = Arc<[AnalyzerDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct BucketsCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for BucketsCacheKey {
+	type Value = Arc<[BucketDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct FunctionsCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for FunctionsCacheKey {
+	type Value = Arc<[FunctionDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ModulesCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for ModulesCacheKey {
+	type Value = Arc<[ModuleDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ModelsCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for ModelsCacheKey {
+	type Value = Arc<[MlModelDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ConfigsCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for ConfigsCacheKey {
+	type Value = Arc<[ConfigDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ParamsCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for ParamsCacheKey {
+	type Value = Arc<[ParamDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TablesCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for TablesCacheKey {
+	type Value = Arc<[TableDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct SequencesCacheKey(pub NamespaceId, pub DatabaseId);
+
+impl CacheKey for SequencesCacheKey {
+	type Value = Arc<[SequenceDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableEventsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableEventsCacheKey {
+	type Value = Arc<[EventDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableFieldsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableFieldsCacheKey {
+	type Value = Arc<[FieldDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableViewsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableViewsCacheKey {
+	type Value = Arc<[TableDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableIndexesCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableIndexesCacheKey {
+	type Value = Arc<[IndexDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableLivesCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableLivesCacheKey {
+	type Value = Arc<[SubscriptionDefinition]>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+// Single item lookups (specific entities)
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NodeCacheKey(pub Uuid);
+
+impl CacheKey for NodeCacheKey {
+	type Value = Arc<Node>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RootConfigCacheKey(pub String);
+
+impl CacheKey for RootConfigCacheKey {
+	type Value = Arc<ConfigDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RootUserCacheKey(pub String);
+
+impl CacheKey for RootUserCacheKey {
+	type Value = Arc<UserDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RootAccessCacheKey(pub String);
+
+impl CacheKey for RootAccessCacheKey {
+	type Value = Arc<AccessDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct RootAccessGrantCacheKey(pub String, pub String);
+
+impl CacheKey for RootAccessGrantCacheKey {
+	type Value = Arc<AccessGrant>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespaceByNameCacheKey(pub String);
+
+impl CacheKey for NamespaceByNameCacheKey {
+	type Value = Arc<NamespaceDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespaceUserCacheKey(pub NamespaceId, pub String);
+
+impl CacheKey for NamespaceUserCacheKey {
+	type Value = Arc<UserDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct NamespaceAccessCacheKey(pub NamespaceId, pub String);
+
+impl CacheKey for NamespaceAccessCacheKey {
+	type Value = Arc<AccessDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct NamespaceAccessGrantCacheKey(pub NamespaceId, pub String, pub String);
+
+impl CacheKey for NamespaceAccessGrantCacheKey {
+	type Value = Arc<AccessGrant>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabaseByNameCacheKey(pub String, pub String);
+
+impl CacheKey for DatabaseByNameCacheKey {
+	type Value = Arc<DatabaseDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabaseUserCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for DatabaseUserCacheKey {
+	type Value = Arc<UserDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct DatabaseAccessCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for DatabaseAccessCacheKey {
+	type Value = Arc<AccessDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub(crate) struct DatabaseAccessGrantCacheKey(
+	pub NamespaceId,
+	pub DatabaseId,
+	pub String,
+	pub String,
+);
+
+impl CacheKey for DatabaseAccessGrantCacheKey {
+	type Value = Arc<AccessGrant>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ApiCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for ApiCacheKey {
+	type Value = Arc<ApiDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct AnalyzerCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for AnalyzerCacheKey {
+	type Value = Arc<AnalyzerDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct BucketCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for BucketCacheKey {
+	type Value = Arc<BucketDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct FunctionCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for FunctionCacheKey {
+	type Value = Arc<FunctionDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ModuleCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for ModuleCacheKey {
+	type Value = Arc<ModuleDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ModelCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub String);
+
+impl CacheKey for ModelCacheKey {
+	type Value = Arc<MlModelDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ConfigCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for ConfigCacheKey {
+	type Value = Arc<ConfigDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct ParamCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for ParamCacheKey {
+	type Value = Arc<ParamDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct SequenceCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for SequenceCacheKey {
+	type Value = Arc<SequenceDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableByNameCacheKey(pub String, pub String, pub String);
+
+impl CacheKey for TableByNameCacheKey {
+	type Value = Arc<TableDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct TableCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+
+impl CacheKey for TableCacheKey {
+	type Value = Arc<TableDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct EventCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub String);
+
+impl CacheKey for EventCacheKey {
+	type Value = Arc<EventDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct FieldCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub String);
+
+impl CacheKey for FieldCacheKey {
+	type Value = Arc<FieldDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct IndexCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub String);
+
+impl CacheKey for IndexCacheKey {
+	type Value = Arc<IndexDefinition>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Critical
+	}
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+pub struct RecordCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub RecordIdKey);
+
+impl CacheKey for RecordCacheKey {
+	type Value = Arc<Record>;
+	fn policy(&self) -> CachePolicy {
+		CachePolicy::Volatile
 	}
 }

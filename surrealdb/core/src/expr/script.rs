@@ -1,7 +1,9 @@
 use std::ops::Deref;
 use std::str;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+use priority_lfu::DeepSizeOf;
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, DeepSizeOf)]
 pub(crate) struct Script(pub String);
 
 impl From<String> for Script {
