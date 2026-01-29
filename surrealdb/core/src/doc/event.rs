@@ -1,5 +1,13 @@
 use std::sync::Arc;
 
+use anyhow::{Result, bail};
+use reblessive::TreeStack;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use surrealdb_types::ToSql;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{EventDefinition, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
@@ -16,13 +24,6 @@ use crate::kvs::{
 	impl_kv_value_revisioned,
 };
 use crate::val::{RecordId, Value};
-use anyhow::{Result, bail};
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use surrealdb_types::ToSql;
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -318,7 +319,8 @@ impl AsyncEventRecord {
 								Some(Error::EvNamespaceMismatch(_))
 									| Some(Error::EvDatabaseMismatch(_))
 							) {
-								// This error is final, we won't retry. The namespace or the database has been recreated.
+								// This error is final, we won't retry. The namespace or the
+								// database has been recreated.
 								warn!("Event processing failed: {se:?}");
 								catch!(tx, tx.del(&k).await);
 							} else {
@@ -354,7 +356,7 @@ impl AsyncEventRecord {
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
 		if ev.attempt < ev.event_definition.retry.unwrap_or(0) {
-			tx.set(eq, &ev, None).await?;
+			tx.set(eq, ev, None).await?;
 		} else {
 			error!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
 			tx.del(eq).await?;

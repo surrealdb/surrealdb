@@ -1,8 +1,9 @@
 mod helpers;
 
+use std::time::Duration;
+
 use anyhow::Result;
 use helpers::Test;
-use std::time::Duration;
 use surrealdb_core::doc::AsyncEventRecord;
 use tokio::time::{sleep, timeout};
 
