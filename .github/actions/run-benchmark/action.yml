@@ -198,6 +198,4 @@ runs:
         fi
         
         # Clean up data directories
-        rm -rf ~/surrealdb-data ~/crud-bench-data;
-        rm -rf ~/surrealdb-data ~/crud-bench-data;
-        done
+        rm -rf ~/surrealdb-data ~/crud-bench-data
