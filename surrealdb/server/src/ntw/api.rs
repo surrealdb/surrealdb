@@ -130,10 +130,11 @@ async fn handler(
 	let res_body = match res.body {
 		Value::None => Vec::new(),
 		Value::Bytes(x) => x.into_inner().to_vec(),
+		Value::String(s) => s.into_bytes(),
 		_ => {
 			return Err(ApiHandlerError(
-				ApiError::Unreachable(
-					"Found a native response instruction where this is not supported".into(),
+				ApiError::InvalidApiResponse(
+					"HTTP API response body must be None, bytes, or string; other values are not supported".into(),
 				)
 				.into(),
 				request_id,
