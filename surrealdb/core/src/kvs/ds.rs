@@ -45,7 +45,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
-use crate::doc::EventRecord;
+use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -1529,12 +1529,7 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running event processing process");
-			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
-			let count = catch!(txn, EventRecord::process_events(&txn).await);
-			if count > 0 {
-				catch!(txn, txn.commit().await);
-			} else {
+			if AsyncEventRecord::process_next_events_batch(self).await? == 0 {
 				// The last batch didn't have any events to process,
 				// we can sleep until the next wake-up call
 				return Ok(());

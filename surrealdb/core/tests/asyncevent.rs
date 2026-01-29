@@ -1,12 +1,11 @@
 mod helpers;
 
-use std::time::Duration;
-
 use anyhow::Result;
 use helpers::Test;
+use surrealdb_core::doc::AsyncEventRecord;
 
 #[tokio::test]
-async fn async_event_basic_matches_language_test() -> Result<()> {
+async fn test_async_event() -> Result<()> {
 	let sql = r#"
 		DEFINE EVENT test ON TABLE user ASYNC RETRY 1 MAXDEPTH 6 WHEN true THEN (
 			CREATE activity SET user = $parent.id, value = $after.email, action = $event, time = time::now()
@@ -35,7 +34,9 @@ async fn async_event_basic_matches_language_test() -> Result<()> {
 		session,
 		..
 	} = t;
-	ds.event_processing(Duration::from_secs(1)).await?;
+
+	// Process the event asynchronously
+	assert_eq!(AsyncEventRecord::process_next_events_batch(&ds).await?, 3);
 
 	let mut t = Test::new_ds_session(
 		ds,

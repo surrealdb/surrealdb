@@ -1,5 +1,4 @@
 pub mod all;
-pub mod eq;
 pub mod ev;
 pub mod fd;
 pub mod ft;

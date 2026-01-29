@@ -1150,6 +1150,16 @@ pub(crate) enum Error {
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
 	IdFieldUnsupportedKind(String),
+
+	#[error(
+		"The ID of the namespace `{0}` does not match the namespace this event has been generated from."
+	)]
+	EvNamespaceMismatch(String),
+
+	#[error(
+		"The ID of the database `{0}` does not match the database this event has been generated from."
+	)]
+	EvDatabaseMismatch(String),
 }
 
 impl Error {

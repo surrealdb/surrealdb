@@ -35,7 +35,8 @@ mod mac;
 #[doc(hidden)]
 pub mod buc;
 mod cf;
-mod doc;
+#[doc(hidden)]
+pub mod doc;
 mod exe;
 mod fmt;
 mod fnc;

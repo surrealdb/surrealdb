@@ -1,17 +1,29 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
+use reblessive::TreeStack;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
-use crate::catalog::EventDefinition;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+use crate::catalog::{EventDefinition, Record};
+use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::{Options, Statement};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext};
-use crate::expr::FlowResultExt as _;
-use crate::iam::AuthLimit;
-use crate::kvs::{HlcTimestamp, Transaction, impl_kv_value_revisioned};
-use crate::val::Value;
+use crate::dbs::{Options, Session, Statement};
+use crate::doc::{Action, CursorDoc, CursorRecord, Document, DocumentContext};
+use crate::err::Error;
+use crate::expr::FlowResultExt;
+use crate::iam::{Auth, AuthLimit};
+use crate::key::root::eq;
+use crate::kvs::LockType::Optimistic;
+use crate::kvs::TransactionType::Write;
+use crate::kvs::{
+	Datastore, HlcTimestamp, KVValue, LockType, Transaction, TransactionType,
+	impl_kv_value_revisioned,
+};
+use crate::val::{RecordId, Value};
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -93,14 +105,15 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let event_record = EventRecord::new(
-				evt.into(),
-				doc.doc.as_arc(),
+			let event_context = EventContext {
+				auth: opt.auth.clone(),
+				event: evt.into(),
+				doc: doc.doc.as_arc(),
 				after,
 				before,
-				input.clone().unwrap_or_default(),
-			);
-			let ctx = event_record.build_event_context(ctx);
+				input: input.clone().unwrap_or_default(),
+			};
+			let ctx = event_context.build_event_context(ctx);
 			// Process conditional clause
 			let val = stk
 				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
@@ -110,7 +123,7 @@ impl Document {
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				if ev.asynchronous {
-					Self::process_async(ctx, opt, event_record, ev, &self.doc_ctx).await?;
+					Self::process_async(ctx, opt, event_context, ev, &self.doc_ctx, doc).await?;
 				} else {
 					Self::process_sync(stk, ctx, opt, ev, doc).await?;
 				}
@@ -123,22 +136,18 @@ impl Document {
 	async fn process_async(
 		ctx: FrozenContext,
 		opt: Options,
-		event_record: EventRecord,
+		event_context: EventContext,
 		ev: &EventDefinition,
 		doc_ctx: &DocumentContext,
+		cursor_doc: &CursorDoc,
 	) -> Result<()> {
 		let node_id = opt.id();
 		let ts = HlcTimestamp::next();
 		let db = doc_ctx.db();
 		let tx = ctx.tx();
-		let key = crate::key::table::eq::Eq::new(
-			db.namespace_id,
-			db.database_id,
-			&ev.target_table,
-			&ev.name,
-			ts,
-			node_id,
-		);
+		let key =
+			eq::Eq::new(db.namespace_id, db.database_id, &ev.target_table, &ev.name, ts, node_id);
+		let event_record = AsyncEventRecord::new(&opt, event_context, ev, cursor_doc)?;
 		tx.put(&key, &event_record, None).await?;
 		Ok(())
 	}
@@ -150,6 +159,7 @@ impl Document {
 		ev: &EventDefinition,
 		doc: &CursorDoc,
 	) -> Result<()> {
+		println!("Process sync: {doc:?} - {opt:?}");
 		for v in ev.then.iter() {
 			stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc)))
 				.await
@@ -160,9 +170,8 @@ impl Document {
 	}
 }
 
-#[revisioned(revision = 1)]
-pub(crate) struct EventRecord {
-	attempt: u16,
+struct EventContext {
+	auth: Arc<Auth>,
 	event: Arc<Value>,
 	doc: Arc<Value>,
 	after: Arc<Value>,
@@ -170,26 +179,7 @@ pub(crate) struct EventRecord {
 	input: Arc<Value>,
 }
 
-impl_kv_value_revisioned!(EventRecord);
-
-impl EventRecord {
-	fn new(
-		event: Arc<Value>,
-		doc: Arc<Value>,
-		after: Arc<Value>,
-		before: Arc<Value>,
-		input: Arc<Value>,
-	) -> Self {
-		Self {
-			attempt: 0,
-			event,
-			doc,
-			after,
-			before,
-			input,
-		}
-	}
-
+impl EventContext {
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
 		let mut ctx = Context::new(ctx);
 		ctx.add_value("event", self.event.clone());
@@ -199,8 +189,167 @@ impl EventRecord {
 		ctx.add_value("input", self.input.clone());
 		ctx.freeze()
 	}
+}
 
-	pub(crate) async fn process_events(_tx: &Transaction) -> Result<usize> {
-		todo!()
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug)]
+pub struct AsyncEventRecord {
+	attempt: u16,
+	max_computation_depth: u32,
+	rid: Option<Arc<RecordId>>,
+	cursor_record: Arc<Record>,
+	fields_computed: bool,
+	ns: Arc<str>,
+	db: Arc<str>,
+	auth: Arc<Auth>,
+	event: Arc<Value>,
+	after: Arc<Value>,
+	before: Arc<Value>,
+	input: Arc<Value>,
+	event_definition: EventDefinition,
+}
+
+impl_kv_value_revisioned!(AsyncEventRecord);
+
+impl AsyncEventRecord {
+	fn new(
+		opt: &Options,
+		event_context: EventContext,
+		event_definition: &EventDefinition,
+		cursor_doc: &CursorDoc,
+	) -> Result<Self> {
+		let (ns, db) = opt.arc_ns_db()?;
+		Ok(Self {
+			attempt: 0,
+			max_computation_depth: opt.dive,
+			rid: cursor_doc.rid.clone(),
+			cursor_record: cursor_doc.doc.clone().into_read_only(),
+			fields_computed: false,
+			ns,
+			db,
+			auth: event_context.auth,
+			event: event_context.event,
+			after: event_context.after,
+			before: event_context.before,
+			input: event_context.input,
+			event_definition: event_definition.clone(),
+		})
+	}
+
+	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
+		let mut ctx = Context::new(ctx);
+		ctx.add_value("event", self.event.clone());
+		ctx.add_value("value", CursorRecord::from(self.cursor_record.clone()).as_arc());
+		ctx.add_value("after", self.after.clone());
+		ctx.add_value("before", self.before.clone());
+		ctx.add_value("input", self.input.clone());
+		ctx.freeze()
+	}
+
+	async fn build_event_options(
+		&self,
+		tx: &Transaction,
+		parent_opts: &Options,
+		eq: &eq::Eq<'_>,
+	) -> Result<Options> {
+		let ns = tx.expect_ns_by_name(&self.ns).await?;
+		if ns.namespace_id != eq.ns {
+			bail!(Error::EvNamespaceMismatch(ns.name.clone()));
+		}
+		let db = tx.expect_db_by_name(&self.ns, &self.db).await?;
+		if db.database_id != eq.db {
+			bail!(Error::EvDatabaseMismatch(ns.name.clone()));
+		}
+		let opt = parent_opts.clone();
+		let opt = opt
+			.with_auth(self.auth.clone())
+			.with_max_computation_depth(self.max_computation_depth)
+			.with_ns(Some(self.ns.clone()))
+			.with_db(Some(self.db.clone()));
+		Ok(opt)
+	}
+
+	fn build_event_cursor_doc(&self) -> CursorDoc {
+		CursorDoc::new(self.rid.clone(), None, self.cursor_record.clone())
+	}
+
+	pub async fn process_next_events_batch(ds: &Datastore) -> Result<usize> {
+		let concurrency: usize = num_cpus::get().max(4);
+		let sem = Arc::new(Semaphore::new(concurrency));
+
+		// Collect the next batch
+		let res = {
+			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			let (beg, end) = eq::Eq::range();
+			let res = catch!(tx, tx.scan(beg..end, *NORMAL_FETCH_SIZE, None).await);
+			tx.cancel().await?;
+			res
+		};
+		let count = res.len();
+		let mut join_set = JoinSet::new();
+
+		for (k, v) in res {
+			let permit = sem.clone().acquire_owned().await?;
+			let tx = ds.transaction(Write, Optimistic).await?;
+			// Set the context
+			let mut ctx = ds.setup_ctx()?;
+			ctx.set_transaction(Arc::new(tx));
+			let ctx = ctx.freeze();
+			let opt = ds.setup_options(&Session::default());
+			join_set.spawn(async move {
+				{
+					let eq = eq::Eq::decode_key(&k)?;
+					let mut ev = AsyncEventRecord::kv_decode_value(v)?;
+					let tx = ctx.tx();
+					match Self::process_event(&ctx, &opt, &eq, &ev).await {
+						Ok(_) => {
+							catch!(tx, tx.del(&k).await);
+						}
+						Err(e) => {
+							if ev.attempt < ev.event_definition.retry.unwrap_or(0) {
+								ev.attempt += 1;
+								catch!(tx, tx.set(&eq, &ev, None).await);
+							} else {
+								error!(
+									"Error while processing an event after {} attempts: {e}",
+									ev.attempt
+								);
+								catch!(tx, tx.del(&k).await);
+							}
+						}
+					}
+					tx.commit().await?;
+				}
+				drop(permit); // releases a slot => producer can send another job
+				Ok(())
+			});
+		}
+
+		while let Some(res) = join_set.join_next().await {
+			if let Err(e) = res {
+				error!("Error while processing an event: {e}");
+			}
+		}
+		Ok(count)
+	}
+
+	async fn process_event(
+		ctx: &FrozenContext,
+		opt: &Options,
+		eq: &eq::Eq<'_>,
+		ev: &AsyncEventRecord,
+	) -> Result<()> {
+		let ctx = ev.build_event_context(ctx);
+		let opt = ev.build_event_options(&ctx.tx(), opt, eq).await?;
+		let doc = ev.build_event_cursor_doc();
+		println!("Processing event for key: {:?} - {:?}", eq, ev);
+		let mut stack = TreeStack::new();
+		stack
+			.enter(|stk| {
+				stk.run(|stk| Document::process_sync(stk, ctx, opt, &ev.event_definition, &doc))
+			})
+			.finish()
+			.await?;
+		Ok(())
 	}
 }

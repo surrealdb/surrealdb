@@ -31,7 +31,7 @@ pub struct Options {
 	/// The currently selected Database
 	pub(crate) db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
-	dive: u32,
+	pub(crate) dive: u32,
 	/// Connection authentication data
 	pub(crate) auth: Arc<Auth>,
 	/// Is authentication enabled on this datastore?
@@ -289,15 +289,31 @@ impl Options {
 		self.ns.as_deref().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
 	}
 
+	pub(crate) fn arc_ns(&self) -> Result<Arc<str>> {
+		self.ns.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+	}
+
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str> {
 		self.db.as_deref().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
 	}
 
+	pub(crate) fn arc_db(&self) -> Result<Arc<str>> {
+		self.db.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+	}
+
 	/// Get currently selected NS and DB
 	#[inline(always)]
 	pub fn ns_db(&self) -> Result<(&str, &str)> {
+		Ok((self.ns()?, self.db()?))
+	}
+
+	pub(crate) fn arc_ns_db(&self) -> Result<(Arc<str>, Arc<str>)> {
+		Ok((self.arc_ns()?, self.arc_db()?))
+	}
+
+	pub fn ns_db_arc(&self) -> Result<(&str, &str)> {
 		Ok((self.ns()?, self.db()?))
 	}
 

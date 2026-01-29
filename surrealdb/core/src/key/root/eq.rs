@@ -5,7 +5,7 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::doc::EventRecord;
+use crate::doc::AsyncEventRecord;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::{HlcTimestamp, impl_kv_key_storekey};
 use crate::val::TableName;
@@ -15,14 +15,11 @@ use crate::val::TableName;
 pub(crate) struct Eq<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
 	_b: u8,
-	pub db: DatabaseId,
 	_c: u8,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
 	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	_e: u8,
-	_f: u8,
 	pub ev: Cow<'a, str>,
 	/// Timestamp when this event was generated (Component 1 of the unique ID)
 	pub ts: u64,
@@ -30,11 +27,11 @@ pub(crate) struct Eq<'a> {
 	pub node_id: Uuid,
 }
 
-impl_kv_key_storekey!(Eq<'_> => EventRecord);
+impl_kv_key_storekey!(Eq<'_> => AsyncEventRecord);
 
 impl Categorise for Eq<'_> {
 	fn categorise(&self) -> Category {
-		Category::TableEventQueue
+		Category::EventQueue
 	}
 }
 
@@ -49,23 +46,24 @@ impl<'a> Eq<'a> {
 	) -> Self {
 		Self {
 			__: b'/',
-			_a: b'*',
+			_a: b'!',
+			_b: b'e',
+			_c: b'q',
 			ns,
-			_b: b'*',
 			db,
-			_c: b'*',
 			tb: Cow::Borrowed(tb),
-			_d: b'!',
-			_e: b'e',
-			_f: b'q',
 			ev: Cow::Borrowed(ev),
 			ts: ts.0,
 			node_id,
 		}
 	}
 
-	pub fn _decode_key(k: &[u8]) -> Result<Eq<'_>> {
+	pub(crate) fn decode_key(k: &[u8]) -> Result<Eq<'_>> {
 		Ok(storekey::decode_borrow(k)?)
+	}
+
+	pub(crate) fn range() -> (Vec<u8>, Vec<u8>) {
+		(b"/!eq\0".to_vec(), b"/!eq\0xff".to_vec())
 	}
 }
 
@@ -83,7 +81,12 @@ mod tests {
 		let enc = Eq::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!eqtestev\0\0\0\0\0\0\0\0\x01\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
+			b"/!eq\x00\x00\x00\x01\x00\x00\x00\x02testtb\0testev\0\0\0\0\0\0\0\0\x01\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
 		);
+	}
+
+	#[test]
+	fn range() {
+		assert_eq!(Eq::range(), (b"/!eq\0".to_vec(), b"/!eq\0xff".to_vec()));
 	}
 }
