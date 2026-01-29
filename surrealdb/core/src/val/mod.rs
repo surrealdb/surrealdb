@@ -285,8 +285,6 @@ impl Value {
 			},
 			Value::RecordId(v) => match other {
 				Value::RecordId(w) => v == w,
-				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
 			Value::String(v) => match other {
@@ -296,8 +294,6 @@ impl Value {
 			},
 			Value::Regex(v) => match other {
 				Value::Regex(w) => v == w,
-				// TODO(3.0.0): Decide if we want to keep this behavior.
-				//Value::RecordId(w) => v.regex().is_match(w.to_raw().as_str()),
 				Value::String(w) => v.inner().is_match(w.as_str()),
 				_ => false,
 			},

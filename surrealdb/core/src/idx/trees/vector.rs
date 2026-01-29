@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
+use blake3::Hasher as Blake3Hasher;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
@@ -100,6 +101,45 @@ impl From<SerializedVector> for Vector {
 			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
 			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
 		}
+	}
+}
+
+impl SerializedVector {
+	/// Computes a BLAKE3 hash of the vector's bytes.
+	///
+	/// This is used for deduplicating vectors in the HNSW index when `HASHED_VECTOR` is enabled.
+	/// The hash is calculated by iterating over the vector elements and updating the hasher
+	/// with their little-endian byte representation.
+	pub(crate) fn compute_hash(&self) -> [u8; 32] {
+		let mut hasher = Blake3Hasher::new();
+		match self {
+			Self::F64(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::F32(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I64(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I32(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I16(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+		}
+		*hasher.finalize().as_bytes()
 	}
 }
 

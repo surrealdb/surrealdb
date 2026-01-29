@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use futures::FutureExt as _;
 use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::kvs::Datastore;

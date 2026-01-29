@@ -54,7 +54,11 @@ pub static REGEX_SIZE_LIMIT: LazyLock<usize> =
 pub static REGEX_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1024 * 1024);
 
-/// Specifies the size of the transaction cache in bytes
+/// Specifies the size of the transaction cache in bytes.
+///
+/// Note: This cache is per-transaction which means that this can lead to `cache size * max
+/// concurrent transactions` memory usage.
+///
 /// (default: 10 MiB)
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_TRANSACTION_CACHE_SIZE", usize, 10 * 1024 * 1024);

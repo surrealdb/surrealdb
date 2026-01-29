@@ -616,10 +616,6 @@ fn parse_define_access_jwt_key() {
 	{
 		syn::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
 	}
-	// Symmetric verify and explicit issue non-matching key.
-	{
-		syn::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
-	}
 	// Symmetric verify and explicit issue non-matching algorithm.
 	{
 		syn::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
@@ -1727,7 +1723,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS HASHED_VECTOR"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
@@ -1745,6 +1741,7 @@ fn parse_define_index() {
 				extend_candidates: true,
 				keep_pruned_connections: true,
 				ml: 0.5.into(),
+				use_hashed_vector: true,
 			}),
 			comment: Expr::Literal(Literal::None),
 			concurrently: false

@@ -119,8 +119,8 @@ geo-types = "0.7.18"
 getrandom = "0.3.4"
 hex = "0.4.3"
 http = "1.4.0"
-hyper = "1.8"
 humantime = "2.3.0"
+hyper = "1.8"
 indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
@@ -132,8 +132,8 @@ native-tls = "0.2.14"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
 nix = { version = "0.30.1", default-features = false }
-num-traits = "0.2.19"
 num_cpus = "1.17.0"
+num-traits = "0.2.19"
 object_store = "0.13.0"
 papaya = "0.2.3"
 parking_lot = "0.12.5"
@@ -143,6 +143,7 @@ pbkdf2 = "0.12.2"
 phf = "0.13.1"
 pin-project-lite = "0.2.16"
 pprof = "0.15.0"
+priority-lfu = { version = "0.1.0" }
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
 rand = "0.8.5"
 rayon = "1.11.0"
@@ -151,9 +152,9 @@ regex-syntax = "0.8.8"
 reqwest = { version = "0.13.1", default-features = false }
 ring = "0.17.14"
 roaring = "0.11.3"
-rustls = { version = "0.23.36", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.40.0"
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
+rustls = { version = "0.23.36", default-features = false, features = ["logging", "std", "tls12"] }
 scrypt = "0.11.0"
 semver = "1.0.27"
 serde = "1.0.228"
@@ -179,7 +180,6 @@ url = "2.5.8"
 uuid = "1.19.0"
 wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
-priority-lfu = { version = "0.1.0" }
 
 # Dev dependencies
 criterion = "0.8.1"
