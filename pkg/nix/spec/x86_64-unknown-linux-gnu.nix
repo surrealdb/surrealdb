@@ -14,7 +14,7 @@
 
       nativeBuildInputs = [ pkg-config ];
 
-      buildInputs = [ openssl onnxruntime ];
+      buildInputs = [ openssl onnxruntime stdenv.cc.cc.lib ];
 
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 
