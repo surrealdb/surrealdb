@@ -8,10 +8,12 @@ value = "NONE"
 
 # 1
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'post' }, context: {  }, headers: {}, status: 201 }"
 
 # 3
@@ -24,10 +26,12 @@ value = "NONE"
 
 # 5
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'get', middleware: 'get_mw' }, context: {  }, headers: {}, status: 200 }"
 
 # 6
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'post', middleware: 'post_mw' }, context: {  }, headers: {}, status: 201 }"
 
 [env.capabilities]

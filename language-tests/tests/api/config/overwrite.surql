@@ -6,6 +6,7 @@ reason = "Test OVERWRITE and IF NOT EXISTS behavior"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
@@ -15,18 +16,21 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

@@ -8,10 +8,12 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
+skip-api-request-id = true
+value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
 
 # 2
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
 
 # 3
@@ -20,7 +22,8 @@ value = "NONE"
 
 # 4
 [[test.results]]
-value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
+skip-api-request-id = true
+value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
 
 # 5
 [[test.results]]
@@ -28,7 +31,8 @@ value = "NONE"
 
 # 6
 [[test.results]]
-error = "The function 'fn::nonexistent' does not exist"
+skip-api-request-id = true
+value = "{ body: NONE, context: {  }, headers: {  }, status: 500 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

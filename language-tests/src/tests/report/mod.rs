@@ -1,9 +1,10 @@
 use std::any::Any;
+use std::collections::BTreeMap;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn::error::RenderedError;
-use surrealdb_types::Value as SurValue;
+use surrealdb_types::{Object, Value as SurValue};
 use surrealdb_types::Variables;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
@@ -13,6 +14,41 @@ use crate::tests::set::TestId;
 
 mod display;
 mod update;
+
+/// Strips `request_id` and `x-surreal-request-id` header from `got` when `expected` does not
+/// include `request_id`. Used when the result has `skip_api_request_id = true` so tests can
+/// omit traceability fields and still match.
+fn strip_api_request_id_for_comparison(expected: &SurValue, got: SurValue) -> SurValue {
+	match (expected, &got) {
+		(SurValue::Object(exp), SurValue::Object(got_obj))
+			if !exp.contains_key("request_id") && got_obj.contains_key("request_id") =>
+		{
+			let mut new_map: BTreeMap<String, SurValue> = BTreeMap::new();
+			for (k, v) in got_obj.iter() {
+				if k == "request_id" {
+					continue;
+				}
+				if k == "headers" {
+					if let SurValue::Object(headers) = v {
+						let mut new_headers: BTreeMap<String, SurValue> = BTreeMap::new();
+						for (hk, hv) in headers.iter() {
+							if hk != "x-surreal-request-id" {
+								new_headers.insert(hk.clone(), hv.clone());
+							}
+						}
+						new_map.insert(k.clone(), SurValue::Object(Object::from(new_headers)));
+					} else {
+						new_map.insert(k.clone(), v.clone());
+					}
+				} else {
+					new_map.insert(k.clone(), v.clone());
+				}
+			}
+			SurValue::Object(Object::from(new_map))
+		}
+		_ => got,
+	}
+}
 
 #[derive(Debug)]
 pub enum TestTaskResult {
@@ -157,6 +193,8 @@ pub enum TestReportKind {
 pub struct ValueExpectation {
 	expected: SurValue,
 	equality: RoughlyEqConfig,
+	/// When true, strip request_id and x-surreal-request-id header from actual before comparison.
+	skip_api_request_id: bool,
 }
 
 #[derive(Clone)]
@@ -205,6 +243,7 @@ impl TestExpectation {
 							TestValueExpectation::Value(Some(ValueExpectation {
 								expected: x.0.clone(),
 								equality: RoughlyEqConfig::all(),
+								skip_api_request_id: false,
 							}))
 						}
 						schema::TestExpectation::Error(e) => match e.error {
@@ -223,6 +262,7 @@ impl TestExpectation {
 							TestValueExpectation::Value(Some(ValueExpectation {
 								expected: x.value.0.clone(),
 								equality: eq_config,
+								skip_api_request_id: x.skip_api_request_id.unwrap_or(false),
 							}))
 						}
 						schema::TestExpectation::Match(x) => {
@@ -578,7 +618,15 @@ impl TestReport {
 						return None;
 					};
 
-					if expected.expected.roughly_equal(&x, &expected.equality) {
+					// When skip_api_request_id is set, strip request_id and x-surreal-request-id
+					// header before comparison (same idea as skip_record_id_key for record ids).
+					let x_normalized = if expected.skip_api_request_id {
+						strip_api_request_id_for_comparison(&expected.expected, x.clone())
+					} else {
+						x.clone()
+					};
+
+					if expected.expected.roughly_equal(&x_normalized, &expected.equality) {
 						// value matched, result is valid.
 						return None;
 					}

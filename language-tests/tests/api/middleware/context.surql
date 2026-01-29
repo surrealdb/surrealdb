@@ -16,6 +16,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { message: 'Hello', requestContext: { middleware1: 'set' } }, context: { middleware4: 'read' }, headers: {  }, status: 200 }"
 
 # 4
@@ -32,6 +33,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { message: 'Test', requestContext: { initial: 'value', middleware1: 'added' }, responseContext: { handler: 'set', middleware2: 'read' } }, context: { handler: 'set', middleware2: 'read' }, headers: {  }, status: 200 }"
 
 # 8
@@ -56,6 +58,7 @@ value = "NONE"
 
 # 13
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { message: 'Chain', requestContext: { step1: 'value1', step2: 'value2', step3: 'value3' }, responseContext: {  } }, context: { step2: 'value2', step3: 'value3' }, headers: {  }, status: 200 }"
 
 [env.capabilities]

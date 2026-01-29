@@ -6,6 +6,7 @@ reason = "Test API comment functionality"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]

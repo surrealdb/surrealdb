@@ -6,36 +6,42 @@ reason = "Test all HTTP methods (GET, POST, PUT, PATCH, DELETE, TRACE)"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'get' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'post' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'put' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'patch' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'delete' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { method: 'trace' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

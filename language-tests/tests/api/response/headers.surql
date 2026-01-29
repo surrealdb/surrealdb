@@ -8,6 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: NULL, context: {  }, headers: { 'x-custom': 'value' }, status: 200 }"
 
 # 2
@@ -16,6 +17,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: NULL, context: {  }, headers: { header1: 'value1', header2: 'value2' }, status: 200 }"
 
 # 4
@@ -24,6 +26,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: NULL, context: {  }, headers: {}, status: 200 }"
 
 # 6
@@ -32,6 +35,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: NULL, context: {  }, headers: { 'from-return': 'return' }, status: 200 }"
 
 [env.capabilities]

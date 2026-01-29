@@ -6,36 +6,42 @@ reason = "Test HTTP status code handling"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 201 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 400 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 404 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {}, context: {  }, headers: {}, status: 500 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { original: 200 }, context: {  }, headers: {}, status: 404 }"
 
 [env.capabilities]

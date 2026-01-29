@@ -82,6 +82,12 @@ pub enum ApiError {
 	// Body parsing errors
 	#[error("Request body must be binary data")]
 	RequestBodyNotBinary,
+
+	#[error("Permission denied: You are not allowed to access this resource")]
+	PermissionDenied,
+
+	#[error("Not found")]
+	NotFound,
 }
 
 impl ApiError {
@@ -116,6 +122,8 @@ impl ApiError {
 			} => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::FinalActionRequestParseFailure => StatusCode::BAD_REQUEST,
 			Self::RequestBodyNotBinary => StatusCode::BAD_REQUEST,
+			Self::PermissionDenied => StatusCode::FORBIDDEN,
+			Self::NotFound => StatusCode::NOT_FOUND,
 		}
 	}
 }

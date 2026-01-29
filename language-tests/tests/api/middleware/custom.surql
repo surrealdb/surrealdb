@@ -12,6 +12,7 @@ value = "NONE"
 
 # 2
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { modified: true, original: 'test' }, context: {  }, headers: { 'x-modified': 'true' }, status: 200 }"
 
 # 3
@@ -24,6 +25,7 @@ value = "NONE"
 
 # 5
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { count: 2 }, context: {  }, headers: {}, status: 200 }"
 
 # 6
@@ -36,6 +38,7 @@ value = "NONE"
 
 # 8
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { message: 'original message', prefix: 'PREFIX: original message' }, context: {  }, headers: {}, status: 200 }"
 
 # 9
@@ -48,7 +51,8 @@ value = "NONE"
 
 # 11
 [[test.results]]
-error = "An error occurred: Custom middleware error"
+skip-api-request-id = true
+value = "{ body: NONE, context: {  }, headers: {  }, status: 500 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
