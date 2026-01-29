@@ -288,6 +288,7 @@ impl Value {
 			},
 			Value::String(v) => match other {
 				Value::String(w) => v == w,
+				// TODO: Should equality check for regexes be based on the regex pattern?
 				Value::Regex(w) => w.inner().is_match(v.as_str()),
 				_ => false,
 			},

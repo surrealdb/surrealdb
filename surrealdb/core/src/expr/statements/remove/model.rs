@@ -19,6 +19,8 @@ impl RemoveModelStatement {
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
+		// Get the namespace and database names
+		let (ns_name, db_name) = opt.ns_db()?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the defined model
@@ -40,7 +42,10 @@ impl RemoveModelStatement {
 		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
-		// TODO Remove the model file from storage
+		// Delete the model file from storage
+		let path =
+			crate::expr::model::get_model_path(ns_name, db_name, &ml.name, &ml.version, &ml.hash);
+		crate::obs::del(&path).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

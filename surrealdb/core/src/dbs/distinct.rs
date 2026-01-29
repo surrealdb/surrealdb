@@ -6,7 +6,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Processable;
 use crate::kvs::Key;
 
-// TODO: This is currently processed in memory. In the future is should be on
+// TODO(3.0): This is currently processed in memory. In the future is should be on
 // disk (mmap?)
 type Distinct = Trie<Key, bool>;
 

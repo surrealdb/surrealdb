@@ -23,7 +23,7 @@ pub async fn read(
 	db: DatabaseId,
 	tb: Option<&TableName>,
 	start: ShowSince,
-	limit: Option<u32>,
+	limit: Option<usize>,
 ) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
 	let ts_bytes = match start {

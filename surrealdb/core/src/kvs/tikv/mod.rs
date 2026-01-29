@@ -464,7 +464,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -476,14 +476,14 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = inner.tx.scan_keys(rng, limit).await?.map(Key::from).collect();
+		let res = inner.tx.scan_keys(rng, limit as u32).await?.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}
 
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -495,7 +495,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
-		let res = inner.tx.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
+		let res = inner.tx.scan_keys_reverse(rng, limit as u32).await?.map(Key::from).collect();
 		// Return result
 		Ok(res)
 	}
@@ -505,31 +505,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		// TiKV does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Load the inner transaction
-		let mut inner = self.inner.write().await;
-		// Scan the keys
-		let res = inner.tx.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
-		// Return result
-		Ok(res)
-	}
-
-	/// Retrieve a range of keys from the database in reverse order
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scanr(
-		&self,
-		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
@@ -544,7 +520,36 @@ impl Transactable for Transaction {
 		let mut inner = self.inner.write().await;
 		// Scan the keys
 		let res =
-			inner.tx.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+			inner.tx.scan(rng, limit as u32).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys from the database in reverse order
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&self,
+		rng: Range<Key>,
+		limit: usize,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Scan the keys
+		let res = inner
+			.tx
+			.scan_reverse(rng, limit as u32)
+			.await?
+			.map(|kv| (Key::from(kv.0), kv.1))
+			.collect();
 		// Return result
 		Ok(res)
 	}

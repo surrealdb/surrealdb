@@ -72,7 +72,8 @@ pub(crate) async fn compute_idiom_recursion(
 	rec: Recursion<'_>,
 ) -> Result<Value> {
 	// Find the recursion limit
-	let limit = *IDIOM_RECURSION_LIMIT as u32;
+	let limit = *IDIOM_RECURSION_LIMIT;
+
 	// Do we recursion instead of looping?
 	let marked_recursive = rec.plan.is_some();
 
@@ -83,7 +84,7 @@ pub(crate) async fn compute_idiom_recursion(
 	}
 
 	// Counter for the local loop and current value
-	let mut i = rec.iterated.to_owned();
+	let mut i = rec.iterated;
 	let mut current = rec.current.to_owned();
 	let mut finished = vec![];
 
@@ -107,7 +108,7 @@ pub(crate) async fn compute_idiom_recursion(
 			if i >= max {
 				return Ok(current);
 			}
-		} else if i >= limit {
+		} else if i as usize >= limit {
 			bail!(Error::IdiomRecursionLimitExceeded {
 				limit,
 			});
@@ -185,7 +186,7 @@ pub(crate) async fn compute_idiom_recursion(
 			if i >= max {
 				return Ok(output!());
 			}
-		} else if i >= limit {
+		} else if i as usize >= limit {
 			bail!(Error::IdiomRecursionLimitExceeded {
 				limit,
 			});

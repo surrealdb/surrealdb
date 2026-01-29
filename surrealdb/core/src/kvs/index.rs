@@ -346,9 +346,9 @@ impl QueueSequences {
 		self.to_index = i;
 	}
 
-	fn next_indexing_batch(&self, page: u32) -> Range<u32> {
+	fn next_indexing_batch(&self, page: usize) -> Range<u32> {
 		let s = self.to_index;
-		let e = (s + page).min(self.next);
+		let e = (s + page as u32).min(self.next);
 		s..e
 	}
 }

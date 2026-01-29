@@ -22,7 +22,7 @@ pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
 	/// This variant should not contain Field::All
-	/// TODO: Encode the above variant into the type.
+	/// TODO(3.0): Encode the above variant into the type.
 	Value(Box<Selector>),
 	/// Normal fields where an object with the selected fields is expected
 	Select(Vec<Field>),
@@ -185,7 +185,7 @@ impl Fields {
 						}
 					}
 				}
-				// TODO: This section should not be handled here, this should be catched by
+				// TODO(3.0): This section should not be handled here, this should be caught by
 				// an analysis pass and optimized.
 				Expr::FunctionCall(f) => {
 					// functions 'type::fields' and 'type::field' are specially handled

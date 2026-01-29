@@ -38,7 +38,6 @@ error = "Invalid query: Cannot delete table `test` on which a view is defined, t
 value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 
 [[test.results]]
-# TODO: Shouldn't this be 0?
 value = "[{ count: 2, id: view:[] }]"
 
 */

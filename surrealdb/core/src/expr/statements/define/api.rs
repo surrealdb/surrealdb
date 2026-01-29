@@ -42,7 +42,7 @@ impl DefineApiStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::ApAlreadyExists {
+						bail!(Error::ApiAlreadyExists {
 							value: self.path.to_sql(),
 						});
 					}
@@ -67,6 +67,19 @@ impl DefineApiStatement {
 				action: action.action.clone(),
 				config: action.config.compute(stk, ctx, opt, doc).await?,
 			});
+		}
+
+		// Validate no duplicate methods across actions
+		let mut seen_methods = std::collections::HashSet::new();
+		for action in &actions {
+			for method in &action.methods {
+				if !seen_methods.insert(method) {
+					bail!(Error::ApiDuplicateMethod {
+						path: path.to_string(),
+						method: method.to_string(),
+					});
+				}
+			}
 		}
 
 		let comment = stk

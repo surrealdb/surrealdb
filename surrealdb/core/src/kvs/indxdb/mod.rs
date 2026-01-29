@@ -247,7 +247,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -259,14 +259,14 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.keys(rng, limit).await?;
+		let res = inner.keys(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Retrieve a range of keys, in reverse
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -278,7 +278,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.keysr(rng, limit).await?;
+		let res = inner.keysr(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
@@ -288,7 +288,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -302,7 +302,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.scan(rng, limit).await?;
+		let res = inner.scan(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}
@@ -312,7 +312,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -326,7 +326,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = inner.scanr(rng, limit).await?;
+		let res = inner.scanr(rng, limit as u32).await?;
 		// Return result
 		Ok(res)
 	}

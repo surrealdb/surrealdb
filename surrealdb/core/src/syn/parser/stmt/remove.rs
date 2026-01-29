@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
 use crate::sql::statements::remove::{
-	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveModuleStatement,
-	RemoveSequenceStatement,
+	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveModelStatement,
+	RemoveModuleStatement, RemoveSequenceStatement,
 };
 use crate::sql::statements::{
 	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
@@ -314,6 +314,32 @@ impl Parser<'_> {
 
 				RemoveStatement::Bucket(RemoveBucketStatement {
 					name,
+					if_exists,
+				})
+			}
+			t!("MODEL") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+
+				// Parse ml::name<version>
+				expected!(self, t!("ml"));
+				expected!(self, t!("::"));
+				let mut name = self.parse_ident()?;
+				while self.eat(t!("::")) {
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?);
+				}
+
+				let (major, minor, patch) = self.parse_model_version()?;
+				let version = format!("{}.{}.{}", major, minor, patch);
+
+				RemoveStatement::Model(RemoveModelStatement {
+					name,
+					version,
 					if_exists,
 				})
 			}

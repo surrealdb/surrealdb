@@ -15,7 +15,7 @@ pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl Cr
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
-	let num_records = (*EXPORT_BATCH_SIZE * 2) as usize;
+	let num_records = *EXPORT_BATCH_SIZE * 2;
 	let num_deleted_records = num_records / 2;
 
 	// Insert a lot of users
@@ -235,7 +235,7 @@ pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
-	let num_versions = (*EXPORT_BATCH_SIZE * 2) as usize;
+	let num_versions = *EXPORT_BATCH_SIZE * 2;
 
 	// Insert a user
 	let _ = db

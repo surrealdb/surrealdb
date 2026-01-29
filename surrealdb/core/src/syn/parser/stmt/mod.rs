@@ -565,7 +565,11 @@ impl Parser<'_> {
 			_ => unexpected!(self, next, "a version stamp or a date-time"),
 		};
 
-		let limit = self.eat(t!("LIMIT")).then(|| self.next_token_value()).transpose()?;
+		let limit = self
+			.eat(t!("LIMIT"))
+			.then(|| self.next_token_value::<u64>())
+			.transpose()?
+			.map(|v| v as usize);
 
 		Ok(ShowStatement {
 			table,

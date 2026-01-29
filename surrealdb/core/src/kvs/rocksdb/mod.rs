@@ -740,7 +740,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -750,7 +750,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000));
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -771,7 +771,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Check the scan limit
-		while res.len() < limit as usize {
+		while res.len() < limit {
 			// Check the key and value
 			if let Some(k) = iter.key() {
 				res.push(k.to_vec());
@@ -788,7 +788,7 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: usize, version: Option<u64>) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -798,7 +798,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000));
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -819,7 +819,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Check the scan limit
-		while res.len() < limit as usize {
+		while res.len() < limit {
 			// Check the key and value
 			if let Some(k) = iter.key() {
 				res.push(k.to_vec());
@@ -839,7 +839,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -851,7 +851,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000));
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -872,7 +872,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Check the scan limit
-		while res.len() < limit as usize {
+		while res.len() < limit {
 			// Check the key and value
 			if let Some((k, v)) = iter.item() {
 				res.push((k.to_vec(), v.to_vec()));
@@ -892,7 +892,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: usize,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -904,7 +904,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000));
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -925,7 +925,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Check the scan limit
-		while res.len() < limit as usize {
+		while res.len() < limit {
 			// Check the key and value
 			if let Some((k, v)) = iter.item() {
 				res.push((k.to_vec(), v.to_vec()));

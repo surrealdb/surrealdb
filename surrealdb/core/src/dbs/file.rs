@@ -79,7 +79,7 @@ impl FileCollector {
 		self.len
 	}
 
-	pub(super) fn start_limit(&mut self, start: Option<u32>, limit: Option<u32>) {
+	pub(super) fn start_limit(&mut self, start: Option<usize>, limit: Option<usize>) {
 		self.paging.start = start;
 		self.paging.limit = limit;
 	}
@@ -87,7 +87,7 @@ impl FileCollector {
 	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.check_reader()?;
 		if let Some(mut reader) = self.reader.take()
-			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u32)
+			&& let Some((start, num)) = self.paging.get_start_num(reader.len)
 		{
 			if let Some(orders) = self.orders.take() {
 				return self.sort_and_take_vec(reader, orders, start, num).await;
@@ -101,8 +101,8 @@ impl FileCollector {
 		&mut self,
 		reader: FileReader,
 		orders: Ordering,
-		start: u32,
-		num: u32,
+		start: usize,
+		num: usize,
 	) -> Result<Vec<Value>, Error> {
 		match orders {
 			Ordering::Random => {
@@ -110,23 +110,29 @@ impl FileCollector {
 					let mut rng = rand::thread_rng();
 					let mut iter = reader.into_iter();
 					// fill initial array
-					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
-					for r in iter.by_ref().take(num as usize) {
+					let mut res: Vec<Value> = Vec::with_capacity(num);
+					for r in iter.by_ref().take(num) {
 						res.push(r?);
 					}
 
 					// Then handle the remaining values as they might need to be part of the random
 					// sampling.
+					//
 					// This implementation is taken from the IteratorRandom::choose_multiple. It is
 					// emperically tested to produce n values uniformly sampled from the iterator.
-					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a
-					// uniform sampling.
+					//
+					// This is Reservoir Sampling: each new item has a num/(current_position) chance
+					// of replacing a random reservoir slot. By mathematical induction, this
+					// guarantees every item in the stream has exactly num/total probability of
+					// being selected, producing uniform sampling.
+					//
+					// See: https://en.wikipedia.org/wiki/Reservoir_sampling
 					for (i, v) in iter.enumerate() {
 						let v = v?;
 						// pick an index to insert the value in, swapping existing values if it is
 						// within the range.
-						let idx = rng.gen_range(0..(i + 1 + num as usize));
-						if let Some(slot) = res.get_mut(idx as usize) {
+						let idx = rng.gen_range(0..(i + 1 + num));
+						if let Some(slot) = res.get_mut(idx) {
 							*slot = v
 						}
 					}
@@ -165,7 +171,7 @@ impl FileCollector {
 
 					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
 					let iter = sorted.map(Result::unwrap);
-					let r: Vec<Value> = iter.skip(start as usize).take(num as usize).collect();
+					let r: Vec<Value> = iter.skip(start).take(num).collect();
 					Ok(r)
 				};
 				#[cfg(target_family = "wasm")]
@@ -274,21 +280,20 @@ impl FileReader {
 		Ok(u)
 	}
 
-	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, Error> {
+	fn take_vec(&mut self, start: usize, num: usize) -> Result<Vec<Value>, Error> {
 		let mut iter = FileRecordsIterator::new(self.records.clone(), self.len);
 		if start > 0 {
 			// Get the start offset of the first record
 			let mut index = OpenOptions::new().read(true).open(&self.index)?;
-			index
-				.seek(SeekFrom::Start(((start as usize - 1) * FileCollector::USIZE_SIZE) as u64))?;
+			index.seek(SeekFrom::Start(((start - 1) * FileCollector::USIZE_SIZE) as u64))?;
 			let start_offset = Self::read_usize(&mut index)?;
 
 			// Set records to the position of the first record
-			iter.seek(start_offset, start as usize)?;
+			iter.seek(start_offset, start)?;
 		}
 
 		// Collect the records
-		let mut res = Vec::with_capacity(num as usize);
+		let mut res = Vec::with_capacity(num);
 		for _ in 0..num {
 			if let Some(val) = iter.next() {
 				res.push(val?);
@@ -380,21 +385,22 @@ impl ExactSizeIterator for FileRecordsIterator {
 
 #[derive(Default)]
 struct FilePaging {
-	start: Option<u32>,
-	limit: Option<u32>,
+	start: Option<usize>,
+	limit: Option<usize>,
 }
 
 impl FilePaging {
-	fn get_start_num(&self, len: u32) -> Option<(u32, u32)> {
+	fn get_start_num(&self, len: usize) -> Option<(usize, usize)> {
 		let start = self.start.unwrap_or(0);
 		if start >= len {
 			return None;
 		}
 		let max = len - start;
+		// Clamp to u32::MAX instead of truncating to prevent silent overflow
 		let num = if let Some(limit) = self.limit {
-			limit.min(max)
+			limit.min(max.min(usize::MAX))
 		} else {
-			max
+			max.min(usize::MAX)
 		};
 		Some((start, num))
 	}

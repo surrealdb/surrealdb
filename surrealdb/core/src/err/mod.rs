@@ -745,8 +745,15 @@ pub(crate) enum Error {
 
 	/// The requested api already exists
 	#[error("The api '/{value}' already exists")]
-	ApAlreadyExists {
+	ApiAlreadyExists {
 		value: String,
+	},
+
+	/// An api action with a duplicate method was defined
+	#[error("The api '{path}' already has an action defined for the {method} method")]
+	ApiDuplicateMethod {
+		path: String,
+		method: String,
 	},
 
 	/// The requested analyzer already exists
@@ -1050,7 +1057,7 @@ pub(crate) enum Error {
 	/// Found an unexpected value in a range
 	#[error("Exceeded the idiom recursion limit of {limit}.")]
 	IdiomRecursionLimitExceeded {
-		limit: u32,
+		limit: usize,
 	},
 
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not

@@ -173,7 +173,7 @@ impl<'js> Response<'js> {
 			let headers = headers.borrow();
 			let headers = &headers.inner;
 			let types = headers.get_all(reqwest::header::CONTENT_TYPE);
-			// TODO: This is not according to spec.
+			// TODO(3.0): This is not according to spec.
 			types
 				.iter()
 				.next()

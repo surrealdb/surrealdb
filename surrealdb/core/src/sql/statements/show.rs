@@ -37,7 +37,7 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 pub struct ShowStatement {
 	pub table: Option<String>,
 	pub since: ShowSince,
-	pub limit: Option<u32>,
+	pub limit: Option<usize>,
 }
 
 impl ToSql for ShowStatement {

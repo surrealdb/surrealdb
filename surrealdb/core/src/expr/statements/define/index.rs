@@ -99,7 +99,8 @@ impl DefineIndexStatement {
 		if tb.schemafull {
 			// Check that the fields exist
 			for idiom in cols.iter() {
-				// TODO: Was this correct? Can users not index data on sub-fields?
+				// TODO(3.0): Is this correct? Can users not index data on sub-fields in a
+				// schemafull table?
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
 				};
