@@ -21,6 +21,8 @@ pub(crate) enum TaskLeaseType {
 	ChangeFeedCleanup,
 	/// Index compaction
 	IndexCompaction,
+	/// Event processing
+	EventProcessing,
 }
 
 #[revisioned(revision = 1)]

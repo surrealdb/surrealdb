@@ -842,6 +842,9 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
+			asynchronous: false,
+			retry: None,
+			max_depth: None,
 		};
 
 		loop {
@@ -861,12 +864,29 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
+				t!("ASYNC") => {
+					self.pop_peek();
+					res.asynchronous = true;
+				}
+				t!("RETRY") => {
+					let token = self.pop_peek();
+					if !res.asynchronous {
+						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
+					}
+					res.retry = Some(self.next_token_value()?);
+				}
+				t!("MAXDEPTH") => {
+					let token = self.pop_peek();
+					if !res.asynchronous {
+						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
+					}
+					res.max_depth = Some(self.next_token_value()?);
+				}
 				_ => break,
 			}
 		}
 		Ok(res)
 	}
-
 	pub(crate) async fn parse_define_field(
 		&mut self,
 		stk: &mut Stk,

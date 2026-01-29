@@ -2,12 +2,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use revision::revisioned;
 
+use crate::catalog::EventDefinition;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::{Action, Document};
+use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::expr::FlowResultExt as _;
 use crate::iam::AuthLimit;
+use crate::kvs::{HlcTimestamp, Transaction, impl_kv_value_revisioned};
 use crate::val::Value;
 
 impl Document {
@@ -90,14 +93,14 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let mut ctx = Context::new(ctx);
-			ctx.add_value("event", evt.into());
-			ctx.add_value("value", doc.doc.as_arc());
-			ctx.add_value("after", after);
-			ctx.add_value("before", before);
-			ctx.add_value("input", input.clone().unwrap_or_default());
-			// Freeze the context
-			let ctx = ctx.freeze();
+			let event_record = EventRecord::new(
+				evt.into(),
+				doc.doc.as_arc(),
+				after,
+				before,
+				input.clone().unwrap_or_default(),
+			);
+			let ctx = event_record.build_event_context(ctx);
 			// Process conditional clause
 			let val = stk
 				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
@@ -106,17 +109,98 @@ impl Document {
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
-				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&*doc)))
-						.await
-						.catch_return()
-						.map_err(|e| {
-							anyhow::anyhow!("Error while processing event {}: {}", ev.name, e)
-						})?;
+				if ev.asynchronous {
+					Self::process_async(ctx, opt, event_record, ev, &self.doc_ctx).await?;
+				} else {
+					Self::process_sync(stk, ctx, opt, ev, doc).await?;
 				}
 			}
 		}
 		// Carry on
 		Ok(())
+	}
+
+	async fn process_async(
+		ctx: FrozenContext,
+		opt: Options,
+		event_record: EventRecord,
+		ev: &EventDefinition,
+		doc_ctx: &DocumentContext,
+	) -> Result<()> {
+		let node_id = opt.id();
+		let ts = HlcTimestamp::next();
+		let db = doc_ctx.db();
+		let tx = ctx.tx();
+		let key = crate::key::table::eq::Eq::new(
+			db.namespace_id,
+			db.database_id,
+			&ev.target_table,
+			&ev.name,
+			ts,
+			node_id,
+		);
+		tx.put(&key, &event_record, None).await?;
+		Ok(())
+	}
+
+	async fn process_sync(
+		stk: &mut Stk,
+		ctx: FrozenContext,
+		opt: Options,
+		ev: &EventDefinition,
+		doc: &CursorDoc,
+	) -> Result<()> {
+		for v in ev.then.iter() {
+			stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc)))
+				.await
+				.catch_return()
+				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
+		}
+		Ok(())
+	}
+}
+
+#[revisioned(revision = 1)]
+pub(crate) struct EventRecord {
+	attempt: u16,
+	event: Arc<Value>,
+	doc: Arc<Value>,
+	after: Arc<Value>,
+	before: Arc<Value>,
+	input: Arc<Value>,
+}
+
+impl_kv_value_revisioned!(EventRecord);
+
+impl EventRecord {
+	fn new(
+		event: Arc<Value>,
+		doc: Arc<Value>,
+		after: Arc<Value>,
+		before: Arc<Value>,
+		input: Arc<Value>,
+	) -> Self {
+		Self {
+			attempt: 0,
+			event,
+			doc,
+			after,
+			before,
+			input,
+		}
+	}
+
+	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
+		let mut ctx = Context::new(ctx);
+		ctx.add_value("event", self.event.clone());
+		ctx.add_value("value", self.doc.clone());
+		ctx.add_value("after", self.after.clone());
+		ctx.add_value("before", self.before.clone());
+		ctx.add_value("input", self.input.clone());
+		ctx.freeze()
+	}
+
+	pub(crate) async fn process_events(_tx: &Transaction) -> Result<usize> {
+		todo!()
 	}
 }

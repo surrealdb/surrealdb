@@ -28,6 +28,7 @@ impl Tl {
 		let task = match task {
 			TaskLeaseType::ChangeFeedCleanup => 1,
 			TaskLeaseType::IndexCompaction => 2,
+			TaskLeaseType::EventProcessing => 3,
 		};
 		Self {
 			__: b'/',

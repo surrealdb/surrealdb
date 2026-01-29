@@ -45,6 +45,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::doc::EventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -1502,6 +1503,40 @@ impl Datastore {
 				catch!(txn, txn.commit().await);
 			} else {
 				txn.cancel().await?;
+				return Ok(());
+			}
+		}
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting event processing process");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::EventProcessing,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Output function invocation details to logs
+			trace!(target: TARGET, "Running event processing process");
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			let count = catch!(txn, EventRecord::process_events(&txn).await);
+			if count > 0 {
+				catch!(txn, txn.commit().await);
+			} else {
+				// The last batch didn't have any events to process,
+				// we can sleep until the next wake-up call
 				return Ok(());
 			}
 		}

@@ -14,6 +14,9 @@ pub(crate) struct DefineEventStatement {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub asynchronous: bool,
+	pub retry: Option<u16>,
+	pub max_depth: Option<u16>,
 }
 
 impl ToSql for DefineEventStatement {
@@ -24,12 +27,20 @@ impl ToSql for DefineEventStatement {
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.target_table),);
+		if self.asynchronous {
+			f.push_str(" ASYNC");
+			if let Some(retry) = self.retry {
+				write_sql!(f, fmt, " RETRY {}", retry);
+			}
+			if let Some(max_depth) = self.max_depth {
+				write_sql!(f, fmt, " MAXDEPTH {}", max_depth);
+			}
+		}
 		write_sql!(
 			f,
 			fmt,
-			" {} ON {} WHEN {} THEN {}",
-			CoverStmts(&self.name),
-			CoverStmts(&self.target_table),
+			" WHEN {} THEN {}",
 			CoverStmts(&self.when),
 			Fmt::comma_separated(self.then.iter().map(CoverStmts))
 		);
@@ -48,6 +59,9 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			asynchronous: v.asynchronous,
+			retry: v.retry,
+			max_depth: v.max_depth,
 		}
 	}
 }
@@ -62,6 +76,9 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			asynchronous: v.asynchronous,
+			retry: v.retry,
+			max_depth: v.max_depth,
 		}
 	}
 }

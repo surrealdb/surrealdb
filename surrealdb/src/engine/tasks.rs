@@ -50,8 +50,9 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task2 = spawn_task_node_membership_check(dbs.clone(), canceller.clone(), opts);
 	let task3 = spawn_task_node_membership_cleanup(dbs.clone(), canceller.clone(), opts);
 	let task4 = spawn_task_changefeed_cleanup(dbs.clone(), canceller.clone(), opts);
-	let task5 = spawn_task_index_compaction(dbs, canceller, opts);
-	Tasks(vec![task1, task2, task3, task4, task5])
+	let task5 = spawn_task_index_compaction(dbs.clone(), canceller.clone(), opts);
+	let task6 = spawn_task_event_processing(dbs, canceller, opts);
+	Tasks(vec![task1, task2, task3, task4, task5, task6])
 }
 
 fn spawn_task_node_membership_refresh(
@@ -224,6 +225,37 @@ fn spawn_task_index_compaction(
 			}
 		}
 		trace!("Background task exited: Running index compaction");
+	}))
+}
+
+fn spawn_task_event_processing(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	// Get the delay interval from the config
+	let interval = opts.event_processing_interval;
+	// Spawn a future
+	Box::pin(spawn(async move {
+		// Log the interval frequency
+		trace!("Running event processing every {interval:?}");
+		// Create a new time-based interval ticket
+		let mut ticker = interval_ticker(interval).await;
+		// Loop continuously until the task is cancelled
+		loop {
+			tokio::select! {
+				biased;
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.event_processing(interval).await {
+						error!("Error running event processing: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Running event processing");
 	}))
 }
 
