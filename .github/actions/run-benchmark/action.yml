@@ -198,12 +198,6 @@ runs:
         fi
         
         # Clean up data directories
-        for dir in ~/surrealdb-data ~/crud-bench-data; do
-          if [ -d "$dir" ]; then
-            rm -rf "$dir" 2>/dev/null || {
-              echo "Warning: Failed to remove $dir, retrying..."
-              sleep 1
-              rm -rf "$dir" 2>/dev/null || echo "Warning: Could not clean $dir"
-            }
-          fi
+        rm -rf ~/surrealdb-data ~/crud-bench-data;
+        rm -rf ~/surrealdb-data ~/crud-bench-data;
         done
