@@ -1438,7 +1438,7 @@ impl Datastore {
 		)?;
 		// We continue without interruptions while there are keys and the lease
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());
@@ -1508,6 +1508,7 @@ impl Datastore {
 		}
 	}
 
+	/// Process queued async events using a distributed lease to avoid duplication.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
 		// Output function invocation details to logs
@@ -1522,7 +1523,7 @@ impl Datastore {
 		)?;
 		// We continue without interruptions while there are keys and the lease
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the EventProcessing task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());

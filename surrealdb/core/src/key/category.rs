@@ -35,7 +35,7 @@ pub enum Category {
 	RootConfig,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
-	/// crate::key::root::eq                /!eq{ns}{db}{tb}{ev}{id}
+	/// crate::key::root::eq                 /!eq{ns}{db}{tb}{ev}{ts}{nid}
 	EventQueue,
 	///
 	/// ------------------------------

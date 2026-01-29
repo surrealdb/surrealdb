@@ -23,6 +23,8 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
+	/// Interval for processing queued async events.
+	///
 	/// Default: 5 seconds
 	pub event_processing_interval: Duration,
 }

@@ -300,7 +300,7 @@ impl Options {
 	}
 
 	pub(crate) fn arc_db(&self) -> Result<Arc<str>> {
-		self.db.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+		self.db.clone().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS and DB

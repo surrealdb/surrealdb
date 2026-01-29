@@ -21,10 +21,13 @@ pub struct EventDefinition {
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
+	/// Whether this event should be queued for async processing.
 	#[revision(start = 3)]
 	pub(crate) asynchronous: bool,
+	/// Retry limit for async events (values <= 1 mean a single attempt).
 	#[revision(start = 3)]
 	pub(crate) retry: Option<u16>,
+	/// Configured computation depth limit for async event evaluation.
 	#[revision(start = 3)]
 	pub(crate) max_depth: Option<u16>,
 }
