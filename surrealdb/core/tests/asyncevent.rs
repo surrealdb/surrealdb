@@ -2,9 +2,12 @@ mod helpers;
 
 use anyhow::Result;
 use helpers::Test;
+use std::time::Duration;
 use surrealdb_core::doc::AsyncEventRecord;
+use tokio::time::{sleep, timeout};
 
 #[tokio::test]
+#[test_log::test]
 async fn test_async_event() -> Result<()> {
 	let sql = r#"
 		DEFINE EVENT test ON TABLE user ASYNC RETRY 1 MAXDEPTH 6 WHEN true THEN (
@@ -14,12 +17,10 @@ async fn test_async_event() -> Result<()> {
 		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now() RETURN id, email;
 		UPSERT user:test SET email = 'info@surrealdb.com', updated_at = time::now() RETURN id, email;
 		UPSERT user:test SET email = 'test@surrealdb.com', updated_at = time::now() RETURN id, email;
-		SLEEP 1s;
-		(SELECT * FROM activity ORDER BY time).{ action, user, value };
 	"#;
 
 	let mut t = Test::new(sql).await?;
-	t.expect_size(7)?;
+	t.expect_size(5)?;
 	t.expect_val("NONE")?;
 	t.expect_val(
 		"{ events: { test: 'DEFINE EVENT test ON user ASYNC RETRY 1 MAXDEPTH 6 WHEN true THEN (CREATE activity SET user = $parent.id, `value` = $after.email, action = $event, time = time::now())' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
@@ -27,7 +28,6 @@ async fn test_async_event() -> Result<()> {
 	t.expect_val("[{ email: 'info@surrealdb.com', id: user:test }]")?;
 	t.expect_val("[{ email: 'info@surrealdb.com', id: user:test }]")?;
 	t.expect_val("[{ email: 'test@surrealdb.com', id: user:test }]")?;
-	t.expect_val("NONE")?;
 
 	let Test {
 		ds,
@@ -36,7 +36,13 @@ async fn test_async_event() -> Result<()> {
 	} = t;
 
 	// Process the event asynchronously
-	assert_eq!(AsyncEventRecord::process_next_events_batch(&ds).await?, 3);
+	timeout(Duration::from_secs(10), async {
+		while AsyncEventRecord::process_next_events_batch(&ds).await? != 0 {
+			sleep(Duration::from_millis(100)).await;
+		}
+		Ok::<_, anyhow::Error>(())
+	})
+	.await??;
 
 	let mut t = Test::new_ds_session(
 		ds,

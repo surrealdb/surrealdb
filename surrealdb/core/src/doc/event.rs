@@ -1,12 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
-use reblessive::TreeStack;
-use reblessive::tree::Stk;
-use revision::revisioned;
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
-
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{EventDefinition, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
@@ -17,13 +10,19 @@ use crate::err::Error;
 use crate::expr::FlowResultExt;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq;
-use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::Write;
 use crate::kvs::{
 	Datastore, HlcTimestamp, KVValue, LockType, Transaction, TransactionType,
 	impl_kv_value_revisioned,
 };
 use crate::val::{RecordId, Value};
+use anyhow::{Result, bail};
+use reblessive::TreeStack;
+use reblessive::tree::Stk;
+use revision::revisioned;
+use surrealdb_types::ToSql;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -159,12 +158,12 @@ impl Document {
 		ev: &EventDefinition,
 		doc: &CursorDoc,
 	) -> Result<()> {
-		println!("Process sync: {doc:?} - {opt:?}");
 		for v in ev.then.iter() {
-			stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc)))
-				.await
-				.catch_return()
-				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
+			let res =
+				stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc))).await.catch_return().map_err(
+					|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e),
+				)?;
+			trace!("Async event returns: {}", res.to_sql());
 		}
 		Ok(())
 	}
@@ -290,35 +289,50 @@ impl AsyncEventRecord {
 
 		for (k, v) in res {
 			let permit = sem.clone().acquire_owned().await?;
-			let tx = ds.transaction(Write, Optimistic).await?;
-			// Set the context
+			// Setup a context
 			let mut ctx = ds.setup_ctx()?;
-			ctx.set_transaction(Arc::new(tx));
-			let ctx = ctx.freeze();
+			// Build default options
 			let opt = ds.setup_options(&Session::default());
+			// Extract sequences and transaction factory
+			let sequences = ds.sequences().clone();
+			let tf = ds.transaction_factory().clone();
 			join_set.spawn(async move {
 				{
+					// create transaction
+					let tx = tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
+					ctx.set_transaction(Arc::new(tx));
+					let ctx = ctx.freeze();
 					let eq = eq::Eq::decode_key(&k)?;
 					let mut ev = AsyncEventRecord::kv_decode_value(v)?;
+					ev.attempt += 1;
+					let ev = ev;
 					let tx = ctx.tx();
 					match Self::process_event(&ctx, &opt, &eq, &ev).await {
 						Ok(_) => {
 							catch!(tx, tx.del(&k).await);
 						}
 						Err(e) => {
-							if ev.attempt < ev.event_definition.retry.unwrap_or(0) {
-								ev.attempt += 1;
-								catch!(tx, tx.set(&eq, &ev, None).await);
-							} else {
-								error!(
-									"Error while processing an event after {} attempts: {e}",
-									ev.attempt
-								);
+							let se: Option<&Error> = e.downcast_ref();
+							if matches!(
+								se,
+								Some(Error::EvNamespaceMismatch(_))
+									| Some(Error::EvDatabaseMismatch(_))
+							) {
+								// This error is final, we won't retry. The namespace or the database has been recreated.
+								warn!("Event processing failed: {se:?}");
 								catch!(tx, tx.del(&k).await);
+							} else {
+								catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
 							}
 						}
 					}
-					tx.commit().await?;
+					if let Err(e) = tx.commit().await {
+						tx.cancel().await?;
+						let tx =
+							tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
+						catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
+						tx.commit().await?;
+					}
 				}
 				drop(permit); // releases a slot => producer can send another job
 				Ok(())
@@ -333,6 +347,21 @@ impl AsyncEventRecord {
 		Ok(count)
 	}
 
+	async fn retry_event(
+		tx: &Transaction,
+		e: anyhow::Error,
+		eq: &eq::Eq<'_>,
+		ev: &AsyncEventRecord,
+	) -> Result<()> {
+		if ev.attempt < ev.event_definition.retry.unwrap_or(0) {
+			tx.set(eq, &ev, None).await?;
+		} else {
+			error!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
+			tx.del(eq).await?;
+		}
+		Ok(())
+	}
+
 	async fn process_event(
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -342,7 +371,6 @@ impl AsyncEventRecord {
 		let ctx = ev.build_event_context(ctx);
 		let opt = ev.build_event_options(&ctx.tx(), opt, eq).await?;
 		let doc = ev.build_event_cursor_doc();
-		println!("Processing event for key: {:?} - {:?}", eq, ev);
 		let mut stack = TreeStack::new();
 		stack
 			.enter(|stk| {

@@ -149,7 +149,7 @@ pub struct Metric {
 }
 
 #[derive(Clone)]
-pub(super) struct TransactionFactory {
+pub(crate) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
@@ -1557,6 +1557,14 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	}
+
+	pub(crate) fn sequences(&self) -> &Sequences {
+		&self.sequences
+	}
+
+	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
+		&self.transaction_factory
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
