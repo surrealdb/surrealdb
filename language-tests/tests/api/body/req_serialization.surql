@@ -8,6 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: { name: 'test', value: 42 } }, context: {  }, headers: {}, status: 200 }"
 
 # 2
@@ -16,6 +17,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: 'abc' }, context: {  }, headers: {}, status: 200 }"
 
 # 4
@@ -24,7 +26,8 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: 'Failed to decode the request body', context: {  }, headers: { \"content-type\": 'application/vnd.surrealdb.native' }, status: 400 }"
+skip-api-request-id = true
+value = "{ body: 'Failed to decode the request body', context: {  }, headers: {  }, status: 400 }"
 
 # 6
 [[test.results]]
@@ -32,6 +35,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: 'plain text content' }, context: {  }, headers: {}, status: 200 }"
 
 # 8
@@ -49,6 +53,7 @@ value = "NONE"
 
 # 11
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: { native: 'format' } }, context: {  }, headers: {}, status: 200 }"
 
 # 12
@@ -57,10 +62,12 @@ value = "NONE"
 
 # 13
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: { auto: 'json' } }, context: {  }, headers: {}, status: 200 }"
 
 # 14
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { parsed: b'736F6D652064617461' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

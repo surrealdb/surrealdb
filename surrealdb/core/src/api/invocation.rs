@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use http::HeaderValue;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
+use tracing::{debug, error, trace};
 
 use super::response::ApiResponse;
+use crate::api::X_SURREAL_REQUEST_ID;
 use crate::api::err::ApiError;
 use crate::api::request::ApiRequest;
 use crate::catalog::providers::DatabaseProvider;
@@ -25,7 +28,7 @@ use crate::val::{Closure, Value};
 /// 2. Collects middleware from database-level, route-level, and method-level configs
 /// 3. Builds a middleware chain in execution order
 /// 4. Executes the middleware chain with the final handler
-/// 5. Returns the response or `None` if no handler matched
+/// 5. Returns an [`ApiResponse`]; no handler or permission denied yield 404/403 responses.
 ///
 /// # Arguments
 /// * `ctx` - The frozen context containing database and transaction information
@@ -34,15 +37,14 @@ use crate::val::{Closure, Value};
 /// * `req` - The incoming API request with method, headers, body, params, etc.
 ///
 /// # Returns
-/// * `Ok(Some(response))` - Successfully processed request with a response
-/// * `Ok(None)` - No matching handler found for the request method
-/// * `Err(e)` - Error during processing (middleware failure, handler error, etc.)
+/// * `Ok(response)` - Processed request; includes 404/403 when no handler or permission denied
+/// * `Err(e)` - Error during processing (e.g. middleware or handler failure)
 pub async fn process_api_request(
 	ctx: &FrozenContext,
 	opt: &Options,
 	api: &ApiDefinition,
 	req: ApiRequest,
-) -> Result<Option<ApiResponse>> {
+) -> Result<ApiResponse> {
 	let mut stack = TreeStack::new();
 	stack.enter(|stk| process_api_request_with_stack(stk, ctx, opt, api, req)).finish().await
 }
@@ -60,16 +62,15 @@ pub async fn process_api_request(
 /// * `req` - The incoming API request with method, headers, body, params, etc.
 ///
 /// # Returns
-/// * `Ok(Some(response))` - Successfully processed request with a response
-/// * `Ok(None)` - No matching handler found for the request method
-/// * `Err(e)` - Error during processing (middleware failure, handler error, etc.)
+/// * `Ok(response)` - Processed request; 404/403 when no handler or permission denied
+/// * `Err(e)` - Error during processing (e.g. middleware or handler failure)
 pub async fn process_api_request_with_stack(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
 	api: &ApiDefinition,
 	req: ApiRequest,
-) -> Result<Option<ApiResponse>> {
+) -> Result<ApiResponse> {
 	// TODO: Figure out if it is possible if multiple actions can have the same
 	// method, and if so should they all be run?
 	let method_action = api.actions.iter().find(|x| x.methods.contains(&req.method));
@@ -79,7 +80,13 @@ pub async fn process_api_request_with_stack(
 		(None, Some(x)) => (x.clone(), None),
 		// nothing to do, just return
 		_ => {
-			return Ok(None);
+			trace!(
+				request_id = %req.request_id,
+				method = ?req.method,
+				"No matching handler or fallback for API request"
+			);
+			let res = ApiResponse::from_error(ApiError::NotFound.into(), req.request_id.clone());
+			return Ok(res);
 		}
 	};
 
@@ -99,7 +106,17 @@ pub async fn process_api_request_with_stack(
 		// Iterate through permissions and process them
 		for permission in permissions {
 			match permission {
-				Permission::None => return Err(ApiError::PermissionDenied.into()),
+				Permission::None => {
+					trace!(
+						request_id = %req.request_id,
+						"API request denied by PERMISSIONS NONE"
+					);
+					let res = ApiResponse::from_error(
+						ApiError::PermissionDenied.into(),
+						req.request_id.clone(),
+					);
+					return Ok(res);
+				}
 				Permission::Full => (),
 				Permission::Specific(e) => {
 					// Disable permissions
@@ -111,7 +128,15 @@ pub async fn process_api_request_with_stack(
 						.catch_return()?
 						.is_truthy()
 					{
-						return Err(ApiError::PermissionDenied.into());
+						trace!(
+							request_id = %req.request_id,
+							"API request denied by PERMISSIONS WHERE clause"
+						);
+						let res = ApiResponse::from_error(
+							ApiError::PermissionDenied.into(),
+							req.request_id.clone(),
+						);
+						return Ok(res);
 					}
 				}
 			}
@@ -126,27 +151,43 @@ pub async fn process_api_request_with_stack(
 		.collect();
 
 	// Create the final action closure (end of the middleware chain)
-	let final_action = create_final_action_closure(action_expr);
+	let final_action = create_final_action_closure(req.request_id.clone(), action_expr);
 
 	// Build the middleware chain backwards, wrapping each middleware around the previous closure
-	let next = middleware
-		.iter()
-		.rev()
-		.fold(final_action, |next, def| create_middleware_closure(def.clone(), next));
+	let middleware_len = middleware.len();
+	let next = middleware.iter().rev().enumerate().fold(final_action, |next, (idx, def)| {
+		// is_initial is true for the first middleware in execution order (furthest from action)
+		// When reversed, the last index is the first middleware
+		let is_initial = idx == middleware_len.saturating_sub(1);
+		create_middleware_closure(req.request_id.clone(), def.clone(), next, is_initial)
+	});
 
 	// APIs run without permissions & limit auth
 	let opt = AuthLimit::try_from(&api.auth_limit)?.limit_opt(opt);
 	let opt = opt.new_with_perms(false);
-	let res = next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?;
-	let res: ApiResponse = res.try_into()?;
-	Ok(Some(res))
+
+	debug!(
+		request_id = %req.request_id,
+		middleware_count = middleware.len(),
+		"Executing API middleware chain"
+	);
+	let mut res: ApiResponse =
+		next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?.try_into()?;
+
+	// Ensure X-Surreal-Request-ID is present in final response headers (from res.request_id)
+	res.ensure_request_id_header();
+
+	Ok(res)
 }
 
 /// Creates a closure that executes the final API action handler.
 ///
 /// This closure is the end of the middleware chain and directly executes
 /// the action expression with the request in the context.
-fn create_final_action_closure(action_expr: Expr) -> Closure {
+///
+/// # Arguments
+/// * `action_expr` - The expression to execute as the final action
+fn create_final_action_closure(request_id: String, action_expr: Expr) -> Closure {
 	Closure::Builtin(Arc::new(
 		move |stk: &mut Stk,
 		      ctx: &FrozenContext,
@@ -154,7 +195,7 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 		      doc: Option<&CursorDoc>,
 		      args: Any| {
 			// Extract request argument
-			let (FromPublic(req),): (FromPublic<ApiRequest>,) =
+			let (FromPublic(mut req),): (FromPublic<ApiRequest>,) =
 				match FromArgs::from_args("", args.0) {
 					Ok(v) => v,
 					Err(_e) => {
@@ -164,22 +205,39 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 					}
 				};
 
-			// Update context - use the parameters passed to the closure
+			// Enforce request ID in request headers & object (prevent user modification)
+			req.request_id.clone_from(&request_id);
+			if !request_id.is_empty() {
+				let _ = req.headers.insert(
+					X_SURREAL_REQUEST_ID,
+					HeaderValue::from_str(&request_id)
+						.unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+				);
+			}
+
+			// Update context
 			let mut ctx_isolated = Context::new_isolated(ctx);
 			ctx_isolated.add_value("request", Arc::new(req.into()));
 			let ctx_frozen = ctx_isolated.freeze();
 
 			// Clone required values
 			let action_expr = action_expr.clone();
+			let request_id = request_id.clone();
 			// Execute
 			Box::pin(stk.run(async move |stk| {
-				action_expr
-					.compute(stk, &ctx_frozen, opt, doc)
-					.await
-					.catch_return()
-					// Ensure that the next middleware receives a proper api response object
-					.and_then(ApiResponse::try_from)
-					.map(Value::from)
+				// Computed result
+				let res = action_expr.compute(stk, &ctx_frozen, opt, doc).await.catch_return();
+
+				// Convert to ApiResponse; set request_id from request for all responses
+				let mut res = match res {
+					Ok(res) => ApiResponse::try_from(res)
+						.unwrap_or_else(|e| ApiResponse::from_error(e, request_id.clone())),
+					Err(e) => ApiResponse::from_error(e, request_id.clone()),
+				};
+				res.request_id.clone_from(&request_id);
+				res.ensure_request_id_header();
+
+				Ok(Value::from(res))
 			}))
 		},
 	))
@@ -189,7 +247,17 @@ fn create_final_action_closure(action_expr: Expr) -> Closure {
 ///
 /// This closure wraps the next middleware/handler in the chain and calls
 /// the middleware function with the request and next closure.
-fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closure {
+///
+/// # Arguments
+/// * `def` - The middleware definition
+/// * `next` - The next closure in the chain
+/// * `is_initial` - Whether this is the initial middleware (furthest from action)
+fn create_middleware_closure(
+	request_id: String,
+	def: MiddlewareDefinition,
+	next: Closure,
+	is_initial: bool,
+) -> Closure {
 	Closure::Builtin(Arc::new(
 		move |stk: &mut Stk,
 		      ctx: &FrozenContext,
@@ -200,7 +268,7 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 			let def = def.clone();
 
 			// Extract request argument
-			let (FromPublic(req),): (FromPublic<ApiRequest>,) =
+			let (FromPublic(mut req),): (FromPublic<ApiRequest>,) =
 				match FromArgs::from_args("", args.0) {
 					Ok(v) => v,
 					Err(_e) => {
@@ -227,23 +295,69 @@ fn create_middleware_closure(def: MiddlewareDefinition, next: Closure) -> Closur
 					}
 				};
 
+			// Enforce request ID in request headers & object (prevent user modification)
+			req.request_id.clone_from(&request_id);
+			if !request_id.is_empty() {
+				let _ = req.headers.insert(
+					X_SURREAL_REQUEST_ID,
+					HeaderValue::from_str(&request_id)
+						.unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+				);
+			}
+
 			// Prepare arguments to be passed
 			let mut fn_args = vec![Value::from(req), Value::Closure(Box::new(next.clone()))];
 			fn_args.extend(def.args);
 
 			// Each middleware should execute in an isolated context to prevent cross-contamination
-			// between middleware calls, besides passed context objects
 			let ctx = Context::new_isolated(ctx).freeze();
 			let opt = opt.clone();
 			let doc = doc.cloned();
+			let middleware_name = def.name;
+			let request_id = request_id.clone();
+
 			Box::pin(stk.run(async move |stk| {
-				function
-					.compute(stk, &ctx, &opt, doc.as_ref(), fn_args)
-					.await
-					.catch_return()
-					// Ensure that the next middleware receives a proper api response object
-					.and_then(ApiResponse::try_from)
-					.map(Value::from)
+				// Computed result
+				let res =
+					function.compute(stk, &ctx, &opt, doc.as_ref(), fn_args).await.catch_return();
+
+				let mut res = match res {
+					Ok(res) => match ApiResponse::try_from(res) {
+						Ok(mut res) => {
+							res.request_id.clone_from(&request_id);
+							res
+						}
+						Err(e) => {
+							if is_initial {
+								error!(
+									request_id = %request_id,
+									middleware = %middleware_name,
+									error = %e,
+									"API middleware error; converting to response (ApiError exposed, internal errors masked)"
+								);
+								ApiResponse::from_error_secure(e, request_id.clone())
+							} else {
+								ApiResponse::from_error(e, request_id.clone())
+							}
+						}
+					},
+					Err(e) => {
+						if is_initial {
+							error!(
+								request_id = %request_id,
+								middleware = %middleware_name,
+								error = %e,
+								"API middleware error; converting to response (ApiError exposed, internal errors masked)"
+							);
+							ApiResponse::from_error_secure(e, request_id.clone())
+						} else {
+							ApiResponse::from_error(e, request_id.clone())
+						}
+					}
+				};
+
+				res.ensure_request_id_header();
+				Ok(Value::from(res))
 			}))
 		},
 	))

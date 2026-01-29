@@ -6,19 +6,22 @@ reason = "Test timeout middleware and error handling"
 value = "NONE"
 
 [[test.results]]
-error = "The query was not executed because it exceeded the timeout: 1ns"
+skip-api-request-id = true
+value = "{ body: 'The query was not executed because it exceeded the timeout: 1ns', context: {  }, headers: {  }, status: 500 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { completed: true }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "deadline has elapsed"
+skip-api-request-id = true
+value = "{ body: 'deadline has elapsed', context: {  }, headers: {  }, status: 500 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

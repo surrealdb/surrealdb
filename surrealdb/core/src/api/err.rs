@@ -85,6 +85,9 @@ pub enum ApiError {
 
 	#[error("Permission denied: You are not allowed to access this resource")]
 	PermissionDenied,
+
+	#[error("Not found")]
+	NotFound,
 }
 
 impl ApiError {
@@ -120,6 +123,7 @@ impl ApiError {
 			Self::FinalActionRequestParseFailure => StatusCode::BAD_REQUEST,
 			Self::RequestBodyNotBinary => StatusCode::BAD_REQUEST,
 			Self::PermissionDenied => StatusCode::FORBIDDEN,
+			Self::NotFound => StatusCode::NOT_FOUND,
 		}
 	}
 }
