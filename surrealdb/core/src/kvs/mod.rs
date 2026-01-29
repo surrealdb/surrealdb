@@ -39,6 +39,9 @@ mod tikv;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod tx_index_cache_test;
+
 pub(crate) mod cache;
 pub(crate) mod index;
 pub(crate) mod sequences;
