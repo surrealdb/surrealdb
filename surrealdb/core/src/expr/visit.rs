@@ -675,7 +675,6 @@ implement_visitor! {
 			this.visit_output(o)?;
 		}
 		this.visit_expr(&i.timeout)?;
-		this.visit_expr(&i.version)?;
 		Ok(())
 	}
 
@@ -1137,8 +1136,6 @@ implement_visitor! {
 		}
 
 		this.visit_expr(&c.timeout)?;
-
-		this.visit_expr(&c.version)?;
 
 		Ok(())
 	}
@@ -2080,7 +2077,6 @@ implement_visitor_mut! {
 			this.visit_mut_output(o)?;
 		}
 		this.visit_mut_expr(&mut i.timeout)?;
-		this.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 
@@ -2539,8 +2535,6 @@ implement_visitor_mut! {
 		}
 
 		this.visit_mut_expr(&mut c.timeout)?;
-
-		this.visit_mut_expr(&mut c.version)?;
 
 		Ok(())
 	}

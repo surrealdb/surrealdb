@@ -17,8 +17,6 @@ pub struct CreateStatement {
 	pub output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Expr,
-	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Expr,
 }
 
 impl Default for CreateStatement {
@@ -29,7 +27,6 @@ impl Default for CreateStatement {
 			data: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -47,9 +44,6 @@ impl ToSql for CreateStatement {
 		if let Some(ref v) = self.output {
 			write_sql!(f, fmt, " {v}");
 		}
-		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
-		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
@@ -64,7 +58,6 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			version: v.version.into(),
 		}
 	}
 }
@@ -77,7 +70,6 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			version: v.version.into(),
 		}
 	}
 }

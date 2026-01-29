@@ -64,98 +64,6 @@ pub async fn select_with_version(new_db: impl CreateDb) {
 	assert_eq!(name, "John v1");
 }
 
-pub async fn create_with_version(new_db: impl CreateDb) {
-	let config = Config::new();
-	let (permit, db) = new_db.create_db(config).await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-
-	// Create a record in the past.
-	let _ = db
-		.query("CREATE user:john SET name = 'John' VERSION d'2024-08-19T08:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-
-	// Without VERSION, SELECT should return the record.
-	let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
-	let Some(name): Option<String> = response.take("name").unwrap() else {
-		panic!("query returned no record");
-	};
-	assert_eq!(name, "John");
-
-	// SELECT with the VERSION set to the creation timestamp or later should return
-	// the record.
-	let mut response = db
-		.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let Some(name): Option<String> = response.take("name").unwrap() else {
-		panic!("query returned no record");
-	};
-	assert_eq!(name, "John");
-
-	// SELECT with the VERSION set before the creation timestamp should return
-	// nothing.
-	let mut response = db
-		.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let response: Option<String> = response.take("name").unwrap();
-	assert!(response.is_none());
-}
-
-pub async fn insert_with_version(new_db: impl CreateDb) {
-	let config = Config::new();
-	let (permit, db) = new_db.create_db(config).await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-
-	// Create a record in the past.
-	let _ = db
-		.query("INSERT INTO user { id: user:john, name: 'John' } VERSION d'2024-08-19T08:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-
-	// Without VERSION, SELECT should return the record.
-	let mut response = db.query("SELECT * FROM user:john").await.unwrap().check().unwrap();
-	let Some(name): Option<String> = response.take("name").unwrap() else {
-		panic!("query returned no record");
-	};
-	assert_eq!(name, "John");
-
-	// SELECT with the VERSION set to the creation timestamp or later should return
-	// the record.
-	let mut response = db
-		.query("SELECT * FROM user:john VERSION d'2024-08-19T08:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let Some(name): Option<String> = response.take("name").unwrap() else {
-		panic!("query returned no record");
-	};
-	assert_eq!(name, "John");
-
-	// SELECT with the VERSION set before the creation timestamp should return
-	// nothing.
-	let mut response = db
-		.query("SELECT * FROM user:john VERSION d'2024-08-19T07:00:00Z'")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let response: Option<String> = response.take("name").unwrap();
-	assert!(response.is_none());
-}
-
 pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -231,10 +139,6 @@ pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 define_include_tests!(version => {
 	#[test_log::test(tokio::test)]
 	select_with_version,
-	#[test_log::test(tokio::test)]
-	create_with_version,
-	#[test_log::test(tokio::test)]
-	insert_with_version,
 	#[test_log::test(tokio::test)]
 	info_for_db_with_versioned_tables,
 	#[test_log::test(tokio::test)]

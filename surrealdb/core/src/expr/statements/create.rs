@@ -9,9 +9,9 @@ use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
-use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output};
+use crate::expr::{Data, Expr, Literal, Output};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use crate::val::{Datetime, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct CreateStatement {
@@ -25,8 +25,6 @@ pub(crate) struct CreateStatement {
 	pub(crate) output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Expr,
-	// Version as nanosecond timestamp passed down to Datastore
-	pub(crate) version: Expr,
 }
 
 impl Default for CreateStatement {
@@ -37,7 +35,6 @@ impl Default for CreateStatement {
 			data: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -59,15 +56,6 @@ impl CreateStatement {
 
 		// Assign the statement
 		let stm = Statement::from(self);
-		// Propagate the version to the underlying datastore
-		let version = stk
-			.run(|stk| self.version.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-			.cast_to::<Option<Datetime>>()?
-			.map(|x| x.to_version_stamp())
-			.transpose()?;
-		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx = stm.setup_timeout(stk, ctx, opt, doc).await?;
 

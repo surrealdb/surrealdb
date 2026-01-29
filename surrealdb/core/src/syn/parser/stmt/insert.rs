@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::sql::statements::InsertStatement;
-use crate::sql::{Data, Expr, Literal};
+use crate::sql::{Data, Expr};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
@@ -39,11 +39,12 @@ impl Parser<'_> {
 		};
 		let output = self.try_parse_output(stk).await?;
 
-		let version = if self.eat(t!("VERSION")) {
-			stk.run(|ctx| self.parse_expr_field(ctx)).await?
-		} else {
-			Expr::Literal(Literal::None)
+		// VERSION is no longer supported in INSERT statements, it is left here for backwards
+		// compatibility.
+		if self.eat(t!("VERSION")) {
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		};
+
 		let timeout = self.try_parse_timeout(stk).await?;
 		Ok(InsertStatement {
 			into,
@@ -53,7 +54,6 @@ impl Parser<'_> {
 			output,
 			timeout,
 			relation,
-			version,
 		})
 	}
 

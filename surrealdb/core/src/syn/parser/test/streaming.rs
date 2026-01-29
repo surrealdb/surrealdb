@@ -153,7 +153,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			version: Expr::Literal(Literal::None),
 		}))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
@@ -577,7 +576,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				},
 			])),
 			output: Some(Output::After),
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
 		}))),
@@ -606,7 +604,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				version: Expr::Literal(Literal::None),
 			})),
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),

@@ -367,65 +367,6 @@ pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
 	remove_file(export_file).await.unwrap();
 }
 
-pub async fn export_import_retrieve_specific_versions(new_db: impl CreateDb) {
-	let config = Config::new();
-	let (_, db) = new_db.create_db(config).await;
-	let db_name = Ulid::new().to_string();
-	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
-
-	// Insert a user with different versions
-	let versions = [
-		"2024-08-19T08:00:00Z",
-		"2024-08-19T09:00:00Z",
-		"2024-08-19T10:00:00Z",
-		"2024-08-19T11:00:00Z",
-		"2024-08-19T12:00:00Z",
-	];
-
-	for (i, version) in versions.iter().enumerate() {
-		let _ = db
-			.query(format!(
-				"
-                CREATE user:user1
-                SET name = 'Updated User {i}' VERSION d'{version}'
-                "
-			))
-			.await
-			.unwrap()
-			.check()
-			.unwrap();
-	}
-
-	// Export the database to a file
-	let export_file = "retrieve_specific_versions_backup.sql";
-	db.export(export_file).with_config().versions(true).await.unwrap();
-
-	// Remove the table to simulate a fresh import
-	db.query("REMOVE TABLE user").await.unwrap();
-
-	// Import the database from the file
-	db.import(export_file).await.unwrap();
-
-	// Verify that specific versions can be retrieved
-	for (i, version) in versions.iter().enumerate() {
-		let mut response = db
-			.query(format!(
-				"
-                SELECT name FROM user:user1 VERSION d'{version}'
-                "
-			))
-			.await
-			.unwrap();
-		let Some(name): Option<String> = response.take("name").unwrap() else {
-			panic!("query returned no record");
-		};
-		assert_eq!(name, format!("Updated User {i}"));
-	}
-
-	// Clean up: remove the export file
-	remove_file(export_file).await.unwrap();
-}
-
 define_include_tests!(backup_version => {
 	#[tokio::test]
 	export_import_versions_with_inserts_updates_deletes,
@@ -437,6 +378,4 @@ define_include_tests!(backup_version => {
 	export_import_versioned_records,
 	#[tokio::test]
 	export_import_versioned_range_queries,
-	#[tokio::test]
-	export_import_retrieve_specific_versions,
 });
