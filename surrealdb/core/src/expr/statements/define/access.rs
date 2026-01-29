@@ -182,32 +182,50 @@ impl DefineAccessStatement {
 			doc: Option<&CursorDoc>,
 			access: &JwtAccess,
 		) -> Result<catalog::JwtAccess> {
+			let verify = match &access.verify {
+				JwtAccessVerify::Key(k) => {
+					catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
+						alg: convert_algorithm(&k.alg),
+						key: stk
+							.run(|stk| k.key.compute(stk, ctx, opt, doc))
+							.await
+							.catch_return()?
+							.coerce_to::<String>()?,
+					})
+				}
+				JwtAccessVerify::Jwks(j) => {
+					catalog::JwtAccessVerify::Jwks(catalog::JwtAccessVerifyJwks {
+						url: stk
+							.run(|stk| j.url.compute(stk, ctx, opt, doc))
+							.await
+							.catch_return()?
+							.cast_to()?,
+					})
+				}
+			};
+
+			let issue = map_opt!(x as &access.issue => catalog::JwtAccessIssue {
+				alg: convert_algorithm(&x.alg),
+				key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
+			});
+
+			// Validate symmetric algorithm key consistency
+			if let (catalog::JwtAccessVerify::Key(ver), Some(iss)) = (&verify, &issue)
+				&& ver.alg.is_symmetric()
+				&& ver.key != iss.key
+			{
+				bail!(Error::Query {
+					message: format!(
+						"Symmetric algorithm {} requires the same key for signing and verification. \
+						Use the same key value for both KEY and WITH ISSUER KEY clauses, or omit WITH ISSUER KEY.",
+						ver.alg
+					)
+				});
+			}
+
 			Ok(catalog::JwtAccess {
-				verify: match &access.verify {
-					JwtAccessVerify::Key(k) => {
-						catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
-							alg: convert_algorithm(&k.alg),
-							key: stk
-								.run(|stk| k.key.compute(stk, ctx, opt, doc))
-								.await
-								.catch_return()?
-								.coerce_to::<String>()?,
-						})
-					}
-					JwtAccessVerify::Jwks(j) => {
-						catalog::JwtAccessVerify::Jwks(catalog::JwtAccessVerifyJwks {
-							url: stk
-								.run(|stk| j.url.compute(stk, ctx, opt, doc))
-								.await
-								.catch_return()?
-								.cast_to()?,
-						})
-					}
-				},
-				issue: map_opt!(x as &access.issue => catalog::JwtAccessIssue {
-					alg: convert_algorithm(&x.alg),
-					key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
-				}),
+				verify,
+				issue,
 			})
 		}
 
