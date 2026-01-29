@@ -10,11 +10,11 @@ export LD_LIBRARY_PATH="/opt/rh/gcc-toolset-13/root/usr/lib64:/usr/lib64:${LD_LI
 export LIBRARY_PATH="/opt/rh/gcc-toolset-13/root/usr/lib64:/usr/lib64:${LIBRARY_PATH}"
 
 # Set C++ compiler and flags for ort-sys build script
+# Only set library search paths in LDFLAGS, not individual libraries
 export CXX="${CXX:-g++}"
-export CXXFLAGS="$CXXFLAGS -L/opt/rh/gcc-toolset-13/root/usr/lib64 -L/usr/lib64"
-export LDFLAGS="$LDFLAGS -L/opt/rh/gcc-toolset-13/root/usr/lib64 -L/usr/lib64 -lstdc++ -lm -ldl -lpthread -lrt -latomic"
+export LDFLAGS="$LDFLAGS -L/opt/rh/gcc-toolset-13/root/usr/lib64 -L/usr/lib64"
 
-# Add linker flags for ONNX Runtime static library
-export RUSTFLAGS="$RUSTFLAGS -C link-arg=-lstdc++ -C link-arg=-lm -C link-arg=-ldl -C link-arg=-lpthread -C link-arg=-lrt -C link-arg=-latomic"
+# Add linker flags for ONNX Runtime static library (Rust linking only)
+export RUSTFLAGS="$RUSTFLAGS -C link-arg=-lstdc++ -C link-arg=-lm -C link-arg=-ldl -C link-arg=-lpthread"
 
 exec cargo build "$@"
