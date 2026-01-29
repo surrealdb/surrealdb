@@ -5,4 +5,7 @@
 # Add system pkg-config paths so openssl-sys can find OpenSSL
 export PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH}"
 
+# Add linker flags for ONNX Runtime static library
+export RUSTFLAGS="$RUSTFLAGS -C link-arg=-lstdc++ -C link-arg=-lm -C link-arg=-ldl -C link-arg=-lpthread"
+
 exec cargo build "$@"

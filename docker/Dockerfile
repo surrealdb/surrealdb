@@ -5,7 +5,7 @@
 
 FROM docker.io/rockylinux/rockylinux:9 AS builder
 
-RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11 openssl-devel pkg-config
+RUN dnf install -y gcc-toolset-13 gcc-toolset-13-gcc-c++ git cmake llvm-toolset patch zlib-devel python3.11 openssl-devel pkg-config libatomic
 
 # Install rust
 ARG RUST_VERSION=1.91.1
