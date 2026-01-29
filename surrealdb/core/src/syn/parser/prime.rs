@@ -331,7 +331,7 @@ impl Parser<'_> {
 			match value {
 				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(stk, x).await,
 				Expr::Table(x) => self.parse_remaining_value_idiom(stk, vec![Part::Field(x)]).await,
-				x => self.parse_remaining_value_idiom(stk, vec![Part::Start(x)]).await,
+				x => self.parse_remaining_value_idiom(stk, vec![Part::Value(x)]).await,
 			}
 		} else {
 			Ok(value)
@@ -540,7 +540,7 @@ impl Parser<'_> {
 
 		// Ensure that `((..).a).b` is broken up into seperate idioms.
 		if self.peek_continues_idiom() {
-			self.parse_remaining_value_idiom(stk, vec![Part::Start(res)]).await
+			self.parse_remaining_value_idiom(stk, vec![Part::Value(res)]).await
 		} else {
 			Ok(res)
 		}

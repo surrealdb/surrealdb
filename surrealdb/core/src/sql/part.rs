@@ -13,7 +13,6 @@ pub(crate) enum Part {
 	Where(Expr),
 	Graph(Lookup),
 	Value(Expr),
-	Start(Expr),
 	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
@@ -33,7 +32,6 @@ impl From<Part> for crate::expr::Part {
 			Part::Where(value) => Self::Where(value.into()),
 			Part::Graph(graph) => Self::Lookup(graph.into()),
 			Part::Value(value) => Self::Value(value.into()),
-			Part::Start(value) => Self::Start(value.into()),
 			Part::Method(method, values) => {
 				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
@@ -63,7 +61,6 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
 			crate::expr::Part::Lookup(graph) => Self::Graph(graph.into()),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
-			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
 				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
@@ -88,7 +85,6 @@ impl ToSql for Part {
 			Part::All => f.push_str(".*"),
 			Part::Last => f.push_str("[$]"),
 			Part::First => f.push_str("[0]"),
-			Part::Start(v) => v.fmt_sql(f, fmt),
 			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v)),
 			Part::Flatten => f.push('…'),
 			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),

@@ -92,7 +92,7 @@ impl Document {
 
 		// Cleanup edges via which the current record relates to other records
 		let what = vec![
-			Part::Start(Expr::Literal(Literal::RecordId(rid.clone().into_literal()))),
+			Part::Value(Expr::Literal(Literal::RecordId(rid.clone().into_literal()))),
 			Part::Lookup(Lookup {
 				kind: LookupKind::Graph(Dir::Both),
 				..Default::default()
