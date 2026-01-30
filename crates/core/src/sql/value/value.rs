@@ -41,7 +41,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Values(pub Vec<Value>);
+pub struct Values(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Value>,
+);
 
 impl<V> From<V> for Values
 where
@@ -136,6 +139,7 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
@@ -2957,6 +2961,39 @@ impl Value {
 				| Value::Table(_)
 				| Value::Uuid(_)
 		)
+	}
+
+	pub(crate) fn has_left_none(&self) -> bool {
+		match self {
+			Value::None => true,
+			Value::Range(x) => {
+				if let Bound::Included(x) | Bound::Excluded(x) = &x.beg {
+					x.has_left_none()
+				} else {
+					false
+				}
+			}
+			Value::Expression(x) => {
+				if let Expression::Binary {
+					l,
+					..
+				} = &**x
+				{
+					l.has_left_none()
+				} else {
+					false
+				}
+			}
+			Value::Idiom(x) => {
+				if let Some(Part::Start(x)) = x.0.first() {
+					x.has_left_none()
+				} else {
+					false
+				}
+			}
+
+			_ => false,
+		}
 	}
 }
 

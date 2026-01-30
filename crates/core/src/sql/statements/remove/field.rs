@@ -15,6 +15,7 @@ use uuid::Uuid;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct RemoveFieldStatement {
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::local_idiom))]
 	pub name: Idiom,
 	pub what: Ident,
 	#[revision(start = 2)]

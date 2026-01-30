@@ -15,7 +15,10 @@ use crate::{
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
+pub struct RequestMiddleware(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<(String, Vec<Value>)>,
+);
 
 impl InfoStructure for RequestMiddleware {
 	fn structure(self) -> Value {

@@ -23,7 +23,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Idiom";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Idioms(pub Vec<Idiom>);
+pub struct Idioms(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Idiom>,
+);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -55,7 +58,6 @@ impl InfoStructure for Idioms {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Idiom(pub Vec<Part>);
 
@@ -202,18 +204,17 @@ impl Idiom {
 
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		Display::fmt(
-			&Fmt::new(
-				self.0.iter().enumerate().map(|args| {
-					Fmt::new(args, |(i, p), f| match (i, p) {
-						(0, Part::Field(v)) => Display::fmt(v, f),
-						_ => Display::fmt(p, f),
-					})
-				}),
-				fmt_separated_by(""),
-			),
-			f,
-		)
+		for (idx, v) in self.0.iter().enumerate() {
+			if idx == 0 {
+				match v {
+					Part::Field(v) => write!(f, "{v}")?,
+					x => write!(f, "{x}")?,
+				}
+			} else {
+				write!(f, "{v}")?;
+			}
+		}
+		Ok(())
 	}
 }
 

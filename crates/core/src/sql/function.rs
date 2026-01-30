@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
+use crate::sql::escape::{EscapeKwFreeIdent, EscapePath};
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
@@ -23,7 +24,6 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
 	Normal(String, Vec<Value>),
@@ -387,8 +387,8 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
-			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
+			Self::Normal(s, e) => write!(f, "{}({})", EscapePath(s), Fmt::comma_separated(e)),
+			Self::Custom(s, e) => write!(f, "fn::{}({})", EscapePath(s), Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 			Self::Anonymous(p, e, _) => write!(f, "{p}({})", Fmt::comma_separated(e)),
 		}
