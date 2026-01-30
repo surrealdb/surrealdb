@@ -807,7 +807,6 @@ pub trait RpcProtocol {
 			update: None,
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -853,7 +852,6 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -908,7 +906,6 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database

@@ -13,7 +13,6 @@ pub struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Expr,
 	pub relation: bool,
-	pub version: Expr,
 }
 
 impl ToSql for InsertStatement {
@@ -35,9 +34,6 @@ impl ToSql for InsertStatement {
 		if let Some(ref v) = self.output {
 			write_sql!(f, fmt, " {v}");
 		}
-		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
-		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
@@ -54,7 +50,6 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
 			relation: v.relation,
-			version: v.version.into(),
 		}
 	}
 }
@@ -69,7 +64,6 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
 			relation: v.relation,
-			version: v.version.into(),
 		}
 	}
 }
