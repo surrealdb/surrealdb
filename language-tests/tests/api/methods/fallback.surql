@@ -8,6 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'fallback' }, context: {  }, headers: {}, status: 200 }"
 
 # 2
@@ -16,10 +17,12 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'fallback' }, context: {  }, headers: {}, status: 200 }"
 
 # 5
@@ -32,6 +35,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { handler: 'fallback', middleware: 'fallback_mw' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]
