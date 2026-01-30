@@ -618,8 +618,19 @@ impl Context {
 		}
 	}
 
-	pub(crate) fn values(&self) -> &HashMap<Cow<'static, str>, Arc<Value>> {
-		&self.values
+	pub(crate) fn collect_values(
+		&self,
+		map: HashMap<Cow<'static, str>, Arc<Value>>,
+	) -> HashMap<Cow<'static, str>, Arc<Value>> {
+		let mut map = if let Some(p) = &self.parent {
+			p.collect_values(map)
+		} else {
+			map
+		};
+		self.values.iter().for_each(|(k, v)| {
+			map.insert(k.clone(), v.clone());
+		});
+		map
 	}
 
 	/// Get a 'static view into the cancellation status.

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -191,7 +192,7 @@ pub struct AsyncEventRecord {
 	db: Arc<str>,
 	perms: bool,
 	auth_enabled: bool,
-	values: HashMap<String, Arc<Value>>,
+	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	auth: Arc<Auth>,
 	event_definition: EventDefinition,
 }
@@ -223,7 +224,7 @@ impl AsyncEventRecord {
 			db,
 			perms: opt.perms,
 			auth_enabled: opt.auth_enabled,
-			values: ctx.values().iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+			values: ctx.collect_values(HashMap::new()),
 			auth: opt.auth.clone(),
 			event_definition: event_definition.clone(),
 			// session: ctx.value("session").map(|v| Arc::new(v.clone())),
