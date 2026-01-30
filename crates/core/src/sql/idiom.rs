@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{
-	fmt::{fmt_separated_by, Fmt},
+	fmt::Fmt,
 	part::{Next, NextMethod},
 	paths::{ID, IN, META, OUT},
 	Part, Value,

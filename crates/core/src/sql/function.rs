@@ -4,7 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
-use crate::sql::escape::{EscapeKwFreeIdent, EscapePath};
+use crate::sql::escape::EscapePath;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;

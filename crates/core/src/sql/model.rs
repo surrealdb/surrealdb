@@ -2,7 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::escape::{EscapeKwFreeIdent, EscapePath};
+use crate::sql::escape::EscapePath;
 use crate::sql::value::Value;
 
 use reblessive::tree::Stk;
