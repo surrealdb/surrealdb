@@ -208,7 +208,7 @@ impl AsyncEventRecord {
 		let (ns, db) = opt.arc_ns_db()?;
 		// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
 		if let Some(d) = opt.async_event_depth()
-			&& d > event_definition.max_depth
+			&& d >= event_definition.max_depth
 		{
 			bail!(Error::EvReachMaxDepth(event_definition.name.clone(), d))
 		}
@@ -217,7 +217,7 @@ impl AsyncEventRecord {
 			event_depth: opt.async_event_depth().map(|d| d + 1).unwrap_or(0),
 			rid: cursor_doc.rid.clone(),
 			cursor_record: cursor_doc.doc.clone().into_read_only(),
-			fields_computed: false,
+			fields_computed: cursor_doc.fields_computed,
 			ns,
 			db,
 			perms: opt.perms,
