@@ -11,7 +11,7 @@ value = "'test'"
 value = "'this is a test'"
 
 [[test.results]]
-value = "'NONENULLtrue11dffffffff-ffff-ffff-ffff-ffffffffffff[]{  }(1, 2)a:b|a:1..2|/a/1..2|$a: any| {  }'"
+value = "'NONENULLtrue11dffffffff-ffff-ffff-ffff-ffffffffffff[]{  }(1f, 2f)a:b|a:1..2|/a/1..2|$a: any| {  }'"
 
 */
 string::concat();

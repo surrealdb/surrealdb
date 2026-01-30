@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = '''[{ details: '', error: "The `SEARCH` index has been renamed to `FULLTEXT` and some of it's parameters have been removed", kind: 'search index', location: { column: 29, kind: 'error', length: 24, line: 1, source: 'DEFINE INDEX f ON t1 FIELDS  FULLTEXT ANALYZER az VS', truncation: 'none' }, origin: ['ns', 'test', 'db', 'test', 'table', 't1', 'index', 'f'], severity: 'unlikely_break' }]'''
+value = '''[{ details: '', error: "The `SEARCH` index has been renamed to `FULLTEXT` and some of it's parameters have been removed", kind: 'search index', location: { column: 21, kind: 'error', length: 24, line: 1, source: 'DEFINE INDEX f ON t1 FULLTEXT ANALYZER az VS', truncation: 'none' }, origin: ['ns', 'test', 'db', 'test', 'table', 't1', 'index', 'f'], severity: 'unlikely_break' }]'''
 
 */
 
