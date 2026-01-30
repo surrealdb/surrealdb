@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
@@ -11,19 +12,7 @@ use crate::expr::Expr;
 use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]
-#[derive(
-	Clone,
-	Debug,
-	Default,
-	Eq,
-	Ord,
-	PartialEq,
-	PartialOrd,
-	Hash,
-	Encode,
-	BorrowDecode,
-	priority_lfu::DeepSizeOf,
-)]
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Array(pub(crate) Vec<Value>);
@@ -85,6 +74,18 @@ impl IntoIterator for Array {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl DeepSizeOf for Array {
+	fn deep_size_of_children(&self, _context: &mut priority_lfu::Context) -> usize {
+		// Simple approximation of the size of the array
+		if self.is_empty() {
+			return 0;
+		}
+		// TODO: Perhaps do an averaged random sample of the values to get a more accurate size?
+		let size_of_first_value = self.0[0].deep_size_of();
+		size_of_first_value * self.len()
 	}
 }
 

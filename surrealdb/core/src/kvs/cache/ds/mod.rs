@@ -3,7 +3,7 @@ pub(crate) mod key;
 use std::ops::Deref;
 
 use anyhow::Result;
-use priority_lfu::Cache;
+use priority_lfu::{Cache, CacheKeyLookup};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -41,20 +41,20 @@ impl DatastoreCache {
 		tb: &TableName,
 	) -> Result<Uuid> {
 		// Get the live-queries cache version
-		let key = key::LiveQueriesVersionCacheKey(ns, db, tb.clone());
-		match self.cache.get_clone(&key) {
+		let lookup = key::LiveQueriesVersionCacheKeyRef(ns, db, tb);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let version = Uuid::now_v7();
-				self.cache.insert(key, version);
+				self.cache.insert(lookup.to_owned_key(), version);
 				Ok(version)
 			}
 		}
 	}
 
 	pub(crate) fn new_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
-		let key = key::LiveQueriesVersionCacheKey(ns, db, tb.clone());
-		self.cache.insert(key, Uuid::now_v7());
+		let lookup = key::LiveQueriesVersionCacheKeyRef(ns, db, tb);
+		self.cache.insert(lookup.to_owned_key(), Uuid::now_v7());
 	}
 }
 

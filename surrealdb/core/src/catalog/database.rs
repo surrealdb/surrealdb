@@ -110,6 +110,3 @@ impl InfoStructure for DatabaseDefinition {
 		})
 	}
 }
-
-// Note: DatabaseDefinition is cached with weight specified on the CacheKey.
-// DeepSizeOf can be derived if needed for better memory tracking.

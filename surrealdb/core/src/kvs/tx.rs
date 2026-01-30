@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
+use priority_lfu::CacheKeyLookup;
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -740,8 +741,8 @@ impl Transaction {
 		record: Arc<Record>,
 	) {
 		// Set the value in the cache
-		let key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
-		self.cache.insert(key, Arc::clone(&record));
+		let lookup = cache::tx::key::RecordCacheKeyRef(ns, db, tb.as_str(), id);
+		self.cache.insert(lookup.to_owned_key(), Arc::clone(&record));
 	}
 
 	/// Clears all keys from the transaction cache.
@@ -806,8 +807,8 @@ impl NodeProvider for Transaction {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl RootProvider for Transaction {
 	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>> {
-		let key = cache::tx::key::RootConfigCacheKey("default".to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootConfigCacheKeyRef("default");
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => {
 				// Since we store ConfigDefinition but need DefaultConfig, extract it
 				match &*val {
@@ -825,7 +826,7 @@ impl RootProvider for Transaction {
 				};
 				let result = Arc::new(default_config.clone());
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(result))
 			}
 		}
@@ -834,14 +835,14 @@ impl RootProvider for Transaction {
 	/// Retrieve a specific config definition from the root.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<ConfigDefinition>>> {
-		let key = cache::tx::key::RootConfigCacheKey(cg.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootConfigCacheKeyRef(cg);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let cfg_key = crate::key::root::root_config::new(cg);
 				if let Some(val) = self.get(&cfg_key, None).await? {
 					let val = Arc::new(val);
-					self.cache.insert(key, Arc::clone(&val));
+					self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 					Ok(Some(val))
 				} else {
 					Ok(None)
@@ -873,8 +874,8 @@ impl NamespaceProvider for Transaction {
 	}
 
 	async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>> {
-		let key = cache::tx::key::NamespaceByNameCacheKey(ns.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::NamespaceByNameCacheKeyRef(ns);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ns_key = crate::key::root::ns::new(ns);
@@ -883,7 +884,7 @@ impl NamespaceProvider for Transaction {
 				};
 
 				let ns = Arc::new(ns);
-				self.cache.insert(key, Arc::clone(&ns));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&ns));
 				Ok(Some(ns))
 			}
 		}
@@ -903,9 +904,9 @@ impl NamespaceProvider for Transaction {
 		self.set(&key, &ns, None).await?;
 
 		// Populate cache
-		let cached_ns = Arc::new(ns.clone());
-		let cache_key = cache::tx::key::NamespaceByNameCacheKey(ns.name.clone());
-		self.cache.insert(cache_key, Arc::clone(&cached_ns));
+		let cached_ns = Arc::new(ns);
+		let lookup = cache::tx::key::NamespaceByNameCacheKeyRef(&cached_ns.name);
+		self.cache.insert(lookup.to_owned_key(), Arc::clone(&cached_ns));
 
 		Ok(cached_ns)
 	}
@@ -938,8 +939,8 @@ impl DatabaseProvider for Transaction {
 	/// Retrieve a specific database definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>> {
-		let key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseByNameCacheKeyRef(ns, db);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let Some(ns) = self.get_ns_by_name(ns).await? else {
@@ -952,7 +953,7 @@ impl DatabaseProvider for Transaction {
 				};
 
 				let val = Arc::new(db_def);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -968,8 +969,8 @@ impl DatabaseProvider for Transaction {
 		db: &str,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		let key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseByNameCacheKeyRef(ns, db);
+		match self.cache.get_clone_by(&lookup) {
 			// The entry is in the cache
 			Some(val) => Ok(val),
 			// The entry is not in the cache
@@ -1016,9 +1017,9 @@ impl DatabaseProvider for Transaction {
 		self.set(&key, &db, None).await?;
 
 		// Populate cache
-		let cache_key = cache::tx::key::DatabaseByNameCacheKey(ns.to_string(), db.name.clone());
 		let cached_db = Arc::new(db);
-		self.cache.insert(cache_key, Arc::clone(&cached_db));
+		let lookup = cache::tx::key::DatabaseByNameCacheKeyRef(ns, &cached_db.name);
+		self.cache.insert(lookup.to_owned_key(), Arc::clone(&cached_db));
 
 		Ok(cached_db)
 	}
@@ -1196,8 +1197,8 @@ impl DatabaseProvider for Transaction {
 		ml: &str,
 		vn: &str,
 	) -> Result<Option<Arc<catalog::MlModelDefinition>>> {
-		let key = cache::tx::key::ModelCacheKey(ns, db, ml.to_string(), vn.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::ModelCacheKeyRef(ns, db, ml, vn);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ml_key = crate::key::database::ml::new(ns, db, ml, vn);
@@ -1205,7 +1206,7 @@ impl DatabaseProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1219,8 +1220,8 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		az: &str,
 	) -> Result<Arc<catalog::AnalyzerDefinition>> {
-		let key = cache::tx::key::AnalyzerCacheKey(ns, db, az.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::AnalyzerCacheKeyRef(ns, db, az);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let az_key = crate::key::database::az::new(ns, db, az);
@@ -1228,7 +1229,7 @@ impl DatabaseProvider for Transaction {
 					name: az.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1242,8 +1243,8 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		sq: &str,
 	) -> Result<Arc<catalog::SequenceDefinition>> {
-		let key = cache::tx::key::SequenceCacheKey(ns, db, sq.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::SequenceCacheKeyRef(ns, db, sq);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let sq_key = Sq::new(ns, db, sq);
@@ -1251,7 +1252,7 @@ impl DatabaseProvider for Transaction {
 					name: sq.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1265,8 +1266,8 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		fc: &str,
 	) -> Result<Arc<catalog::FunctionDefinition>> {
-		let key = cache::tx::key::FunctionCacheKey(ns, db, fc.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::FunctionCacheKeyRef(ns, db, fc);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let fc_key = crate::key::database::fc::new(ns, db, fc);
@@ -1274,7 +1275,7 @@ impl DatabaseProvider for Transaction {
 					name: fc.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1288,8 +1289,8 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		md: &str,
 	) -> Result<Arc<catalog::ModuleDefinition>> {
-		let key = cache::tx::key::ModuleCacheKey(ns, db, md.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::ModuleCacheKeyRef(ns, db, md);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let md_key = crate::key::database::md::new(ns, db, md);
@@ -1297,7 +1298,7 @@ impl DatabaseProvider for Transaction {
 					name: md.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1311,8 +1312,8 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		pa: &str,
 	) -> Result<Arc<catalog::ParamDefinition>> {
-		let key = cache::tx::key::ParamCacheKey(ns, db, pa.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::ParamCacheKeyRef(ns, db, pa);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let pa_key = crate::key::database::pa::new(ns, db, pa);
@@ -1320,7 +1321,7 @@ impl DatabaseProvider for Transaction {
 					name: pa.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1334,14 +1335,14 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		cg: &str,
 	) -> Result<Option<Arc<ConfigDefinition>>> {
-		let key = cache::tx::key::ConfigCacheKey(ns, db, cg.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::ConfigCacheKeyRef(ns, db, cg);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let cg_key = crate::key::database::cg::new(ns, db, cg);
 				if let Some(val) = self.get(&cg_key, None).await? {
 					let val = Arc::new(val);
-					self.cache.insert(key, Arc::clone(&val));
+					self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 					Ok(Some(val))
 				} else {
 					Ok(None)
@@ -1418,15 +1419,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[TableDefinition]>> {
-		let key = cache::tx::key::TableViewsCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableViewsCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ft::prefix(ns, db, tb)?;
 				let end = crate::key::table::ft::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1442,9 +1443,8 @@ impl TableProvider for Transaction {
 		db: &str,
 		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
-		let key =
-			cache::tx::key::TableByNameCacheKey(ns.to_string(), db.to_string(), tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			// The entry is in the cache
 			Some(val) => Ok(val),
 			// The entry is not in the cache
@@ -1459,7 +1459,7 @@ impl TableProvider for Transaction {
 					crate::key::database::tb::new(db_def.namespace_id, db_def.database_id, tb);
 				if let Some(tb_def) = self.get(&table_key, None).await? {
 					let cached_tb = Arc::new(tb_def);
-					self.cache.insert(key, Arc::clone(&cached_tb));
+					self.cache.insert(lookup.to_owned_key(), Arc::clone(&cached_tb));
 					return Ok(cached_tb);
 				}
 
@@ -1487,9 +1487,8 @@ impl TableProvider for Transaction {
 		db: &str,
 		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
-		let key =
-			cache::tx::key::TableByNameCacheKey(ns.to_string(), db.to_string(), tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let Some(db) = self.get_db_by_name(ns, db).await? else {
@@ -1502,7 +1501,7 @@ impl TableProvider for Transaction {
 				};
 
 				let tb = Arc::new(tb);
-				self.cache.insert(key, Arc::clone(&tb));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&tb));
 				Ok(Some(tb))
 			}
 		}
@@ -1534,16 +1533,12 @@ impl TableProvider for Transaction {
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
 
-		let key1 =
-			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
-		self.cache.insert(key1, Arc::clone(&cached_tb));
+		let lookup1 =
+			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
+		self.cache.insert(lookup1.to_owned_key(), Arc::clone(&cached_tb));
 
-		let key2 = cache::tx::key::TableByNameCacheKey(
-			ns.to_string(),
-			db.to_string(),
-			tb.name.to_string(),
-		);
-		self.cache.insert(key2, Arc::clone(&cached_tb));
+		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
+		self.cache.insert(lookup2.to_owned_key(), Arc::clone(&cached_tb));
 
 		Ok(cached_tb)
 	}
@@ -1560,15 +1555,11 @@ impl TableProvider for Transaction {
 		self.del(&key).await?;
 
 		// Clear the cache
-		let key1 =
-			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
-		self.cache.remove(&key1);
-		let key2 = cache::tx::key::TableByNameCacheKey(
-			ns.to_string(),
-			db.to_string(),
-			tb.name.to_string(),
-		);
-		self.cache.remove(&key2);
+		let lookup1 =
+			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
+		self.cache.remove(&lookup1.to_owned_key());
+		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
+		self.cache.remove(&lookup2.to_owned_key());
 
 		Ok(())
 	}
@@ -1585,15 +1576,11 @@ impl TableProvider for Transaction {
 		self.clr(&key).await?;
 
 		// Clear the cache
-		let key1 =
-			cache::tx::key::TableCacheKey(tb.namespace_id, tb.database_id, tb.name.to_string());
-		self.cache.remove(&key1);
-		let key2 = cache::tx::key::TableByNameCacheKey(
-			ns.to_string(),
-			db.to_string(),
-			tb.name.to_string(),
-		);
-		self.cache.remove(&key2);
+		let lookup1 =
+			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
+		self.cache.remove(&lookup1.to_owned_key());
+		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
+		self.cache.remove(&lookup2.to_owned_key());
 
 		Ok(())
 	}
@@ -1606,15 +1593,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
-		let key = cache::tx::key::TableEventsCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableEventsCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ev::prefix(ns, db, tb)?;
 				let end = crate::key::table::ev::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1629,15 +1616,15 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		version: Option<u64>,
 	) -> Result<Arc<[catalog::FieldDefinition]>> {
-		let key = cache::tx::key::TableFieldsCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableFieldsCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::fd::prefix(ns, db, tb)?;
 				let end = crate::key::table::fd::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, version).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1651,15 +1638,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::IndexDefinition]>> {
-		let key = cache::tx::key::TableIndexesCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableIndexesCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::ix::prefix(ns, db, tb)?;
 				let end = crate::key::table::ix::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1673,15 +1660,15 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>> {
-		let key = cache::tx::key::TableLivesCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableLivesCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::table::lq::prefix(ns, db, tb)?;
 				let end = crate::key::table::lq::suffix(ns, db, tb)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1695,8 +1682,8 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Option<Arc<TableDefinition>>> {
-		let key = cache::tx::key::TableCacheKey(ns, db, tb.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::TableCacheKeyRef(ns, db, tb.as_str());
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let tb_key = crate::key::database::tb::new(ns, db, tb);
@@ -1704,7 +1691,7 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1719,8 +1706,8 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		ev: &str,
 	) -> Result<Arc<catalog::EventDefinition>> {
-		let key = cache::tx::key::EventCacheKey(ns, db, tb.to_string(), ev.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::EventCacheKeyRef(ns, db, tb.as_str(), ev);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let ev_key = crate::key::table::ev::new(ns, db, tb, ev);
@@ -1728,7 +1715,7 @@ impl TableProvider for Transaction {
 					name: ev.to_owned(),
 				})?;
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -1743,8 +1730,8 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		fd: &str,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>> {
-		let key = cache::tx::key::FieldCacheKey(ns, db, tb.to_string(), fd.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::FieldCacheKeyRef(ns, db, tb.as_str(), fd);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let fd_key = crate::key::table::fd::new(ns, db, tb, fd);
@@ -1752,7 +1739,7 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1780,8 +1767,8 @@ impl TableProvider for Transaction {
 		tb: &TableName,
 		ix: &str,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>> {
-		let key = cache::tx::key::IndexCacheKey(ns, db, tb.to_string(), ix.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::IndexCacheKeyRef(ns, db, tb.as_str(), ix);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ix_key = crate::key::table::ix::new(ns, db, tb, ix);
@@ -1789,7 +1776,7 @@ impl TableProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -1825,8 +1812,8 @@ impl TableProvider for Transaction {
 		self.set(&name_lookup_key, &ix.name, None).await?;
 
 		// Set the entry in the cache
-		let key = cache::tx::key::IndexCacheKey(ns, db, tb.to_string(), ix.name.clone());
-		self.cache.insert(key, Arc::new(ix.clone()));
+		let lookup = cache::tx::key::IndexCacheKeyRef(ns, db, tb.as_str(), &ix.name);
+		self.cache.insert(lookup.to_owned_key(), Arc::new(ix.clone()));
 		Ok(())
 	}
 
@@ -1885,8 +1872,8 @@ impl TableProvider for Transaction {
 				None => Ok(Arc::new(Default::default())),
 			}
 		} else {
-			let key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
-			match self.cache.get_clone(&key) {
+			let lookup = cache::tx::key::RecordCacheKeyRef(ns, db, tb.as_str(), id);
+			match self.cache.get_clone_by(&lookup) {
 				// The entry is in the cache
 				Some(val) => Ok(val),
 				// The entry is not in the cache
@@ -1904,7 +1891,7 @@ impl TableProvider for Transaction {
 							record.data.to_mut().def(&rid);
 							// Convert to read-only format for better sharing and performance
 							let record = record.into_read_only();
-							self.cache.insert(key, Arc::clone(&record));
+							self.cache.insert(lookup.to_owned_key(), Arc::clone(&record));
 							Ok(record)
 						}
 						// The value is not in the datastore
@@ -1973,8 +1960,8 @@ impl TableProvider for Transaction {
 		let key = crate::key::record::new(ns, db, tb, id);
 		self.del(&key).await?;
 		// Clear the value from the cache
-		let cache_key = cache::tx::key::RecordCacheKey(ns, db, tb.to_string(), id.clone());
-		self.cache.remove(&cache_key);
+		let lookup = cache::tx::key::RecordCacheKeyRef(ns, db, tb.as_str(), id);
+		self.cache.remove(&lookup.to_owned_key());
 		// Return nothing
 		Ok(())
 	}
@@ -2050,8 +2037,8 @@ impl UserProvider for Transaction {
 	/// Retrieve a specific root user definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_user(&self, us: &str) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let key = cache::tx::key::RootUserCacheKey(us.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootUserCacheKeyRef(us);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let us_key = crate::key::root::us::new(us);
@@ -2059,7 +2046,7 @@ impl UserProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2072,8 +2059,8 @@ impl UserProvider for Transaction {
 		ns: NamespaceId,
 		us: &str,
 	) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let key = cache::tx::key::NamespaceUserCacheKey(ns, us.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::NamespaceUserCacheKeyRef(ns, us);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let us_key = crate::key::namespace::us::new(ns, us);
@@ -2082,7 +2069,7 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2096,8 +2083,8 @@ impl UserProvider for Transaction {
 		db: DatabaseId,
 		us: &str,
 	) -> Result<Option<Arc<catalog::UserDefinition>>> {
-		let key = cache::tx::key::DatabaseUserCacheKey(ns, db, us.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseUserCacheKeyRef(ns, db, us);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let us_key = crate::key::database::us::new(ns, db, us);
@@ -2106,7 +2093,7 @@ impl UserProvider for Transaction {
 				};
 
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2159,15 +2146,15 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve all root access grants in a datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[catalog::AccessGrant]>> {
-		let key = cache::tx::key::RootAccessGrantsCacheKey(ra.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootAccessGrantsCacheKeyRef(ra);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::root::access::gr::prefix(ra)?;
 				let end = crate::key::root::access::gr::suffix(ra)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2197,15 +2184,15 @@ impl AuthorisationProvider for Transaction {
 		ns: NamespaceId,
 		na: &str,
 	) -> Result<Arc<[catalog::AccessGrant]>> {
-		let key = cache::tx::key::NamespaceAccessGrantsCacheKey(ns, na.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::NamespaceAccessGrantsCacheKeyRef(ns, na);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::namespace::access::gr::prefix(ns, na)?;
 				let end = crate::key::namespace::access::gr::suffix(ns, na)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2240,15 +2227,15 @@ impl AuthorisationProvider for Transaction {
 		db: DatabaseId,
 		da: &str,
 	) -> Result<Arc<[catalog::AccessGrant]>> {
-		let key = cache::tx::key::DatabaseAccessGrantsCacheKey(ns, db, da.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseAccessGrantsCacheKeyRef(ns, db, da);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {
 				let beg = crate::key::database::access::gr::prefix(ns, db, da)?;
 				let end = crate::key::database::access::gr::suffix(ns, db, da)?;
 				let val = self.getr(beg..end, None).await?;
 				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(val)
 			}
 		}
@@ -2257,8 +2244,8 @@ impl AuthorisationProvider for Transaction {
 	/// Retrieve a specific root access definition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let key = cache::tx::key::RootAccessCacheKey(ra.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootAccessCacheKeyRef(ra);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ac_key = crate::key::root::ac::new(ra);
@@ -2266,7 +2253,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2279,8 +2266,8 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let key = cache::tx::key::RootAccessGrantCacheKey(ac.to_string(), gr.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::RootAccessGrantCacheKeyRef(ac, gr);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let gr_key = crate::key::root::access::gr::new(ac, gr);
@@ -2288,7 +2275,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2301,8 +2288,8 @@ impl AuthorisationProvider for Transaction {
 		ns: NamespaceId,
 		na: &str,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let key = cache::tx::key::NamespaceAccessCacheKey(ns, na.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::NamespaceAccessCacheKeyRef(ns, na);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ac_key = crate::key::namespace::ac::new(ns, na);
@@ -2310,7 +2297,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2324,8 +2311,8 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let key = cache::tx::key::NamespaceAccessGrantCacheKey(ns, ac.to_string(), gr.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::NamespaceAccessGrantCacheKeyRef(ns, ac, gr);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let gr_key = crate::key::namespace::access::gr::new(ns, ac, gr);
@@ -2333,7 +2320,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2347,8 +2334,8 @@ impl AuthorisationProvider for Transaction {
 		db: DatabaseId,
 		da: &str,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>> {
-		let key = cache::tx::key::DatabaseAccessCacheKey(ns, db, da.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseAccessCacheKeyRef(ns, db, da);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ac_key = crate::key::database::ac::new(ns, db, da);
@@ -2356,7 +2343,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2371,9 +2358,8 @@ impl AuthorisationProvider for Transaction {
 		ac: &str,
 		gr: &str,
 	) -> Result<Option<Arc<catalog::AccessGrant>>> {
-		let key =
-			cache::tx::key::DatabaseAccessGrantCacheKey(ns, db, ac.to_string(), gr.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::DatabaseAccessGrantCacheKeyRef(ns, db, ac, gr);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let gr_key = crate::key::database::access::gr::new(ns, db, ac, gr);
@@ -2381,7 +2367,7 @@ impl AuthorisationProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2449,8 +2435,8 @@ impl ApiProvider for Transaction {
 		db: DatabaseId,
 		ap: &str,
 	) -> Result<Option<Arc<ApiDefinition>>> {
-		let key = cache::tx::key::ApiCacheKey(ns, db, ap.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::ApiCacheKeyRef(ns, db, ap);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let ap_key = crate::key::database::ap::new(ns, db, ap);
@@ -2458,7 +2444,7 @@ impl ApiProvider for Transaction {
 					return Ok(None);
 				};
 				let val = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&val));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 				Ok(Some(val))
 			}
 		}
@@ -2505,8 +2491,8 @@ impl BucketProvider for Transaction {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Option<Arc<catalog::BucketDefinition>>> {
-		let key = cache::tx::key::BucketCacheKey(ns, db, bu.to_string());
-		match self.cache.get_clone(&key) {
+		let lookup = cache::tx::key::BucketCacheKeyRef(ns, db, bu);
+		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(Some(val)),
 			None => {
 				let bu_key = crate::key::database::bu::new(ns, db, bu);
@@ -2514,7 +2500,7 @@ impl BucketProvider for Transaction {
 					return Ok(None);
 				};
 				let bucket_def = Arc::new(val);
-				self.cache.insert(key, Arc::clone(&bucket_def));
+				self.cache.insert(lookup.to_owned_key(), Arc::clone(&bucket_def));
 				Ok(Some(bucket_def))
 			}
 		}
