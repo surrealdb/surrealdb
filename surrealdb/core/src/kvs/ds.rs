@@ -17,7 +17,7 @@ use surrealdb_types::{SurrealValue, object};
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace};
 use uuid::Uuid;
 
 use super::api::Transactable;
@@ -25,6 +25,7 @@ use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
@@ -2361,7 +2362,7 @@ impl Datastore {
 		path: &str,
 		session: &Session,
 		mut req: ApiRequest,
-	) -> Result<Option<ApiResponse>> {
+	) -> Result<ApiResponse> {
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
@@ -2371,6 +2372,11 @@ impl Datastore {
 
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
 			Some((api, params)) => {
+				debug!(
+					request_id = %req.request_id,
+					path = %path,
+					"API definition found, dispatching to process_api_request"
+				);
 				req.params = params.try_into()?;
 
 				let opt = self.setup_options(session);
@@ -2382,10 +2388,17 @@ impl Datastore {
 
 				process_api_request(ctx, &opt, api, req).await
 			}
-			_ => {
-				return Err(anyhow::anyhow!(Error::ApNotFound {
-					value: path.to_owned(),
-				}));
+			None => {
+				trace!(
+					request_id = %req.request_id,
+					path = %path,
+					"No API definition found for path"
+				);
+				tx.cancel().await?;
+				return Ok(ApiResponse::from_error(
+					ApiError::NotFound.into(),
+					req.request_id.clone(),
+				));
 			}
 		};
 

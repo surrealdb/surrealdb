@@ -8,7 +8,8 @@ value = "NONE"
 
 # 1
 [[test.results]]
-error = "Invalid HTTP status code: 99. Must be between 100 and 599"
+skip-api-request-id = true
+value = "{ body: 'Invalid HTTP status code: 99. Must be between 100 and 599', context: {  }, headers: {  }, status: 400 }"
 
 # 2
 [[test.results]]
@@ -16,6 +17,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: {  }, context: {  }, headers: {}, status: 600 }"
 
 # 4
@@ -24,7 +26,8 @@ value = "NONE"
 
 # 5
 [[test.results]]
-error = "Invalid HTTP status code: -1. Must be between 100 and 599"
+skip-api-request-id = true
+value = "{ body: 'Invalid HTTP status code: -1. Must be between 100 and 599', context: {  }, headers: {  }, status: 400 }"
 
 # 6
 [[test.results]]
@@ -32,7 +35,8 @@ value = "NONE"
 
 # 7
 [[test.results]]
-error = "Invalid header name: invalid header name: invalid HTTP header name"
+skip-api-request-id = true
+value = "{ body: 'Invalid header name: invalid header name: invalid HTTP header name', context: {  }, headers: {  }, status: 400 }"
 
 # 8
 [[test.results]]
@@ -40,7 +44,8 @@ value = "NONE"
 
 # 9
 [[test.results]]
-error = "Invalid header value for x-test: test\r\nvalue: failed to parse header value"
+skip-api-request-id = true
+value = "{ body: 'Invalid header value for x-test: test\r\nvalue: failed to parse header value', context: {  }, headers: {  }, status: 400 }"
 
 # 10
 [[test.results]]
@@ -48,7 +53,8 @@ value = "NONE"
 
 # 11
 [[test.results]]
-error = "Invalid header value for x-test: test\nvalue: failed to parse header value"
+skip-api-request-id = true
+value = "{ body: 'Invalid header value for x-test: test\nvalue: failed to parse header value', context: {  }, headers: {  }, status: 400 }"
 
 # 12
 [[test.results]]
@@ -60,7 +66,8 @@ value = "NONE"
 
 # 14
 [[test.results]]
-error = "Expected Content-Type to be application/json"
+skip-api-request-id = true
+value = "{ body: 'Expected Content-Type to be application/json', context: {  }, headers: {  }, status: 400 }"
 
 # 15
 [[test.results]]
@@ -68,7 +75,8 @@ value = "NONE"
 
 # 16
 [[test.results]]
-error = "Unsupported Content-Type: application/xml"
+skip-api-request-id = true
+value = "{ body: 'Unsupported Content-Type: application/xml', context: {  }, headers: {  }, status: 415 }"
 
 # 17
 [[test.results]]
@@ -76,7 +84,8 @@ value = "NONE"
 
 # 18
 [[test.results]]
-error = "No output strategy was possible for this API request"
+skip-api-request-id = true
+value = "{ body: 'No output strategy was possible for this API request', context: {  }, headers: {  }, status: 406 }"
 
 # 19
 [[test.results]]
@@ -84,7 +93,8 @@ value = "NONE"
 
 # 20
 [[test.results]]
-error = "Request body must be binary data"
+skip-api-request-id = true
+value = "{ body: 'Request body must be binary data', context: {  }, headers: {  }, status: 400 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

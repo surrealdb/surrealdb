@@ -1,25 +1,19 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use http::header::CONTENT_TYPE;
 use http::{HeaderName, HeaderValue, StatusCode};
 use reblessive::tree::Stk;
-use surrealdb_types::SurrealValue;
 
 use crate::api::err::ApiError;
-use crate::api::format as api_format;
 use crate::api::middleware::common::BodyStrategy;
-use crate::api::middleware::res::output_body_strategy;
+use crate::api::middleware::res::{convert_response_value, output_body_strategy};
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::fnc::args::{FromPublic, Optional};
-use crate::rpc::format;
-use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::PublicBytes;
-use crate::val::{Bytes, Closure, Value};
+use crate::val::{Closure, Value};
 
 /// Middleware function that serializes the response body according to the specified strategy.
 ///
@@ -68,49 +62,7 @@ pub async fn body(
 		return Err(ApiError::NoOutputStrategy.into());
 	};
 
-	match strategy {
-		BodyStrategy::Auto | BodyStrategy::Json => {
-			res.body = PublicBytes::from(
-				format::json::encode(res.body).map_err(|_| ApiError::BodyEncodeFailure)?,
-			)
-			.into_value();
-			res.headers.insert(CONTENT_TYPE, api_format::JSON.try_into()?);
-		}
-		BodyStrategy::Cbor => {
-			res.body = PublicBytes::from(
-				format::cbor::encode(res.body).map_err(|_| ApiError::BodyEncodeFailure)?,
-			)
-			.into_value();
-			res.headers.insert(CONTENT_TYPE, api_format::CBOR.try_into()?);
-		}
-		BodyStrategy::Flatbuffers => {
-			res.body = PublicBytes::from(
-				format::flatbuffers::encode(&res.body).map_err(|_| ApiError::BodyEncodeFailure)?,
-			)
-			.into_value();
-			res.headers.insert(CONTENT_TYPE, api_format::FLATBUFFERS.try_into()?);
-		}
-		BodyStrategy::Bytes => {
-			res.body = PublicBytes::from(
-				convert_public_value_to_internal(res.body)
-					.cast_to::<Bytes>()
-					.map_err(|_| ApiError::BodyEncodeFailure)?
-					.0,
-			)
-			.into_value();
-			res.headers.insert(CONTENT_TYPE, api_format::OCTET_STREAM.try_into()?);
-		}
-		BodyStrategy::Plain => {
-			let text = convert_public_value_to_internal(res.body)
-				.cast_to::<String>()
-				.map_err(|_| ApiError::BodyEncodeFailure)?;
-			res.body = PublicBytes::from(text.into_bytes()).into_value();
-			res.headers.insert(CONTENT_TYPE, api_format::PLAIN.try_into()?);
-		}
-		BodyStrategy::Native => {
-			res.headers.insert(CONTENT_TYPE, api_format::NATIVE.try_into()?);
-		}
-	}
+	convert_response_value(&mut res, strategy)?;
 
 	Ok(res.into())
 }

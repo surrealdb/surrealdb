@@ -1,0 +1,377 @@
+name: Performance Benchmarks
+#
+# This workflow runs CRUD benchmarks using a pinned version of crud-bench.
+# The crud-bench revision is intentionally pinned to ensure consistent
+# benchmarking across all PRs (apples-to-apples comparison).
+#
+# Documentation: doc/BENCHMARKING.md
+#
+# To upgrade crud-bench:
+# 1. Update the CRUD_BENCH_REVISION in the env section below
+# 2. Test manually using workflow_dispatch with the new revision
+# 3. Commit and let benchmarks run on a PR to verify
+
+run-name: "Benchmark run '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  workflow_dispatch:
+    inputs:
+      crud_bench_revision:
+        description: 'crud-bench git revision (commit, tag, or branch)'
+        required: false
+        type: string
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  pull-requests: write
+
+env:
+  # Default crud-bench revision - update this to upgrade crud-bench version
+  # This ensures consistent benchmarking across all PRs
+  CRUD_BENCH_REVISION: ${{ inputs.crud_bench_revision || '8accc013fe279b458d1378f41ba9a9b5ea4ffee2' }}
+
+jobs:
+  # ----------------------------------------
+  # Setup matrix dimensions
+  # ----------------------------------------
+  
+  setup-matrix:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      key_types: ${{ steps.set-matrix.outputs.key_types }}
+    steps:
+      - name: Set matrix dimensions
+        id: set-matrix
+        run: |
+          echo 'key_types=["integer","string26","string90","string250"]' >> $GITHUB_OUTPUT
+
+  # ----------------------------------------
+  # Build SurrealDB binaries with minimal features
+  # ----------------------------------------
+
+  build-surrealdb-memory:
+    name: Build SurrealDB (memory)
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+
+      - name: Build SurrealDB with minimal features
+        run: |
+          echo "Building SurrealDB with in-memory storage only"
+          cargo build --release --no-default-features --features "storage-mem,http"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: surreal-binary-memory
+          path: target/release/surreal
+          retention-days: 1
+
+  build-surrealdb-rocksdb:
+    name: Build SurrealDB (rocksdb)
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Build SurrealDB with minimal features
+        run: |
+          echo "Building SurrealDB with RocksDB storage only"
+          cargo build --release --no-default-features --features "storage-rocksdb,http"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: surreal-binary-rocksdb
+          path: target/release/surreal
+          retention-days: 1
+
+  # ----------------------------------------
+  # Build crud-bench with patched surrealdb
+  # ----------------------------------------
+
+  build-crud-bench:
+    name: Build crud-bench
+    runs-on: [self-hosted, benchmarking]
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      
+      - name: Checkout crud-bench repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: surrealdb/crud-bench
+          ref: ${{ env.CRUD_BENCH_REVISION }}
+          path: .github/tools/crud-bench
+
+      - name: Setup crud-bench cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          workspaces: .github/tools/crud-bench
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Align SurrealDB version with crud-bench
+        run: |
+          # Extract the surrealdb version that crud-bench expects
+          EXPECTED_VERSION=$(grep -A 2 '[[package]]' .github/tools/crud-bench/Cargo.lock | grep -A 1 'name = "surrealdb"' | grep 'version = ' | head -1 | cut -d '"' -f 2)
+          echo "crud-bench expects surrealdb version: $EXPECTED_VERSION"
+
+          # Get current version
+          CURRENT_VERSION=$(grep '^version = ' Cargo.toml | head -1 | cut -d '"' -f 2)
+          echo "Current workspace version: $CURRENT_VERSION"
+
+          if [ "$EXPECTED_VERSION" != "$CURRENT_VERSION" ]; then
+            echo "Updating workspace and internal crate versions to $EXPECTED_VERSION"
+
+            # Update workspace package version
+            sed -i "s/^version = \"$CURRENT_VERSION\"/version = \"$EXPECTED_VERSION\"/" Cargo.toml
+
+            # Update all internal surrealdb-* dependency versions in workspace.dependencies
+            sed -i "s/surrealdb\([a-z-]*\) = { version = \"$CURRENT_VERSION\"/surrealdb\1 = { version = \"$EXPECTED_VERSION\"/g" Cargo.toml
+
+            echo "Updated Cargo.toml workspace and dependency versions"
+          else
+            echo "Versions already match, no changes needed"
+          fi
+
+      - name: Build crud-bench
+        run: |
+          cd .github/tools/crud-bench
+          
+          # Update only surrealdb and its dependencies to resolve conflicts with the patched version
+          # This keeps all other crud-bench dependencies locked for consistent benchmarking
+          cargo update -p surrealdb
+          
+          # Build with only the database features we actually use
+          cargo build --release --no-default-features --features "surrealdb,surrealkv,surrealmx"
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crud-bench-binary
+          path: .github/tools/crud-bench/target/release/crud-bench
+          retention-days: 1
+
+  # ----------------------------------------
+  # Run CRUD benchmarks
+  # ----------------------------------------
+
+  benchmark-memory:
+    name: CRUD Benchmark (memory-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [setup-matrix, build-surrealdb-memory, build-crud-bench]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: memory
+          database: surrealdb-memory
+          endpoint: ws://localhost:8000
+          description: SurrealDB with in-memory storage
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'true'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+
+  benchmark-rocksdb:
+    name: CRUD Benchmark (rocksdb-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [setup-matrix, build-surrealdb-rocksdb, build-crud-bench]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
+    
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: rocksdb
+          database: surrealdb-rocksdb
+          endpoint: ws://localhost:8000
+          description: SurrealDB with RocksDB storage
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'true'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+
+  benchmark-embedded:
+    name: CRUD Benchmark (${{ matrix.config }}-${{ matrix.key_type }})
+    runs-on: [self-hosted, benchmarking]
+    needs: [setup-matrix, build-crud-bench]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - embedded-memory
+          - embedded-rocksdb
+          - surrealkv-local
+          - surrealmx
+        key_type: ${{ fromJSON(needs.setup-matrix.outputs.key_types) }}
+        
+        include:
+          - config: embedded-memory
+            database: surrealdb
+            endpoint: memory
+            description: SurrealDB embedded with in-memory storage
+
+          - config: embedded-rocksdb
+            database: surrealdb
+            endpoint: rocksdb:~/crud-bench-data
+            description: SurrealDB embedded with RocksDB storage
+
+          - config: surrealkv-local
+            database: surrealkv
+            endpoint: ''
+            description: SurrealKV storage engine
+
+          - config: surrealmx
+            database: surrealmx
+            endpoint: ''
+            description: SurrealMX storage engine
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Run benchmark
+        uses: ./.github/actions/run-benchmark
+        with:
+          config: ${{ matrix.config }}
+          database: ${{ matrix.database }}
+          endpoint: ${{ matrix.endpoint }}
+          description: ${{ matrix.description }}
+          key_type: ${{ matrix.key_type }}
+          needs_server: 'false'
+          crud_bench_revision: ${{ env.CRUD_BENCH_REVISION }}
+
+  # ----------------------------------------
+  # Analyze results and report
+  # ----------------------------------------
+
+  analyze-and-report:
+    name: Analyze and Report
+    runs-on: ubuntu-latest
+    needs: [benchmark-memory, benchmark-rocksdb, benchmark-embedded]
+    if: always()
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Download all benchmark results
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          pattern: benchmark-results-*
+          path: ${{ github.workspace }}/results
+          merge-multiple: true
+
+      - name: List downloaded results
+        run: |
+          echo "Downloaded benchmark results:"
+          find ${{ github.workspace }}/results -type f
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: '3.11'
+
+      - name: Run analysis
+        id: analysis
+        run: |
+          python3 .github/scripts/analyze_benchmark.py \
+            --results-dir ${{ github.workspace }}/results \
+            --output ${{ github.workspace }}/report.md \
+            --json-output ${{ github.workspace }}/analysis.json
+        continue-on-error: true
+
+      - name: Prepare PR comment
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -f ${{ github.workspace }}/report.md ]; then
+            # Append workflow link to the report
+            echo "" >> ${{ github.workspace }}/report.md
+            echo "---" >> ${{ github.workspace }}/report.md
+            echo "<sub>Benchmark run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>" >> ${{ github.workspace }}/report.md
+          else
+            # Create a fallback report if analysis failed
+            echo "## 🔍 CRUD Benchmark Results" > ${{ github.workspace }}/report.md
+            echo "" >> ${{ github.workspace }}/report.md
+            echo "⚠️ Benchmark analysis failed. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details." >> ${{ github.workspace }}/report.md
+          fi
+
+      - name: Find existing comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: find_comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## 🔍 CRUD Benchmark Results'
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: ${{ github.workspace }}/report.md
+          comment-id: ${{ steps.find_comment.outputs.comment-id }}
+          edit-mode: replace
+
+      - name: Upload analysis results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-analysis
+          path: |
+            ${{ github.workspace }}/report.md
+            ${{ github.workspace }}/analysis.json
+          retention-days: 90

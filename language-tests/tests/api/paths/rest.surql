@@ -8,6 +8,7 @@ value = "NONE"
 
 # 1
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { rest: ['segment1'] }, context: {  }, headers: {}, status: 200 }"
 
 # 2
@@ -16,6 +17,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { rest: ['v1', 'users', '123'] }, context: {  }, headers: {}, status: 200 }"
 
 # 4
@@ -24,7 +26,8 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: NONE, context: {  }, headers: {  }, status: 404 }"
+skip-api-request-id = true
+value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
 
 # 6
 [[test.results]]
@@ -32,6 +35,7 @@ value = "NONE"
 
 # 7
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { path: ['a', 'b', 'c'] }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

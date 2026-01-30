@@ -17,6 +17,7 @@ value = "NONE"
 
 # 3
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: 'raw string response', context: {  }, headers: {}, status: 200 }"
 
 # 4
