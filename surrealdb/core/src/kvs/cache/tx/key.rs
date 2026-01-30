@@ -146,10 +146,10 @@ pub struct SequencesCacheKey(pub NamespaceId, pub DatabaseId);
 impl_cache_key!(SequencesCacheKey, Arc<[SequenceDefinition]>, Critical);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableEventsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+pub struct TableEventsCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableEventsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str);
+pub struct TableEventsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName);
 
 impl_cache_key!(TableEventsCacheKey, Arc<[EventDefinition]>, Critical);
 impl_cache_key_lookup!(TableEventsCacheKeyRef<'a> => TableEventsCacheKey {
@@ -159,10 +159,10 @@ impl_cache_key_lookup!(TableEventsCacheKeyRef<'a> => TableEventsCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableFieldsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+pub struct TableFieldsCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableFieldsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str);
+pub struct TableFieldsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName);
 
 impl_cache_key!(TableFieldsCacheKey, Arc<[FieldDefinition]>, Critical);
 impl_cache_key_lookup!(TableFieldsCacheKeyRef<'a> => TableFieldsCacheKey {
@@ -172,10 +172,10 @@ impl_cache_key_lookup!(TableFieldsCacheKeyRef<'a> => TableFieldsCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableViewsCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+pub struct TableViewsCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableViewsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str);
+pub struct TableViewsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName);
 
 impl_cache_key!(TableViewsCacheKey, Arc<[TableDefinition]>, Critical);
 impl_cache_key_lookup!(TableViewsCacheKeyRef<'a> => TableViewsCacheKey {
@@ -185,10 +185,10 @@ impl_cache_key_lookup!(TableViewsCacheKeyRef<'a> => TableViewsCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableIndexesCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+pub struct TableIndexesCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableIndexesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str);
+pub struct TableIndexesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName);
 
 impl_cache_key!(TableIndexesCacheKey, Arc<[IndexDefinition]>, Critical);
 impl_cache_key_lookup!(TableIndexesCacheKeyRef<'a> => TableIndexesCacheKey {
@@ -198,10 +198,10 @@ impl_cache_key_lookup!(TableIndexesCacheKeyRef<'a> => TableIndexesCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableLivesCacheKey(pub NamespaceId, pub DatabaseId, pub String);
+pub struct TableLivesCacheKey(pub NamespaceId, pub DatabaseId, pub TableName);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct TableLivesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str);
+pub struct TableLivesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName);
 
 impl_cache_key!(TableLivesCacheKey, Arc<[SubscriptionDefinition]>, Critical);
 impl_cache_key_lookup!(TableLivesCacheKeyRef<'a> => TableLivesCacheKey {

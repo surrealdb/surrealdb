@@ -1533,12 +1533,11 @@ impl TableProvider for Transaction {
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
 
-		let lookup1 =
-			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
-		self.cache.insert(lookup1.to_owned_key(), Arc::clone(&cached_tb));
+		let lookup = cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.insert(lookup.to_owned_key(), Arc::clone(&cached_tb));
 
-		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
-		self.cache.insert(lookup2.to_owned_key(), Arc::clone(&cached_tb));
+		let lookup = cache::tx::key::TableByNameCacheKeyRef(ns, db, &tb.name);
+		self.cache.insert(lookup.to_owned_key(), Arc::clone(&cached_tb));
 
 		Ok(cached_tb)
 	}
@@ -1555,11 +1554,10 @@ impl TableProvider for Transaction {
 		self.del(&key).await?;
 
 		// Clear the cache
-		let lookup1 =
-			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
-		self.cache.remove(&lookup1.to_owned_key());
-		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
-		self.cache.remove(&lookup2.to_owned_key());
+		let lookup = cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(&lookup.to_owned_key());
+		let lookup = cache::tx::key::TableByNameCacheKeyRef(ns, db, &tb.name);
+		self.cache.remove(&lookup.to_owned_key());
 
 		Ok(())
 	}
@@ -1576,11 +1574,10 @@ impl TableProvider for Transaction {
 		self.clr(&key).await?;
 
 		// Clear the cache
-		let lookup1 =
-			cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, tb.name.as_str());
-		self.cache.remove(&lookup1.to_owned_key());
-		let lookup2 = cache::tx::key::TableByNameCacheKeyRef(ns, db, tb.name.as_str());
-		self.cache.remove(&lookup2.to_owned_key());
+		let lookup = cache::tx::key::TableCacheKeyRef(tb.namespace_id, tb.database_id, &tb.name);
+		self.cache.remove(&lookup.to_owned_key());
+		let lookup = cache::tx::key::TableByNameCacheKeyRef(ns, db, &tb.name);
+		self.cache.remove(&lookup.to_owned_key());
 
 		Ok(())
 	}
@@ -1593,7 +1590,7 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
-		let lookup = cache::tx::key::TableEventsCacheKeyRef(ns, db, tb.as_str());
+		let lookup = cache::tx::key::TableEventsCacheKeyRef(ns, db, tb);
 		match self.cache.get_clone_by(&lookup) {
 			Some(val) => Ok(val),
 			None => {

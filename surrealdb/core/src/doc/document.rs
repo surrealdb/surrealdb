@@ -616,7 +616,7 @@ impl Document {
 			Some(cache) => {
 				// Get the cache entry key
 				let lookup =
-					cache::ds::key::EventsCacheKeyRef(ns, db, tb.name.as_str(), tb.cache_events_ts);
+					cache::ds::key::EventsCacheKeyRef(ns, db, &tb.name, tb.cache_events_ts);
 				// Get or update the cache entry
 				match cache.get_clone_by(&lookup) {
 					Some(val) => Ok(val),
@@ -665,12 +665,8 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) => {
 				// Get the cache entry key
-				let lookup = cache::ds::key::IndexesCacheKeyRef(
-					ns,
-					db,
-					tb.name.as_str(),
-					tb.cache_indexes_ts,
-				);
+				let lookup =
+					cache::ds::key::IndexesCacheKeyRef(ns, db, &tb.name, tb.cache_indexes_ts);
 				// Get or update the cache entry
 				match cache.get_clone_by(&lookup) {
 					Some(val) => Ok(val),
@@ -707,8 +703,7 @@ impl Document {
 				// Get the live-queries cache version
 				let version = cache.get_live_queries_version(ns, db, &tb.name)?;
 				// Get the cache entry key
-				let lookup =
-					cache::ds::key::LiveQueriesCacheKeyRef(ns, db, tb.name.as_str(), version);
+				let lookup = cache::ds::key::LiveQueriesCacheKeyRef(ns, db, &tb.name, version);
 				// Get or update the cache entry
 				match cache.get_clone_by(&lookup) {
 					Some(val) => Ok(val),

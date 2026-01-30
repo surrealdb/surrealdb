@@ -34,10 +34,10 @@ impl_cache_key_lookup!(ForiegnTablesCacheKeyRef<'a> => ForiegnTablesCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct EventsCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+pub struct EventsCacheKey(pub NamespaceId, pub DatabaseId, pub TableName, pub Uuid);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct EventsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str, pub Uuid);
+pub struct EventsCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName, pub Uuid);
 
 impl_cache_key!(EventsCacheKey, Arc<[EventDefinition]>, Critical);
 impl_cache_key_lookup!(EventsCacheKeyRef<'a> => EventsCacheKey {
@@ -48,10 +48,10 @@ impl_cache_key_lookup!(EventsCacheKeyRef<'a> => EventsCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct IndexesCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+pub struct IndexesCacheKey(pub NamespaceId, pub DatabaseId, pub TableName, pub Uuid);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct IndexesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str, pub Uuid);
+pub struct IndexesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName, pub Uuid);
 
 impl_cache_key!(IndexesCacheKey, Arc<[IndexDefinition]>, Critical);
 impl_cache_key_lookup!(IndexesCacheKeyRef<'a> => IndexesCacheKey {
@@ -62,10 +62,10 @@ impl_cache_key_lookup!(IndexesCacheKeyRef<'a> => IndexesCacheKey {
 });
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct LiveQueriesCacheKey(pub NamespaceId, pub DatabaseId, pub String, pub Uuid);
+pub struct LiveQueriesCacheKey(pub NamespaceId, pub DatabaseId, pub TableName, pub Uuid);
 
 #[derive(Clone, Hash, Eq, PartialEq)]
-pub struct LiveQueriesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a str, pub Uuid);
+pub struct LiveQueriesCacheKeyRef<'a>(pub NamespaceId, pub DatabaseId, pub &'a TableName, pub Uuid);
 
 impl_cache_key!(LiveQueriesCacheKey, Arc<[SubscriptionDefinition]>, Critical);
 impl_cache_key_lookup!(LiveQueriesCacheKeyRef<'a> => LiveQueriesCacheKey {
@@ -92,7 +92,7 @@ impl_cache_key_lookup!(LiveQueriesVersionCacheKeyRef<'a> => LiveQueriesVersionCa
 mod tests {
 	use std::hash::{DefaultHasher, Hash, Hasher};
 
-	use priority_lfu::CacheKeyLookup;
+	use priority_lfu::{CacheKey, CacheKeyLookup};
 	use rstest::rstest;
 
 	use super::*;
@@ -105,7 +105,8 @@ mod tests {
 
 	#[rstest]
 	#[case(DbCacheKeyRef("test-ns", "test-db"))]
-	fn test_hash_equality(#[case] lookup: DbCacheKeyRef<'_>) {
+	#[case(ForiegnTablesCacheKeyRef(NamespaceId(1), DatabaseId(2), &TableName("test-table".to_string())))]
+	fn test_hash_equality<L: CacheKeyLookup<K>, K: CacheKey>(#[case] lookup: L) {
 		let key = lookup.clone().to_owned_key();
 		// calculate the hash of the lookup and key
 		let lookup_hash = hash(&lookup);
