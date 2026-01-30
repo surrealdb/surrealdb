@@ -147,7 +147,7 @@ impl Document {
 		// HLC timestamp + node ID keep the queue key ordered and unique.
 		let key =
 			eq::Eq::new(db.namespace_id, db.database_id, &ev.target_table, &ev.name, ts, node_id);
-		let event_record = AsyncEventRecord::new(&opt, event_context, ev, cursor_doc)?;
+		let event_record = AsyncEventRecord::new(&opt, &ctx, event_context, ev, cursor_doc)?;
 		tx.put(&key, &event_record, None).await?;
 		Ok(())
 	}
@@ -205,11 +205,13 @@ pub struct AsyncEventRecord {
 	fields_computed: bool,
 	ns: Arc<str>,
 	db: Arc<str>,
+	auth_enabled: bool,
 	auth: Arc<Auth>,
 	event: Arc<Value>,
 	after: Arc<Value>,
 	before: Arc<Value>,
 	input: Arc<Value>,
+	session: Option<Arc<Value>>,
 	event_definition: EventDefinition,
 }
 
@@ -219,6 +221,7 @@ impl AsyncEventRecord {
 	/// Build a queued event payload from the current cursor document and context.
 	fn new(
 		opt: &Options,
+		ctx: &FrozenContext,
 		event_context: EventContext,
 		event_definition: &EventDefinition,
 		cursor_doc: &CursorDoc,
@@ -226,18 +229,20 @@ impl AsyncEventRecord {
 		let (ns, db) = opt.arc_ns_db()?;
 		Ok(Self {
 			attempt: 0,
-			max_computation_depth: opt.dive,
+			max_computation_depth: opt.dive - 1,
 			rid: cursor_doc.rid.clone(),
 			cursor_record: cursor_doc.doc.clone().into_read_only(),
 			fields_computed: false,
 			ns,
 			db,
+			auth_enabled: opt.auth_enabled,
 			auth: event_context.auth,
 			event: event_context.event,
 			after: event_context.after,
 			before: event_context.before,
 			input: event_context.input,
 			event_definition: event_definition.clone(),
+			session: ctx.value("session").map(|v| Arc::new(v.clone())),
 		})
 	}
 
@@ -250,6 +255,9 @@ impl AsyncEventRecord {
 		ctx.add_value("after", self.after.clone());
 		ctx.add_value("before", self.before.clone());
 		ctx.add_value("input", self.input.clone());
+		if let Some(v) = &self.session {
+			ctx.add_value("session", v.clone());
+		}
 		ctx.freeze()
 	}
 
@@ -271,6 +279,7 @@ impl AsyncEventRecord {
 		}
 		let opt = parent_opts.clone();
 		let opt = opt
+			.with_auth_enabled(self.auth_enabled)
 			.with_auth(self.auth.clone())
 			.with_max_computation_depth(self.max_computation_depth)
 			.with_ns(Some(self.ns.clone()))
@@ -359,8 +368,16 @@ impl AsyncEventRecord {
 		}
 
 		while let Some(res) = join_set.join_next().await {
-			if let Err(e) = res {
-				error!("Error while processing an event: {e}");
+			match res {
+				Ok(Err(e)) => {
+					error!("Error while processing an event: {e}");
+				}
+				Ok(Ok(())) => {
+					// All good, we have been successful
+				}
+				Err(e) => {
+					error!("Error while processing an event: {e}");
+				}
 			}
 		}
 		Ok(count)
