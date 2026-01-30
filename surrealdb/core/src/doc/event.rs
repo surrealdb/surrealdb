@@ -114,9 +114,7 @@ impl Document {
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
 			ctx.add_value("before", before);
-			if let Some(input) = &input {
-				ctx.add_value("input", input.clone());
-			}
+			ctx.add_value("input", input.clone().unwrap_or_default());
 			let ctx = ctx.freeze();
 			// Process conditional clause
 			let val = stk
