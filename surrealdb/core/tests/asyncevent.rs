@@ -11,7 +11,7 @@ use tokio::time::{sleep, timeout};
 #[test_log::test]
 async fn test_async_event() -> Result<()> {
 	let sql = r#"
-		DEFINE EVENT test ON TABLE user ASYNC RETRY 1 MAXDEPTH 6 WHEN true THEN (
+		DEFINE EVENT test ON TABLE user ASYNC RETRY 3 MAXDEPTH 10 WHEN true THEN (
 			CREATE activity SET user = $parent.id, value = $after.email, action = $event, time = time::now()
 		);
 		INFO FOR TABLE user;
@@ -24,7 +24,7 @@ async fn test_async_event() -> Result<()> {
 	t.expect_size(5)?;
 	t.expect_val("NONE")?;
 	t.expect_val(
-		"{ events: { test: 'DEFINE EVENT test ON user ASYNC RETRY 1 MAXDEPTH 6 WHEN true THEN (CREATE activity SET user = $parent.id, `value` = $after.email, action = $event, time = time::now())' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
+		"{ events: { test: 'DEFINE EVENT test ON user ASYNC RETRY 3 MAXDEPTH 10 WHEN true THEN (CREATE activity SET user = $parent.id, `value` = $after.email, action = $event, time = time::now())' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }",
 	)?;
 	t.expect_val("[{ email: 'info@surrealdb.com', id: user:test }]")?;
 	t.expect_val("[{ email: 'info@surrealdb.com', id: user:test }]")?;

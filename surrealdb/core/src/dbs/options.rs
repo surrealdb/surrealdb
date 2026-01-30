@@ -50,6 +50,8 @@ pub struct Options {
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
 	/// Configuration parameters that can be dynamically changed
 	dynamic_configuration: DynamicConfiguration,
+	/// Tracks the async event stacks (events created by events)
+	async_event_depth: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +89,7 @@ impl Options {
 			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			async_event_depth: None,
 			dynamic_configuration,
 		}
 	}
@@ -172,6 +175,12 @@ impl Options {
 	// Set the version
 	pub fn with_version(mut self, version: Option<u64>) -> Self {
 		self.version = version;
+		self
+	}
+
+	/// Set the maximum depth a computation can reach.
+	pub fn with_async_event_depth(mut self, depth: u16) -> Self {
+		self.async_event_depth = Some(depth);
 		self
 	}
 
@@ -430,6 +439,10 @@ impl Options {
 	/// via `ALTER SYSTEM QUERY_TIMEOUT ...`.
 	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
 		&self.dynamic_configuration
+	}
+
+	pub(crate) fn async_event_depth(&self) -> Option<u16> {
+		self.async_event_depth
 	}
 }
 

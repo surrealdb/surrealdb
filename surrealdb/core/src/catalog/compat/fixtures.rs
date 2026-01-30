@@ -460,8 +460,8 @@ pub fn event_basic() -> EventDefinition {
 		comment: Some("Audit log on create".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
 		asynchronous: true,
-		retry: Some(5),
-		max_depth: Some(64),
+		retry: 1,
+		max_depth: 5,
 	}
 }
 

@@ -199,12 +199,13 @@ impl EventContext {
 #[derive(Clone, Debug)]
 pub struct AsyncEventRecord {
 	attempt: u16,
-	max_computation_depth: u32,
+	event_depth: u16,
 	rid: Option<Arc<RecordId>>,
 	cursor_record: Arc<Record>,
 	fields_computed: bool,
 	ns: Arc<str>,
 	db: Arc<str>,
+	perms: bool,
 	auth_enabled: bool,
 	auth: Arc<Auth>,
 	event: Arc<Value>,
@@ -227,14 +228,20 @@ impl AsyncEventRecord {
 		cursor_doc: &CursorDoc,
 	) -> Result<Self> {
 		let (ns, db) = opt.arc_ns_db()?;
+		if let Some(d) = opt.async_event_depth()
+			&& d >= event_definition.max_depth
+		{
+			bail!(Error::EvReachMaxDepth(event_definition.name.clone(), d))
+		}
 		Ok(Self {
 			attempt: 0,
-			max_computation_depth: opt.dive - 1,
+			event_depth: opt.async_event_depth().map(|d| d + 1).unwrap_or(0),
 			rid: cursor_doc.rid.clone(),
 			cursor_record: cursor_doc.doc.clone().into_read_only(),
 			fields_computed: false,
 			ns,
 			db,
+			perms: opt.perms,
 			auth_enabled: opt.auth_enabled,
 			auth: event_context.auth,
 			event: event_context.event,
@@ -271,17 +278,18 @@ impl AsyncEventRecord {
 		// Resolve namespace/database IDs and ensure they still match the queued key.
 		let ns = tx.expect_ns_by_name(&self.ns).await?;
 		if ns.namespace_id != eq.ns {
-			bail!(Error::EvNamespaceMismatch(ns.name.clone()));
+			bail!(Error::EvNamespaceMismatch(self.event_definition.name.clone(), ns.name.clone()));
 		}
 		let db = tx.expect_db_by_name(&self.ns, &self.db).await?;
 		if db.database_id != eq.db {
-			bail!(Error::EvDatabaseMismatch(ns.name.clone()));
+			bail!(Error::EvDatabaseMismatch(self.event_definition.name.clone(), db.name.clone()));
 		}
 		let opt = parent_opts.clone();
 		let opt = opt
+			.with_perms(self.perms)
 			.with_auth_enabled(self.auth_enabled)
 			.with_auth(self.auth.clone())
-			.with_max_computation_depth(self.max_computation_depth)
+			.with_async_event_depth(self.event_depth)
 			.with_ns(Some(self.ns.clone()))
 			.with_db(Some(self.db.clone()));
 		Ok(opt)
@@ -341,8 +349,8 @@ impl AsyncEventRecord {
 							let se: Option<&Error> = e.downcast_ref();
 							if matches!(
 								se,
-								Some(Error::EvNamespaceMismatch(_))
-									| Some(Error::EvDatabaseMismatch(_))
+								Some(Error::EvNamespaceMismatch(..))
+									| Some(Error::EvDatabaseMismatch(..))
 							) {
 								// This error is final, we won't retry. The namespace or the
 								// database has been recreated.
@@ -391,7 +399,7 @@ impl AsyncEventRecord {
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
 		// `attempt` is incremented before processing; requeue while below the retry limit.
-		if ev.attempt < ev.event_definition.retry.unwrap_or(0) {
+		if ev.attempt <= ev.event_definition.retry {
 			tx.set(eq, ev, None).await?;
 		} else {
 			error!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);

@@ -24,12 +24,12 @@ pub struct EventDefinition {
 	/// Whether this event should be queued for async processing.
 	#[revision(start = 3)]
 	pub(crate) asynchronous: bool,
-	/// Retry limit for async events (values <= 1 mean a single attempt).
-	#[revision(start = 3)]
-	pub(crate) retry: Option<u16>,
+	/// Retry limit for async events (values = 0 mean a single attempt).
+	#[revision(start = 3, default_fn = "default_retry")]
+	pub(crate) retry: u16,
 	/// Configured computation depth limit for async event evaluation.
-	#[revision(start = 3)]
-	pub(crate) max_depth: Option<u16>,
+	#[revision(start = 3, default_fn = "default_max_depth")]
+	pub(crate) max_depth: u16,
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
@@ -37,6 +37,14 @@ pub struct EventDefinition {
 impl EventDefinition {
 	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
+	}
+
+	fn default_retry(_revision: u16) -> Result<u16, revision::Error> {
+		Ok(1)
+	}
+
+	fn default_max_depth(_revision: u16) -> Result<u16, revision::Error> {
+		Ok(5)
 	}
 }
 
@@ -56,8 +64,8 @@ impl EventDefinition {
 				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			asynchronous: self.asynchronous,
-			retry: self.retry,
-			max_depth: self.max_depth,
+			retry: Some(self.retry),
+			max_depth: Some(self.max_depth),
 		}
 	}
 }
@@ -71,8 +79,8 @@ impl InfoStructure for EventDefinition {
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 			"async".to_string(), if self.asynchronous => Value::Bool(true),
-			"retry".to_string(), if let Some(v) = self.retry => Value::Number(v.into()),
-			"maxdepth".to_string(), if let Some(v) = self.max_depth => Value::Number(v.into()),
+			"retry".to_string() =>  self.retry.into(),
+			"maxdepth".to_string() => self.max_depth.into(),
 		})
 	}
 }

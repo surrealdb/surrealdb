@@ -163,9 +163,9 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	auth_limit: AuthLimit::default(),
     asynchronous: true,
-	retry: Some(5),
-    max_depth: Some(64),
-}, 39)]
+	retry: 1,
+    max_depth: 5,
+}, 42)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
 	table: TableName::from("what"),

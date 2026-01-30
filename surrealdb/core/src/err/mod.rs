@@ -1152,14 +1152,17 @@ pub(crate) enum Error {
 	IdFieldUnsupportedKind(String),
 
 	#[error(
-		"The ID of the namespace `{0}` does not match the namespace this event has been generated from."
+		"Error with the event {0}. The ID of the namespace `{1}` does not match the namespace this event has been generated from."
 	)]
-	EvNamespaceMismatch(String),
+	EvNamespaceMismatch(String, String),
 
 	#[error(
-		"The ID of the database `{0}` does not match the database this event has been generated from."
+		"Error with the event {0}. The ID of the database `{1}` does not match the database this event has been generated from."
 	)]
-	EvDatabaseMismatch(String),
+	EvDatabaseMismatch(String, String),
+
+	#[error("The event {0} reached the max allowed depth: {1}.")]
+	EvReachMaxDepth(String, u16),
 }
 
 impl Error {
