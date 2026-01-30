@@ -101,7 +101,7 @@ pub trait RpcProtocol {
 	async fn del_session(&self, id: &Uuid) {
 		self.session_map().remove(&Some(*id));
 		// Cleanup live queries
-		self.cleanup_lqs(Some(&id)).await;
+		self.cleanup_lqs(Some(id)).await;
 	}
 
 	/// Lists all non-default sessions
