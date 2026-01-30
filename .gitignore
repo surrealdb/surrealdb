@@ -43,6 +43,7 @@ lcov.info
 /lib/target/
 /tests/sdk/*/Cargo.lock
 /tests/sdk/*/target
+/.github/scripts/__pycache__/
 
 .idea/
 .vscode/
