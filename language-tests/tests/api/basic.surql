@@ -6,18 +6,21 @@ reason = "Test basic API definition, invocation, and response structure"
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { message: 'Hello, World!' }, context: {  }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { data: 'test' }, context: {  }, headers: { 'content-type': 'application/json' }, status: 201 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { default: 'status' }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

@@ -36,6 +36,7 @@ value = "NONE"
 
 # 8
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { db1: true, db2: true }, context: {  }, headers: {}, status: 200 }"
 
 # 9
@@ -44,6 +45,7 @@ value = "NONE"
 
 # 10
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { db1: true, db2: true, route1: true, route2: true }, context: {  }, headers: {}, status: 200 }"
 
 # 11
@@ -52,6 +54,7 @@ value = "NONE"
 
 # 12
 [[test.results]]
+skip-api-request-id = true
 value = "{ body: { db1: true, db2: true, method1: true, method2: true }, context: {  }, headers: {}, status: 200 }"
 
 [env.capabilities]

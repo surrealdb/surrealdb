@@ -1,9 +1,11 @@
 use anyhow::Result;
-use http::StatusCode;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
+use tracing::trace;
+use uuid::Uuid;
 
 use super::args::Optional;
+use crate::api::err::ApiError;
 use crate::api::format as api_format;
 use crate::api::invocation::process_api_request_with_stack;
 use crate::api::request::ApiRequest;
@@ -61,7 +63,11 @@ pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
 	(path, Optional(req)): (String, Optional<FromPublic<ApiRequest>>),
 ) -> Result<Value> {
+	let request_id = Uuid::new_v4().to_string();
 	let mut req = req.map(|x| x.0).unwrap_or_default();
+	req.request_id.clone_from(&request_id);
+	trace!(request_id = %request_id, path = %path, "fnc::api::invoke called");
+
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 
@@ -85,21 +91,11 @@ pub async fn invoke(
 
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
 		req.params = params.try_into()?;
-		match process_api_request_with_stack(stk, ctx, opt, api, req).await {
-			Ok(Some(v)) => Ok(v.into()),
-			Err(e) => Err(e),
-			_ => Ok(ApiResponse {
-				status: StatusCode::NOT_FOUND,
-				..Default::default()
-			}
-			.into()),
-		}
+		process_api_request_with_stack(stk, ctx, opt, api, req).await.map(Into::into)
 	} else {
-		Ok(ApiResponse {
-			status: StatusCode::NOT_FOUND,
-			..Default::default()
-		}
-		.into())
+		trace!(request_id = %request_id, path = %path, "No API definition found for path");
+		let res = ApiResponse::from_error(ApiError::NotFound.into(), request_id);
+		Ok(res.into())
 	}
 }
 

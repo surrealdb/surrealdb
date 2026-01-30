@@ -11,9 +11,10 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
 use surrealdb_types::Value;
 use tower_http::limit::RequestBodyLimitLayer;
+use uuid::Uuid;
 
 use super::AppState;
-use super::error::ResponseError;
+use super::error::{ApiHandlerError, ResponseError};
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::params::Params;
@@ -38,7 +39,19 @@ async fn handler(
 	}): Query<Params>,
 	method: Method,
 	body: Bytes,
-) -> Result<impl IntoResponse, ResponseError> {
+) -> Result<impl IntoResponse, ApiHandlerError> {
+	// Generate request ID at the start so it can be passed back for ALL errors and included in
+	// warns
+	let request_id = Uuid::new_v4().to_string();
+	trace!(
+		request_id = %request_id,
+		method = %method,
+		path = %path,
+		ns = %ns,
+		db = %db,
+		"API request received"
+	);
+
 	// Format the full URL
 	let url = format!("/api/{ns}/{db}/{path}");
 	// Get a database reference
@@ -47,13 +60,20 @@ async fn handler(
 	let session = session.with_ns(&ns).with_db(&db);
 	// Check if the experimental capability is enabled
 	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
-		warn!("Experimental capability for API routes is not enabled");
-		return Err(NetError::NotFound(url).into());
+		warn!(request_id = %request_id, "Experimental capability for API routes is not enabled");
+		return Err(ApiHandlerError(NetError::NotFound(url).into(), request_id));
 	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !ds.allows_http_route(&RouteTarget::Api) {
-		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Api);
-		return Err(NetError::ForbiddenRoute(RouteTarget::Api.to_string()).into());
+		warn!(
+			request_id = %request_id,
+			"Capabilities denied HTTP route request attempt, target: '{}'",
+			&RouteTarget::Api
+		);
+		return Err(ApiHandlerError(
+			NetError::ForbiddenRoute(RouteTarget::Api.to_string()).into(),
+			request_id,
+		));
 	}
 
 	let method = match method {
@@ -63,7 +83,14 @@ async fn handler(
 		Method::POST => ApiMethod::Post,
 		Method::PUT => ApiMethod::Put,
 		Method::TRACE => ApiMethod::Trace,
-		_ => return Err(NetError::NotFound(url).into()),
+		_ => {
+			warn!(
+				request_id = %request_id,
+				method = %method,
+				"API route does not support HTTP method"
+			);
+			return Err(ApiHandlerError(NetError::NotFound(url).into(), request_id));
+		}
 	};
 
 	// TODO we need to get a max body size back somehow. Introduction of blob like value? This
@@ -81,23 +108,37 @@ async fn handler(
 		headers,
 		body,
 		query,
+		request_id: request_id.clone(),
 		..Default::default()
 	};
 
-	let res = ds.invoke_api_handler(&ns, &db, &path, &session, req).await.map_err(ResponseError)?;
+	debug!(
+		request_id = %request_id,
+		path = %path,
+		"Invoking API handler"
+	);
+	let res = ds
+		.invoke_api_handler(&ns, &db, &path, &session, req)
+		.await
+		.map_err(|e| ApiHandlerError(ResponseError(e), request_id.clone()))?;
 
-	let Some(res) = res else {
-		return Err(NetError::NotFound(url).into());
-	};
-
+	trace!(
+		request_id = %request_id,
+		status = %res.status,
+		"API handler completed"
+	);
 	let res_body = match res.body {
 		Value::None => Vec::new(),
 		Value::Bytes(x) => x.into_inner().to_vec(),
+		Value::String(s) => s.into_bytes(),
 		_ => {
-			return Err(ApiError::Unreachable(
-				"Found a native response instruction where this is not supported".into(),
-			)
-			.into());
+			return Err(ApiHandlerError(
+				ApiError::InvalidApiResponse(
+					"HTTP API response body must be None, bytes, or string; other values are not supported".into(),
+				)
+				.into(),
+				request_id,
+			));
 		}
 	};
 
