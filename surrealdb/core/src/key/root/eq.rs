@@ -21,9 +21,9 @@ pub(crate) struct Eq<'a> {
 	pub db: DatabaseId,
 	pub tb: Cow<'a, TableName>,
 	pub ev: Cow<'a, str>,
-	/// Timestamp when this event was generated (Component 1 of the unique ID)
+	/// Timestamp when this event was generated (component 1 of the composite unique ID).
 	pub ts: u64,
-	/// The id of the node that generated the event (Component 2 of the composite unique ID)
+	/// The ID of the node that generated the event (component 2 of the composite unique ID).
 	pub node_id: Uuid,
 }
 

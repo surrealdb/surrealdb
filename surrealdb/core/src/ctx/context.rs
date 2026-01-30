@@ -618,6 +618,10 @@ impl Context {
 		}
 	}
 
+	pub(crate) fn values(&self) -> &HashMap<Cow<'static, str>, Arc<Value>> {
+		&self.values
+	}
+
 	/// Get a 'static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {

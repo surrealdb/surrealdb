@@ -1531,7 +1531,7 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running event processing process");
-			if AsyncEventRecord::process_next_events_batch(self).await? == 0 {
+			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
 				// The last batch didn't have any events to process,
 				// we can sleep until the next wake-up call
 				return Ok(());

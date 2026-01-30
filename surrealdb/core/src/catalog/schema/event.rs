@@ -24,10 +24,10 @@ pub struct EventDefinition {
 	/// Whether this event should be queued for async processing.
 	#[revision(start = 3)]
 	pub(crate) asynchronous: bool,
-	/// Retry limit for async events (values = 0 mean a single attempt).
+	/// Maximum retry count for async events (0 disables retries; event still runs once).
 	#[revision(start = 3, default_fn = "default_retry")]
 	pub(crate) retry: u16,
-	/// Maximum async event nesting depth for this event.
+	/// Maximum async event nesting depth for this event (0 allows top-level only).
 	#[revision(start = 3, default_fn = "default_max_depth")]
 	pub(crate) max_depth: u16,
 }

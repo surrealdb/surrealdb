@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -15,13 +16,14 @@ use crate::catalog::{EventDefinition, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session, Statement};
-use crate::doc::{Action, CursorDoc, CursorRecord, Document, DocumentContext};
+use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::err::Error;
 use crate::expr::FlowResultExt;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq;
 use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
 	Datastore, HlcTimestamp, KVValue, Key, LockType, Transaction, TransactionFactory,
 	TransactionType, Val, impl_kv_value_revisioned,
@@ -106,15 +108,15 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let event_context = EventContext {
-				auth: opt.auth.clone(),
-				event: evt.into(),
-				doc: doc.doc.as_arc(),
-				after,
-				before,
-				input: input.clone().unwrap_or_default(),
-			};
-			let ctx = event_context.build_event_context(ctx);
+			let mut ctx = Context::new(ctx);
+			ctx.add_value("event", evt.into());
+			ctx.add_value("value", doc.doc.as_arc());
+			ctx.add_value("after", after);
+			ctx.add_value("before", before);
+			if let Some(input) = &input {
+				ctx.add_value("input", input.clone());
+			}
+			let ctx = ctx.freeze();
 			// Process conditional clause
 			let val = stk
 				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
@@ -124,7 +126,7 @@ impl Document {
 			// Execute or enqueue the event if the condition is truthy.
 			if val.is_truthy() {
 				if ev.asynchronous {
-					Self::process_async(ctx, opt, event_context, ev, &self.doc_ctx, doc).await?;
+					Self::process_async(ctx, opt, ev, &self.doc_ctx, doc).await?;
 				} else {
 					Self::process_sync(stk, ctx, opt, ev, doc).await?;
 				}
@@ -137,7 +139,6 @@ impl Document {
 	async fn process_async(
 		ctx: FrozenContext,
 		opt: Options,
-		event_context: EventContext,
 		ev: &EventDefinition,
 		doc_ctx: &DocumentContext,
 		cursor_doc: &CursorDoc,
@@ -147,10 +148,11 @@ impl Document {
 		let db = doc_ctx.db();
 		let tx = ctx.tx();
 		// Persist the event payload so it can be processed out-of-band.
+		// Use the current transaction so enqueue is atomic with the document change.
 		// HLC timestamp + node ID keep the queue key ordered and unique.
 		let key =
 			eq::Eq::new(db.namespace_id, db.database_id, &ev.target_table, &ev.name, ts, node_id);
-		let event_record = AsyncEventRecord::new(&opt, &ctx, event_context, ev, cursor_doc)?;
+		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
 		tx.put(&key, &event_record, None).await?;
 		Ok(())
 	}
@@ -174,35 +176,13 @@ impl Document {
 	}
 }
 
-/// Captures event values for building the evaluation context.
-struct EventContext {
-	auth: Arc<Auth>,
-	event: Arc<Value>,
-	doc: Arc<Value>,
-	after: Arc<Value>,
-	before: Arc<Value>,
-	input: Arc<Value>,
-}
-
-impl EventContext {
-	/// Build a FrozenContext with standard event variables.
-	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
-		let mut ctx = Context::new(ctx);
-		ctx.add_value("event", self.event.clone());
-		ctx.add_value("value", self.doc.clone());
-		ctx.add_value("after", self.after.clone());
-		ctx.add_value("before", self.before.clone());
-		ctx.add_value("input", self.input.clone());
-		ctx.freeze()
-	}
-}
-
 /// Persisted payload for processing DEFINE EVENT ... ASYNC.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub struct AsyncEventRecord {
+	/// Number of processing attempts already made (incremented before execution).
 	attempt: u16,
-	/// Async event nesting depth, incremented when events trigger events.
+	/// Async event nesting depth for this record (0 for top-level).
 	event_depth: u16,
 	rid: Option<Arc<RecordId>>,
 	cursor_record: Arc<Record>,
@@ -211,12 +191,8 @@ pub struct AsyncEventRecord {
 	db: Arc<str>,
 	perms: bool,
 	auth_enabled: bool,
+	values: HashMap<String, Arc<Value>>,
 	auth: Arc<Auth>,
-	event: Arc<Value>,
-	after: Arc<Value>,
-	before: Arc<Value>,
-	input: Arc<Value>,
-	session: Option<Arc<Value>>,
 	event_definition: EventDefinition,
 }
 
@@ -227,13 +203,13 @@ impl AsyncEventRecord {
 	fn new(
 		opt: &Options,
 		ctx: &FrozenContext,
-		event_context: EventContext,
 		event_definition: &EventDefinition,
 		cursor_doc: &CursorDoc,
 	) -> Result<Self> {
 		let (ns, db) = opt.arc_ns_db()?;
+		// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
 		if let Some(d) = opt.async_event_depth()
-			&& d >= event_definition.max_depth
+			&& d > event_definition.max_depth
 		{
 			bail!(Error::EvReachMaxDepth(event_definition.name.clone(), d))
 		}
@@ -247,28 +223,17 @@ impl AsyncEventRecord {
 			db,
 			perms: opt.perms,
 			auth_enabled: opt.auth_enabled,
-			auth: event_context.auth,
-			event: event_context.event,
-			after: event_context.after,
-			before: event_context.before,
-			input: event_context.input,
+			values: ctx.values().iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+			auth: opt.auth.clone(),
 			event_definition: event_definition.clone(),
-			session: ctx.value("session").map(|v| Arc::new(v.clone())),
+			// session: ctx.value("session").map(|v| Arc::new(v.clone())),
 		})
 	}
 
 	/// Rebuild the event context when processing a queued event.
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
 		let mut ctx = Context::new(ctx);
-		ctx.add_value("event", self.event.clone());
-		// Use the read-only snapshot of the record for $value.
-		ctx.add_value("value", CursorRecord::from(self.cursor_record.clone()).as_arc());
-		ctx.add_value("after", self.after.clone());
-		ctx.add_value("before", self.before.clone());
-		ctx.add_value("input", self.input.clone());
-		if let Some(v) = &self.session {
-			ctx.add_value("session", v.clone());
-		}
+		ctx.add_values(self.values.clone());
 		ctx.freeze()
 	}
 
@@ -301,14 +266,25 @@ impl AsyncEventRecord {
 
 	/// Recreate a cursor document from the persisted record snapshot.
 	fn build_event_cursor_doc(&self) -> CursorDoc {
-		CursorDoc::new(self.rid.clone(), None, self.cursor_record.clone())
+		CursorDoc {
+			rid: self.rid.clone(),
+			ir: None,
+			doc: self.cursor_record.clone().into(),
+			fields_computed: self.fields_computed,
+		}
 	}
 
 	/// Process a single batch of queued async events.
-	/// Returns the number of events fetched for processing.
-	pub async fn process_next_events_batch(ds: &Datastore) -> Result<usize> {
+	/// Returns the number of events fetched (not necessarily successfully processed).
+	pub async fn process_next_events_batch(
+		ds: &Datastore,
+		lh: Option<&LeaseHandler>,
+	) -> Result<usize> {
 		// Collect the next batch
 		let res = {
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?;
+			}
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
 			let (beg, end) = eq::Eq::range();
 			// Read a bounded batch without holding a write transaction.
@@ -317,12 +293,16 @@ impl AsyncEventRecord {
 			res
 		};
 		let count = res.len();
-		Self::process_events_batch(ds, res).await?;
+		Self::process_events_batch(ds, res, lh).await?;
 		Ok(count)
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	async fn process_events_batch(ds: &Datastore, res: Vec<(Key, Val)>) -> Result<()> {
+	async fn process_events_batch(
+		ds: &Datastore,
+		res: Vec<(Key, Val)>,
+		lh: Option<&LeaseHandler>,
+	) -> Result<()> {
 		// Limit in-flight event processing to avoid oversubscription.
 		let concurrency: usize = num_cpus::get().max(4);
 		let sem = Arc::new(Semaphore::new(concurrency));
@@ -330,6 +310,9 @@ impl AsyncEventRecord {
 		let mut join_handles = Vec::with_capacity(res.len());
 
 		for (k, v) in res {
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?;
+			}
 			// Acquire a concurrency slot per event.
 			let permit = sem.clone().acquire_owned().await?;
 			// Setup a context
@@ -341,7 +324,7 @@ impl AsyncEventRecord {
 			let tf = ds.transaction_factory().clone();
 			let jh = spawn(async move {
 				Self::run_event_checked(ctx, opt, tf, sequences, k, v).await;
-				drop(permit); // releases a slot => producer can send another job
+				drop(permit); // releases a slot so the loop can enqueue another task
 			});
 			join_handles.push(jh);
 		}
@@ -355,8 +338,15 @@ impl AsyncEventRecord {
 	}
 
 	#[cfg(target_family = "wasm")]
-	async fn process_events_batch(ds: &Datastore, res: Vec<(Key, Val)>) -> Result<()> {
+	async fn process_events_batch(
+		ds: &Datastore,
+		res: Vec<(Key, Val)>,
+		lh: Option<&LeaseHandler>,
+	) -> Result<()> {
 		for (k, v) in res {
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?;
+			}
 			// Setup a context
 			let ctx = ds.setup_ctx()?;
 			// Build default options
@@ -435,8 +425,11 @@ impl AsyncEventRecord {
 		eq: &eq::Eq<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
-		// `attempt` is incremented before processing; requeue while below the retry limit.
+		// `attempt` is incremented before processing; `retry` counts retries, so requeue while
+		// attempt <= retry.
 		if ev.attempt <= ev.event_definition.retry {
+			// Requeue with the same key so the event keeps its original queue position; retries are
+			// bounded here and no backoff is applied yet (will be implemented in a future version).
 			tx.set(eq, ev, None).await?;
 		} else {
 			error!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);

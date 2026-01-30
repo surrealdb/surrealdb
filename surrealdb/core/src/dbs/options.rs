@@ -178,7 +178,8 @@ impl Options {
 		self
 	}
 
-	/// Set the maximum depth a computation can reach.
+	/// Set the current async event nesting depth (0 for top-level).
+	/// Used to enforce MAXDEPTH when async events trigger async events.
 	pub fn with_async_event_depth(mut self, depth: u16) -> Self {
 		self.async_event_depth = Some(depth);
 		self

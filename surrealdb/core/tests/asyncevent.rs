@@ -38,7 +38,7 @@ async fn test_async_event() -> Result<()> {
 
 	// Process the event asynchronously
 	timeout(Duration::from_secs(10), async {
-		while AsyncEventRecord::process_next_events_batch(&ds).await? != 0 {
+		while AsyncEventRecord::process_next_events_batch(&ds, None).await? != 0 {
 			sleep(Duration::from_millis(100)).await;
 		}
 		Ok::<_, anyhow::Error>(())
