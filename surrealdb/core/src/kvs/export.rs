@@ -338,15 +338,14 @@ impl Transaction {
 		Ok(())
 	}
 
-	/// Processes a value and generates the appropriate SQL command.
+	/// Processes a record and categorizes it for SQL export.
 	///
-	/// This function processes a value, categorizing it into either normal
-	/// records or graph edge records, and generates the appropriate SQL
-	/// command based on the type of record.
+	/// This function processes a record, categorizing it into either normal
+	/// records or graph edge records, and writes it to the appropriate string
+	/// buffer for later SQL generation.
 	///
-	/// Note: Version information is not included in SQL exports. Only the latest
-	/// version of each record is exported. Historical versions must be exported
-	/// at the KV level.
+	/// Note: Only the latest version of each record is exported. Historical
+	/// versions must be exported at the KV level.
 	///
 	/// # Arguments
 	///
@@ -354,56 +353,35 @@ impl Transaction {
 	/// * `record` - The record to be processed.
 	/// * `records_relate` - A mutable reference to a string buffer for graph edge records.
 	/// * `records_normal` - A mutable reference to a string buffer for normal records.
-	/// * `is_tombstone` - An optional boolean indicating if the record is a tombstone.
-	///
-	/// # Returns
-	///
-	/// * `String` - Returns the generated SQL command as a string. If no command is generated,
-	///   returns an empty string.
 	fn process_record(
 		k: record::RecordKey,
 		mut record: Record,
 		records_relate: &mut String,
 		records_normal: &mut String,
-		is_tombstone: Option<bool>,
-	) -> String {
+	) {
 		// Inject the id field into the document before processing.
 		let rid = crate::val::RecordId {
 			table: k.tb.into_owned(),
 			key: k.id,
 		};
 		record.data.to_mut().def(&rid);
-		// Match on the value to determine if it is a graph edge record or a normal
-		// record.
+		// Match on the value to determine if it is a graph edge record or a normal record.
 		if record.is_edge()
 			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*IN)
 			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*OUT)
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			// Write the value to the records_relate string (version info is not exported in SQL).
+			// Write the value to the records_relate string.
 			if !records_relate.is_empty() {
 				records_relate.push_str(", ");
 			}
 			records_relate.push_str(&record.data.as_ref().to_sql());
-			String::new()
-			// If the value is a normal record:
-		} else if let Some(is_tombstone) = is_tombstone {
-			if is_tombstone {
-				// If the record is a tombstone, format it as a DELETE command.
-				format!("DELETE {}:{};", rid.table, rid.key.to_sql())
-			} else {
-				// If the record is not a tombstone, format it as an INSERT command
-				// (version info is not exported in SQL).
-				format!("INSERT {};", record.data.as_ref().to_sql())
-			}
 		} else {
-			// If no tombstone or version information is provided, write the value to the
-			// records_normal string.
+			// If the value is a normal record, write it to the records_normal string.
 			if !records_normal.is_empty() {
 				records_normal.push_str(", ");
 			}
 			records_normal.push_str(&record.data.as_ref().to_sql());
-			String::new()
 		}
 	}
 
@@ -439,7 +417,7 @@ impl Transaction {
 			let k = record::RecordKey::decode_key(&k)?;
 			let v = Record::kv_decode_value(v)?;
 			// Process the value and categorize it into records_relate or records_normal.
-			Self::process_record(k, v, &mut records_relate, &mut records_normal, None);
+			Self::process_record(k, v, &mut records_relate, &mut records_normal);
 		}
 
 		// If there are normal records, generate and send the INSERT SQL command.
