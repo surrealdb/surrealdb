@@ -27,7 +27,7 @@ pub struct EventDefinition {
 	/// Retry limit for async events (values = 0 mean a single attempt).
 	#[revision(start = 3, default_fn = "default_retry")]
 	pub(crate) retry: u16,
-	/// Configured computation depth limit for async event evaluation.
+	/// Maximum async event nesting depth for this event.
 	#[revision(start = 3, default_fn = "default_max_depth")]
 	pub(crate) max_depth: u16,
 }

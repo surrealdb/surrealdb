@@ -50,7 +50,7 @@ pub struct Options {
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
 	/// Configuration parameters that can be dynamically changed
 	dynamic_configuration: DynamicConfiguration,
-	/// Tracks the async event stacks (events created by events)
+	/// Tracks async event nesting depth for enforcing event MAXDEPTH.
 	async_event_depth: Option<u16>,
 }
 

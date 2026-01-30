@@ -199,6 +199,7 @@ impl EventContext {
 #[derive(Clone, Debug)]
 pub struct AsyncEventRecord {
 	attempt: u16,
+	/// Async event nesting depth, incremented when events trigger events.
 	event_depth: u16,
 	rid: Option<Arc<RecordId>>,
 	cursor_record: Arc<Record>,

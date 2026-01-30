@@ -1161,7 +1161,7 @@ pub(crate) enum Error {
 	)]
 	EvDatabaseMismatch(String, String),
 
-	#[error("The event {0} reached the max allowed depth: {1}.")]
+	#[error("The event {0} reached the max async event nesting depth: {1}.")]
 	EvReachMaxDepth(String, u16),
 }
 
