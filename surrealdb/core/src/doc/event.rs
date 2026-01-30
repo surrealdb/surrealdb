@@ -5,8 +5,10 @@ use reblessive::TreeStack;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use surrealdb_types::ToSql;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+#[cfg(not(target_family = "wasm"))]
 use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{EventDefinition, Record};
@@ -19,9 +21,10 @@ use crate::expr::FlowResultExt;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq;
 use crate::kvs::TransactionType::Write;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{
-	Datastore, HlcTimestamp, KVValue, LockType, Transaction, TransactionType,
-	impl_kv_value_revisioned,
+	Datastore, HlcTimestamp, KVValue, Key, LockType, Transaction, TransactionFactory,
+	TransactionType, Val, impl_kv_value_revisioned,
 };
 use crate::val::{RecordId, Value};
 
@@ -304,10 +307,6 @@ impl AsyncEventRecord {
 	/// Process a single batch of queued async events.
 	/// Returns the number of events fetched for processing.
 	pub async fn process_next_events_batch(ds: &Datastore) -> Result<usize> {
-		// Limit in-flight event processing to avoid oversubscription.
-		let concurrency: usize = num_cpus::get().max(4);
-		let sem = Arc::new(Semaphore::new(concurrency));
-
 		// Collect the next batch
 		let res = {
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -318,78 +317,115 @@ impl AsyncEventRecord {
 			res
 		};
 		let count = res.len();
-		let mut join_set = JoinSet::new();
+		Self::process_events_batch(ds, res).await?;
+		Ok(count)
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	async fn process_events_batch(ds: &Datastore, res: Vec<(Key, Val)>) -> Result<()> {
+		// Limit in-flight event processing to avoid oversubscription.
+		let concurrency: usize = num_cpus::get().max(4);
+		let sem = Arc::new(Semaphore::new(concurrency));
+
+		let mut join_handles = Vec::with_capacity(res.len());
 
 		for (k, v) in res {
 			// Acquire a concurrency slot per event.
 			let permit = sem.clone().acquire_owned().await?;
 			// Setup a context
-			let mut ctx = ds.setup_ctx()?;
+			let ctx = ds.setup_ctx()?;
 			// Build default options
 			let opt = ds.setup_options(&Session::default());
 			// Extract sequences and transaction factory
 			let sequences = ds.sequences().clone();
 			let tf = ds.transaction_factory().clone();
-			join_set.spawn(async move {
-				{
-					// Process each event in its own write transaction.
-					let tx = tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
-					ctx.set_transaction(Arc::new(tx));
-					let ctx = ctx.freeze();
-					let eq = eq::Eq::decode_key(&k)?;
-					let mut ev = AsyncEventRecord::kv_decode_value(v)?;
-					// Count this attempt before processing so retries are bounded.
-					ev.attempt += 1;
-					let ev = ev;
-					let tx = ctx.tx();
-					match Self::process_event(&ctx, &opt, &eq, &ev).await {
-						Ok(_) => {
-							catch!(tx, tx.del(&k).await);
-						}
-						Err(e) => {
-							let se: Option<&Error> = e.downcast_ref();
-							if matches!(
-								se,
-								Some(Error::EvNamespaceMismatch(..))
-									| Some(Error::EvDatabaseMismatch(..))
-							) {
-								// This error is final, we won't retry. The namespace or the
-								// database has been recreated.
-								warn!("Event processing failed: {se:?}");
-								catch!(tx, tx.del(&k).await);
-							} else {
-								catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
-							}
-						}
-					}
-					if let Err(e) = tx.commit().await {
-						// If the commit fails, requeue the event and commit that update.
-						tx.cancel().await?;
-						let tx =
-							tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
-						catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
-						tx.commit().await?;
-					}
-				}
+			let jh = spawn(async move {
+				Self::run_event_checked(ctx, opt, tf, sequences, k, v).await;
 				drop(permit); // releases a slot => producer can send another job
-				Ok(())
 			});
+			join_handles.push(jh);
 		}
 
-		while let Some(res) = join_set.join_next().await {
-			match res {
-				Ok(Err(e)) => {
-					error!("Error while processing an event: {e}");
-				}
-				Ok(Ok(())) => {
-					// All good, we have been successful
-				}
-				Err(e) => {
-					error!("Error while processing an event: {e}");
+		for jh in join_handles {
+			if let Err(e) = jh.await {
+				error!("Error while processing an event: {e}");
+			}
+		}
+		Ok(())
+	}
+
+	#[cfg(target_family = "wasm")]
+	async fn process_events_batch(ds: &Datastore, res: Vec<(Key, Val)>) -> Result<()> {
+		for (k, v) in res {
+			// Setup a context
+			let ctx = ds.setup_ctx()?;
+			// Build default options
+			let opt = ds.setup_options(&Session::default());
+			// Extract sequences and transaction factory
+			let sequences = ds.sequences().clone();
+			let tf = ds.transaction_factory().clone();
+			Self::run_event_checked(ctx, opt, tf, sequences, k, v).await;
+		}
+		Ok(())
+	}
+
+	async fn run_event_checked(
+		ctx: Context,
+		opt: Options,
+		tf: TransactionFactory,
+		sequences: Sequences,
+		k: Key,
+		v: Val,
+	) {
+		if let Err(e) = Self::run_event(ctx, opt, tf, sequences, k, v).await {
+			error!("Error while processing an event: {e}");
+		}
+	}
+	async fn run_event(
+		mut ctx: Context,
+		opt: Options,
+		tf: TransactionFactory,
+		sequences: Sequences,
+		k: Key,
+		v: Val,
+	) -> Result<()> {
+		// Process each event in its own write transaction.
+		let tx = tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
+		ctx.set_transaction(Arc::new(tx));
+		let ctx = ctx.freeze();
+		let eq = eq::Eq::decode_key(&k)?;
+		let mut ev = AsyncEventRecord::kv_decode_value(v)?;
+		// Count this attempt before processing so retries are bounded.
+		ev.attempt += 1;
+		let ev = ev;
+		let tx = ctx.tx();
+		match Self::process_event(&ctx, &opt, &eq, &ev).await {
+			Ok(_) => {
+				catch!(tx, tx.del(&k).await);
+			}
+			Err(e) => {
+				let se: Option<&Error> = e.downcast_ref();
+				if matches!(
+					se,
+					Some(Error::EvNamespaceMismatch(..)) | Some(Error::EvDatabaseMismatch(..))
+				) {
+					// This error is final, we won't retry. The namespace or the
+					// database has been recreated.
+					warn!("Event processing failed: {se:?}");
+					catch!(tx, tx.del(&k).await);
+				} else {
+					catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
 				}
 			}
 		}
-		Ok(count)
+		if let Err(e) = tx.commit().await {
+			// If the commit fails, requeue the event and commit that update.
+			tx.cancel().await?;
+			let tx = tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
+			catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
+			tx.commit().await?;
+		}
+		Ok(())
 	}
 
 	/// Update or remove the queued event based on the retry policy.
