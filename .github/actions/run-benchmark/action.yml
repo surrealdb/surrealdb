@@ -154,7 +154,7 @@ runs:
           CMD="$CMD --endpoint ${{ inputs.endpoint }}"
         fi
         
-        CMD="$CMD -s 1000000 -c 12 -t 48 -r -k ${{ inputs.key_type }} -n $RESULT_NAME"
+        CMD="$CMD -s 100000 -c 12 -t 48 -r -k ${{ inputs.key_type }} -n $RESULT_NAME"
         
         echo "${{ inputs.description }}" > "display_name_${RESULT_NAME}.txt"
         
