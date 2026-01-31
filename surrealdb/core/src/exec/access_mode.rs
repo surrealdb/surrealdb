@@ -6,6 +6,9 @@
 //!
 //! Example: `SELECT *, (UPSERT person) FROM person` is syntactically a SELECT
 //! but has `AccessMode::ReadWrite` because the subquery mutates data.
+//!
+//! Note: Some methods are currently only used by work-in-progress modules.
+#![allow(dead_code)]
 
 /// Access mode for a plan or expression.
 ///

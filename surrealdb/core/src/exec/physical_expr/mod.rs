@@ -1,8 +1,7 @@
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use async_trait::async_trait;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::ToSql;
 
 use crate::exec::{AccessMode, ExecutionContext};
 use crate::val::Value;
@@ -98,9 +97,7 @@ pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{ClosurePhysicalExpr, FunctionCallExpr};
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};
-pub(crate) use lookup::LookupExpr;
 pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
-pub(crate) use recurse::RecurseExpr;
 pub(crate) use subquery::ScalarSubquery;
 
 #[cfg(test)]

@@ -15,8 +15,14 @@ mod commit_plan;
 mod let_plan;
 mod use_plan;
 
+// These operators are work-in-progress and will be used once transaction
+// and USE statement support is added to the planner.
+#[allow(unused)]
 pub use begin_plan::BeginPlan;
+#[allow(unused)]
 pub use cancel_plan::CancelPlan;
+#[allow(unused)]
 pub use commit_plan::CommitPlan;
 pub use let_plan::LetPlan;
+#[allow(unused)]
 pub use use_plan::UsePlan;

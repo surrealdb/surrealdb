@@ -7,6 +7,9 @@
 //! - IF/ELSE branches
 //! - FUNCTION bodies
 //! - Transaction blocks
+//!
+//! Note: This module is work-in-progress infrastructure for future block execution.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::time::Duration;

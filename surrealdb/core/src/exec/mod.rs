@@ -123,6 +123,7 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	/// True for USE, LET, BEGIN, COMMIT, CANCEL operators.
 	/// When true, the executor will call `output_context()` after execution
 	/// to get the modified context for downstream statements.
+
 	fn mutates_context(&self) -> bool {
 		false
 	}
@@ -132,6 +133,7 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
+
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		Ok(input.clone())
 	}

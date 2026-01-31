@@ -2,6 +2,9 @@
 //!
 //! The Update operator modifies existing records, checking UPDATE permissions
 //! at execution time.
+//!
+//! Note: This module is work-in-progress for UPDATE statement support.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 

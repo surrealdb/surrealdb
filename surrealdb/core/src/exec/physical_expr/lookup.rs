@@ -1,3 +1,8 @@
+//! Lookup expressions for graph/reference traversal.
+//!
+//! Note: This module is work-in-progress for graph traversal expressions.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

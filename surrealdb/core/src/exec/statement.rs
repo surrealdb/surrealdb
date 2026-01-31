@@ -11,6 +11,9 @@
 //!
 //! Context-mutating statements (USE, LET, BEGIN, COMMIT, CANCEL) are all
 //! implemented as operators with `mutates_context() = true` and `output_context()`.
+//!
+//! Note: This module is work-in-progress infrastructure for DAG-based execution.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::time::Duration;

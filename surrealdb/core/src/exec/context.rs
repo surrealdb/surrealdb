@@ -7,6 +7,9 @@
 //!
 //! Operators declare their minimum required context level via `ExecutionPlan::required_context()`,
 //! and the executor validates requirements before execution begins.
+//!
+//! Note: Parts of this module are work-in-progress for the hierarchical context model.
+#![allow(dead_code)]
 
 use std::borrow::Cow;
 use std::collections::HashMap;

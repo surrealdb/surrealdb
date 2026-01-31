@@ -46,6 +46,7 @@ impl IdiomExpr {
 	}
 
 	/// Check if all parts are simple (can be evaluated synchronously).
+
 	pub fn is_simple(&self) -> bool {
 		self.parts.iter().all(|p| p.is_simple())
 	}

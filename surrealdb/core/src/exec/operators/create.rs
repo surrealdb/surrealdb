@@ -2,8 +2,9 @@
 //!
 //! The Create operator inserts new records into a table, checking CREATE
 //! permissions at execution time.
-
-use std::sync::Arc;
+//!
+//! Note: This module is work-in-progress for CREATE statement support.
+#![allow(dead_code)]
 
 use async_trait::async_trait;
 use futures::stream;

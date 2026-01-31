@@ -1,3 +1,8 @@
+//! Broadcast operator for sharing query results across multiple consumers.
+//!
+//! Note: This module is work-in-progress for query result caching/sharing.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

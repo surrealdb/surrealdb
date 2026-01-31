@@ -519,7 +519,7 @@ fn plan_select(
 		version,
 		timeout,
 		explain,
-		tempfiles,
+		tempfiles: _,
 	} = select;
 
 	// ONLY clause (unwraps single results)
@@ -1134,7 +1134,7 @@ fn convert_let_statement(
 	let crate::expr::statements::SetStatement {
 		name,
 		what,
-		kind,
+		kind: _,
 	} = let_stmt;
 
 	// Determine if the expression is a query or scalar

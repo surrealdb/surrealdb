@@ -4,6 +4,9 @@
 //! at execution time. Since SurrealQL allows DDL and DML interleaving within transactions,
 //! permissions must be resolved from the current transaction's schema view rather than
 //! at planning time.
+//!
+//! Note: Parts of this module are work-in-progress for permission checking.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 

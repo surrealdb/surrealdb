@@ -17,7 +17,7 @@ value = "[1, 2, 3]"
 value = "[{ name: 'B' }, { name: 'C' }]"
 
 [[test.results]]
-value = "[{ age: 2, id: person:b, knows: [[person:c]], name: 'B' }, { age: 2, id: person:c, knows: [], name: 'C' }]"
+value = "[{ age: 17, can_drive: false, id: person:a, knows: [[person:b]], name: 'A' }, { age: 18, can_drive: true, id: person:b, knows: [[person:c]], name: 'B' }]"
 
 [[test.results]]
 value = "{ age: person:b, id: person:a }"
@@ -25,9 +25,11 @@ value = "{ age: person:b, id: person:a }"
 */
 
 {
-    CREATE person:a SET name = 'A', age = 1;
-    CREATE person:b SET name = 'B', age = 2;
-    CREATE person:c SET name = 'C', age = 2;
+    DEFINE TABLE person SCHEMALESS;
+    DEFINE FIELD can_drive ON person TYPE bool COMPUTED age >= 18;
+    CREATE person:a SET name = 'A', age = 17;
+    CREATE person:b SET name = 'B', age = 18;
+    CREATE person:c SET name = 'C', age = 19;
     
     RELATE person:a->knows->person:b;
     RELATE person:b->knows->person:c;
@@ -39,6 +41,6 @@ SELECT name FROM person:a;
 SELECT * FROM [1, 2, 3];
 SELECT name FROM [{ name: 'A', age: 1 }, { name: 'B', age: 2 }, { name: 'C', age: 3 }] WHERE age > 1;
 
-SELECT *, ->knows->person AS knows FROM person WHERE age > 1;
+SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
 
 { id: person:a, age: person:b }.*;

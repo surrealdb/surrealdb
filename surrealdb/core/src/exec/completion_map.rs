@@ -2,6 +2,9 @@
 //!
 //! The CompletionMap tracks completion status and results for all statements
 //! in a script, enabling statements to wait for their dependencies.
+//!
+//! Note: This module is work-in-progress infrastructure for parallel execution.
+#![allow(dead_code)]
 
 use parking_lot::Mutex;
 use tokio::sync::watch;

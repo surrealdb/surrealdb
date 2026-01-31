@@ -48,7 +48,7 @@ impl PhysicalExpr for ScalarSubquery {
 }
 
 impl ToSql for ScalarSubquery {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "TODO: Not implemented")
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, _fmt, "TODO: Not implemented")
 	}
 }

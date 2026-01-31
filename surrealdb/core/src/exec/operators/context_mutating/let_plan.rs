@@ -87,6 +87,7 @@ impl OperatorPlan for LetPlan {
 }
 
 /// Collect all values from a stream into a Vec
+
 async fn collect_stream(stream: ValueBatchStream) -> anyhow::Result<Vec<Value>> {
 	let mut results = Vec::new();
 	futures::pin_mut!(stream);

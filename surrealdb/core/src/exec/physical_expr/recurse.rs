@@ -1,3 +1,8 @@
+//! Recursive traversal expressions.
+//!
+//! Note: This module is work-in-progress for recursive graph traversal.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

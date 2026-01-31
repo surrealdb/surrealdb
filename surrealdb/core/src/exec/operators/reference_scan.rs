@@ -9,7 +9,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
@@ -17,7 +16,7 @@ use crate::exec::{
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{RecordId, TableName, Value};
 
 /// Batch size for collecting references before yielding.
 const BATCH_SIZE: usize = 1000;

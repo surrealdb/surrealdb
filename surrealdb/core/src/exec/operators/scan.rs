@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use tokio::sync::OnceCell;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
@@ -22,7 +21,7 @@ use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::record;
-use crate::kvs::{KVKey, KVValue};
+use crate::kvs::{KVKey, KVValue, Key};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Batch size for collecting records before yielding.
@@ -96,227 +95,11 @@ impl OperatorPlan for Scan {
 		let version = self.version;
 		let ctx = ctx.clone();
 
-		// Use try_stream! for clean async generator syntax
 		let stream = async_stream::try_stream! {
-			let txn = Arc::clone(ctx.txn());
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
+			let mut executor = ScanExecutor::init(&ctx, source_expr, version, check_perms).await?;
 
-			// Evaluate table expression
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
-			})?;
-
-			// Determine scan target: either a table name or a record ID
-			let scan_target = match table_value {
-				Value::String(s) => ScanTarget::Table(TableName::from(s)),
-				Value::Table(t) => ScanTarget::Table(t),
-				Value::RecordId(rid) => ScanTarget::RecordId(rid),
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Table expression must evaluate to a string, table, or record ID, got: {:?}",
-						table_value
-					)))?
-				}
-			};
-
-			// Get table name for permission lookup
-			let table_name = scan_target.table_name();
-
-			// Resolve SELECT permission
-			let select_permission = if check_perms {
-				let table_def = txn
-					.get_tb_by_name(&ns.name, &db.name, &table_name)
-					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
-
-				let catalog_perm = match table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => Permission::None, // Schemaless: deny for record users
-				};
-
-				convert_permission_to_physical(&catalog_perm)
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}")))?
-			} else {
-				PhysicalPermission::Allow
-			};
-
-			// Early exit if denied - yield nothing
-			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
-			}
-
-			// Lazy-initialized field state for computed fields and field permissions
-			let field_state: Arc<OnceCell<FieldState>> = Arc::new(OnceCell::new());
-
-			// Execute based on scan target type
-			match scan_target {
-				ScanTarget::Table(ref table_name_ref) => {
-					// Full table scan
-					let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, table_name_ref)
-						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
-					let end = crate::key::record::suffix(ns.namespace_id, db.database_id, table_name_ref)
-						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
-
-					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
-					futures::pin_mut!(kv_stream);
-
-					let mut batch = Vec::with_capacity(BATCH_SIZE);
-
-					while let Some(result) = kv_stream.next().await {
-						let (key, val) = result
-							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-
-						let value = decode_record(&key, val)?;
-
-						let allowed = check_permission_for_value(&select_permission, &value, &ctx)
-							.await
-							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
-
-						if allowed {
-							batch.push(value);
-							if batch.len() >= BATCH_SIZE {
-								// Initialize field state on first batch
-								let state = field_state.get_or_try_init(|| {
-									build_field_state(&ctx, &table_name, check_perms)
-								}).await?;
-
-								// Process batch: computed fields and field permissions
-								process_batch(&ctx, state, check_perms, &mut batch).await?;
-
-								yield ValueBatch { values: std::mem::take(&mut batch) };
-								batch.reserve(BATCH_SIZE);
-							}
-						}
-					}
-
-					if !batch.is_empty() {
-						// Initialize field state on first batch
-						let state = field_state.get_or_try_init(|| {
-							build_field_state(&ctx, &table_name, check_perms)
-						}).await?;
-
-						// Process batch: computed fields and field permissions
-						process_batch(&ctx, state, check_perms, &mut batch).await?;
-
-						yield ValueBatch { values: batch };
-					}
-				}
-				ScanTarget::RecordId(ref rid) => {
-					// Check if this is a range query or a point lookup
-					match &rid.key {
-						RecordIdKey::Range(range) => {
-							// Range scan within the table - prepare key range like processor.rs does
-							let beg = match &range.start {
-								Bound::Unbounded => record::prefix(ns.namespace_id, db.database_id, &rid.table)
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?,
-								Bound::Included(v) => record::new(ns.namespace_id, db.database_id, &rid.table, v)
-									.encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}")))?,
-								Bound::Excluded(v) => {
-									let mut key = record::new(ns.namespace_id, db.database_id, &rid.table, v)
-										.encode_key()
-										.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}")))?;
-									key.push(0x00);
-									key
-								}
-							};
-							let end = match &range.end {
-								Bound::Unbounded => record::suffix(ns.namespace_id, db.database_id, &rid.table)
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?,
-								Bound::Excluded(v) => record::new(ns.namespace_id, db.database_id, &rid.table, v)
-									.encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?,
-								Bound::Included(v) => {
-									let mut key = record::new(ns.namespace_id, db.database_id, &rid.table, v)
-										.encode_key()
-										.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?;
-									key.push(0x00);
-									key
-								}
-							};
-
-							let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
-							futures::pin_mut!(kv_stream);
-
-							let mut batch = Vec::with_capacity(BATCH_SIZE);
-
-							while let Some(result) = kv_stream.next().await {
-								let (key, val) = result
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-
-								let value = decode_record(&key, val)?;
-
-								let allowed = check_permission_for_value(&select_permission, &value, &ctx)
-									.await
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
-
-								if allowed {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										// Initialize field state on first batch
-										let state = field_state.get_or_try_init(|| {
-											build_field_state(&ctx, &table_name, check_perms)
-										}).await?;
-
-										// Process batch: computed fields and field permissions
-										process_batch(&ctx, state, check_perms, &mut batch).await?;
-
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
-								}
-							}
-
-							if !batch.is_empty() {
-								// Initialize field state on first batch
-								let state = field_state.get_or_try_init(|| {
-									build_field_state(&ctx, &table_name, check_perms)
-								}).await?;
-
-								// Process batch: computed fields and field permissions
-								process_batch(&ctx, state, check_perms, &mut batch).await?;
-
-								yield ValueBatch { values: batch };
-							}
-						}
-						_ => {
-							// Point lookup for a single record
-							let record = txn
-								.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
-								.await
-								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
-
-							// Check if record exists
-							if record.data.as_ref().is_none() {
-								return;
-							}
-
-							// Inject the id field into the document
-							let mut value = record.data.as_ref().clone();
-							value.def(&rid);
-
-							// Check permission for this record
-							let allowed = check_permission_for_value(&select_permission, &value, &ctx)
-								.await
-								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
-
-							if allowed {
-								// Initialize field state
-								let state = field_state.get_or_try_init(|| {
-									build_field_state(&ctx, &table_name, check_perms)
-								}).await?;
-
-								// Process the single value
-								let mut batch = vec![value];
-								process_batch(&ctx, state, check_perms, &mut batch).await?;
-
-								yield ValueBatch { values: batch };
-							}
-						}
-					}
-				}
+			while let Some(batch) = executor.next_batch().await? {
+				yield batch;
 			}
 		};
 
@@ -362,6 +145,364 @@ struct ComputedFieldDef {
 	expr: Arc<dyn PhysicalExpr>,
 	/// Optional type coercion
 	kind: Option<crate::expr::Kind>,
+}
+
+/// The active scan mode with its associated state
+enum ScanMode {
+	/// KV stream iteration (used for both table and range scans)
+	/// Stores the key range (begin, end)
+	KvStream {
+		beg: Key,
+		end: Key,
+	},
+	/// Single record point lookup
+	PointLookup {
+		rid: RecordId,
+		done: bool,
+	},
+	/// Scan complete
+	Done,
+}
+
+/// Executes a scan operation, managing state across batch yields.
+struct ScanExecutor {
+	ctx: ExecutionContext,
+	table_name: TableName,
+	select_permission: PhysicalPermission,
+	check_perms: bool,
+	version: Option<u64>,
+	field_state: Option<FieldState>,
+	batch: Vec<Value>,
+	mode: ScanMode,
+}
+
+impl ScanExecutor {
+	/// Initialize a new ScanExecutor by evaluating the source expression,
+	/// resolving permissions, and creating the appropriate scan mode.
+	async fn init(
+		ctx: &ExecutionContext,
+		source_expr: Arc<dyn PhysicalExpr>,
+		version: Option<u64>,
+		check_perms: bool,
+	) -> Result<Self, ControlFlow> {
+		let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+		let txn = Arc::clone(ctx.txn());
+		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+		let db = Arc::clone(&db_ctx.db);
+
+		// Evaluate table expression
+		let eval_ctx = EvalContext::from_exec_ctx(ctx);
+		let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
+			ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
+		})?;
+
+		// Determine scan target: either a table name or a record ID
+		let scan_target = match table_value {
+			Value::String(s) => ScanTarget::Table(TableName::from(s)),
+			Value::Table(t) => ScanTarget::Table(t),
+			Value::RecordId(rid) => ScanTarget::RecordId(rid),
+			_ => {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"Table expression must evaluate to a string, table, or record ID, got: {:?}",
+					table_value
+				)));
+			}
+		};
+
+		// Get table name for permission lookup
+		let table_name = scan_target.table_name();
+
+		// Resolve SELECT permission
+		let select_permission = if check_perms {
+			let table_def = txn
+				.get_tb_by_name(&ns.name, &db.name, &table_name)
+				.await
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
+
+			let catalog_perm = match table_def {
+				Some(def) => def.permissions.select.clone(),
+				None => Permission::None, // Schemaless: deny for record users
+			};
+
+			convert_permission_to_physical(&catalog_perm).map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}"))
+			})?
+		} else {
+			PhysicalPermission::Allow
+		};
+
+		// Early exit if denied - mode is Done
+		if matches!(select_permission, PhysicalPermission::Deny) {
+			return Ok(Self {
+				ctx: ctx.clone(),
+				table_name,
+				select_permission,
+				check_perms,
+				version,
+				field_state: None,
+				batch: Vec::new(),
+				mode: ScanMode::Done,
+			});
+		}
+
+		// Create the appropriate scan mode
+		let mode = match scan_target {
+			ScanTarget::Table(table_name_ref) => {
+				// Full table scan - store the key range
+				let beg = record::prefix(ns.namespace_id, db.database_id, &table_name_ref)
+					.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}"))
+					})?;
+				let end = record::suffix(ns.namespace_id, db.database_id, &table_name_ref)
+					.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}"))
+					})?;
+
+				ScanMode::KvStream {
+					beg,
+					end,
+				}
+			}
+			ScanTarget::RecordId(rid) => {
+				match &rid.key {
+					RecordIdKey::Range(range) => {
+						// Range scan within the table - store the key range
+						let beg = match &range.start {
+							Bound::Unbounded => {
+								record::prefix(ns.namespace_id, db.database_id, &rid.table)
+									.map_err(|e| {
+										ControlFlow::Err(anyhow::anyhow!(
+											"Failed to create prefix key: {e}"
+										))
+									})?
+							}
+							Bound::Included(v) => {
+								record::new(ns.namespace_id, db.database_id, &rid.table, v)
+									.encode_key()
+									.map_err(|e| {
+										ControlFlow::Err(anyhow::anyhow!(
+											"Failed to create begin key: {e}"
+										))
+									})?
+							}
+							Bound::Excluded(v) => {
+								let mut key =
+									record::new(ns.namespace_id, db.database_id, &rid.table, v)
+										.encode_key()
+										.map_err(|e| {
+											ControlFlow::Err(anyhow::anyhow!(
+												"Failed to create begin key: {e}"
+											))
+										})?;
+								key.push(0x00);
+								key
+							}
+						};
+						let end = match &range.end {
+							Bound::Unbounded => {
+								record::suffix(ns.namespace_id, db.database_id, &rid.table)
+									.map_err(|e| {
+										ControlFlow::Err(anyhow::anyhow!(
+											"Failed to create suffix key: {e}"
+										))
+									})?
+							}
+							Bound::Excluded(v) => {
+								record::new(ns.namespace_id, db.database_id, &rid.table, v)
+									.encode_key()
+									.map_err(|e| {
+										ControlFlow::Err(anyhow::anyhow!(
+											"Failed to create end key: {e}"
+										))
+									})?
+							}
+							Bound::Included(v) => {
+								let mut key =
+									record::new(ns.namespace_id, db.database_id, &rid.table, v)
+										.encode_key()
+										.map_err(|e| {
+											ControlFlow::Err(anyhow::anyhow!(
+												"Failed to create end key: {e}"
+											))
+										})?;
+								key.push(0x00);
+								key
+							}
+						};
+
+						ScanMode::KvStream {
+							beg,
+							end,
+						}
+					}
+					_ => {
+						// Point lookup for a single record
+						ScanMode::PointLookup {
+							rid,
+							done: false,
+						}
+					}
+				}
+			}
+		};
+
+		Ok(Self {
+			ctx: ctx.clone(),
+			table_name,
+			select_permission,
+			check_perms,
+			version,
+			field_state: None,
+			batch: Vec::with_capacity(BATCH_SIZE),
+			mode,
+		})
+	}
+
+	/// Get the next batch of values, or None if the scan is complete.
+	async fn next_batch(&mut self) -> Result<Option<ValueBatch>, ControlFlow> {
+		// Extract data from mode before processing to avoid borrow conflicts
+		let mode_info = match &self.mode {
+			ScanMode::KvStream {
+				beg,
+				end,
+			} => Some((beg.clone(), end.clone())),
+			ScanMode::PointLookup {
+				rid: _,
+				done,
+			} => {
+				if *done {
+					return Ok(None);
+				}
+				// Will process point lookup below
+				None
+			}
+			ScanMode::Done => return Ok(None),
+		};
+
+		if let Some((beg, end)) = mode_info {
+			// KV stream mode
+			let txn = Arc::clone(self.ctx.txn());
+			let kv_stream =
+				txn.stream_keys_vals(beg..end, self.version, None, ScanDirection::Forward);
+			futures::pin_mut!(kv_stream);
+
+			while let Some(result) = kv_stream.next().await {
+				let (key, val) = result
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+
+				let value = decode_record(&key, val)?;
+
+				// Check permission and add to batch
+				if self.check_and_add_to_batch(value).await? {
+					// Batch is full, return it
+					return self.flush_batch().await.map(Some);
+				}
+			}
+
+			// Stream exhausted - flush remaining batch and mark as done
+			self.mode = ScanMode::Done;
+			if self.batch.is_empty() {
+				Ok(None)
+			} else {
+				self.flush_batch().await.map(Some)
+			}
+		} else {
+			// Point lookup mode
+			let rid = if let ScanMode::PointLookup {
+				rid,
+				..
+			} = &self.mode
+			{
+				rid.clone()
+			} else {
+				unreachable!()
+			};
+			self.point_lookup(rid).await
+		}
+	}
+
+	/// Perform a point lookup for a single record.
+	async fn point_lookup(&mut self, rid: RecordId) -> Result<Option<ValueBatch>, ControlFlow> {
+		// Mark as done immediately
+		if let ScanMode::PointLookup {
+			done,
+			..
+		} = &mut self.mode
+		{
+			*done = true;
+		}
+
+		let db_ctx = self.ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+		let txn = self.ctx.txn();
+
+		let record = txn
+			.get_record(
+				db_ctx.ns_ctx.ns.namespace_id,
+				db_ctx.db.database_id,
+				&rid.table,
+				&rid.key,
+				self.version,
+			)
+			.await
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
+
+		// Check if record exists
+		if record.data.as_ref().is_none() {
+			return Ok(None);
+		}
+
+		// Inject the id field into the document
+		let mut value = record.data.as_ref().clone();
+		value.def(&rid);
+
+		// Check permission and add to batch
+		self.check_and_add_to_batch(value).await?;
+
+		// Flush the single-item batch
+		if self.batch.is_empty() {
+			Ok(None)
+		} else {
+			self.flush_batch().await.map(Some)
+		}
+	}
+
+	/// Check permission for a value and add it to the batch if allowed.
+	/// Returns true if the batch is now full and should be flushed.
+	async fn check_and_add_to_batch(&mut self, value: Value) -> Result<bool, ControlFlow> {
+		let allowed = check_permission_for_value(&self.select_permission, &value, &self.ctx)
+			.await
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
+
+		if allowed {
+			self.batch.push(value);
+			Ok(self.batch.len() >= BATCH_SIZE)
+		} else {
+			Ok(false)
+		}
+	}
+
+	/// Flush the current batch: process computed fields and field permissions,
+	/// then return the batch as a ValueBatch.
+	async fn flush_batch(&mut self) -> Result<ValueBatch, ControlFlow> {
+		// Lazy-initialize field state on first batch
+		if self.field_state.is_none() {
+			let state = build_field_state(&self.ctx, &self.table_name, self.check_perms).await?;
+			self.field_state = Some(state);
+		}
+
+		// Process batch: computed fields and field permissions
+		if let Some(ref state) = self.field_state {
+			process_batch(&self.ctx, state, self.check_perms, &mut self.batch).await?;
+		}
+
+		// Take the batch and reserve capacity for the next one
+		let batch = std::mem::take(&mut self.batch);
+		self.batch.reserve(BATCH_SIZE);
+
+		Ok(ValueBatch {
+			values: batch,
+		})
+	}
 }
 
 /// Fetch field definitions and build the cached field state.
@@ -460,7 +601,7 @@ async fn compute_fields_for_value(
 		})?;
 
 		// Apply type coercion if specified
-		let final_value = if let Some(ref kind) = cf.kind {
+		let final_value = if let Some(kind) = &cf.kind {
 			computed_value.coerce_to_kind(kind).map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!(
 					"Failed to coerce computed field '{}': {}",
@@ -493,44 +634,27 @@ async fn filter_fields_by_permission(
 		return Ok(());
 	}
 
-	// Clone the value for permission checking, as we need immutable access
-	// while also potentially mutating the object
-	let value_clone = value.clone();
-
-	let Value::Object(obj) = value else {
-		return Ok(());
-	};
-
 	// Collect fields to check
-	let field_names: Vec<String> = obj.keys().cloned().collect();
-
-	// Collect fields to remove (can't modify during iteration)
-	let mut fields_to_remove = Vec::new();
+	let field_names: Vec<String> = {
+		let Value::Object(obj) = &*value else {
+			return Ok(());
+		};
+		obj.keys().cloned().collect()
+	};
 
 	for field_name in field_names {
 		// Check if there's a permission for this field
 		if let Some(perm) = state.field_permissions.get(&field_name) {
-			let allowed = match perm {
-				PhysicalPermission::Allow => true,
-				PhysicalPermission::Deny => false,
-				PhysicalPermission::Conditional(_) => {
-					// Evaluate the conditional permission using the cloned value
-					check_permission_for_value(perm, &value_clone, ctx).await.map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to check field permission: {}", e))
-					})?
-				}
-			};
+			let allowed = check_permission_for_value(perm, &*value, ctx).await.map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!("Failed to check field permission: {}", e))
+			})?;
 
 			if !allowed {
-				fields_to_remove.push(field_name);
+				if let Value::Object(obj) = value {
+					obj.remove(&field_name);
+				}
 			}
 		}
-		// Fields without explicit permissions are allowed by default
-	}
-
-	// Remove denied fields
-	for field_name in fields_to_remove {
-		obj.remove(&field_name);
 	}
 
 	Ok(())

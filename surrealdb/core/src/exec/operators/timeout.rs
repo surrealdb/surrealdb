@@ -5,8 +5,7 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, PhysicalExpr, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Duration;

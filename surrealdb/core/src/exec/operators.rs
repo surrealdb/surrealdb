@@ -21,10 +21,7 @@ mod union;
 mod update;
 
 pub use aggregate::{Aggregate, AggregateField, AggregateType};
-pub use broadcast::BroadcastSource;
-pub use context_mutating::{BeginPlan, CancelPlan, CommitPlan, LetPlan, UsePlan};
-pub use create::{ContentSource, Create};
-pub use delete::Delete;
+pub use context_mutating::LetPlan;
 pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
@@ -40,4 +37,3 @@ pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;
 pub use union::Union;
-pub use update::{SetField, Update};

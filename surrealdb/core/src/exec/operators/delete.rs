@@ -2,6 +2,9 @@
 //!
 //! The Delete operator removes existing records, checking DELETE permissions
 //! at execution time.
+//!
+//! Note: This module is work-in-progress for DELETE statement support.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
