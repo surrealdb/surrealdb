@@ -1,27 +1,22 @@
-//! Project operator for field selection with permissions.
+//! Project operator for field selection and transformation.
 //!
-//! The Project operator selects and transforms fields from input records,
-//! applying field-level permissions at execution time.
+//! The Project operator selects and transforms fields from input records.
+//! It is a pure transformation operator that evaluates expressions and builds
+//! output objects. Permissions are handled in Scan.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use tokio::sync::Mutex;
 
-use crate::catalog::providers::TableProvider;
 use crate::err::Error;
-use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
-	should_check_perms,
-};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, OperatorPlan,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
-use crate::iam::Action;
-use crate::val::{Object, TableName, Value};
+use crate::expr::idiom::Idiom;
+use crate::expr::part::Part;
+use crate::val::{Object, Value};
 
 /// Field selection specification.
 #[derive(Debug, Clone)]
@@ -30,22 +25,20 @@ pub struct FieldSelection {
 	pub output_name: String,
 	/// The expression to evaluate for this field's value
 	pub expr: Arc<dyn PhysicalExpr>,
-	/// If this selects a table field (for permission lookup), the field name
-	pub field_name: Option<String>,
 }
 
 /// Project operator - selects and transforms fields from input records.
 ///
-/// This operator applies field-level permissions at execution time by resolving
-/// field definitions from the current transaction's schema view.
+/// This is a pure transformation operator that evaluates expressions and builds
+/// output objects. All permission checking occurs in the Scan operator.
 #[derive(Debug, Clone)]
 pub struct Project {
 	/// The input plan to project from
 	pub input: Arc<dyn OperatorPlan>,
-	/// The table name (for field permission lookup)
-	pub table: TableName,
 	/// The fields to select/project
 	pub fields: Vec<FieldSelection>,
+	/// Fields to omit from output (for SELECT * OMIT)
+	pub omit: Vec<Idiom>,
 }
 
 #[async_trait]
@@ -55,9 +48,8 @@ impl OperatorPlan for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Project needs Database for field permission lookup, but also
-		// inherits child requirements (take the maximum)
-		ContextLevel::Database.max(self.input.required_context())
+		// Project is a pure transformation operator - inherits child requirements
+		self.input.required_context()
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -73,185 +65,133 @@ impl OperatorPlan for Project {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		// Get database context
-		let db_ctx = ctx.database()?;
-
-		// Check if we need to enforce permissions
-		let check_perms = should_check_perms(db_ctx, Action::View)?;
-
-		// Clone what we need for the async block
 		let input_stream = self.input.execute(ctx)?;
-		let table = self.table.clone();
 		let fields = self.fields.clone();
-		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-		let db = Arc::clone(&db_ctx.db);
-		let txn = db_ctx.ns_ctx.root.txn.clone();
-		let params = db_ctx.ns_ctx.root.params.clone();
-		let auth = db_ctx.ns_ctx.root.auth.clone();
-		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
+		let omit = self.omit.clone();
+		let ctx = ctx.clone();
 
-		// Use Arc<Mutex> for shared state across async iterations
-		let field_permissions: Arc<Mutex<Option<HashMap<String, PhysicalPermission>>>> =
-			Arc::new(Mutex::new(None));
-
-		// Create a stream that projects fields with permission checking
-		let projected = input_stream.filter_map(move |batch_result| {
-			let table = table.clone();
+		// Create a stream that projects fields
+		let projected = input_stream.then(move |batch_result| {
 			let fields = fields.clone();
-			let ns = ns.clone();
-			let db = db.clone();
-			let txn = txn.clone();
-			let params = params.clone();
-			let auth = auth.clone();
-			let field_permissions = field_permissions.clone();
+			let omit = omit.clone();
+			let ctx = ctx.clone();
 
 			async move {
 				use crate::expr::ControlFlow;
 
-				// Handle errors in the input batch
-				let batch = match batch_result {
-					Ok(b) => b,
-					Err(e) => return Some(Err(e)),
-				};
-
-				// Initialize field permissions on first batch
-				{
-					let mut perms_guard = field_permissions.lock().await;
-					if perms_guard.is_none() && check_perms {
-						// Get all field definitions for this table
-						let field_defs = match txn
-							.all_tb_fields(ns.namespace_id, db.database_id, &table, None)
-							.await
-						{
-							Ok(defs) => defs,
-							Err(e) => {
-								return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-									"Failed to get field definitions: {}",
-									e
-								))));
-							}
-						};
-
-						// Build permission map
-						let mut perm_map = HashMap::new();
-						for field_def in field_defs.iter() {
-							let field_name = field_def.name.to_raw_string();
-							let physical_perm = match convert_permission_to_physical(
-								&field_def.select_permission,
-							) {
-								Ok(perm) => perm,
-								Err(e) => {
-									return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-										"Failed to convert field permission: {}",
-										e
-									))));
-								}
-							};
-							perm_map.insert(field_name, physical_perm);
-						}
-						*perms_guard = Some(perm_map);
-					}
-				}
-
-				let perms_guard = field_permissions.lock().await;
-				let perms_map = perms_guard.as_ref();
-
+				let batch = batch_result?;
 				let mut projected_values = Vec::with_capacity(batch.values.len());
 
-				for value in batch.values {
-					// Build execution context for expression evaluation and permission checks
-					let exec_ctx = ExecutionContext::Database(crate::exec::DatabaseContext {
-						ns_ctx: crate::exec::NamespaceContext {
-							root: crate::exec::RootContext {
-								datastore: None,
-								params: params.clone(),
-								cancellation: tokio_util::sync::CancellationToken::new(),
-								auth: auth.clone(),
-								auth_enabled,
-								txn: txn.clone(),
-							},
-							ns: ns.clone(),
-						},
-						db: db.clone(),
-					});
-					let eval_ctx = EvalContext::from_exec_ctx(&exec_ctx).with_value(&value);
+				for mut value in batch.values {
+					// Build evaluation context with current value
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
 
 					// Build the projected object
 					let mut obj = Object::default();
 
 					for field in &fields {
-						// Check field permission if we're checking perms and this is a table field
-						let allowed = if check_perms {
-							if let Some(field_name) = &field.field_name {
-								match perms_map.and_then(|m| m.get(field_name)) {
-									Some(PhysicalPermission::Deny) => false,
-									Some(PhysicalPermission::Allow) => true,
-									Some(PhysicalPermission::Conditional(_perm)) => {
-										// Use the execution context we already built for permission
-										// evaluation
-										match check_permission_for_value(
-											perms_map.and_then(|m| m.get(field_name)).unwrap(),
-											&value,
-											&exec_ctx,
-										)
-										.await
-										{
-											Ok(allowed) => allowed,
-											Err(e) => {
-												return Some(Err(ControlFlow::Err(
-													anyhow::anyhow!(
-														"Failed to check field permission: {}",
-														e
-													),
-												)));
-											}
-										}
-									}
-									None => {
-										// No explicit field definition - allow by default
-										true
-									}
-								}
-							} else {
-								// Not a table field (e.g., computed expression) - allow
-								true
-							}
-						} else {
-							// Not checking permissions
-							true
-						};
-
-						if allowed {
-							// Evaluate the field expression
-							match field.expr.evaluate(eval_ctx.clone()).await {
-								Ok(field_value) => {
-									obj.insert(field.output_name.clone(), field_value);
-								}
-								Err(e) => {
-									return Some(Err(ControlFlow::Err(anyhow::anyhow!(
-										"Failed to evaluate field expression: {}",
-										e
-									))));
-								}
-							}
-						}
-						// If not allowed, we simply don't include the field in the output
+						// Evaluate the field expression
+						let field_value = field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!(
+								"Failed to evaluate field expression: {}",
+								e
+							))
+						})?;
+						obj.insert(field.output_name.clone(), field_value);
 					}
 
-					projected_values.push(Value::Object(obj));
+					let mut output_value = Value::Object(obj);
+
+					// Apply omit fields if present
+					for field in &omit {
+						omit_field_sync(&mut output_value, field);
+					}
+
+					projected_values.push(output_value);
 				}
 
-				if projected_values.is_empty() {
-					// Skip empty batches
-					None
-				} else {
-					Some(Ok(ValueBatch {
-						values: projected_values,
-					}))
-				}
+				Ok(ValueBatch {
+					values: projected_values,
+				})
 			}
 		});
 
 		Ok(Box::pin(projected))
+	}
+}
+
+/// Synchronously remove a field from a value by idiom path.
+fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
+	// For simple single-part idioms, directly remove from object
+	if idiom.len() == 1 {
+		if let Some(Part::Field(field_name)) = idiom.first() {
+			if let Value::Object(obj) = value {
+				obj.remove(&**field_name);
+			}
+		}
+	} else {
+		// For nested paths, traverse and remove
+		omit_nested_field(value, idiom, 0);
+	}
+}
+
+/// Recursively traverse and remove a nested field.
+fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
+	if depth >= idiom.len() {
+		return;
+	}
+
+	let Some(part) = idiom.get(depth) else {
+		return;
+	};
+
+	match part {
+		Part::Field(field_name) => {
+			if let Value::Object(obj) = value {
+				if depth == idiom.len() - 1 {
+					// Last part - remove the field
+					obj.remove(&**field_name);
+				} else {
+					// Not last part - recurse into the field
+					if let Some(nested) = obj.get_mut(&**field_name) {
+						omit_nested_field(nested, idiom, depth + 1);
+					}
+				}
+			}
+		}
+		Part::All => {
+			// Apply to all elements
+			match value {
+				Value::Object(obj) => {
+					for (_, v) in obj.iter_mut() {
+						omit_nested_field(v, idiom, depth + 1);
+					}
+				}
+				Value::Array(arr) => {
+					for v in arr.iter_mut() {
+						omit_nested_field(v, idiom, depth + 1);
+					}
+				}
+				_ => {}
+			}
+		}
+		Part::Value(expr) => {
+			// Handle array index access: [0], [1], etc.
+			if let crate::expr::Expr::Literal(crate::expr::Literal::Integer(idx)) = expr {
+				if let Value::Array(arr) = value {
+					if let Some(nested) = arr.get_mut(*idx as usize) {
+						if depth == idiom.len() - 1 {
+							// Can't "remove" an array element by index, set to None
+							*nested = Value::None;
+						} else {
+							omit_nested_field(nested, idiom, depth + 1);
+						}
+					}
+				}
+			}
+		}
+		_ => {
+			// Other part types are not supported for omit
+		}
 	}
 }

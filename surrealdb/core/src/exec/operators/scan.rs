@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tokio::sync::OnceCell;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
@@ -11,6 +13,7 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
+use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
 	ValueBatch, ValueBatchStream,
@@ -143,13 +146,16 @@ impl OperatorPlan for Scan {
 				return;
 			}
 
+			// Lazy-initialized field state for computed fields and field permissions
+			let field_state: Arc<OnceCell<FieldState>> = Arc::new(OnceCell::new());
+
 			// Execute based on scan target type
 			match scan_target {
-				ScanTarget::Table(table_name) => {
+				ScanTarget::Table(ref table_name_ref) => {
 					// Full table scan
-					let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, &table_name)
+					let beg = crate::key::record::prefix(ns.namespace_id, db.database_id, table_name_ref)
 						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
-					let end = crate::key::record::suffix(ns.namespace_id, db.database_id, &table_name)
+					let end = crate::key::record::suffix(ns.namespace_id, db.database_id, table_name_ref)
 						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
 
 					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
@@ -170,6 +176,14 @@ impl OperatorPlan for Scan {
 						if allowed {
 							batch.push(value);
 							if batch.len() >= BATCH_SIZE {
+								// Initialize field state on first batch
+								let state = field_state.get_or_try_init(|| {
+									build_field_state(&ctx, &table_name, check_perms)
+								}).await?;
+
+								// Process batch: computed fields and field permissions
+								process_batch(&ctx, state, check_perms, &mut batch).await?;
+
 								yield ValueBatch { values: std::mem::take(&mut batch) };
 								batch.reserve(BATCH_SIZE);
 							}
@@ -177,10 +191,18 @@ impl OperatorPlan for Scan {
 					}
 
 					if !batch.is_empty() {
+						// Initialize field state on first batch
+						let state = field_state.get_or_try_init(|| {
+							build_field_state(&ctx, &table_name, check_perms)
+						}).await?;
+
+						// Process batch: computed fields and field permissions
+						process_batch(&ctx, state, check_perms, &mut batch).await?;
+
 						yield ValueBatch { values: batch };
 					}
 				}
-				ScanTarget::RecordId(rid) => {
+				ScanTarget::RecordId(ref rid) => {
 					// Check if this is a range query or a point lookup
 					match &rid.key {
 						RecordIdKey::Range(range) => {
@@ -232,6 +254,14 @@ impl OperatorPlan for Scan {
 								if allowed {
 									batch.push(value);
 									if batch.len() >= BATCH_SIZE {
+										// Initialize field state on first batch
+										let state = field_state.get_or_try_init(|| {
+											build_field_state(&ctx, &table_name, check_perms)
+										}).await?;
+
+										// Process batch: computed fields and field permissions
+										process_batch(&ctx, state, check_perms, &mut batch).await?;
+
 										yield ValueBatch { values: std::mem::take(&mut batch) };
 										batch.reserve(BATCH_SIZE);
 									}
@@ -239,6 +269,14 @@ impl OperatorPlan for Scan {
 							}
 
 							if !batch.is_empty() {
+								// Initialize field state on first batch
+								let state = field_state.get_or_try_init(|| {
+									build_field_state(&ctx, &table_name, check_perms)
+								}).await?;
+
+								// Process batch: computed fields and field permissions
+								process_batch(&ctx, state, check_perms, &mut batch).await?;
+
 								yield ValueBatch { values: batch };
 							}
 						}
@@ -264,7 +302,16 @@ impl OperatorPlan for Scan {
 								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
 
 							if allowed {
-								yield ValueBatch { values: vec![value] };
+								// Initialize field state
+								let state = field_state.get_or_try_init(|| {
+									build_field_state(&ctx, &table_name, check_perms)
+								}).await?;
+
+								// Process the single value
+								let mut batch = vec![value];
+								process_batch(&ctx, state, check_perms, &mut batch).await?;
+
+								yield ValueBatch { values: batch };
 							}
 						}
 					}
@@ -293,4 +340,199 @@ fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 	record.data.to_mut().def(&rid);
 
 	Ok(record.data.as_ref().clone())
+}
+
+/// Cached state for field processing (computed fields and permissions).
+/// Initialized on first batch and reused for subsequent batches.
+#[derive(Debug)]
+struct FieldState {
+	/// Computed field definitions converted to physical expressions
+	computed_fields: Vec<ComputedFieldDef>,
+	/// Field-level permissions (field name -> permission)
+	field_permissions: HashMap<String, PhysicalPermission>,
+}
+
+/// A computed field definition ready for evaluation.
+#[derive(Debug)]
+struct ComputedFieldDef {
+	/// The field name where to store the result
+	field_name: String,
+	/// The physical expression to evaluate
+	expr: Arc<dyn PhysicalExpr>,
+	/// Optional type coercion
+	kind: Option<crate::expr::Kind>,
+}
+
+/// Fetch field definitions and build the cached field state.
+async fn build_field_state(
+	ctx: &ExecutionContext,
+	table_name: &TableName,
+	check_perms: bool,
+) -> Result<FieldState, ControlFlow> {
+	let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+	let txn = ctx.txn();
+
+	let field_defs = txn
+		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table_name, None)
+		.await
+		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get field definitions: {}", e)))?;
+
+	// Build computed fields
+	let mut computed_fields = Vec::new();
+	for fd in field_defs.iter() {
+		if let Some(ref expr) = fd.computed {
+			let physical_expr = expr_to_physical_expr(expr.clone()).map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!(
+					"Computed field '{}' has unsupported expression: {}",
+					fd.name.to_raw_string(),
+					e
+				))
+			})?;
+
+			computed_fields.push(ComputedFieldDef {
+				field_name: fd.name.to_raw_string(),
+				expr: physical_expr,
+				kind: fd.field_kind.clone(),
+			});
+		}
+	}
+
+	// Build field permissions
+	let mut field_permissions = HashMap::new();
+	if check_perms {
+		for fd in field_defs.iter() {
+			let field_name = fd.name.to_raw_string();
+			let physical_perm =
+				convert_permission_to_physical(&fd.select_permission).map_err(|e| {
+					ControlFlow::Err(anyhow::anyhow!("Failed to convert field permission: {}", e))
+				})?;
+			field_permissions.insert(field_name, physical_perm);
+		}
+	}
+
+	Ok(FieldState {
+		computed_fields,
+		field_permissions,
+	})
+}
+
+/// Process a batch of values: evaluate computed fields and apply field-level permissions.
+async fn process_batch(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	check_perms: bool,
+	values: &mut Vec<Value>,
+) -> Result<(), ControlFlow> {
+	for value in values.iter_mut() {
+		// Evaluate computed fields
+		compute_fields_for_value(ctx, state, value).await?;
+
+		// Apply field-level permissions
+		if check_perms {
+			filter_fields_by_permission(ctx, state, value).await?;
+		}
+	}
+
+	Ok(())
+}
+
+/// Compute all computed fields for a single value.
+async fn compute_fields_for_value(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+) -> Result<(), ControlFlow> {
+	if state.computed_fields.is_empty() {
+		return Ok(());
+	}
+
+	let eval_ctx = EvalContext::from_exec_ctx(ctx);
+
+	for cf in &state.computed_fields {
+		// Evaluate with the current value as context
+		let row_ctx = eval_ctx.with_value(value);
+		let computed_value = cf.expr.evaluate(row_ctx).await.map_err(|e| {
+			ControlFlow::Err(anyhow::anyhow!("Failed to compute field '{}': {}", cf.field_name, e))
+		})?;
+
+		// Apply type coercion if specified
+		let final_value = if let Some(ref kind) = cf.kind {
+			computed_value.coerce_to_kind(kind).map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!(
+					"Failed to coerce computed field '{}': {}",
+					cf.field_name,
+					e
+				))
+			})?
+		} else {
+			computed_value
+		};
+
+		// Inject the computed value into the document
+		if let Value::Object(obj) = value {
+			obj.insert(cf.field_name.clone(), final_value);
+		} else {
+			return Err(ControlFlow::Err(anyhow::anyhow!("Value is not an object: {:?}", value)));
+		}
+	}
+
+	Ok(())
+}
+
+/// Filter fields from a value based on field-level permissions.
+async fn filter_fields_by_permission(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+) -> Result<(), ControlFlow> {
+	if state.field_permissions.is_empty() {
+		return Ok(());
+	}
+
+	// Clone the value for permission checking, as we need immutable access
+	// while also potentially mutating the object
+	let value_clone = value.clone();
+
+	let Value::Object(obj) = value else {
+		return Ok(());
+	};
+
+	// Collect fields to check
+	let field_names: Vec<String> = obj.keys().cloned().collect();
+
+	// Collect fields to remove (can't modify during iteration)
+	let mut fields_to_remove = Vec::new();
+
+	for field_name in field_names {
+		// Check if there's a permission for this field
+		if let Some(perm) = state.field_permissions.get(&field_name) {
+			let allowed = match perm {
+				PhysicalPermission::Allow => true,
+				PhysicalPermission::Deny => false,
+				PhysicalPermission::Conditional(_) => {
+					// Evaluate the conditional permission using the cloned value
+					check_permission_for_value(perm, &value_clone, ctx)
+						.await
+						.map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!(
+								"Failed to check field permission: {}",
+								e
+							))
+						})?
+				}
+			};
+
+			if !allowed {
+				fields_to_remove.push(field_name);
+			}
+		}
+		// Fields without explicit permissions are allowed by default
+	}
+
+	// Remove denied fields
+	for field_name in fields_to_remove {
+		obj.remove(&field_name);
+	}
+
+	Ok(())
 }

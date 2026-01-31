@@ -2,14 +2,12 @@ use std::sync::Arc;
 
 use crate::err::Error;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ComputeFields, ExprPlan, Fetch, FieldSelection,
-	Filter, LetPlan, Limit, Omit, Project, ProjectValue, RecordIdLookup, Scan, Sort, Split,
-	Timeout, Union,
+	Aggregate, AggregateField, AggregateType, ExprPlan, Fetch, FieldSelection, Filter, LetPlan,
+	Limit, Project, ProjectValue, Scan, Sort, Split, Timeout, Union,
 };
 use crate::exec::OperatorPlan;
 use crate::expr::field::{Field, Fields};
 use crate::expr::{Expr, Function, Literal};
-use crate::val::TableName;
 
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
@@ -79,6 +77,30 @@ pub(crate) fn expr_to_physical_expr(
 	}
 }
 
+/// Convert a RecordIdKeyLit to a RecordIdKey for range bounds
+fn convert_record_key_lit(
+	key_lit: &crate::expr::record_id::RecordIdKeyLit,
+) -> Result<crate::val::RecordIdKey, Error> {
+	use crate::expr::record_id::RecordIdKeyLit;
+	use crate::val::RecordIdKey;
+
+	match key_lit {
+		RecordIdKeyLit::Number(n) => Ok(RecordIdKey::Number(*n)),
+		RecordIdKeyLit::String(s) => Ok(RecordIdKey::String(s.clone())),
+		RecordIdKeyLit::Uuid(u) => Ok(RecordIdKey::Uuid(*u)),
+		RecordIdKeyLit::Generate(generator) => Ok(generator.compute()),
+		RecordIdKeyLit::Array(_) => Err(Error::Unimplemented(
+			"Array record keys not yet supported in execution plans".to_string(),
+		)),
+		RecordIdKeyLit::Object(_) => Err(Error::Unimplemented(
+			"Object record keys not yet supported in execution plans".to_string(),
+		)),
+		RecordIdKeyLit::Range(_) => Err(Error::Unimplemented(
+			"Nested range record keys not supported in execution plans".to_string(),
+		)),
+	}
+}
+
 /// Convert a Literal to a Value for static (non-computed) cases
 /// This is used for USE statement expressions which must be static
 fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Value, Error> {
@@ -101,10 +123,59 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		// These require async computation, not allowed for USE statements
-		Literal::RecordId(_) => Err(Error::Unimplemented(
-			"RecordId literals in USE statements not yet supported".to_string(),
-		)),
+		// RecordId literals - convert to RecordId value for Scan operator
+		Literal::RecordId(rid_lit) => {
+			use crate::expr::record_id::RecordIdKeyLit;
+			use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
+			use std::ops::Bound;
+
+			let key = match &rid_lit.key {
+				RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
+				RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
+				RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
+				RecordIdKeyLit::Generate(generator) => generator.compute(),
+				RecordIdKeyLit::Range(range_lit) => {
+					// Convert RecordIdKeyRangeLit to RecordIdKeyRange
+					let start = match &range_lit.start {
+						Bound::Unbounded => Bound::Unbounded,
+						Bound::Included(key_lit) => {
+							Bound::Included(convert_record_key_lit(key_lit)?)
+						}
+						Bound::Excluded(key_lit) => {
+							Bound::Excluded(convert_record_key_lit(key_lit)?)
+						}
+					};
+					let end = match &range_lit.end {
+						Bound::Unbounded => Bound::Unbounded,
+						Bound::Included(key_lit) => {
+							Bound::Included(convert_record_key_lit(key_lit)?)
+						}
+						Bound::Excluded(key_lit) => {
+							Bound::Excluded(convert_record_key_lit(key_lit)?)
+						}
+					};
+					RecordIdKey::Range(Box::new(RecordIdKeyRange {
+						start,
+						end,
+					}))
+				}
+				RecordIdKeyLit::Array(_) => {
+					return Err(Error::Unimplemented(
+						"Array record keys not yet supported in execution plans".to_string(),
+					));
+				}
+				RecordIdKeyLit::Object(_) => {
+					return Err(Error::Unimplemented(
+						"Object record keys not yet supported in execution plans".to_string(),
+					));
+				}
+			};
+
+			Ok(Value::RecordId(RecordId {
+				table: rid_lit.table.clone(),
+				key,
+			}))
+		}
 		Literal::Array(_) => Err(Error::Unimplemented(
 			"Array literals in USE statements not yet supported".to_string(),
 		)),
@@ -294,10 +365,6 @@ fn plan_select(
 	// Extract VERSION timestamp if present (for time-travel queries)
 	let version = extract_version(&select.version)?;
 
-	// Extract table name from the first source for projection permissions
-	// This is a simplification - complex queries with multiple tables need more work
-	let table_name = extract_table_name(&select.what)?;
-
 	// Build the source plan from `what` (FROM clause)
 	let source = plan_select_sources(&select.what, version)?;
 
@@ -349,7 +416,7 @@ fn plan_select(
 	let projected = if skip_projections {
 		grouped
 	} else {
-		plan_projections(&select.fields, &select.omit, &table_name, grouped)?
+		plan_projections(&select.fields, &select.omit, grouped)?
 	};
 
 	// Apply ORDER BY if present
@@ -406,14 +473,13 @@ fn plan_select(
 ///
 /// This handles:
 /// - `SELECT *` - pass through without projection
-/// - `SELECT * OMIT field` - pass through with Omit operator
+/// - `SELECT * OMIT field` - use Project with empty fields and omit populated
 /// - `SELECT VALUE expr` - use ProjectValue operator
 /// - `SELECT field1, field2` - use Project operator
 /// - `SELECT field1, *, field2` - mixed wildcards (returns Unimplemented for now)
 fn plan_projections(
 	fields: &Fields,
 	omit: &[Expr],
-	table_name: &Option<TableName>,
 	input: Arc<dyn OperatorPlan>,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match fields {
@@ -438,12 +504,13 @@ fn plan_projections(
 
 			if is_select_all {
 				// SELECT * - pass through without projection
-				// But apply OMIT if present
+				// But apply OMIT if present using Project operator
 				if !omit.is_empty() {
 					let omit_fields = plan_omit_fields(omit)?;
-					return Ok(Arc::new(Omit {
+					return Ok(Arc::new(Project {
 						input,
-						fields: omit_fields,
+						fields: vec![], // No specific fields - pass through
+						omit: omit_fields,
 					}) as Arc<dyn OperatorPlan>);
 				}
 				return Ok(input);
@@ -484,28 +551,17 @@ fn plan_projections(
 					// Convert expression to physical
 					let expr = expr_to_physical_expr(selector.expr.clone())?;
 
-					// Determine if this is a simple field reference (for permissions)
-					let field_name = extract_simple_field_name(&selector.expr);
-
 					field_selections.push(FieldSelection {
 						output_name,
 						expr,
-						field_name,
 					});
 				}
 			}
 
-			// Need a table name for the Project operator
-			let table = table_name.clone().ok_or_else(|| {
-				Error::Unimplemented(
-					"Projections require a table source for permission checking".to_string(),
-				)
-			})?;
-
 			Ok(Arc::new(Project {
 				input,
-				table,
 				fields: field_selections,
+				omit: vec![], // No omit for specific field projections
 			}) as Arc<dyn OperatorPlan>)
 		}
 	}
@@ -532,31 +588,6 @@ fn plan_omit_fields(omit: &[Expr]) -> Result<Vec<crate::expr::idiom::Idiom>, Err
 	Ok(fields)
 }
 
-/// Extract a table name from the FROM sources (for projection permissions)
-fn extract_table_name(what: &[Expr]) -> Result<Option<TableName>, Error> {
-	if what.is_empty() {
-		return Ok(None);
-	}
-
-	// Get table name from first source
-	match &what[0] {
-		Expr::Table(name) => Ok(Some(name.clone())),
-		Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
-			Ok(Some(rid.table.clone()))
-		}
-		Expr::Idiom(idiom) => {
-			// Simple idiom is a table name
-			use crate::expr::part::Part;
-			if idiom.len() == 1 {
-				if let Some(Part::Field(name)) = idiom.first() {
-					return Ok(Some(TableName::from(name.to_string())));
-				}
-			}
-			Ok(None)
-		}
-		_ => Ok(None),
-	}
-}
 
 /// Derive a field name from an expression for projection output
 fn derive_field_name(expr: &Expr) -> String {
@@ -586,24 +617,6 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	idiom.to_sql()
 }
 
-/// Extract a simple field name from an expression (for permission lookup)
-/// Returns None if the expression is not a simple field reference
-fn extract_simple_field_name(expr: &Expr) -> Option<String> {
-	use crate::expr::part::Part;
-
-	match expr {
-		Expr::Idiom(idiom) => {
-			// Only simple single-part idioms are field references
-			if idiom.len() == 1 {
-				if let Some(Part::Field(name)) = idiom.first() {
-					return Some(name.to_string());
-				}
-			}
-			None
-		}
-		_ => None,
-	}
-}
 
 /// Plan FETCH clause
 fn plan_fetch(
@@ -649,8 +662,6 @@ fn plan_aggregation(
 	fields: &Fields,
 	group_by: &[crate::expr::idiom::Idiom],
 ) -> Result<Vec<AggregateField>, Error> {
-	use surrealdb_types::ToSql;
-
 	match fields {
 		// SELECT VALUE with GROUP BY - the VALUE expression may contain aggregates
 		Fields::Value(selector) => {
@@ -820,9 +831,10 @@ fn plan_select_sources(
 }
 
 /// Plan a single FROM source (table or record ID)
-/// Always wraps source operators (Scan, RecordIdLookup) with ComputeFields
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
+/// Scan handles all source types: table names, record IDs (point or range), idioms, and params.
+/// Scan also evaluates computed fields and applies field-level permissions internally.
 fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match expr {
 		// Table name: SELECT * FROM users
@@ -831,36 +843,24 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Opera
 			let table_expr = expr_to_physical_expr(Expr::Literal(
 				crate::expr::literal::Literal::String(table_name.as_str().to_string()),
 			))?;
-			let scan = Arc::new(Scan {
-				table: table_expr.clone(),
-				version,
-			}) as Arc<dyn OperatorPlan>;
-			// Wrap with ComputeFields to evaluate computed fields
-			Ok(Arc::new(ComputeFields {
-				input: scan,
+			Ok(Arc::new(Scan {
 				table: table_expr,
-			}))
+				version,
+			}) as Arc<dyn OperatorPlan>)
 		}
 
 		// Record ID literal: SELECT * FROM users:123
+		// Scan handles record IDs internally via ScanTarget::RecordId
 		Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
-			// Convert the RecordIdLit to an actual RecordId
-			// For now, we only support static record IDs (table:key)
-			// More complex expressions would need async evaluation
-			let record_id = record_id_lit_to_record_id(record_id_lit)?;
-			// Get table name for ComputeFields
+			// Convert the record ID literal to an expression that Scan can evaluate
+			// Scan will handle point lookups and range scans internally
 			let table_expr = expr_to_physical_expr(Expr::Literal(
-				crate::expr::literal::Literal::String(record_id.table.as_str().to_string()),
+				crate::expr::literal::Literal::RecordId(record_id_lit.clone()),
 			))?;
-			let lookup = Arc::new(RecordIdLookup {
-				record_id,
-				version,
-			}) as Arc<dyn OperatorPlan>;
-			// Wrap with ComputeFields to evaluate computed fields
-			Ok(Arc::new(ComputeFields {
-				input: lookup,
+			Ok(Arc::new(Scan {
 				table: table_expr,
-			}))
+				version,
+			}) as Arc<dyn OperatorPlan>)
 		}
 
 		// Idiom that might be a table or record reference
@@ -868,31 +868,21 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Opera
 			// Simple idiom (just a name) is a table reference
 			// Convert to a table scan using the idiom as a physical expression
 			let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
-			let scan = Arc::new(Scan {
-				table: table_expr.clone(),
-				version,
-			}) as Arc<dyn OperatorPlan>;
-			// Wrap with ComputeFields to evaluate computed fields
-			Ok(Arc::new(ComputeFields {
-				input: scan,
+			Ok(Arc::new(Scan {
 				table: table_expr,
-			}))
+				version,
+			}) as Arc<dyn OperatorPlan>)
 		}
 
 		// Parameter that will be resolved at runtime
 		Expr::Param(param) => {
 			// Parameters could be record IDs or table names
-			// We'll treat them as table references - Scan evaluates at runtime
+			// Scan evaluates at runtime and handles both cases
 			let table_expr = expr_to_physical_expr(Expr::Param(param.clone()))?;
-			let scan = Arc::new(Scan {
-				table: table_expr.clone(),
-				version,
-			}) as Arc<dyn OperatorPlan>;
-			// Wrap with ComputeFields to evaluate computed fields
-			Ok(Arc::new(ComputeFields {
-				input: scan,
+			Ok(Arc::new(Scan {
 				table: table_expr,
-			}))
+				version,
+			}) as Arc<dyn OperatorPlan>)
 		}
 
 		_ => Err(Error::Unimplemented(format!(
@@ -902,41 +892,6 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Opera
 	}
 }
 
-/// Convert a RecordIdLit to an actual RecordId
-/// For now, only supports static key patterns (Number, String, Uuid)
-fn record_id_lit_to_record_id(
-	record_id_lit: &crate::expr::RecordIdLit,
-) -> Result<crate::val::RecordId, Error> {
-	use crate::expr::record_id::RecordIdKeyLit;
-	use crate::val::RecordIdKey;
-
-	let key = match &record_id_lit.key {
-		RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
-		RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
-		RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
-		RecordIdKeyLit::Generate(generator) => generator.compute(),
-		RecordIdKeyLit::Array(_) => {
-			return Err(Error::Unimplemented(
-				"Array record keys not yet supported in execution plans".to_string(),
-			));
-		}
-		RecordIdKeyLit::Object(_) => {
-			return Err(Error::Unimplemented(
-				"Object record keys not yet supported in execution plans".to_string(),
-			));
-		}
-		RecordIdKeyLit::Range(_) => {
-			return Err(Error::Unimplemented(
-				"Range record keys not yet supported in execution plans".to_string(),
-			));
-		}
-	};
-
-	Ok(crate::val::RecordId {
-		table: record_id_lit.table.clone(),
-		key,
-	})
-}
 
 /// Convert a LET statement to an execution plan
 fn convert_let_statement(
