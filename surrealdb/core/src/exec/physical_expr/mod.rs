@@ -1,0 +1,306 @@
+use std::fmt::Debug;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use surrealdb_types::{SqlFormat, ToSql};
+
+use crate::exec::{AccessMode, ExecutionContext};
+use crate::val::Value;
+
+/// Evaluation context - what's available during expression evaluation.
+///
+/// This is a borrowed view into the execution context for expression evaluation.
+/// It provides access to parameters, namespace/database names, and the current row
+/// (for per-row expressions like filters and projections).
+#[derive(Clone)]
+pub struct EvalContext<'a> {
+	pub exec_ctx: &'a ExecutionContext,
+
+	/// Current row for per-row expressions (projections, filters).
+	/// None when evaluating in "scalar context" (USE, LIMIT, TIMEOUT, etc.)
+	pub current_value: Option<&'a Value>,
+}
+
+impl<'a> EvalContext<'a> {
+	/// Convert from ExecutionContext enum for expression evaluation.
+	///
+	/// This extracts the appropriate fields based on the context level:
+	/// - Root: params only, no ns/db/txn
+	/// - Namespace: params, ns, txn
+	/// - Database: params, ns, db, txn
+	// pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
+	// 	match exec_ctx {
+	// 		ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
+	// 		ExecutionContext::Namespace(n) => {
+	// 			Self::scalar(&n.root.params, Some(&n.ns), None, Some(&n.txn))
+	// 		}
+	// 		ExecutionContext::Database(d) => Self::scalar(
+	// 			&d.ns_ctx.root.params,
+	// 			Some(&d.ns_ctx.ns),
+	// 			Some(&d.db),
+	// 			Some(&d.ns_ctx.txn),
+	// 		),
+	// 	}
+	// }
+
+	/// For session-level scalar evaluation (USE, LIMIT, etc.)
+	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
+		Self {
+			exec_ctx,
+			current_value: None,
+		}
+	}
+
+	/// For per-row evaluation (projections, filters)
+	pub fn with_value(&self, value: &'a Value) -> Self {
+		Self {
+			current_value: Some(value),
+			..*self
+		}
+	}
+}
+
+#[async_trait]
+pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
+	fn name(&self) -> &'static str;
+
+	/// Evaluate this expression to a value.
+	///
+	/// May execute subqueries internally, hence async.
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value>;
+
+	/// Does this expression reference the current row?
+	/// If false, can be evaluated in scalar context.
+	fn references_current_value(&self) -> bool;
+
+	/// Returns the access mode for this expression.
+	///
+	/// This is critical for plan-based mutability analysis:
+	/// - If an expression contains a mutation subquery, it must return `ReadWrite`
+	/// - Example: `(UPSERT person)` in a SELECT must propagate `ReadWrite` upward
+	fn access_mode(&self) -> AccessMode;
+}
+
+// Submodules
+mod collections;
+mod conditional;
+mod function;
+mod idiom;
+mod literal;
+mod lookup;
+mod ops;
+mod recurse;
+mod subquery;
+
+// Re-export all expression types for external use
+pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
+pub(crate) use conditional::IfElseExpr;
+pub(crate) use function::{ClosurePhysicalExpr, FunctionCallExpr};
+pub(crate) use idiom::IdiomExpr;
+pub(crate) use literal::{Literal, Param};
+pub(crate) use lookup::LookupExpr;
+pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
+pub(crate) use recurse::RecurseExpr;
+pub(crate) use subquery::ScalarSubquery;
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::val::{Array, Number, Object};
+
+	// =========================================================================
+	// Simple Field Access Tests
+	// =========================================================================
+
+	#[test]
+	fn test_evaluate_field_on_object() {
+		use crate::exec::physical_expr::idiom::evaluate_field;
+
+		let obj = Value::Object(Object::from_iter([
+			("name".to_string(), Value::String("Alice".to_string())),
+			("age".to_string(), Value::Number(Number::Int(30))),
+		]));
+
+		let result = evaluate_field(&obj, "name").unwrap();
+		assert_eq!(result, Value::String("Alice".to_string()));
+
+		let result = evaluate_field(&obj, "age").unwrap();
+		assert_eq!(result, Value::Number(Number::Int(30)));
+
+		let result = evaluate_field(&obj, "missing").unwrap();
+		assert_eq!(result, Value::None);
+	}
+
+	#[test]
+	fn test_evaluate_field_on_array() {
+		use crate::exec::physical_expr::idiom::evaluate_field;
+
+		let arr = Value::Array(Array::from(vec![
+			Value::Object(Object::from_iter([(
+				"name".to_string(),
+				Value::String("Alice".to_string()),
+			)])),
+			Value::Object(Object::from_iter([(
+				"name".to_string(),
+				Value::String("Bob".to_string()),
+			)])),
+		]));
+
+		let result = evaluate_field(&arr, "name").unwrap();
+		assert_eq!(
+			result,
+			Value::Array(Array::from(vec![
+				Value::String("Alice".to_string()),
+				Value::String("Bob".to_string()),
+			]))
+		);
+	}
+
+	// =========================================================================
+	// Index Access Tests
+	// =========================================================================
+
+	#[test]
+	fn test_evaluate_index_on_array() {
+		use crate::exec::physical_expr::idiom::evaluate_index;
+
+		let arr = Value::Array(Array::from(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		]));
+
+		let result = evaluate_index(&arr, &Value::Number(Number::Int(0))).unwrap();
+		assert_eq!(result, Value::Number(Number::Int(1)));
+
+		let result = evaluate_index(&arr, &Value::Number(Number::Int(2))).unwrap();
+		assert_eq!(result, Value::Number(Number::Int(3)));
+
+		let result = evaluate_index(&arr, &Value::Number(Number::Int(5))).unwrap();
+		assert_eq!(result, Value::None);
+	}
+
+	#[test]
+	fn test_evaluate_index_on_object() {
+		use crate::exec::physical_expr::idiom::evaluate_index;
+
+		let obj = Value::Object(Object::from_iter([(
+			"key1".to_string(),
+			Value::String("value1".to_string()),
+		)]));
+
+		let result = evaluate_index(&obj, &Value::String("key1".to_string())).unwrap();
+		assert_eq!(result, Value::String("value1".to_string()));
+	}
+
+	// =========================================================================
+	// Array Operation Tests
+	// =========================================================================
+
+	#[test]
+	fn test_evaluate_all() {
+		use crate::exec::physical_expr::idiom::evaluate_all;
+
+		let arr = Value::Array(Array::from(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+		]));
+
+		let result = evaluate_all(&arr).unwrap();
+		assert_eq!(result, arr);
+	}
+
+	#[test]
+	fn test_evaluate_flatten() {
+		use crate::exec::physical_expr::idiom::evaluate_flatten;
+
+		let nested = Value::Array(Array::from(vec![
+			Value::Array(Array::from(vec![
+				Value::Number(Number::Int(1)),
+				Value::Number(Number::Int(2)),
+			])),
+			Value::Array(Array::from(vec![Value::Number(Number::Int(3))])),
+		]));
+
+		let result = evaluate_flatten(&nested).unwrap();
+		assert_eq!(
+			result,
+			Value::Array(Array::from(vec![
+				Value::Number(Number::Int(1)),
+				Value::Number(Number::Int(2)),
+				Value::Number(Number::Int(3)),
+			]))
+		);
+	}
+
+	#[test]
+	fn test_evaluate_first_and_last() {
+		use crate::exec::physical_expr::idiom::{evaluate_first, evaluate_last};
+
+		let arr = Value::Array(Array::from(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		]));
+
+		let first = evaluate_first(&arr).unwrap();
+		assert_eq!(first, Value::Number(Number::Int(1)));
+
+		let last = evaluate_last(&arr).unwrap();
+		assert_eq!(last, Value::Number(Number::Int(3)));
+
+		// Empty array
+		let empty = Value::Array(Array::from(Vec::<Value>::new()));
+		assert_eq!(evaluate_first(&empty).unwrap(), Value::None);
+		assert_eq!(evaluate_last(&empty).unwrap(), Value::None);
+	}
+
+	// =========================================================================
+	// PhysicalPart Tests
+	// =========================================================================
+
+	#[test]
+	fn test_physical_part_is_simple() {
+		use crate::exec::physical_part::PhysicalPart;
+
+		assert!(PhysicalPart::Field("test".to_string()).is_simple());
+		assert!(PhysicalPart::All.is_simple());
+		assert!(PhysicalPart::First.is_simple());
+		assert!(PhysicalPart::Last.is_simple());
+		assert!(PhysicalPart::Flatten.is_simple());
+		assert!(PhysicalPart::Optional.is_simple());
+	}
+
+	// =========================================================================
+	// IdiomExpr Tests
+	// =========================================================================
+
+	#[test]
+	fn test_idiom_expr_is_simple() {
+		use crate::exec::physical_part::PhysicalPart;
+		use crate::expr::Idiom;
+		use crate::expr::part::Part;
+
+		let idiom = Idiom(vec![Part::Field("test".to_string())]);
+		let parts = vec![PhysicalPart::Field("test".to_string())];
+		let expr = IdiomExpr::new(idiom, parts);
+
+		assert!(expr.is_simple());
+	}
+
+	// =========================================================================
+	// Value Hash Tests
+	// =========================================================================
+
+	#[test]
+	fn test_value_hash_consistency() {
+		use crate::exec::physical_expr::recurse::value_hash;
+
+		let v1 = Value::Number(Number::Int(42));
+		let v2 = Value::Number(Number::Int(42));
+		let v3 = Value::Number(Number::Int(43));
+
+		assert_eq!(value_hash(&v1), value_hash(&v2));
+		assert_ne!(value_hash(&v1), value_hash(&v3));
+	}
+}
