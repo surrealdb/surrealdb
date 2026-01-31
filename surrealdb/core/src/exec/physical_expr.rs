@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::exec::{AccessMode, ExecutionContext, OperatorPlan};
+use crate::exec::{AccessMode, CombineAccessModes, ExecutionContext, OperatorPlan};
 use crate::expr::Idiom;
 use crate::val::Value;
 
@@ -494,6 +494,49 @@ impl ToSql for PostfixOp {
 	}
 }
 
+/// Array literal - [1, 2, 3] or [expr1, expr2, ...]
+#[derive(Debug, Clone)]
+pub struct ArrayLiteral {
+	pub(crate) elements: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+#[async_trait]
+impl PhysicalExpr for ArrayLiteral {
+	fn name(&self) -> &'static str {
+		"ArrayLiteral"
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		let mut values = Vec::with_capacity(self.elements.len());
+		for elem in &self.elements {
+			let value = elem.evaluate(ctx.clone()).await?;
+			values.push(value);
+		}
+		Ok(Value::Array(crate::val::Array::from(values)))
+	}
+
+	fn references_current_value(&self) -> bool {
+		self.elements.iter().any(|e| e.references_current_value())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		self.elements.iter().map(|e| e.access_mode()).combine_all()
+	}
+}
+
+impl ToSql for ArrayLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('[');
+		for (i, elem) in self.elements.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			elem.fmt_sql(f, fmt);
+		}
+		f.push(']');
+	}
+}
+
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {
@@ -537,5 +580,256 @@ impl PhysicalExpr for ScalarSubquery {
 impl ToSql for ScalarSubquery {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "TODO: Not implemented")
+	}
+}
+
+/// Object literal - { key1: expr1, key2: expr2, ... }
+#[derive(Debug, Clone)]
+pub struct ObjectLiteral {
+	pub(crate) entries: Vec<(String, Arc<dyn PhysicalExpr>)>,
+}
+
+#[async_trait]
+impl PhysicalExpr for ObjectLiteral {
+	fn name(&self) -> &'static str {
+		"ObjectLiteral"
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		let mut map = std::collections::BTreeMap::new();
+		for (key, expr) in &self.entries {
+			let value = expr.evaluate(ctx.clone()).await?;
+			map.insert(key.clone(), value);
+		}
+		Ok(Value::Object(crate::val::Object(map)))
+	}
+
+	fn references_current_value(&self) -> bool {
+		self.entries.iter().any(|(_, e)| e.references_current_value())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		self.entries.iter().map(|(_, e)| e.access_mode()).combine_all()
+	}
+}
+
+impl ToSql for ObjectLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('{');
+		for (i, (key, expr)) in self.entries.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			write_sql!(f, fmt, "{}: {}", key, expr);
+		}
+		f.push('}');
+	}
+}
+
+/// Set literal - <{expr1, expr2, ...}>
+#[derive(Debug, Clone)]
+pub struct SetLiteral {
+	pub(crate) elements: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+#[async_trait]
+impl PhysicalExpr for SetLiteral {
+	fn name(&self) -> &'static str {
+		"SetLiteral"
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		let mut set = crate::val::Set::new();
+		for elem in &self.elements {
+			let value = elem.evaluate(ctx.clone()).await?;
+			set.insert(value);
+		}
+		Ok(Value::Set(set))
+	}
+
+	fn references_current_value(&self) -> bool {
+		self.elements.iter().any(|e| e.references_current_value())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		self.elements.iter().map(|e| e.access_mode()).combine_all()
+	}
+}
+
+impl ToSql for SetLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("<{");
+		for (i, elem) in self.elements.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			elem.fmt_sql(f, fmt);
+		}
+		f.push_str("}>");
+	}
+}
+
+/// Function call - count(), string::concat(a, b), etc.
+#[derive(Debug, Clone)]
+pub struct FunctionCallExpr {
+	pub(crate) function: crate::expr::Function,
+	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+#[async_trait]
+impl PhysicalExpr for FunctionCallExpr {
+	fn name(&self) -> &'static str {
+		"FunctionCall"
+	}
+
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// TODO: Function calls need full execution context with Stk, Options, and CursorDoc
+		// These are not yet available in EvalContext for physical expressions
+		// This will need to be implemented when the execution context is extended
+		Err(anyhow::anyhow!(
+			"Function call evaluation not yet supported in physical expressions - need Stk and Options in EvalContext"
+		))
+	}
+
+	fn references_current_value(&self) -> bool {
+		// Check if any argument references the current value
+		self.arguments.iter().any(|e| e.references_current_value())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Function calls may be read-write depending on the function
+		// For now, check if the function itself is read-only
+		let func_mode = if self.function.read_only() {
+			AccessMode::ReadOnly
+		} else {
+			AccessMode::ReadWrite
+		};
+
+		// Combine with argument access modes
+		let args_mode = self.arguments.iter().map(|e| e.access_mode()).combine_all();
+		func_mode.combine(args_mode)
+	}
+}
+
+impl ToSql for FunctionCallExpr {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		// Convert to FunctionCall for formatting
+		// Note: We can't easily convert physical exprs back to logical exprs,
+		// so we just show the function name without arguments
+		f.push_str(&self.function.to_idiom().to_sql());
+		f.push_str("(...)");
+	}
+}
+
+/// Closure expression - |$x| $x * 2
+#[derive(Debug, Clone)]
+pub struct ClosurePhysicalExpr {
+	pub(crate) closure: crate::expr::ClosureExpr,
+}
+
+#[async_trait]
+impl PhysicalExpr for ClosurePhysicalExpr {
+	fn name(&self) -> &'static str {
+		"Closure"
+	}
+
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// Closures evaluate to a Value::Closure
+		// This is similar to how the old executor handles it
+		// TODO: Need to capture parameters from context
+		Err(anyhow::anyhow!(
+			"Closure evaluation not yet fully implemented - need parameter capture from context"
+		))
+	}
+
+	fn references_current_value(&self) -> bool {
+		// Closures capture their environment, but don't directly reference current value
+		// The body might, but that's evaluated later when the closure is called
+		false
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Closures themselves are read-only (they're values)
+		// What they do when called is a different matter
+		AccessMode::ReadOnly
+	}
+}
+
+impl ToSql for ClosurePhysicalExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.closure.fmt_sql(f, fmt);
+	}
+}
+
+/// IF/THEN/ELSE expression - IF condition THEN value ELSE other END
+#[derive(Debug, Clone)]
+pub struct IfElseExpr {
+	/// List of (condition, value) pairs for IF and ELSE IF branches
+	pub(crate) branches: Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)>,
+	/// Optional ELSE branch (final fallback)
+	pub(crate) otherwise: Option<Arc<dyn PhysicalExpr>>,
+}
+
+#[async_trait]
+impl PhysicalExpr for IfElseExpr {
+	fn name(&self) -> &'static str {
+		"IfElse"
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// Evaluate each condition in order
+		for (condition, value) in &self.branches {
+			let cond_result = condition.evaluate(ctx.clone()).await?;
+			// Check if condition is truthy
+			if cond_result.is_truthy() {
+				return value.evaluate(ctx).await;
+			}
+		}
+
+		// No condition was true, evaluate the else branch if present
+		if let Some(otherwise) = &self.otherwise {
+			otherwise.evaluate(ctx).await
+		} else {
+			// No else branch, return NONE
+			Ok(Value::None)
+		}
+	}
+
+	fn references_current_value(&self) -> bool {
+		// Check if any branch references current value
+		self.branches
+			.iter()
+			.any(|(cond, val)| cond.references_current_value() || val.references_current_value())
+			|| self.otherwise.as_ref().map_or(false, |e| e.references_current_value())
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine all branches' access modes
+		let branches_mode = self
+			.branches
+			.iter()
+			.flat_map(|(cond, val)| [cond.access_mode(), val.access_mode()])
+			.combine_all();
+
+		let otherwise_mode =
+			self.otherwise.as_ref().map_or(AccessMode::ReadOnly, |e| e.access_mode());
+
+		branches_mode.combine(otherwise_mode)
+	}
+}
+
+impl ToSql for IfElseExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		for (i, (condition, value)) in self.branches.iter().enumerate() {
+			if i == 0 {
+				write_sql!(f, fmt, "IF {} THEN {}", condition, value);
+			} else {
+				write_sql!(f, fmt, " ELSE IF {} THEN {}", condition, value);
+			}
+		}
+		if let Some(otherwise) = &self.otherwise {
+			write_sql!(f, fmt, " ELSE {}", otherwise);
+		}
+		f.push_str(" END");
 	}
 }

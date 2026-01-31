@@ -69,7 +69,10 @@ enum AggregateState {
 	Sum(Number),
 	Min(Value),
 	Max(Value),
-	Avg { sum: Number, count: i64 },
+	Avg {
+		sum: Number,
+		count: i64,
+	},
 	ArrayGroup(Vec<Value>),
 	/// For non-aggregate fields, just store the first value seen
 	FirstValue(Value),
@@ -344,17 +347,15 @@ fn find_matching_group_key_value(group_key: &GroupKey, group_by: &[Idiom], name:
 	}
 
 	// Otherwise find by matching field name
-	let key_idx = group_by
-		.iter()
-		.position(|g| idiom_to_field_name(g) == name)
-		.unwrap_or(0);
+	let key_idx = group_by.iter().position(|g| idiom_to_field_name(g) == name).unwrap_or(0);
 	group_key.get(key_idx).cloned().unwrap_or(Value::None)
 }
 
 /// Extract a simple field name from an idiom for matching.
 fn idiom_to_field_name(idiom: &Idiom) -> String {
-	use crate::expr::part::Part;
 	use surrealdb_types::ToSql;
+
+	use crate::expr::part::Part;
 	if let Some(Part::Field(f)) = idiom.first() {
 		f.to_string()
 	} else {

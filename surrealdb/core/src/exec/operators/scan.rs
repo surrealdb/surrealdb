@@ -56,7 +56,7 @@ impl ScanTarget {
 /// based on the SELECT permission.
 #[derive(Debug, Clone)]
 pub struct Scan {
-	pub(crate) table: Arc<dyn PhysicalExpr>,
+	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional version timestamp for time-travel queries (VERSION clause)
 	pub(crate) version: Option<u64>,
 }
@@ -68,7 +68,7 @@ impl OperatorPlan for Scan {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		vec![("table".to_string(), self.table.to_sql())]
+		vec![("source".to_string(), self.source.to_sql())]
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -76,8 +76,9 @@ impl OperatorPlan for Scan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but the table expression could theoretically contain a subquery
-		self.table.access_mode()
+		// Scan is read-only, but the source expression could contain a subquery containing a
+		// mutation.
+		self.source.access_mode()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
@@ -91,7 +92,7 @@ impl OperatorPlan for Scan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		// Clone for the async block
-		let table_expr = Arc::clone(&self.table);
+		let source_expr = Arc::clone(&self.source);
 		let version = self.version;
 		let ctx = ctx.clone();
 
@@ -103,7 +104,7 @@ impl OperatorPlan for Scan {
 
 			// Evaluate table expression
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let table_value = table_expr.evaluate(eval_ctx).await.map_err(|e| {
+			let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
 			})?;
 
@@ -381,7 +382,10 @@ async fn build_field_state(
 	let mut computed_fields = Vec::new();
 	for fd in field_defs.iter() {
 		if let Some(ref expr) = fd.computed {
-			let physical_expr = expr_to_physical_expr(expr.clone()).map_err(|e| {
+			// Create a background context for planning computed field expressions
+			// TODO: This should ideally happen at planning time, not execution time
+			let plan_ctx = std::sync::Arc::new(crate::ctx::Context::background());
+			let physical_expr = expr_to_physical_expr(expr.clone(), &plan_ctx).map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!(
 					"Computed field '{}' has unsupported expression: {}",
 					fd.name.to_raw_string(),
@@ -511,14 +515,9 @@ async fn filter_fields_by_permission(
 				PhysicalPermission::Deny => false,
 				PhysicalPermission::Conditional(_) => {
 					// Evaluate the conditional permission using the cloned value
-					check_permission_for_value(perm, &value_clone, ctx)
-						.await
-						.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!(
-								"Failed to check field permission: {}",
-								e
-							))
-						})?
+					check_permission_for_value(perm, &value_clone, ctx).await.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to check field permission: {}", e))
+					})?
 				}
 			};
 

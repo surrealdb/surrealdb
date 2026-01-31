@@ -33,7 +33,10 @@ pub fn convert_permission_to_physical(
 		Permission::Full => Ok(PhysicalPermission::Allow),
 		Permission::Specific(expr) => {
 			// Convert Expr to PhysicalExpr using the planner's conversion
-			let physical_expr = crate::exec::planner::expr_to_physical_expr(expr.clone())?;
+			// TODO: This should ideally happen at planning time, not execution time
+			let plan_ctx = Arc::new(crate::ctx::Context::background());
+			let physical_expr =
+				crate::exec::planner::expr_to_physical_expr(expr.clone(), &plan_ctx)?;
 			Ok(PhysicalPermission::Conditional(physical_expr))
 		}
 	}

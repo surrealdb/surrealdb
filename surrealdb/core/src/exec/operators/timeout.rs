@@ -124,7 +124,7 @@ mod tests {
 		use crate::exec::operators::scan::Scan;
 
 		let scan = Arc::new(Scan {
-			table: "test".to_string(),
+			source: "test".to_string(),
 			fields: None,
 			condition: None,
 		});

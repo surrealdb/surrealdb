@@ -132,7 +132,12 @@ async fn fetch_record(ctx: &ExecutionContext, rid: &RecordId) -> crate::expr::Fl
 
 	// Read the record from the datastore
 	let txn = db_ctx.ns_ctx.root.txn.as_ref();
-	let key = crate::key::record::new(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, &rid.table, &rid.key);
+	let key = crate::key::record::new(
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		&rid.table,
+		&rid.key,
+	);
 
 	match txn.get(&key, None).await {
 		Ok(Some(record)) => {
@@ -160,7 +165,7 @@ mod tests {
 
 		// Create a minimal scan for testing
 		let scan = Arc::new(Scan {
-			table: "test".to_string(),
+			source: "test".to_string(),
 			fields: None,
 			condition: None,
 		});

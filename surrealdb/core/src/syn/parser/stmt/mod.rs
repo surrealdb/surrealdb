@@ -332,10 +332,7 @@ impl Parser<'_> {
 							ExplainFormat::Text
 						} else if format_str.eq_ignore_ascii_case("JSON") {
 							self.pop_peek();
-							return Err(SyntaxError::new(
-								"EXPLAIN FORMAT JSON is not yet supported",
-							)
-							.with_span(format_peek.span, MessageKind::Error));
+							ExplainFormat::Json
 						} else {
 							unexpected!(self, format_peek, "TEXT or JSON")
 						}
@@ -350,13 +347,13 @@ impl Parser<'_> {
 			}
 		};
 
-		// Parse the inner statement
-		let statement = stk.run(|stk| self.parse_top_level_expr(stk)).await?;
+		// Parse the inner statement as an expression
+		let statement = self.parse_expr_start(stk).await?;
 
-		Ok(TopLevelExpr::Explain {
+		Ok(TopLevelExpr::Expr(Expr::Explain {
 			format,
 			statement: Box::new(statement),
-		})
+		}))
 	}
 
 	/// Parsers a USE statement.

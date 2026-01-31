@@ -3,6 +3,7 @@ use std::ops::Bound;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeIdent};
+use crate::sql::ast::ExplainFormat;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::LookupKind;
 use crate::sql::operator::BindingPower;
@@ -68,6 +69,10 @@ pub(crate) enum Expr {
 	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
 	Sleep(Box<SleepStatement>),
+	Explain {
+		format: ExplainFormat,
+		statement: Box<Expr>,
+	},
 }
 
 impl Expr {
@@ -155,7 +160,10 @@ impl Expr {
 			| Expr::Info(_)
 			| Expr::Foreach(_)
 			| Expr::Let(_)
-			| Expr::Sleep(_) => true,
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => true,
 
 			Expr::Postfix {
 				op,
@@ -538,6 +546,18 @@ impl ToSql for Expr {
 			Expr::Foreach(s) => s.fmt_sql(f, fmt),
 			Expr::Let(s) => s.fmt_sql(f, fmt),
 			Expr::Sleep(s) => s.fmt_sql(f, fmt),
+			Expr::Explain {
+				format: explain_format,
+				statement,
+			} => {
+				f.push_str("EXPLAIN");
+				match explain_format {
+					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
+					ExplainFormat::Json => f.push_str(" FORMAT JSON"),
+				}
+				f.push(' ');
+				statement.fmt_sql(f, fmt);
+			}
 		}
 	}
 }
@@ -598,6 +618,13 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Foreach(s) => crate::expr::Expr::Foreach(Box::new((*s).into())),
 			Expr::Let(s) => crate::expr::Expr::Let(Box::new((*s).into())),
 			Expr::Sleep(s) => crate::expr::Expr::Sleep(Box::new((*s).into())),
+			Expr::Explain {
+				format,
+				statement,
+			} => crate::expr::Expr::Explain {
+				format: format.into(),
+				statement: Box::new((*statement).into()),
+			},
 		}
 	}
 }
@@ -658,6 +685,13 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Foreach(s) => Expr::Foreach(Box::new((*s).into())),
 			crate::expr::Expr::Let(s) => Expr::Let(Box::new((*s).into())),
 			crate::expr::Expr::Sleep(s) => Expr::Sleep(Box::new((*s).into())),
+			crate::expr::Expr::Explain {
+				format,
+				statement,
+			} => Expr::Explain {
+				format: format.into(),
+				statement: Box::new((*statement).into()),
+			},
 		}
 	}
 }

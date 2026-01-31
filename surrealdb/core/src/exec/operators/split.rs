@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::err::Error;
-use crate::exec::{AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+};
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
 
@@ -30,11 +32,7 @@ impl OperatorPlan for Split {
 		use surrealdb_types::ToSql;
 		vec![(
 			"on".to_string(),
-			self.idioms
-				.iter()
-				.map(|i| i.to_sql())
-				.collect::<Vec<_>>()
-				.join(", "),
+			self.idioms.iter().map(|i| i.to_sql()).collect::<Vec<_>>().join(", "),
 		)]
 	}
 

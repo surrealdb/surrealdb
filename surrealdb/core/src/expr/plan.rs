@@ -3,13 +3,6 @@ use crate::expr::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-pub(crate) enum ExplainFormat {
-	#[default]
-	Text,
-	// Json, // Future
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct LogicalPlan {
 	pub(crate) expressions: Vec<TopLevelExpr>,
@@ -26,10 +19,6 @@ pub(crate) enum TopLevelExpr {
 	Option(OptionStatement),
 	Use(UseStatement),
 	Show(ShowStatement),
-	Explain {
-		format: ExplainFormat,
-		statement: Box<TopLevelExpr>,
-	},
 	Expr(Expr),
 }
 
@@ -46,11 +35,6 @@ impl TopLevelExpr {
 			| TopLevelExpr::Option(_)
 			| TopLevelExpr::Use(_)
 			| TopLevelExpr::Access(_) => false,
-			// EXPLAIN is read-only if the inner statement is read-only
-			TopLevelExpr::Explain {
-				statement,
-				..
-			} => statement.read_only(),
 			TopLevelExpr::Expr(expr) => expr.read_only(),
 		}
 	}

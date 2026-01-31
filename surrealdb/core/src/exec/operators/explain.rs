@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{AccessMode, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::expr::ExplainFormat;
-use crate::val::Value;
+use crate::val::{Array, Object, Value};
 
 /// EXPLAIN operator - formats an execution plan as text.
 ///
@@ -36,6 +36,7 @@ impl OperatorPlan for ExplainPlan {
 	fn attrs(&self) -> Vec<(String, String)> {
 		match self.format {
 			ExplainFormat::Text => vec![("format".to_string(), "TEXT".to_string())],
+			ExplainFormat::Json => vec![("format".to_string(), "JSON".to_string())],
 		}
 	}
 
@@ -50,14 +51,21 @@ impl OperatorPlan for ExplainPlan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
-		// Format the inner statement's plan as text
-		let mut plan_text = String::new();
-		format_execution_plan(self.plan.as_ref(), &mut plan_text, "", true);
+		let output = match self.format {
+			ExplainFormat::Text => {
+				let mut plan_text = String::new();
+				format_execution_plan(self.plan.as_ref(), &mut plan_text, "", true);
+				Value::String(plan_text)
+			}
+			ExplainFormat::Json => {
+				let plan_json = format_execution_plan_json(self.plan.as_ref());
+				Value::Object(plan_json)
+			}
+		};
 
-		// Return the plan text as a single string value
 		Ok(Box::pin(stream::once(async move {
 			Ok(ValueBatch {
-				values: vec![Value::String(plan_text)],
+				values: vec![output],
 			})
 		})))
 	}
@@ -114,4 +122,40 @@ fn format_execution_plan(
 			format_execution_plan(child.as_ref(), output, &next_prefix, is_last_child);
 		}
 	}
+}
+
+/// Format an execution plan node as a JSON object
+fn format_execution_plan_json(plan: &dyn OperatorPlan) -> Object {
+	let mut obj = Object::default();
+
+	// Add operator name
+	obj.insert("operator".to_string(), Value::String(plan.name().to_string()));
+
+	// Add context level
+	obj.insert(
+		"context".to_string(),
+		Value::String(plan.required_context().short_name().to_string()),
+	);
+
+	// Add attributes if any
+	let attrs = plan.attrs();
+	if !attrs.is_empty() {
+		let mut attrs_obj = Object::default();
+		for (key, value) in attrs {
+			attrs_obj.insert(key, Value::String(value));
+		}
+		obj.insert("attributes".to_string(), Value::Object(attrs_obj));
+	}
+
+	// Add children if any
+	let children = plan.children();
+	if !children.is_empty() {
+		let children_array: Vec<Value> = children
+			.iter()
+			.map(|child| Value::Object(format_execution_plan_json(child.as_ref())))
+			.collect();
+		obj.insert("children".to_string(), Value::Array(Array::from(children_array)));
+	}
+
+	obj
 }

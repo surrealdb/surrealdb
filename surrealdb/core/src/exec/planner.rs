@@ -1,22 +1,57 @@
 use std::sync::Arc;
 
+use crate::ctx::FrozenContext;
 use crate::err::Error;
-use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ExprPlan, Fetch, FieldSelection, Filter, LetPlan,
-	Limit, Project, ProjectValue, Scan, Sort, Split, Timeout, Union,
-};
 use crate::exec::OperatorPlan;
+use crate::exec::operators::{
+	Aggregate, AggregateField, AggregateType, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter,
+	LetPlan, Limit, Project, ProjectValue, Scan, Sort, SourceExpr, Split, Timeout, Union,
+};
 use crate::expr::field::{Field, Fields};
 use crate::expr::{Expr, Function, Literal};
 
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		BinaryOp, Field, Literal as PhysicalLiteral, Param, PostfixOp, UnaryOp,
+		ArrayLiteral, BinaryOp, ClosurePhysicalExpr, Field, FunctionCallExpr, IfElseExpr,
+		Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp, ScalarSubquery, SetLiteral,
+		UnaryOp,
 	};
 
 	match expr {
+		Expr::Literal(crate::expr::literal::Literal::Array(elements)) => {
+			// Array literal - convert each element to a physical expression
+			let mut phys_elements = Vec::with_capacity(elements.len());
+			for elem in elements {
+				phys_elements.push(expr_to_physical_expr(elem, ctx)?);
+			}
+			Ok(Arc::new(ArrayLiteral {
+				elements: phys_elements,
+			}))
+		}
+		Expr::Literal(crate::expr::literal::Literal::Object(entries)) => {
+			// Object literal - convert each entry to a physical expression
+			let mut phys_entries = Vec::with_capacity(entries.len());
+			for entry in entries {
+				let value = expr_to_physical_expr(entry.value, ctx)?;
+				phys_entries.push((entry.key, value));
+			}
+			Ok(Arc::new(ObjectLiteral {
+				entries: phys_entries,
+			}))
+		}
+		Expr::Literal(crate::expr::literal::Literal::Set(elements)) => {
+			// Set literal - convert each element to a physical expression
+			let mut phys_elements = Vec::with_capacity(elements.len());
+			for elem in elements {
+				phys_elements.push(expr_to_physical_expr(elem, ctx)?);
+			}
+			Ok(Arc::new(SetLiteral {
+				elements: phys_elements,
+			}))
+		}
 		Expr::Literal(lit) => {
 			// Convert the logical Literal to a physical Value
 			let value = literal_to_value(lit)?;
@@ -29,8 +64,8 @@ pub(crate) fn expr_to_physical_expr(
 			op,
 			right,
 		} => {
-			let left_phys = expr_to_physical_expr(*left)?;
-			let right_phys = expr_to_physical_expr(*right)?;
+			let left_phys = expr_to_physical_expr(*left, ctx)?;
+			let right_phys = expr_to_physical_expr(*right, ctx)?;
 			Ok(Arc::new(BinaryOp {
 				left: left_phys,
 				op,
@@ -48,7 +83,7 @@ pub(crate) fn expr_to_physical_expr(
 			op,
 			expr,
 		} => {
-			let inner = expr_to_physical_expr(*expr)?;
+			let inner = expr_to_physical_expr(*expr, ctx)?;
 			Ok(Arc::new(UnaryOp {
 				op,
 				expr: inner,
@@ -58,7 +93,7 @@ pub(crate) fn expr_to_physical_expr(
 			op,
 			expr,
 		} => {
-			let inner = expr_to_physical_expr(*expr)?;
+			let inner = expr_to_physical_expr(*expr, ctx)?;
 			Ok(Arc::new(PostfixOp {
 				op,
 				expr: inner,
@@ -70,10 +105,123 @@ pub(crate) fn expr_to_physical_expr(
 				table_name.as_str().to_string(),
 			))))
 		}
-		_ => Err(Error::Unimplemented(format!(
-			"Expression type not yet supported in execution plans: {:?}",
-			std::mem::discriminant(&expr)
-		))),
+		Expr::FunctionCall(func_call) => {
+			// Function call - convert arguments to physical expressions
+			let mut phys_args = Vec::with_capacity(func_call.arguments.len());
+			for arg in &func_call.arguments {
+				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
+			}
+			Ok(Arc::new(FunctionCallExpr {
+				function: func_call.receiver.clone(),
+				arguments: phys_args,
+			}))
+		}
+		Expr::Closure(closure) => {
+			// Closure expression - wrap in physical expression
+			Ok(Arc::new(ClosurePhysicalExpr {
+				closure: (*closure).clone(),
+			}))
+		}
+		Expr::IfElse(ifelse) => {
+			// IF/THEN/ELSE expression - convert all branches
+			let mut branches = Vec::with_capacity(ifelse.exprs.len());
+			for (condition, body) in &ifelse.exprs {
+				let cond_phys = expr_to_physical_expr(condition.clone(), ctx)?;
+				let body_phys = expr_to_physical_expr(body.clone(), ctx)?;
+				branches.push((cond_phys, body_phys));
+			}
+			let otherwise = if let Some(else_expr) = &ifelse.close {
+				Some(expr_to_physical_expr(else_expr.clone(), ctx)?)
+			} else {
+				None
+			};
+			Ok(Arc::new(IfElseExpr {
+				branches,
+				otherwise,
+			}))
+		}
+		Expr::Select(select) => {
+			// Scalar subquery - plan the SELECT and wrap in ScalarSubquery
+			let plan = plan_select(&select, ctx)?;
+			Ok(Arc::new(ScalarSubquery {
+				plan,
+			}))
+		}
+
+		// Control flow expressions - cannot be used in expression context
+		Expr::Break => Err(Error::Unimplemented(
+			"BREAK cannot be used in expression context - only valid in loops".to_string(),
+		)),
+		Expr::Continue => Err(Error::Unimplemented(
+			"CONTINUE cannot be used in expression context - only valid in loops".to_string(),
+		)),
+		Expr::Return(_) => Err(Error::Unimplemented(
+			"RETURN cannot be used in expression context - only valid in functions".to_string(),
+		)),
+
+		// DDL statements - cannot be used in expression context
+		Expr::Define(_) => Err(Error::Unimplemented(
+			"DEFINE statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Remove(_) => Err(Error::Unimplemented(
+			"REMOVE statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Rebuild(_) => Err(Error::Unimplemented(
+			"REBUILD statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Alter(_) => Err(Error::Unimplemented(
+			"ALTER statements cannot be used in expression context".to_string(),
+		)),
+
+		// Utility statements - cannot be used in expression context
+		Expr::Info(_) => Err(Error::Unimplemented(
+			"INFO statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Foreach(_) => {
+			Err(Error::Unimplemented("FOR loops cannot be used in expression context".to_string()))
+		}
+		Expr::Sleep(_) => Err(Error::Unimplemented(
+			"SLEEP statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Let(_) => Err(Error::Unimplemented(
+			"LET statements cannot be used in expression context".to_string(),
+		)),
+		Expr::Explain {
+			..
+		} => Err(Error::Unimplemented(
+			"EXPLAIN statements cannot be used in expression context".to_string(),
+		)),
+
+		// Value expressions - not yet implemented
+		Expr::Mock(_) => Err(Error::Unimplemented(
+			"Mock expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::Block(_) => Err(Error::Unimplemented(
+			"Block expressions not yet supported in execution plans".to_string(),
+		)),
+		Expr::Throw(_) => Err(Error::Unimplemented(
+			"THROW expressions not yet supported in execution plans".to_string(),
+		)),
+
+		// DML subqueries - not yet implemented
+		Expr::Create(_) => Err(Error::Unimplemented(
+			"CREATE subqueries not yet supported in execution plans".to_string(),
+		)),
+		Expr::Update(_) => Err(Error::Unimplemented(
+			"UPDATE subqueries not yet supported in execution plans".to_string(),
+		)),
+		Expr::Upsert(_) => Err(Error::Unimplemented(
+			"UPSERT subqueries not yet supported in execution plans".to_string(),
+		)),
+		Expr::Delete(_) => Err(Error::Unimplemented(
+			"DELETE subqueries not yet supported in execution plans".to_string(),
+		)),
+		Expr::Relate(_) => Err(Error::Unimplemented(
+			"RELATE subqueries not yet supported in execution plans".to_string(),
+		)),
+		Expr::Insert(_) => Err(Error::Unimplemented(
+			"INSERT subqueries not yet supported in execution plans".to_string(),
+		)),
 	}
 }
 
@@ -125,9 +273,10 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 		Literal::File(f) => Ok(Value::File(f)),
 		// RecordId literals - convert to RecordId value for Scan operator
 		Literal::RecordId(rid_lit) => {
+			use std::ops::Bound;
+
 			use crate::expr::record_id::RecordIdKeyLit;
 			use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
-			use std::ops::Bound;
 
 			let key = match &rid_lit.key {
 				RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
@@ -188,11 +337,14 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 	}
 }
 
-pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error> {
+pub(crate) fn try_plan_expr(
+	expr: &Expr,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match expr {
 		// Supported statements
-		Expr::Select(select) => plan_select(select),
-		Expr::Let(let_stmt) => convert_let_statement(let_stmt),
+		Expr::Select(select) => plan_select(select, ctx),
+		Expr::Let(let_stmt) => convert_let_statement(let_stmt, ctx),
 
 		// DML statements - not yet supported
 		Expr::Create(_) => Err(Error::Unimplemented(
@@ -262,6 +414,18 @@ pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error>
 		Expr::Sleep(_) => Err(Error::Unimplemented(
 			"SLEEP statements not yet supported in execution plans".to_string(),
 		)),
+		Expr::Explain {
+			format,
+			statement,
+		} => {
+			// Plan the inner statement
+			let inner_plan = try_plan_expr(statement, ctx)?;
+			// Wrap it in an ExplainPlan operator
+			Ok(Arc::new(ExplainPlan {
+				plan: inner_plan,
+				format: *format,
+			}))
+		}
 
 		// Value expressions - evaluate in scalar context and return result
 		Expr::Literal(_)
@@ -274,7 +438,7 @@ pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error>
 			..
 		}
 		| Expr::Table(_) => {
-			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
 			// Validate that the expression doesn't require row context
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -288,7 +452,7 @@ pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error>
 
 		// Idiom expressions require row context, so they need special handling
 		Expr::Idiom(_) => {
-			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
 			// Idioms always reference current_value, so this will be an error for top-level
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -309,7 +473,7 @@ pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error>
 		Expr::Postfix {
 			..
 		} => {
-			let phys_expr = expr_to_physical_expr(expr.clone())?;
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
 			// Validate that the expression doesn't require row context
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -337,6 +501,7 @@ pub(crate) fn try_plan_expr(expr: &Expr) -> Result<Arc<dyn OperatorPlan>, Error>
 /// 9. Timeout (TIMEOUT)
 fn plan_select(
 	select: &crate::expr::statements::SelectStatement,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	// Return Unimplemented for features not yet supported in the new executor
 	// These will fall back to the old executor
@@ -366,7 +531,7 @@ fn plan_select(
 	let version = extract_version(&select.version)?;
 
 	// Build the source plan from `what` (FROM clause)
-	let source = plan_select_sources(&select.what, version)?;
+	let source = plan_select_sources(&select.what, version, ctx)?;
 
 	// Apply SPLIT BY if present (before filtering)
 	let split = if let Some(splits) = &select.split {
@@ -381,7 +546,7 @@ fn plan_select(
 
 	// Apply WHERE clause if present (before grouping)
 	let filtered = if let Some(cond) = &select.cond {
-		let predicate = expr_to_physical_expr(cond.0.clone())?;
+		let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
 		Arc::new(Filter {
 			input: split,
 			predicate,
@@ -395,7 +560,7 @@ fn plan_select(
 		let group_by: Vec<_> = groups.0.iter().map(|g| g.0.clone()).collect();
 
 		// Build aggregate fields from the SELECT expression
-		let aggregates = plan_aggregation(&select.fields, &group_by)?;
+		let aggregates = plan_aggregation(&select.fields, &group_by, ctx)?;
 
 		// For GROUP BY, the Aggregate operator handles projections internally
 		// Skip the separate projection step
@@ -416,7 +581,7 @@ fn plan_select(
 	let projected = if skip_projections {
 		grouped
 	} else {
-		plan_projections(&select.fields, &select.omit, grouped)?
+		plan_projections(&select.fields, &select.omit, grouped, ctx)?
 	};
 
 	// Apply ORDER BY if present
@@ -433,12 +598,12 @@ fn plan_select(
 	// Apply LIMIT/START if present
 	let limited = if select.limit.is_some() || select.start.is_some() {
 		let limit_expr = if let Some(limit) = &select.limit {
-			Some(expr_to_physical_expr(limit.0.clone())?)
+			Some(expr_to_physical_expr(limit.0.clone(), ctx)?)
 		} else {
 			None
 		};
 		let offset_expr = if let Some(start) = &select.start {
-			Some(expr_to_physical_expr(start.0.clone())?)
+			Some(expr_to_physical_expr(start.0.clone(), ctx)?)
 		} else {
 			None
 		};
@@ -458,7 +623,7 @@ fn plan_select(
 	let timed = match &select.timeout {
 		Expr::Literal(Literal::None) => fetched,
 		timeout_expr => {
-			let timeout_phys = expr_to_physical_expr(timeout_expr.clone())?;
+			let timeout_phys = expr_to_physical_expr(timeout_expr.clone(), ctx)?;
 			Arc::new(Timeout {
 				input: fetched,
 				timeout: Some(timeout_phys),
@@ -481,6 +646,7 @@ fn plan_projections(
 	fields: &Fields,
 	omit: &[Expr],
 	input: Arc<dyn OperatorPlan>,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match fields {
 		// SELECT VALUE expr - return raw values (OMIT doesn't make sense here)
@@ -490,7 +656,7 @@ fn plan_projections(
 					"OMIT clause with SELECT VALUE not supported".to_string(),
 				));
 			}
-			let expr = expr_to_physical_expr(selector.expr.clone())?;
+			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 			Ok(Arc::new(ProjectValue {
 				input,
 				expr,
@@ -500,13 +666,14 @@ fn plan_projections(
 		// SELECT field1, field2, ... or SELECT *
 		Fields::Select(field_list) => {
 			// Check if this is just SELECT * (all fields, no specific fields)
-			let is_select_all = field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+			let is_select_all =
+				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 			if is_select_all {
 				// SELECT * - pass through without projection
 				// But apply OMIT if present using Project operator
 				if !omit.is_empty() {
-					let omit_fields = plan_omit_fields(omit)?;
+					let omit_fields = plan_omit_fields(omit, ctx)?;
 					return Ok(Arc::new(Project {
 						input,
 						fields: vec![], // No specific fields - pass through
@@ -549,7 +716,7 @@ fn plan_projections(
 					};
 
 					// Convert expression to physical
-					let expr = expr_to_physical_expr(selector.expr.clone())?;
+					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
 					field_selections.push(FieldSelection {
 						output_name,
@@ -568,7 +735,10 @@ fn plan_projections(
 }
 
 /// Plan OMIT fields - convert expressions to idioms
-fn plan_omit_fields(omit: &[Expr]) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
+fn plan_omit_fields(
+	omit: &[Expr],
+	_ctx: &FrozenContext,
+) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
 	let mut fields = Vec::with_capacity(omit.len());
 
 	for expr in omit {
@@ -588,7 +758,6 @@ fn plan_omit_fields(omit: &[Expr]) -> Result<Vec<crate::expr::idiom::Idiom>, Err
 	Ok(fields)
 }
 
-
 /// Derive a field name from an expression for projection output
 fn derive_field_name(expr: &Expr) -> String {
 	match expr {
@@ -604,8 +773,9 @@ fn derive_field_name(expr: &Expr) -> String {
 
 /// Extract a field name from an idiom, preferring raw names for simple idioms.
 fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
-	use crate::expr::part::Part;
 	use surrealdb_types::ToSql;
+
+	use crate::expr::part::Part;
 
 	// For simple single-part idioms, use the raw field name
 	if idiom.len() == 1 {
@@ -616,7 +786,6 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	// For complex idioms, use the SQL representation
 	idiom.to_sql()
 }
-
 
 /// Plan FETCH clause
 fn plan_fetch(
@@ -661,6 +830,7 @@ fn plan_fetch(
 fn plan_aggregation(
 	fields: &Fields,
 	group_by: &[crate::expr::idiom::Idiom],
+	ctx: &FrozenContext,
 ) -> Result<Vec<AggregateField>, Error> {
 	match fields {
 		// SELECT VALUE with GROUP BY - the VALUE expression may contain aggregates
@@ -672,7 +842,7 @@ fn plan_aggregation(
 			} else {
 				detect_aggregate_type(&selector.expr)
 			};
-			let expr = expr_to_physical_expr(selector.expr.clone())?;
+			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
 			// For VALUE, we use an empty name since the result isn't wrapped in an object
 			Ok(vec![AggregateField {
@@ -714,7 +884,7 @@ fn plan_aggregation(
 						};
 
 						// Convert expression to physical
-						let expr = expr_to_physical_expr(selector.expr.clone())?;
+						let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
 						aggregates.push(AggregateField {
 							name: output_name,
@@ -732,10 +902,7 @@ fn plan_aggregation(
 }
 
 /// Check if an expression is a group-by key reference.
-fn is_group_key_expression(
-	expr: &Expr,
-	group_by: &[crate::expr::idiom::Idiom],
-) -> bool {
+fn is_group_key_expression(expr: &Expr, group_by: &[crate::expr::idiom::Idiom]) -> bool {
 	use surrealdb_types::ToSql;
 
 	// Only simple idiom expressions can be group keys
@@ -808,6 +975,7 @@ fn extract_version(version_expr: &Expr) -> Result<Option<u64>, Error> {
 fn plan_select_sources(
 	what: &[Expr],
 	version: Option<u64>,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	if what.is_empty() {
 		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
@@ -816,7 +984,7 @@ fn plan_select_sources(
 	// Convert each source to a plan
 	let mut source_plans = Vec::with_capacity(what.len());
 	for expr in what {
-		let plan = plan_single_source(expr, version)?;
+		let plan = plan_single_source(expr, version, ctx)?;
 		source_plans.push(plan);
 	}
 
@@ -833,18 +1001,27 @@ fn plan_select_sources(
 /// Plan a single FROM source (table or record ID)
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
-/// Scan handles all source types: table names, record IDs (point or range), idioms, and params.
-/// Scan also evaluates computed fields and applies field-level permissions internally.
-fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn OperatorPlan>, Error> {
+/// Scan handles KV store sources: table names, record IDs (point or range).
+/// SourceExpr handles value sources: arrays, scalars, computed expressions.
+fn plan_single_source(
+	expr: &Expr,
+	version: Option<u64>,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn OperatorPlan>, Error> {
+	use crate::val::Value;
+
 	match expr {
 		// Table name: SELECT * FROM users
 		Expr::Table(table_name) => {
 			// Convert table name to a literal string for the physical expression
-			let table_expr = expr_to_physical_expr(Expr::Literal(
-				crate::expr::literal::Literal::String(table_name.as_str().to_string()),
-			))?;
+			let table_expr = expr_to_physical_expr(
+				Expr::Literal(crate::expr::literal::Literal::String(
+					table_name.as_str().to_string(),
+				)),
+				ctx,
+			)?;
 			Ok(Arc::new(Scan {
-				table: table_expr,
+				source: table_expr,
 				version,
 			}) as Arc<dyn OperatorPlan>)
 		}
@@ -854,55 +1031,86 @@ fn plan_single_source(expr: &Expr, version: Option<u64>) -> Result<Arc<dyn Opera
 		Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
 			// Convert the record ID literal to an expression that Scan can evaluate
 			// Scan will handle point lookups and range scans internally
-			let table_expr = expr_to_physical_expr(Expr::Literal(
-				crate::expr::literal::Literal::RecordId(record_id_lit.clone()),
-			))?;
+			let table_expr = expr_to_physical_expr(
+				Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit.clone())),
+				ctx,
+			)?;
 			Ok(Arc::new(Scan {
-				table: table_expr,
+				source: table_expr,
 				version,
 			}) as Arc<dyn OperatorPlan>)
+		}
+
+		// Subquery: SELECT * FROM (SELECT * FROM table)
+		Expr::Select(inner_select) => {
+			// Recursively plan the inner SELECT
+			plan_select(inner_select, ctx)
+		}
+
+		// Array literal: SELECT * FROM [1, 2, 3]
+		Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
+			// Convert to SourceExpr which will unnest the array elements
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			Ok(Arc::new(SourceExpr {
+				expr: phys_expr,
+			}) as Arc<dyn OperatorPlan>)
+		}
+
+		// Parameter: SELECT * FROM $param
+		// Inspect the parameter value to determine if it's a KV source or value source
+		Expr::Param(param) => {
+			match ctx.value(param.as_str()) {
+				Some(Value::Table(_)) | Some(Value::RecordId(_)) => {
+					// KV store source → Scan
+					let table_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
+					Ok(Arc::new(Scan {
+						source: table_expr,
+						version,
+					}) as Arc<dyn OperatorPlan>)
+				}
+				Some(_) | None => {
+					// Array, scalar, or unknown → SourceExpr
+					let phys_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
+					Ok(Arc::new(SourceExpr {
+						expr: phys_expr,
+					}) as Arc<dyn OperatorPlan>)
+				}
+			}
 		}
 
 		// Idiom that might be a table or record reference
-		Expr::Idiom(idiom) => {
-			// Simple idiom (just a name) is a table reference
-			// Convert to a table scan using the idiom as a physical expression
-			let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
-			Ok(Arc::new(Scan {
-				table: table_expr,
-				version,
+		// TODO: I think Idiom can just be treated as a SourceExpr
+		// Expr::Idiom(idiom) => {
+		// 	// Simple idiom (just a name) is a table reference
+		// 	// Convert to a table scan using the idiom as a physical expression
+		// 	let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
+		// 	Ok(Arc::new(Scan {
+		// 		source: table_expr,
+		// 		version,
+		// 	}) as Arc<dyn OperatorPlan>)
+		// }
+
+		// Other expressions (strings, objects, etc.) → SourceExpr
+		other => {
+			let phys_expr = expr_to_physical_expr(other.clone(), ctx)?;
+			Ok(Arc::new(SourceExpr {
+				expr: phys_expr,
 			}) as Arc<dyn OperatorPlan>)
 		}
-
-		// Parameter that will be resolved at runtime
-		Expr::Param(param) => {
-			// Parameters could be record IDs or table names
-			// Scan evaluates at runtime and handles both cases
-			let table_expr = expr_to_physical_expr(Expr::Param(param.clone()))?;
-			Ok(Arc::new(Scan {
-				table: table_expr,
-				version,
-			}) as Arc<dyn OperatorPlan>)
-		}
-
-		_ => Err(Error::Unimplemented(format!(
-			"Unsupported FROM source type: {:?}",
-			std::mem::discriminant(expr)
-		))),
 	}
 }
-
 
 /// Convert a LET statement to an execution plan
 fn convert_let_statement(
 	let_stmt: &crate::expr::statements::SetStatement,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	let name = let_stmt.name.clone();
 
 	// Determine if the expression is a query or scalar
 	let value: Arc<dyn OperatorPlan> = match &let_stmt.what {
 		// SELECT produces a stream that gets collected into an array
-		Expr::Select(select) => plan_select(select)?,
+		Expr::Select(select) => plan_select(select, ctx)?,
 
 		// DML statements in LET are not yet supported
 		Expr::Create(_) => {
@@ -938,7 +1146,7 @@ fn convert_let_statement(
 
 		// Everything else is a scalar expression - wrap in ExprPlan
 		other => {
-			let expr = expr_to_physical_expr(other.clone())?;
+			let expr = expr_to_physical_expr(other.clone(), ctx)?;
 
 			// Validate: LET expressions can't reference current row
 			if expr.references_current_value() {

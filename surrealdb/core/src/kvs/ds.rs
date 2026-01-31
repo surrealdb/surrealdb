@@ -1878,156 +1878,149 @@ impl Datastore {
 		}
 
 		// Process all statements
-		ComputeExecutor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				Some(Error::InvalidAuth) => {
-					DbResultError::InvalidAuth("Authentication failed".to_string())
-				}
-				Some(Error::UnexpectedAuth) => {
-					DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-				}
-				Some(Error::MissingUserOrPass) => {
-					DbResultError::InvalidAuth("Missing username or password".to_string())
-				}
-				Some(Error::InvalidPass) => {
-					DbResultError::InvalidAuth("Invalid password".to_string())
-				}
-				Some(Error::NoSigninTarget) => {
-					DbResultError::InvalidAuth("No signin target specified".to_string())
-				}
-				Some(Error::TokenMakingFailed) => {
-					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-				}
-				Some(Error::IamError(iam_err)) => {
-					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-				}
-				Some(Error::Kvs(kvs_err)) => {
-					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-				}
-				Some(Error::NsEmpty) => {
-					DbResultError::InvalidParams("No namespace specified".to_string())
-				}
-				Some(Error::DbEmpty) => {
-					DbResultError::InvalidParams("No database specified".to_string())
-				}
-				Some(Error::InvalidQuery(_)) => {
-					DbResultError::ParseError("Invalid query syntax".to_string())
-				}
-				Some(Error::InvalidContent {
-					..
-				}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
-				Some(Error::InvalidMerge {
-					..
-				}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
-				Some(Error::InvalidPatch(_)) => {
-					DbResultError::InvalidParams("Invalid patch operation".to_string())
-				}
-				Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-				Some(Error::Unimplemented(msg)) => {
-					DbResultError::InternalError(format!("Unimplemented: {}", msg))
-				}
-				Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-				Some(Error::Http(msg)) => {
-					DbResultError::InternalError(format!("HTTP error: {}", msg))
-				}
-				Some(Error::Channel(msg)) => {
-					DbResultError::InternalError(format!("Channel error: {}", msg))
-				}
-				Some(Error::QueryTimedout(timeout)) => {
-					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
-				}
-				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-				Some(Error::QueryNotExecuted {
-					message,
-				}) => DbResultError::QueryNotExecuted(message.clone()),
-				Some(Error::ScriptingNotAllowed) => DbResultError::MethodNotAllowed(
-					"Scripting functions are not allowed".to_string(),
-				),
-				Some(Error::FunctionNotAllowed(func)) => {
-					DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-				}
-				Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(
-					format!("Network target '{}' is not allowed", target),
-				),
-				Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-				Some(Error::Coerce(_)) => {
-					DbResultError::InvalidParams("Type coercion error".to_string())
-				}
-				Some(Error::Cast(_)) => {
-					DbResultError::InvalidParams("Type casting error".to_string())
-				}
-				Some(Error::TryAdd(_, _))
-				| Some(Error::TrySub(_, _))
-				| Some(Error::TryMul(_, _))
-				| Some(Error::TryDiv(_, _))
-				| Some(Error::TryRem(_, _))
-				| Some(Error::TryPow(_, _))
-				| Some(Error::TryNeg(_)) => {
-					DbResultError::InvalidParams("Arithmetic operation error".to_string())
-				}
-				Some(Error::TryFrom(_, _)) => {
-					DbResultError::InvalidParams("Type conversion error".to_string())
-				}
-				Some(Error::Unencodable) => {
-					DbResultError::SerializationError("Value cannot be serialized".to_string())
-				}
-				Some(Error::Storekey(_)) => {
-					DbResultError::DeserializationError("Key decoding error".to_string())
-				}
-				Some(Error::Revision(_)) => {
-					DbResultError::DeserializationError("Versioned data error".to_string())
-				}
-				Some(Error::CorruptedIndex(_)) => {
-					DbResultError::InternalError("Index corruption detected".to_string())
-				}
-				Some(Error::NoIndexFoundForMatch {
-					..
-				}) => DbResultError::InternalError("No suitable index found".to_string()),
-				Some(Error::AnalyzerError(msg)) => {
-					DbResultError::InternalError(format!("Analyzer error: {}", msg))
-				}
-				Some(Error::HighlightError(msg)) => {
-					DbResultError::InternalError(format!("Highlight error: {}", msg))
-				}
-				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
-				Some(Error::Utf8Error(_)) => {
-					DbResultError::DeserializationError("UTF-8 decoding error".to_string())
-				}
-				Some(Error::ObsError(_)) => {
-					DbResultError::InternalError("Object store error".to_string())
-				}
-				Some(Error::DuplicatedMatchRef {
-					..
-				}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
-				Some(Error::TimestampOverflow(msg)) => {
-					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
-				}
-				Some(Error::NoRecordFound) => {
-					DbResultError::InternalError("No record found".to_string())
-				}
-				Some(Error::InvalidSignup) => {
-					DbResultError::InvalidAuth("Signup failed".to_string())
-				}
-				Some(Error::ClAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
-					..
-				}) => DbResultError::InternalError("API already exists".to_string()),
-				Some(Error::AzAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Analyzer already exists".to_string()),
-				Some(Error::BuAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Bucket already exists".to_string()),
-				Some(Error::DbAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Database already exists".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
+		ComputeExecutor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| match e
+			.downcast_ref::<Error>()
+		{
+			Some(Error::ExpiredSession) => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
 			}
+			Some(Error::InvalidAuth) => {
+				DbResultError::InvalidAuth("Authentication failed".to_string())
+			}
+			Some(Error::UnexpectedAuth) => {
+				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
+			}
+			Some(Error::MissingUserOrPass) => {
+				DbResultError::InvalidAuth("Missing username or password".to_string())
+			}
+			Some(Error::InvalidPass) => DbResultError::InvalidAuth("Invalid password".to_string()),
+			Some(Error::NoSigninTarget) => {
+				DbResultError::InvalidAuth("No signin target specified".to_string())
+			}
+			Some(Error::TokenMakingFailed) => {
+				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
+			}
+			Some(Error::IamError(iam_err)) => {
+				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+			}
+			Some(Error::Kvs(kvs_err)) => {
+				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
+			}
+			Some(Error::NsEmpty) => {
+				DbResultError::InvalidParams("No namespace specified".to_string())
+			}
+			Some(Error::DbEmpty) => {
+				DbResultError::InvalidParams("No database specified".to_string())
+			}
+			Some(Error::InvalidQuery(_)) => {
+				DbResultError::ParseError("Invalid query syntax".to_string())
+			}
+			Some(Error::InvalidContent {
+				..
+			}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
+			Some(Error::InvalidMerge {
+				..
+			}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
+			Some(Error::InvalidPatch(_)) => {
+				DbResultError::InvalidParams("Invalid patch operation".to_string())
+			}
+			Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
+			Some(Error::Unimplemented(msg)) => {
+				DbResultError::InternalError(format!("Unimplemented: {}", msg))
+			}
+			Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
+			Some(Error::Http(msg)) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
+			Some(Error::Channel(msg)) => {
+				DbResultError::InternalError(format!("Channel error: {}", msg))
+			}
+			Some(Error::QueryTimedout(timeout)) => {
+				DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
+			}
+			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
+			Some(Error::QueryNotExecuted {
+				message,
+			}) => DbResultError::QueryNotExecuted(message.clone()),
+			Some(Error::ScriptingNotAllowed) => {
+				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
+			}
+			Some(Error::FunctionNotAllowed(func)) => {
+				DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
+			}
+			Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(format!(
+				"Network target '{}' is not allowed",
+				target
+			)),
+			Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
+			Some(Error::Coerce(_)) => {
+				DbResultError::InvalidParams("Type coercion error".to_string())
+			}
+			Some(Error::Cast(_)) => DbResultError::InvalidParams("Type casting error".to_string()),
+			Some(Error::TryAdd(_, _))
+			| Some(Error::TrySub(_, _))
+			| Some(Error::TryMul(_, _))
+			| Some(Error::TryDiv(_, _))
+			| Some(Error::TryRem(_, _))
+			| Some(Error::TryPow(_, _))
+			| Some(Error::TryNeg(_)) => {
+				DbResultError::InvalidParams("Arithmetic operation error".to_string())
+			}
+			Some(Error::TryFrom(_, _)) => {
+				DbResultError::InvalidParams("Type conversion error".to_string())
+			}
+			Some(Error::Unencodable) => {
+				DbResultError::SerializationError("Value cannot be serialized".to_string())
+			}
+			Some(Error::Storekey(_)) => {
+				DbResultError::DeserializationError("Key decoding error".to_string())
+			}
+			Some(Error::Revision(_)) => {
+				DbResultError::DeserializationError("Versioned data error".to_string())
+			}
+			Some(Error::CorruptedIndex(_)) => {
+				DbResultError::InternalError("Index corruption detected".to_string())
+			}
+			Some(Error::NoIndexFoundForMatch {
+				..
+			}) => DbResultError::InternalError("No suitable index found".to_string()),
+			Some(Error::AnalyzerError(msg)) => {
+				DbResultError::InternalError(format!("Analyzer error: {}", msg))
+			}
+			Some(Error::HighlightError(msg)) => {
+				DbResultError::InternalError(format!("Highlight error: {}", msg))
+			}
+			Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
+			Some(Error::Utf8Error(_)) => {
+				DbResultError::DeserializationError("UTF-8 decoding error".to_string())
+			}
+			Some(Error::ObsError(_)) => {
+				DbResultError::InternalError("Object store error".to_string())
+			}
+			Some(Error::DuplicatedMatchRef {
+				..
+			}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
+			Some(Error::TimestampOverflow(msg)) => {
+				DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
+			}
+			Some(Error::NoRecordFound) => {
+				DbResultError::InternalError("No record found".to_string())
+			}
+			Some(Error::InvalidSignup) => DbResultError::InvalidAuth("Signup failed".to_string()),
+			Some(Error::ClAlreadyExists {
+				..
+			}) => DbResultError::InternalError("Cluster node already exists".to_string()),
+			Some(Error::ApAlreadyExists {
+				..
+			}) => DbResultError::InternalError("API already exists".to_string()),
+			Some(Error::AzAlreadyExists {
+				..
+			}) => DbResultError::InternalError("Analyzer already exists".to_string()),
+			Some(Error::BuAlreadyExists {
+				..
+			}) => DbResultError::InternalError("Bucket already exists".to_string()),
+			Some(Error::DbAlreadyExists {
+				..
+			}) => DbResultError::InternalError("Database already exists".to_string()),
+			_ => DbResultError::InternalError(e.to_string()),
 		})
 	}
 

@@ -106,12 +106,14 @@ impl ComputeExecutor {
 		plan: Arc<dyn crate::exec::OperatorPlan>,
 		txn: Arc<Transaction>,
 	) -> anyhow::Result<Value> {
+		use std::collections::HashMap;
+
+		use tokio_util::sync::CancellationToken;
+
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 		use crate::exec::context::{
 			DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
 		};
-		use std::collections::HashMap;
-		use tokio_util::sync::CancellationToken;
 
 		// Build parameters from the context values
 		// For now, we just create an empty parameters map since the old context
@@ -385,26 +387,16 @@ impl ComputeExecutor {
 				ctx_mut!().set_transaction(txn);
 				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
-			// EXPLAIN should use the new execution model
-			TopLevelExpr::Explain {
-				..
-			} => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
-					"EXPLAIN is only supported with the new execution model".to_string(),
-				))));
-			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// Try the new streaming execution path first
-				match crate::exec::planner::try_plan_expr(&e) {
+				match crate::exec::planner::try_plan_expr(&e, &self.ctx) {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());
 
 						// Build execution context and execute the plan
-						let exec_result = self
-							.execute_operator_plan(plan, txn.clone())
-							.await;
+						let exec_result = self.execute_operator_plan(plan, txn.clone()).await;
 
 						self.check_slow_log(start, &e);
 

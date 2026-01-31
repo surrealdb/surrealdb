@@ -91,12 +91,13 @@ impl OperatorPlan for Project {
 
 					for field in &fields {
 						// Evaluate the field expression
-						let field_value = field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!(
-								"Failed to evaluate field expression: {}",
-								e
-							))
-						})?;
+						let field_value =
+							field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
+								ControlFlow::Err(anyhow::anyhow!(
+									"Failed to evaluate field expression: {}",
+									e
+								))
+							})?;
 						obj.insert(field.output_name.clone(), field_value);
 					}
 

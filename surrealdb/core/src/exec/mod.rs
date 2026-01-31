@@ -6,18 +6,17 @@
 //!
 //! ## Design Principles
 //!
-//! - **No compute methods**: This module must not call any `compute()` methods from the
-//!   `expr` module. All evaluation logic is implemented through [`PhysicalExpr`] and
-//!   [`OperatorPlan`] traits to maintain a clean separation between the legacy compute
-//!   path and the streaming execution path.
+//! - **No compute methods**: This module must not call any `compute()` methods from the `expr`
+//!   module. All evaluation logic is implemented through [`PhysicalExpr`] and [`OperatorPlan`]
+//!   traits to maintain a clean separation between the legacy compute path and the streaming
+//!   execution path.
 //!
-//! - **Push-based streaming**: Rather than pulling results through recursive calls,
-//!   operators push batches of values downstream through async streams. This enables
-//!   better memory efficiency and supports incremental result delivery.
+//! - **Push-based streaming**: Rather than pulling results through recursive calls, operators push
+//!   batches of values downstream through async streams. This enables better memory efficiency and
+//!   supports incremental result delivery.
 //!
-//! - **Batched execution**: Values are processed in [`ValueBatch`] containers, allowing
-//!   operators to amortize per-record overhead and enabling future optimizations like
-//!   columnar execution.
+//! - **Batched execution**: Values are processed in [`ValueBatch`] containers, allowing operators
+//!   to amortize per-record overhead and enabling future optimizations like columnar execution.
 //!
 //! ## Module Structure
 //!
@@ -447,20 +446,20 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 // 			USE NS test;
 // 			DEFINE DATABASE test;
 // 			USE DB test;
-			
+
 // 			-- Table with FULL permissions (explicit)
 // 			DEFINE TABLE public_data PERMISSIONS FULL;
 // 			INSERT INTO public_data [
 // 				{ id: public_data:1, value: "public1" },
 // 				{ id: public_data:2, value: "public2" }
 // 			];
-			
+
 // 			-- Table with NONE permissions for select
 // 			DEFINE TABLE private_data PERMISSIONS FOR select NONE;
 // 			INSERT INTO private_data [
 // 				{ id: private_data:1, secret: "classified" }
 // 			];
-			
+
 // 			-- Table with conditional SELECT permission (WHERE id = $auth.id)
 // 			DEFINE TABLE user_data PERMISSIONS FOR select WHERE id = $auth;
 // 			INSERT INTO user_data [
