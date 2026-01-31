@@ -1,0 +1,90 @@
+//! ProjectValue operator for SELECT VALUE expressions.
+//!
+//! The ProjectValue operator evaluates a single expression for each input record
+//! and returns the raw values (not wrapped in objects).
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use futures::StreamExt;
+
+use crate::err::Error;
+use crate::exec::{
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
+	ValueBatch, ValueBatchStream,
+};
+use crate::expr::ControlFlow;
+
+/// ProjectValue operator - evaluates a single expression for each input record.
+///
+/// Unlike the regular Project operator which produces objects with named fields,
+/// ProjectValue returns the raw value of the expression for each record.
+/// This is used for `SELECT VALUE expr FROM ...`.
+#[derive(Debug, Clone)]
+pub struct ProjectValue {
+	/// The input plan to project from
+	pub input: Arc<dyn OperatorPlan>,
+	/// The expression to evaluate for each record
+	pub expr: Arc<dyn PhysicalExpr>,
+}
+
+#[async_trait]
+impl OperatorPlan for ProjectValue {
+	fn name(&self) -> &'static str {
+		"ProjectValue"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![("expr".to_string(), self.expr.to_sql())]
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		// ProjectValue needs the same context as its input, plus whatever the expression needs
+		self.input.required_context()
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Combine input's mode with expression's mode
+		self.input.access_mode().combine(self.expr.access_mode())
+	}
+
+	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+		vec![&self.input]
+	}
+
+	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+		let input_stream = self.input.execute(ctx)?;
+		let expr = self.expr.clone();
+		let ctx = ctx.clone();
+
+		let projected = input_stream.then(move |batch_result| {
+			let expr = expr.clone();
+			let ctx = ctx.clone();
+
+			async move {
+				let batch = batch_result?;
+				let mut projected_values = Vec::with_capacity(batch.values.len());
+
+				for value in batch.values {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
+
+					match expr.evaluate(eval_ctx).await {
+						Ok(result) => projected_values.push(result),
+						Err(e) => {
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"Failed to evaluate projection expression: {}",
+								e
+							)));
+						}
+					}
+				}
+
+				Ok(ValueBatch {
+					values: projected_values,
+				})
+			}
+		});
+
+		Ok(Box::pin(projected))
+	}
+}

@@ -1,0 +1,27 @@
+[package]
+name = "surrealism-runtime"
+version = "0.1.7"
+description = "Runtime for Surrealism"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+surrealdb-types.workspace = true
+wasmtime.workspace = true
+surrealism-types = { workspace = true, features = ["host"] }
+tar.workspace = true
+zstd.workspace = true
+semver.workspace = true
+wasmtime-wasi.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true

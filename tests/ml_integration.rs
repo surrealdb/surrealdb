@@ -4,13 +4,10 @@ mod common;
 #[cfg(feature = "ml")]
 mod ml_integration {
 
-	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::time::Duration;
 
 	use http::{StatusCode, header};
-	use reqwest::Body;
 	use serde::{Deserialize, Serialize};
-	use surrealdb_core::ml::storage::stream_adapter::StreamAdapter;
 	use test_log::test;
 	use ulid::Ulid;
 
@@ -24,8 +21,6 @@ mod ml_integration {
 		information: String,
 	}
 
-	static LOCK: AtomicBool = AtomicBool::new(false);
-
 	#[derive(Serialize, Deserialize, Debug)]
 	struct Data {
 		result: Vec<f64>,
@@ -33,28 +28,9 @@ mod ml_integration {
 		time: String,
 	}
 
-	struct LockHandle;
-
-	impl LockHandle {
-		fn acquire_lock() -> Self {
-			while LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-				!= Ok(false)
-			{
-				std::thread::sleep(Duration::from_millis(100));
-			}
-			LockHandle
-		}
-	}
-
-	impl Drop for LockHandle {
-		fn drop(&mut self) {
-			LOCK.store(false, Ordering::Release);
-		}
-	}
-
 	async fn upload_file(addr: &str, ns: &str, db: &str) -> Result<(), Box<dyn std::error::Error>> {
-		let generator = StreamAdapter::new(5, "./tests/linear_test.surml".to_string()).unwrap();
-		let body = Body::wrap_stream(generator);
+		// Open the model file
+		let body = std::fs::read("./tests/linear_test.surml")?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -76,23 +52,12 @@ mod ml_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn upload_model() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
-		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-		let ns = Ulid::new().to_string();
-		let db = Ulid::new().to_string();
-		upload_file(&addr, &ns, &db).await?;
-		Ok(())
-	}
-
-	#[test(tokio::test)]
 	async fn upload_bad_file() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		let generator = StreamAdapter::new(5, "./tests/should_crash.surml".to_string()).unwrap();
-		let body = Body::wrap_stream(generator);
+		// Open the model file
+		let body = std::fs::read("./tests/should_crash.surml")?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -111,7 +76,6 @@ mod ml_integration {
 		// Check response code
 		let raw_data = res.text().await?;
 		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
-
 		assert_eq!(response.code, 400);
 		assert_eq!(
 			"Not enough bytes to read for header, maybe the file format is not correct".to_string(),
@@ -122,12 +86,11 @@ mod ml_integration {
 
 	#[test(tokio::test)]
 	async fn upload_file_with_no_name() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		let generator = StreamAdapter::new(5, "./tests/no_name.surml".to_string()).unwrap();
-		let body = Body::wrap_stream(generator);
+		// Open the model file
+		let body = std::fs::read("./tests/no_name.surml")?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -146,7 +109,6 @@ mod ml_integration {
 		// Check response code
 		let raw_data = res.text().await?;
 		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
-
 		assert_eq!(response.code, 400);
 		assert_eq!("Model name and version must be set".to_string(), response.information);
 		Ok(())
@@ -154,12 +116,11 @@ mod ml_integration {
 
 	#[test(tokio::test)]
 	async fn upload_file_with_no_version() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		let generator = StreamAdapter::new(5, "./tests/no_version.surml".to_string()).unwrap();
-		let body = Body::wrap_stream(generator);
+		// Open the model file
+		let body = std::fs::read("./tests/no_version.surml")?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -178,7 +139,6 @@ mod ml_integration {
 		// Check response code
 		let raw_data = res.text().await?;
 		let response: ErrorResponse = serde_json::from_str(&raw_data)?;
-
 		assert_eq!(response.code, 400);
 		assert_eq!("Model name and version must be set".to_string(), response.information);
 		Ok(())
@@ -186,13 +146,11 @@ mod ml_integration {
 
 	#[test(tokio::test)]
 	async fn upload_file_with_no_version_or_name() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-		let generator =
-			StreamAdapter::new(5, "./tests/no_name_or_version.surml".to_string()).unwrap();
-		let body = Body::wrap_stream(generator);
+		// Open the model file
+		let body = std::fs::read("./tests/no_name_or_version.surml")?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -218,15 +176,20 @@ mod ml_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn raw_compute() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
+	async fn upload_model() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-
 		upload_file(&addr, &ns, &db).await?;
+		Ok(())
+	}
 
+	#[test(tokio::test)]
+	async fn raw_compute() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		upload_file(&addr, &ns, &db).await?;
 		// Prepare HTTP client
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
@@ -236,7 +199,6 @@ mod ml_integration {
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
 			.build()?;
-
 		// perform an SQL query to check if the model is available
 		{
 			let res = client
@@ -256,12 +218,9 @@ mod ml_integration {
 
 	#[test(tokio::test)]
 	async fn buffered_compute() -> Result<(), Box<dyn std::error::Error>> {
-		let _lock = LockHandle::acquire_lock();
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
-
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
-
 		upload_file(&addr, &ns, &db).await?;
 
 		// Prepare HTTP client
@@ -273,8 +232,7 @@ mod ml_integration {
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
 			.build()?;
-
-		// perform an SQL query to check if the model is available
+		// Perform an SQL query to check if the model is available
 		{
 			let res = client
 				.post(format!("http://{addr}/sql"))

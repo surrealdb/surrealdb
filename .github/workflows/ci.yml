@@ -171,7 +171,7 @@ jobs:
     name: Check workspace (MSRV)
     runs-on: ubuntu-latest
     env:
-      msrv: "1.89" # This should be updated if the MSRV is updated.
+      msrv: "1.90" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -523,7 +523,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/language-tests
+          workspaces: language-tests
           cache-key: lang-${{ matrix.engine }}
 
       - name: Install tools
@@ -549,18 +549,18 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
-            crates/language-tests
+            language-tests
             ./
-          cache-directories: crates/language-tests/.binary-cache
+          cache-directories: language-tests/.binary-cache
 
       - name: Build SurrealQL test tool
         run: |
-          cd crates/language-tests
+          cd language-tests
           cargo build --features upgrade
 
   #    - name: Run SurrealQL test suite
         #run: |
-        #  cd crates/language-tests
+        #  cd language-tests
         #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
@@ -884,7 +884,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 9.0.x
+          - 10.0.x
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
