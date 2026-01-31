@@ -65,6 +65,20 @@ impl Fields {
 		}))
 	}
 
+	pub(crate) fn push(&mut self, field: Field) -> std::result::Result<(), crate::err::Error> {
+		match self {
+			Fields::Value(_) => {
+				return Err(crate::err::Error::Query {
+					message: "Cannot push field to VALUE projection".to_string(),
+				});
+			}
+			Fields::Select(fields) => {
+				fields.push(field);
+			}
+		}
+		Ok(())
+	}
+
 	/// Returns an iterator which returns all fields which are not `Field::All`.
 	pub(crate) fn iter_non_all_fields(&self) -> FieldsIter<'_> {
 		match self {

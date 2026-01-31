@@ -7,7 +7,7 @@ use crate::exec::operators::{
 	Aggregate, AggregateField, AggregateType, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter,
 	LetPlan, Limit, Project, ProjectValue, Scan, Sort, SourceExpr, Split, Timeout, Union,
 };
-use crate::expr::field::{Field, Fields};
+use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
 
 pub(crate) fn expr_to_physical_expr(
@@ -142,7 +142,7 @@ pub(crate) fn expr_to_physical_expr(
 		}
 		Expr::Select(select) => {
 			// Scalar subquery - plan the SELECT and wrap in ScalarSubquery
-			let plan = plan_select(&select, ctx)?;
+			let plan = plan_select(*select, ctx)?;
 			Ok(Arc::new(ScalarSubquery {
 				plan,
 			}))
@@ -338,13 +338,13 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 }
 
 pub(crate) fn try_plan_expr(
-	expr: &Expr,
+	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	match expr {
 		// Supported statements
-		Expr::Select(select) => plan_select(select, ctx),
-		Expr::Let(let_stmt) => convert_let_statement(let_stmt, ctx),
+		Expr::Select(select) => plan_select(*select, ctx),
+		Expr::Let(let_stmt) => convert_let_statement(*let_stmt, ctx),
 
 		// DML statements - not yet supported
 		Expr::Create(_) => Err(Error::Unimplemented(
@@ -419,11 +419,11 @@ pub(crate) fn try_plan_expr(
 			statement,
 		} => {
 			// Plan the inner statement
-			let inner_plan = try_plan_expr(statement, ctx)?;
+			let inner_plan = try_plan_expr(*statement, ctx)?;
 			// Wrap it in an ExplainPlan operator
 			Ok(Arc::new(ExplainPlan {
 				plan: inner_plan,
-				format: *format,
+				format,
 			}))
 		}
 
@@ -438,7 +438,7 @@ pub(crate) fn try_plan_expr(
 			..
 		}
 		| Expr::Table(_) => {
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			let phys_expr = expr_to_physical_expr(expr, ctx)?;
 			// Validate that the expression doesn't require row context
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -452,7 +452,7 @@ pub(crate) fn try_plan_expr(
 
 		// Idiom expressions require row context, so they need special handling
 		Expr::Idiom(_) => {
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			let phys_expr = expr_to_physical_expr(expr, ctx)?;
 			// Idioms always reference current_value, so this will be an error for top-level
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -473,7 +473,7 @@ pub(crate) fn try_plan_expr(
 		Expr::Postfix {
 			..
 		} => {
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			let phys_expr = expr_to_physical_expr(expr, ctx)?;
 			// Validate that the expression doesn't require row context
 			if phys_expr.references_current_value() {
 				return Err(Error::Unimplemented(
@@ -491,118 +491,126 @@ pub(crate) fn try_plan_expr(
 ///
 /// The operator pipeline is built in this order:
 /// 1. Scan/Union (source from FROM clause)
-/// 2. Split (SPLIT BY - before filtering/grouping)
-/// 3. Filter (WHERE - before grouping)
+/// 2. Filter (WHERE)
+/// 3. Split (SPLIT BY)
 /// 4. Aggregate (GROUP BY)
-/// 5. Project (SELECT fields) or ProjectValue (SELECT VALUE)
-/// 6. Sort (ORDER BY)
-/// 7. Limit (LIMIT/START)
-/// 8. Fetch (FETCH)
+/// 5. Sort (ORDER BY)
+/// 6. Limit (LIMIT/START)
+/// 7. Fetch (FETCH)
+/// 8. Project (SELECT fields) or ProjectValue (SELECT VALUE)
 /// 9. Timeout (TIMEOUT)
 fn plan_select(
-	select: &crate::expr::statements::SelectStatement,
+	select: crate::expr::statements::SelectStatement,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
-	// Return Unimplemented for features not yet supported in the new executor
-	// These will fall back to the old executor
+	let crate::expr::statements::SelectStatement {
+		mut fields,
+		omit,
+		only,
+		what,
+		with,
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		fetch,
+		version,
+		timeout,
+		explain,
+		tempfiles,
+	} = select;
 
 	// ONLY clause (unwraps single results)
-	if select.only {
+	if only {
 		return Err(Error::Unimplemented(
 			"SELECT ... ONLY not yet supported in execution plans".to_string(),
 		));
 	}
 
 	// EXPLAIN clause (query explain output)
-	if select.explain.is_some() {
+	if explain.is_some() {
 		return Err(Error::Unimplemented(
 			"SELECT ... EXPLAIN not yet supported in execution plans".to_string(),
 		));
 	}
 
 	// WITH clause (index hints)
-	if select.with.is_some() {
+	if with.is_some() {
 		return Err(Error::Unimplemented(
 			"SELECT ... WITH not yet supported in execution plans".to_string(),
 		));
 	}
 
 	// Extract VERSION timestamp if present (for time-travel queries)
-	let version = extract_version(&select.version)?;
+	let version = extract_version(version)?;
 
 	// Build the source plan from `what` (FROM clause)
-	let source = plan_select_sources(&select.what, version, ctx)?;
+	let source = plan_select_sources(what, version, ctx)?;
 
-	// Apply SPLIT BY if present (before filtering)
-	let split = if let Some(splits) = &select.split {
-		let idioms: Vec<_> = splits.iter().map(|s| s.0.clone()).collect();
-		Arc::new(Split {
+	// Apply WHERE clause if present (before grouping)
+	let filtered = if let Some(cond) = cond {
+		let predicate = expr_to_physical_expr(cond.0, ctx)?;
+		Arc::new(Filter {
 			input: source,
-			idioms,
+			predicate,
 		}) as Arc<dyn OperatorPlan>
 	} else {
 		source
 	};
 
-	// Apply WHERE clause if present (before grouping)
-	let filtered = if let Some(cond) = &select.cond {
-		let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
-		Arc::new(Filter {
-			input: split,
-			predicate,
+	// Apply SPLIT BY if present (before filtering)
+	let split = if let Some(splits) = split {
+		let idioms: Vec<_> = splits.into_iter().map(|s| s.0).collect();
+		Arc::new(Split {
+			input: filtered,
+			idioms,
 		}) as Arc<dyn OperatorPlan>
 	} else {
-		split
+		filtered
 	};
 
 	// Apply GROUP BY if present
-	let (grouped, skip_projections) = if let Some(groups) = &select.group {
-		let group_by: Vec<_> = groups.0.iter().map(|g| g.0.clone()).collect();
+	let (grouped, skip_projections) = if let Some(groups) = group {
+		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
 
 		// Build aggregate fields from the SELECT expression
-		let aggregates = plan_aggregation(&select.fields, &group_by, ctx)?;
+		let aggregates = plan_aggregation(&fields, &group_by, ctx)?;
 
 		// For GROUP BY, the Aggregate operator handles projections internally
 		// Skip the separate projection step
 		(
 			Arc::new(Aggregate {
-				input: filtered,
+				input: split,
 				group_by,
 				aggregates,
 			}) as Arc<dyn OperatorPlan>,
 			true,
 		)
 	} else {
-		(filtered, false)
-	};
-
-	// Apply projections (SELECT fields or SELECT VALUE)
-	// Skip if GROUP BY is present (handled by Aggregate operator)
-	let projected = if skip_projections {
-		grouped
-	} else {
-		plan_projections(&select.fields, &select.omit, grouped, ctx)?
+		(split, false)
 	};
 
 	// Apply ORDER BY if present
-	let sorted = if let Some(order) = &select.order {
+	let sorted = if let Some(order) = &order {
 		let order_by = plan_order_by(order, ctx)?;
 		Arc::new(Sort {
-			input: projected,
+			input: grouped,
 			order_by,
 		}) as Arc<dyn OperatorPlan>
 	} else {
-		projected
+		grouped
 	};
 
 	// Apply LIMIT/START if present
-	let limited = if select.limit.is_some() || select.start.is_some() {
-		let limit_expr = if let Some(limit) = &select.limit {
+	let limited = if limit.is_some() || start.is_some() {
+		let limit_expr = if let Some(limit) = &limit {
 			Some(expr_to_physical_expr(limit.0.clone(), ctx)?)
 		} else {
 			None
 		};
-		let offset_expr = if let Some(start) = &select.start {
+		let offset_expr = if let Some(start) = &start {
 			Some(expr_to_physical_expr(start.0.clone(), ctx)?)
 		} else {
 			None
@@ -617,15 +625,24 @@ fn plan_select(
 	};
 
 	// Apply FETCH if present
-	let fetched = plan_fetch(&select.fetch, limited)?;
+	// Fetch adds to the projections list.
+	let fetched = plan_fetch(fetch, limited, &mut fields)?;
+
+	// Apply projections (SELECT fields or SELECT VALUE)
+	// Skip if GROUP BY is present (handled by Aggregate operator)
+	let projected = if skip_projections {
+		fetched
+	} else {
+		plan_projections(&fields, &omit, fetched, ctx)?
+	};
 
 	// Apply TIMEOUT if present (timeout is always Expr but may be Literal::None)
-	let timed = match &select.timeout {
-		Expr::Literal(Literal::None) => fetched,
+	let timed = match timeout {
+		Expr::Literal(Literal::None) => projected,
 		timeout_expr => {
-			let timeout_phys = expr_to_physical_expr(timeout_expr.clone(), ctx)?;
+			let timeout_phys = expr_to_physical_expr(timeout_expr, ctx)?;
 			Arc::new(Timeout {
-				input: fetched,
+				input: projected,
 				timeout: Some(timeout_phys),
 			}) as Arc<dyn OperatorPlan>
 		}
@@ -673,7 +690,7 @@ fn plan_projections(
 				// SELECT * - pass through without projection
 				// But apply OMIT if present using Project operator
 				if !omit.is_empty() {
-					let omit_fields = plan_omit_fields(omit, ctx)?;
+					let omit_fields = plan_omit_fields(omit.to_vec(), ctx)?;
 					return Ok(Arc::new(Project {
 						input,
 						fields: vec![], // No specific fields - pass through
@@ -721,7 +738,7 @@ fn plan_projections(
 
 			// Handle OMIT if present (only valid with wildcards)
 			let omit_fields = if has_wildcard && !omit.is_empty() {
-				plan_omit_fields(omit, ctx)?
+				plan_omit_fields(omit.to_vec(), ctx)?
 			} else {
 				vec![]
 			};
@@ -738,7 +755,7 @@ fn plan_projections(
 
 /// Plan OMIT fields - convert expressions to idioms
 fn plan_omit_fields(
-	omit: &[Expr],
+	omit: Vec<Expr>,
 	_ctx: &FrozenContext,
 ) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
 	let mut fields = Vec::with_capacity(omit.len());
@@ -746,7 +763,7 @@ fn plan_omit_fields(
 	for expr in omit {
 		match expr {
 			Expr::Idiom(idiom) => {
-				fields.push(idiom.clone());
+				fields.push(idiom);
 			}
 			_ => {
 				// Only simple idiom references are supported for OMIT
@@ -791,8 +808,9 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 
 /// Plan FETCH clause
 fn plan_fetch(
-	fetch: &Option<crate::expr::fetch::Fetchs>,
+	fetch: Option<crate::expr::fetch::Fetchs>,
 	input: Arc<dyn OperatorPlan>,
+	projection: &mut Fields,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
 	let Some(fetchs) = fetch else {
 		return Ok(input);
@@ -800,12 +818,18 @@ fn plan_fetch(
 
 	// Convert fetch expressions to idioms
 	// We only support simple idiom fetches for now
-	let mut fields = Vec::new();
-	for fetch_item in fetchs.iter() {
+	let mut fields = Vec::with_capacity(fetchs.len());
+	for fetch_item in fetchs {
 		// The Fetch struct wraps an Expr in field .0
-		match &fetch_item.0 {
+		match fetch_item.0 {
 			Expr::Idiom(idiom) => {
 				fields.push(idiom.clone());
+
+				// Add to the final projection list to ensure the fetch is not dropped.
+				projection.push(Field::Single(Selector {
+					expr: Expr::Idiom(idiom),
+					alias: None,
+				}))?;
 			}
 			_ => {
 				// Complex fetch expressions (params, function calls) not yet supported
@@ -956,7 +980,7 @@ fn detect_aggregate_type(expr: &Expr) -> Option<AggregateType> {
 
 /// Extract version timestamp from VERSION clause expression.
 /// Currently only supports literal Datetime values.
-fn extract_version(version_expr: &Expr) -> Result<Option<u64>, Error> {
+fn extract_version(version_expr: Expr) -> Result<Option<u64>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
 		Expr::Literal(Literal::Datetime(dt)) => {
@@ -975,7 +999,7 @@ fn extract_version(version_expr: &Expr) -> Result<Option<u64>, Error> {
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
 fn plan_select_sources(
-	what: &[Expr],
+	what: Vec<Expr>,
 	version: Option<u64>,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
@@ -1006,7 +1030,7 @@ fn plan_select_sources(
 /// Scan handles KV store sources: table names, record IDs (point or range).
 /// SourceExpr handles value sources: arrays, scalars, computed expressions.
 fn plan_single_source(
-	expr: &Expr,
+	expr: Expr,
 	version: Option<u64>,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
@@ -1034,7 +1058,7 @@ fn plan_single_source(
 			// Convert the record ID literal to an expression that Scan can evaluate
 			// Scan will handle point lookups and range scans internally
 			let table_expr = expr_to_physical_expr(
-				Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit.clone())),
+				Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)),
 				ctx,
 			)?;
 			Ok(Arc::new(Scan {
@@ -1046,13 +1070,13 @@ fn plan_single_source(
 		// Subquery: SELECT * FROM (SELECT * FROM table)
 		Expr::Select(inner_select) => {
 			// Recursively plan the inner SELECT
-			plan_select(inner_select, ctx)
+			plan_select(*inner_select, ctx)
 		}
 
 		// Array literal: SELECT * FROM [1, 2, 3]
 		Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
 			// Convert to SourceExpr which will unnest the array elements
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			let phys_expr = expr_to_physical_expr(expr, ctx)?;
 			Ok(Arc::new(SourceExpr {
 				expr: phys_expr,
 			}) as Arc<dyn OperatorPlan>)
@@ -1072,7 +1096,7 @@ fn plan_single_source(
 				}
 				Some(_) | None => {
 					// Array, scalar, or unknown → SourceExpr
-					let phys_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
+					let phys_expr = expr_to_physical_expr(Expr::Param(param), ctx)?;
 					Ok(Arc::new(SourceExpr {
 						expr: phys_expr,
 					}) as Arc<dyn OperatorPlan>)
@@ -1094,7 +1118,7 @@ fn plan_single_source(
 
 		// Other expressions (strings, objects, etc.) → SourceExpr
 		other => {
-			let phys_expr = expr_to_physical_expr(other.clone(), ctx)?;
+			let phys_expr = expr_to_physical_expr(other, ctx)?;
 			Ok(Arc::new(SourceExpr {
 				expr: phys_expr,
 			}) as Arc<dyn OperatorPlan>)
@@ -1104,15 +1128,19 @@ fn plan_single_source(
 
 /// Convert a LET statement to an execution plan
 fn convert_let_statement(
-	let_stmt: &crate::expr::statements::SetStatement,
+	let_stmt: crate::expr::statements::SetStatement,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn OperatorPlan>, Error> {
-	let name = let_stmt.name.clone();
+	let crate::expr::statements::SetStatement {
+		name,
+		what,
+		kind,
+	} = let_stmt;
 
 	// Determine if the expression is a query or scalar
-	let value: Arc<dyn OperatorPlan> = match &let_stmt.what {
+	let value: Arc<dyn OperatorPlan> = match what {
 		// SELECT produces a stream that gets collected into an array
-		Expr::Select(select) => plan_select(select, ctx)?,
+		Expr::Select(select) => plan_select(*select, ctx)?,
 
 		// DML statements in LET are not yet supported
 		Expr::Create(_) => {
@@ -1535,6 +1563,7 @@ fn plan_lookup(
 #[cfg(test)]
 mod planner_tests {
 	use super::*;
+	use crate::ctx::Context;
 
 	#[test]
 	fn test_planner_creates_let_operator() {
@@ -1544,7 +1573,8 @@ mod planner_tests {
 			kind: None,
 		}));
 
-		let plan = try_plan_expr(&expr).expect("Planning failed");
+		let ctx = Arc::new(Context::background());
+		let plan = try_plan_expr(expr, &ctx).expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
 		assert!(plan.mutates_context());
@@ -1555,7 +1585,8 @@ mod planner_tests {
 		// Test a simple literal
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
-		let plan = try_plan_expr(&expr).expect("Planning failed");
+		let ctx = Arc::new(Context::background());
+		let plan = try_plan_expr(expr, &ctx).expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");
 		assert!(plan.is_scalar());

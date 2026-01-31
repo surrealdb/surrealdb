@@ -390,7 +390,7 @@ impl ComputeExecutor {
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// Try the new streaming execution path first
-				match crate::exec::planner::try_plan_expr(&e, &self.ctx) {
+				match crate::exec::planner::try_plan_expr(e.clone(), &self.ctx) {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());
