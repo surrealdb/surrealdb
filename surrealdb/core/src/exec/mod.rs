@@ -51,6 +51,7 @@ pub(crate) mod context;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
+pub(crate) mod physical_part;
 pub(crate) mod planner;
 pub(crate) mod statement;
 

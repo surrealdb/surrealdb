@@ -39,6 +39,8 @@ pub struct Project {
 	pub fields: Vec<FieldSelection>,
 	/// Fields to omit from output (for SELECT * OMIT)
 	pub omit: Vec<Idiom>,
+	/// Whether to include all fields from input (for SELECT *, field1, field2)
+	pub include_all: bool,
 }
 
 #[async_trait]
@@ -68,6 +70,7 @@ impl OperatorPlan for Project {
 		let input_stream = self.input.execute(ctx)?;
 		let fields = self.fields.clone();
 		let omit = self.omit.clone();
+		let include_all = self.include_all;
 		let ctx = ctx.clone();
 
 		// Create a stream that projects fields
@@ -82,13 +85,22 @@ impl OperatorPlan for Project {
 				let batch = batch_result?;
 				let mut projected_values = Vec::with_capacity(batch.values.len());
 
-				for mut value in batch.values {
+				for value in batch.values {
 					// Build evaluation context with current value
 					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
 
 					// Build the projected object
-					let mut obj = Object::default();
+					// If include_all is true, start with the original object's fields
+					let mut obj = if include_all {
+						match &value {
+							Value::Object(original) => original.clone(),
+							_ => Object::default(),
+						}
+					} else {
+						Object::default()
+					};
 
+					// Add/override with explicit field selections
 					for field in &fields {
 						// Evaluate the field expression
 						let field_value =

@@ -15,7 +15,7 @@ pub(crate) fn expr_to_physical_expr(
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, ClosurePhysicalExpr, Field, FunctionCallExpr, IfElseExpr,
+		ArrayLiteral, BinaryOp, ClosurePhysicalExpr, FunctionCallExpr, IfElseExpr,
 		Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp, ScalarSubquery, SetLiteral,
 		UnaryOp,
 	};
@@ -58,7 +58,7 @@ pub(crate) fn expr_to_physical_expr(
 			Ok(Arc::new(PhysicalLiteral(value)))
 		}
 		Expr::Param(param) => Ok(Arc::new(Param(param.as_str().to_string()))),
-		Expr::Idiom(idiom) => Ok(Arc::new(Field(idiom))),
+		Expr::Idiom(idiom) => convert_idiom_to_physical_expr(&idiom, ctx),
 		Expr::Binary {
 			left,
 			op,
@@ -586,7 +586,7 @@ fn plan_select(
 
 	// Apply ORDER BY if present
 	let sorted = if let Some(order) = &select.order {
-		let order_by = plan_order_by(order)?;
+		let order_by = plan_order_by(order, ctx)?;
 		Arc::new(Sort {
 			input: projected,
 			order_by,
@@ -678,6 +678,7 @@ fn plan_projections(
 						input,
 						fields: vec![], // No specific fields - pass through
 						omit: omit_fields,
+						include_all: true,
 					}) as Arc<dyn OperatorPlan>);
 				}
 				return Ok(input);
@@ -685,23 +686,15 @@ fn plan_projections(
 
 			// Check for wildcards mixed with specific fields
 			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-			if has_wildcard {
-				// Mixed wildcards (e.g., SELECT field1, *, field2) are complex
-				// The old executor handles this by starting with the full document
-				// and then overwriting specific fields. We'll defer this for now.
-				return Err(Error::Unimplemented(
-					"Mixed wildcard projections (SELECT field, *, ...) not yet supported in execution plans".to_string(),
-				));
-			}
 
-			// OMIT doesn't make sense with specific field projections
-			if !omit.is_empty() {
+			// OMIT doesn't make sense with specific field projections (without wildcard)
+			if !omit.is_empty() && !has_wildcard {
 				return Err(Error::Unimplemented(
 					"OMIT clause with specific field projections not supported".to_string(),
 				));
 			}
 
-			// Build field selections for specific fields only
+			// Build field selections for specific fields (skip wildcards)
 			let mut field_selections = Vec::with_capacity(field_list.len());
 
 			for field in field_list {
@@ -723,12 +716,21 @@ fn plan_projections(
 						expr,
 					});
 				}
+				// Skip Field::All - handled by include_all flag
 			}
+
+			// Handle OMIT if present (only valid with wildcards)
+			let omit_fields = if has_wildcard && !omit.is_empty() {
+				plan_omit_fields(omit, ctx)?
+			} else {
+				vec![]
+			};
 
 			Ok(Arc::new(Project {
 				input,
 				fields: field_selections,
-				omit: vec![], // No omit for specific field projections
+				omit: omit_fields,
+				include_all: has_wildcard,
 			}) as Arc<dyn OperatorPlan>)
 		}
 	}
@@ -1170,9 +1172,9 @@ fn convert_let_statement(
 /// Plan ORDER BY clause into OrderByField list
 fn plan_order_by(
 	order: &crate::expr::order::Ordering,
+	ctx: &FrozenContext,
 ) -> Result<Vec<crate::exec::operators::OrderByField>, Error> {
 	use crate::exec::operators::{NullsOrder, OrderByField, SortDirection};
-	use crate::exec::physical_expr::Field;
 	use crate::expr::order::Ordering;
 
 	match order {
@@ -1185,9 +1187,9 @@ fn plan_order_by(
 		Ordering::Order(order_list) => {
 			let mut fields = Vec::with_capacity(order_list.len());
 			for order_field in order_list.iter() {
-				// Convert idiom to field expression
+				// Convert idiom to IdiomExpr
 				let expr: Arc<dyn crate::exec::PhysicalExpr> =
-					Arc::new(Field(order_field.value.clone()));
+					convert_idiom_to_physical_expr(&order_field.value, ctx)?;
 
 				let direction = if order_field.direction {
 					SortDirection::Asc
@@ -1213,6 +1215,321 @@ fn plan_order_by(
 			Ok(fields)
 		}
 	}
+}
+
+// ============================================================================
+// Idiom Conversion Functions
+// ============================================================================
+
+use crate::exec::physical_expr::IdiomExpr;
+use crate::exec::physical_part::{
+	LookupDirection, PhysicalDestructurePart, PhysicalLookup, PhysicalPart, PhysicalRecurse,
+	PhysicalRecurseInstruction,
+};
+use crate::expr::part::{DestructurePart, Part, RecurseInstruction};
+
+/// Convert an idiom to a physical expression.
+///
+/// All idioms are converted to `IdiomExpr` which handles runtime type checking
+/// (e.g., fetching records when accessing fields on RecordIds).
+fn convert_idiom_to_physical_expr(
+	idiom: &crate::expr::idiom::Idiom,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+	// Always convert all parts - runtime handles type-specific behavior
+	let physical_parts = convert_parts_to_physical(&idiom.0, ctx)?;
+	Ok(Arc::new(IdiomExpr::new(idiom.clone(), physical_parts)))
+}
+
+/// Convert idiom parts to physical parts.
+fn convert_parts_to_physical(
+	parts: &[Part],
+	ctx: &FrozenContext,
+) -> Result<Vec<PhysicalPart>, Error> {
+	let mut physical_parts = Vec::with_capacity(parts.len());
+
+	for part in parts {
+		let physical_part = convert_single_part(part, ctx)?;
+		physical_parts.push(physical_part);
+	}
+
+	Ok(physical_parts)
+}
+
+/// Convert a single Part to a PhysicalPart.
+fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart, Error> {
+	match part {
+		Part::Field(name) => Ok(PhysicalPart::Field(name.clone())),
+
+		Part::Value(expr) => {
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			Ok(PhysicalPart::Index(phys_expr))
+		}
+
+		Part::All => Ok(PhysicalPart::All),
+		Part::Flatten => Ok(PhysicalPart::Flatten),
+		Part::First => Ok(PhysicalPart::First),
+		Part::Last => Ok(PhysicalPart::Last),
+		Part::Optional => Ok(PhysicalPart::Optional),
+
+		Part::Where(expr) => {
+			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+			Ok(PhysicalPart::Where(phys_expr))
+		}
+
+		Part::Method(name, args) => {
+			let mut phys_args = Vec::with_capacity(args.len());
+			for arg in args {
+				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
+			}
+			Ok(PhysicalPart::Method {
+				name: name.clone(),
+				args: phys_args,
+			})
+		}
+
+		Part::Destructure(parts) => {
+			let phys_parts = convert_destructure_parts(parts, ctx)?;
+			Ok(PhysicalPart::Destructure(phys_parts))
+		}
+
+		Part::Start(_) => {
+			// Start parts are handled at the idiom level, not as individual parts
+			Err(Error::Unimplemented(
+				"Start parts should be handled at the idiom level".to_string(),
+			))
+		}
+
+		Part::Lookup(lookup) => {
+			// Lookups need special handling - create a plan
+			let plan = plan_lookup(lookup, ctx)?;
+			let direction = match &lookup.kind {
+				crate::expr::lookup::LookupKind::Graph(dir) => LookupDirection::from(dir),
+				crate::expr::lookup::LookupKind::Reference => LookupDirection::Reference,
+			};
+			// Extract edge tables from the lookup subjects
+			let edge_tables: Vec<_> = lookup
+				.what
+				.iter()
+				.map(|s| match s {
+					crate::expr::lookup::LookupSubject::Table {
+						table,
+						..
+					} => table.clone(),
+					crate::expr::lookup::LookupSubject::Range {
+						table,
+						..
+					} => table.clone(),
+				})
+				.collect();
+			Ok(PhysicalPart::Lookup(PhysicalLookup {
+				direction,
+				edge_tables,
+				plan,
+				alias: lookup.alias.clone(),
+			}))
+		}
+
+		Part::Recurse(recurse, inner_path, instruction) => {
+			let (min_depth, max_depth) = match recurse {
+				crate::expr::part::Recurse::Fixed(n) => (*n, Some(*n)),
+				crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), *max),
+			};
+
+			let path = if let Some(p) = inner_path {
+				convert_parts_to_physical(&p.0, ctx)?
+			} else {
+				vec![]
+			};
+
+			let instr = convert_recurse_instruction(instruction, ctx)?;
+
+			Ok(PhysicalPart::Recurse(PhysicalRecurse {
+				min_depth,
+				max_depth,
+				path,
+				instruction: instr,
+				inclusive: matches!(
+					instruction,
+					Some(RecurseInstruction::Path {
+						inclusive: true,
+						..
+					}) | Some(RecurseInstruction::Collect {
+						inclusive: true,
+						..
+					}) | Some(RecurseInstruction::Shortest {
+						inclusive: true,
+						..
+					})
+				),
+			}))
+		}
+
+		Part::Doc => {
+			// Doc ($) refers to the document, which is the current value
+			// This should be handled at the idiom level
+			Ok(PhysicalPart::Field("id".to_string()))
+		}
+
+		Part::RepeatRecurse => {
+			// RepeatRecurse (@) is handled within recursion context
+			Err(Error::Unimplemented(
+				"RepeatRecurse should be handled within recursion context".to_string(),
+			))
+		}
+	}
+}
+
+/// Convert destructure parts to physical destructure parts.
+fn convert_destructure_parts(
+	parts: &[DestructurePart],
+	ctx: &FrozenContext,
+) -> Result<Vec<PhysicalDestructurePart>, Error> {
+	let mut physical_parts = Vec::with_capacity(parts.len());
+
+	for part in parts {
+		let phys_part = match part {
+			DestructurePart::All(field) => PhysicalDestructurePart::All(field.clone()),
+			DestructurePart::Field(field) => PhysicalDestructurePart::Field(field.clone()),
+			DestructurePart::Aliased(field, idiom) => {
+				let path = convert_parts_to_physical(&idiom.0, ctx)?;
+				PhysicalDestructurePart::Aliased {
+					field: field.clone(),
+					path,
+				}
+			}
+			DestructurePart::Destructure(field, nested) => {
+				let nested_parts = convert_destructure_parts(nested, ctx)?;
+				PhysicalDestructurePart::Nested {
+					field: field.clone(),
+					parts: nested_parts,
+				}
+			}
+		};
+		physical_parts.push(phys_part);
+	}
+
+	Ok(physical_parts)
+}
+
+/// Convert a RecurseInstruction to a PhysicalRecurseInstruction.
+fn convert_recurse_instruction(
+	instruction: &Option<RecurseInstruction>,
+	ctx: &FrozenContext,
+) -> Result<PhysicalRecurseInstruction, Error> {
+	match instruction {
+		None => Ok(PhysicalRecurseInstruction::Default),
+		Some(RecurseInstruction::Collect {
+			..
+		}) => Ok(PhysicalRecurseInstruction::Collect),
+		Some(RecurseInstruction::Path {
+			..
+		}) => Ok(PhysicalRecurseInstruction::Path),
+		Some(RecurseInstruction::Shortest {
+			expects,
+			..
+		}) => {
+			let target = expr_to_physical_expr(expects.clone(), ctx)?;
+			Ok(PhysicalRecurseInstruction::Shortest {
+				target,
+			})
+		}
+	}
+}
+
+/// Plan a Lookup operation, creating the operator tree.
+fn plan_lookup(
+	lookup: &crate::expr::lookup::Lookup,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn OperatorPlan>, Error> {
+	use crate::exec::operators::{Filter, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
+
+	// Determine the source expression (current value's record ID)
+	// For now, use a literal placeholder - the actual source binding happens at eval time
+	let source_expr: Arc<dyn crate::exec::PhysicalExpr> =
+		Arc::new(crate::exec::physical_expr::Literal(crate::val::Value::None));
+
+	// Create the base scan operator
+	let base_scan: Arc<dyn OperatorPlan> = match &lookup.kind {
+		crate::expr::lookup::LookupKind::Graph(dir) => {
+			// Convert lookup subjects to table names
+			let edge_tables: Vec<_> = lookup
+				.what
+				.iter()
+				.map(|s| match s {
+					crate::expr::lookup::LookupSubject::Table {
+						table,
+						..
+					} => table.clone(),
+					crate::expr::lookup::LookupSubject::Range {
+						table,
+						..
+					} => table.clone(),
+				})
+				.collect();
+
+			Arc::new(GraphEdgeScan {
+				source: source_expr,
+				direction: LookupDirection::from(dir),
+				edge_tables,
+				output_mode: GraphScanOutput::TargetId,
+			})
+		}
+		crate::expr::lookup::LookupKind::Reference => {
+			// For references, we need the referencing table
+			let (referencing_table, referencing_field) = lookup
+				.what
+				.first()
+				.map(|s| match s {
+					crate::expr::lookup::LookupSubject::Table {
+						table,
+						referencing_field,
+					} => (table.clone(), referencing_field.clone()),
+					crate::expr::lookup::LookupSubject::Range {
+						table,
+						referencing_field,
+						..
+					} => (table.clone(), referencing_field.clone()),
+				})
+				.unwrap_or_else(|| ("unknown".into(), None));
+
+			Arc::new(ReferenceScan {
+				source: source_expr,
+				referencing_table,
+				referencing_field,
+			})
+		}
+	};
+
+	// Apply filter if present
+	let filtered: Arc<dyn OperatorPlan> = if let Some(cond) = &lookup.cond {
+		let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
+		Arc::new(Filter {
+			input: base_scan,
+			predicate,
+		})
+	} else {
+		base_scan
+	};
+
+	// Apply limit if present
+	let limited: Arc<dyn OperatorPlan> = if lookup.limit.is_some() || lookup.start.is_some() {
+		let limit_expr =
+			lookup.limit.as_ref().map(|l| expr_to_physical_expr(l.0.clone(), ctx)).transpose()?;
+		let offset_expr =
+			lookup.start.as_ref().map(|s| expr_to_physical_expr(s.0.clone(), ctx)).transpose()?;
+		Arc::new(Limit {
+			input: filtered,
+			limit: limit_expr,
+			offset: offset_expr,
+		})
+	} else {
+		filtered
+	};
+
+	// TODO: Add Sort, Split, Aggregate, and Project as needed
+
+	Ok(limited)
 }
 
 #[cfg(test)]
