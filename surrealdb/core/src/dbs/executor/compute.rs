@@ -174,8 +174,6 @@ impl ComputeExecutor {
 		plan: Arc<dyn crate::exec::OperatorPlan>,
 		txn: Arc<Transaction>,
 	) -> anyhow::Result<Value> {
-		use std::collections::HashMap;
-
 		use tokio_util::sync::CancellationToken;
 
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
@@ -184,9 +182,9 @@ impl ComputeExecutor {
 		};
 
 		// Build parameters from the context values
-		// For now, we just create an empty parameters map since the old context
-		// stores values differently. In a future iteration, we can properly convert.
-		let params: Arc<Parameters> = Arc::new(HashMap::new());
+		// This collects all query parameters from the FrozenContext chain,
+		// excluding protected/system parameters (access, auth, token, session).
+		let params: Arc<Parameters> = Arc::new(self.ctx.collect_params());
 
 		// Extract session info from the FrozenContext
 		let session = self.extract_session_info();

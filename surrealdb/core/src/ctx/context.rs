@@ -618,6 +618,34 @@ impl Context {
 		}
 	}
 
+	/// Collect all parameter values from the context chain into a HashMap.
+	///
+	/// This walks the parent chain and collects all values, with child values
+	/// taking precedence over parent values (shadowing). Protected parameter
+	/// names (access, auth, token, session) are excluded as they are system
+	/// parameters and not user-defined query parameters.
+	pub(crate) fn collect_params(&self) -> HashMap<Cow<'static, str>, Arc<Value>> {
+		let mut params = HashMap::new();
+
+		// First collect from parent (if not isolated)
+		if !self.isolated {
+			if let Some(ref parent) = self.parent {
+				params = parent.collect_params();
+			}
+		}
+
+		// Then add our own values (shadowing parent values)
+		for (key, value) in &self.values {
+			// Skip protected/system parameters
+			if PROTECTED_PARAM_NAMES.contains(&key.as_ref()) {
+				continue;
+			}
+			params.insert(key.clone(), value.clone());
+		}
+
+		params
+	}
+
 	/// Get a 'static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
