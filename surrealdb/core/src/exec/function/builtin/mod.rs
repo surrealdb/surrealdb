@@ -1,8 +1,9 @@
-//! Built-in scalar function definitions.
+//! Built-in scalar and aggregate function definitions.
 //!
-//! This module registers all built-in pure scalar functions with the registry.
+//! This module registers all built-in functions with the registry.
 //! Functions are organized by category (math, string, array, etc.).
 
+pub mod aggregates;
 mod array;
 mod bytes;
 mod count;
@@ -31,6 +32,7 @@ use super::FunctionRegistry;
 
 /// Register all built-in functions with the registry.
 pub fn register_all(registry: &mut FunctionRegistry) {
+	// Scalar functions
 	array::register(registry);
 	bytes::register(registry);
 	count::register(registry);
@@ -54,4 +56,7 @@ pub fn register_all(registry: &mut FunctionRegistry) {
 	time::register(registry);
 	r#type::register(registry);
 	vector::register(registry);
+
+	// Aggregate functions
+	aggregates::register(registry);
 }

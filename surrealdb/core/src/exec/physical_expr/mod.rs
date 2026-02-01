@@ -208,7 +208,10 @@ mod subquery;
 pub(crate) use block::BlockPhysicalExpr;
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
-pub(crate) use function::{ClosurePhysicalExpr, FunctionCallExpr};
+pub(crate) use function::{
+	BuiltinFunctionExec, ClosureExec, JsFunctionExec, ModelFunctionExec, SiloModuleExec,
+	SurrealismModuleExec, UserDefinedFunctionExec,
+};
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};
 pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};

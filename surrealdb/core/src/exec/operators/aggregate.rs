@@ -4,12 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
-use crate::val::{Number, Object, Value};
+use crate::val::{Object, Value};
 
 /// Aggregates values by grouping keys.
 ///
@@ -33,158 +34,41 @@ pub struct Aggregate {
 pub struct AggregateField {
 	/// The output field name (alias or computed)
 	pub name: String,
-	/// The expression to evaluate. May contain aggregate functions.
-	pub expr: Arc<dyn PhysicalExpr>,
 	/// Whether this field is a group-by key (passed through unchanged)
 	pub is_group_key: bool,
-	/// Optional aggregate function type (for simple aggregate detection)
-	pub aggregate_type: Option<AggregateType>,
+	/// Information about the aggregate function (if this is an aggregate expression).
+	/// When set, the accumulator-based evaluation is used.
+	pub aggregate_info: Option<AggregateInfo>,
+	/// Expression to evaluate for non-aggregate fields (e.g., group-by keys or first-value
+	/// fields). This is used when aggregate_info is None.
+	pub fallback_expr: Option<Arc<dyn PhysicalExpr>>,
 }
 
-/// Known aggregate function types for simple aggregate handling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AggregateType {
-	/// COUNT() - counts all values
-	Count,
-	/// COUNT(field) - counts non-null values
-	CountField,
-	/// SUM(field) - sums numeric values
-	Sum,
-	/// MIN(field) - finds minimum
-	Min,
-	/// MAX(field) - finds maximum
-	Max,
-	/// AVG(field) or math::mean(field) - calculates average
-	Avg,
-	/// array::group(field) - collects values into an array
-	ArrayGroup,
+/// Information about an aggregate function call extracted during planning.
+#[derive(Clone)]
+pub struct AggregateInfo {
+	/// The aggregate function from the registry.
+	pub function: Arc<dyn AggregateFunction>,
+	/// The expression to evaluate per-row to get the value to accumulate.
+	/// For `math::mean(a)`, this would be the expression for `a`.
+	pub argument_expr: Arc<dyn PhysicalExpr>,
 }
 
-/// Running aggregate state for a single field.
-#[derive(Debug, Clone)]
-enum AggregateState {
-	Count(i64),
-	CountField(i64),
-	Sum(Number),
-	Min(Value),
-	Max(Value),
-	Avg {
-		sum: Number,
-		count: i64,
-	},
-	ArrayGroup(Vec<Value>),
-	/// For non-aggregate fields, just store the first value seen
-	FirstValue(Value),
-}
-
-impl AggregateState {
-	fn new(agg_type: Option<AggregateType>) -> Self {
-		match agg_type {
-			Some(AggregateType::Count) => AggregateState::Count(0),
-			Some(AggregateType::CountField) => AggregateState::CountField(0),
-			Some(AggregateType::Sum) => AggregateState::Sum(Number::Int(0)),
-			Some(AggregateType::Min) => AggregateState::Min(Value::None),
-			Some(AggregateType::Max) => AggregateState::Max(Value::None),
-			Some(AggregateType::Avg) => AggregateState::Avg {
-				sum: Number::Int(0),
-				count: 0,
-			},
-			Some(AggregateType::ArrayGroup) => AggregateState::ArrayGroup(Vec::new()),
-			None => AggregateState::FirstValue(Value::None),
-		}
-	}
-
-	fn update(&mut self, value: Value) {
-		match self {
-			AggregateState::Count(count) => *count += 1,
-			AggregateState::CountField(count) => {
-				if !value.is_none() && !value.is_null() {
-					*count += 1;
-				}
-			}
-			AggregateState::Sum(sum) => {
-				if let Some(num) = value.as_number() {
-					*sum = sum.clone() + num.clone();
-				}
-			}
-			AggregateState::Min(min) => {
-				if !value.is_none() && !value.is_null() {
-					if min.is_none() || value < *min {
-						*min = value;
-					}
-				}
-			}
-			AggregateState::Max(max) => {
-				if !value.is_none() && !value.is_null() {
-					if max.is_none() || value > *max {
-						*max = value;
-					}
-				}
-			}
-			AggregateState::Avg {
-				sum,
-				count,
-			} => {
-				if let Some(num) = value.as_number() {
-					*sum = sum.clone() + num.clone();
-					*count += 1;
-				}
-			}
-			AggregateState::ArrayGroup(values) => {
-				values.push(value);
-			}
-			AggregateState::FirstValue(first) => {
-				if first.is_none() {
-					*first = value;
-				}
-			}
-		}
-	}
-
-	fn finalize(self) -> Value {
-		match self {
-			AggregateState::Count(count) => Value::Number(Number::Int(count)),
-			AggregateState::CountField(count) => Value::Number(Number::Int(count)),
-			AggregateState::Sum(sum) => Value::Number(sum),
-			AggregateState::Min(min) => {
-				if min.is_none() {
-					Value::Null
-				} else {
-					min
-				}
-			}
-			AggregateState::Max(max) => {
-				if max.is_none() {
-					Value::Null
-				} else {
-					max
-				}
-			}
-			AggregateState::Avg {
-				sum,
-				count,
-			} => {
-				if count == 0 {
-					Value::Null
-				} else {
-					// Convert to float division
-					let sum_f64 = sum.to_float();
-					Value::Number(Number::Float(sum_f64 / count as f64))
-				}
-			}
-			AggregateState::ArrayGroup(values) => Value::Array(values.into()),
-			AggregateState::FirstValue(value) => value,
-		}
+impl std::fmt::Debug for AggregateInfo {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("AggregateInfo").field("function", &self.function.name()).finish()
 	}
 }
 
 /// Key for grouping - a tuple of values corresponding to GROUP BY expressions
 type GroupKey = Vec<Value>;
 
-/// Per-group aggregate state
+/// Per-group aggregate state using accumulators
 struct GroupState {
-	/// State for each aggregate field
-	field_states: Vec<AggregateState>,
+	/// Accumulators for each aggregate field (None for non-aggregate fields)
+	accumulators: Vec<Option<Box<dyn Accumulator>>>,
+	/// First values seen for non-aggregate fields
+	first_values: Vec<Value>,
 }
 
 #[async_trait]
@@ -214,7 +98,12 @@ impl OperatorPlan for Aggregate {
 		// Combine input's access mode with aggregate expression modes
 		let mut mode = self.input.access_mode();
 		for agg in &self.aggregates {
-			mode = mode.combine(agg.expr.access_mode());
+			if let Some(info) = &agg.aggregate_info {
+				mode = mode.combine(info.argument_expr.access_mode());
+			}
+			if let Some(expr) = &agg.fallback_expr {
+				mode = mode.combine(expr.access_mode());
+			}
 		}
 		mode
 	}
@@ -243,9 +132,7 @@ impl OperatorPlan for Aggregate {
 					let key = compute_group_key(&value, &group_by);
 
 					// Get or create the group state
-					let state = groups.entry(key).or_insert_with(|| GroupState {
-						field_states: aggregates.iter().map(|a| AggregateState::new(a.aggregate_type)).collect(),
-					});
+					let state = groups.entry(key).or_insert_with(|| create_group_state(&aggregates));
 
 					// Update aggregate states with this value
 					for (i, agg) in aggregates.iter().enumerate() {
@@ -254,15 +141,34 @@ impl OperatorPlan for Aggregate {
 							continue;
 						}
 
-						// Evaluate the expression to get the value to aggregate
 						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
-						match agg.expr.evaluate(eval_ctx).await {
-							Ok(field_value) => {
-								state.field_states[i].update(field_value);
+
+						if let Some(info) = &agg.aggregate_info {
+							// Evaluate the ARGUMENT expression (not the full function call)
+							match info.argument_expr.evaluate(eval_ctx).await {
+								Ok(arg_value) => {
+									if let Some(acc) = &mut state.accumulators[i] {
+										// Update the accumulator with the argument value
+										if let Err(_e) = acc.update(arg_value) {
+											// On error, continue (value is effectively skipped)
+										}
+									}
+								}
+								Err(_) => {
+									// On error, skip this value
+								}
 							}
-							Err(_) => {
-								// On error, update with None
-								state.field_states[i].update(Value::None);
+						} else if let Some(expr) = &agg.fallback_expr {
+							// Non-aggregate field - store first value
+							if state.first_values[i].is_none() {
+								match expr.evaluate(eval_ctx).await {
+									Ok(field_value) => {
+										state.first_values[i] = field_value;
+									}
+									Err(_) => {
+										// On error, leave as None
+									}
+								}
 							}
 						}
 					}
@@ -271,9 +177,7 @@ impl OperatorPlan for Aggregate {
 
 			// If no groups and we have GROUP ALL, create an empty group
 			if groups.is_empty() && group_by.is_empty() {
-				groups.insert(vec![], GroupState {
-					field_states: aggregates.iter().map(|a| AggregateState::new(a.aggregate_type)).collect(),
-				});
+				groups.insert(vec![], create_group_state(&aggregates));
 			}
 
 			// Now compute final results for each group
@@ -287,6 +191,21 @@ impl OperatorPlan for Aggregate {
 		};
 
 		Ok(Box::pin(aggregate_stream))
+	}
+}
+
+/// Create initial group state with accumulators for each aggregate field.
+fn create_group_state(aggregates: &[AggregateField]) -> GroupState {
+	let accumulators = aggregates
+		.iter()
+		.map(|agg| agg.aggregate_info.as_ref().map(|info| info.function.create_accumulator()))
+		.collect();
+
+	let first_values = aggregates.iter().map(|_| Value::None).collect();
+
+	GroupState {
+		accumulators,
+		first_values,
 	}
 }
 
@@ -313,24 +232,35 @@ fn compute_group_result(
 		let agg = &aggregates[0];
 		return if agg.is_group_key {
 			// For group-by keys, use the key value directly
-			// Find which group key this corresponds to
 			find_matching_group_key_value(group_key, group_by, &agg.name)
+		} else if let Some(acc) = state.accumulators.into_iter().next().flatten() {
+			// Finalize the accumulator
+			acc.finalize().unwrap_or(Value::Null)
 		} else {
-			// Finalize the aggregate state
-			state.field_states[0].clone().finalize()
+			// Return first value
+			state.first_values.into_iter().next().unwrap_or(Value::None)
 		};
 	}
 
 	// Normal case: return an object with field names
 	let mut result = Object::default();
 
-	for (i, agg) in aggregates.iter().enumerate() {
+	let mut accumulators = state.accumulators.into_iter();
+	let mut first_values = state.first_values.into_iter();
+
+	for agg in aggregates.iter() {
+		let acc = accumulators.next().flatten();
+		let first_value = first_values.next().unwrap_or(Value::None);
+
 		let field_value = if agg.is_group_key {
 			// For group-by keys, use the key value directly
 			find_matching_group_key_value(group_key, group_by, &agg.name)
+		} else if let Some(accumulator) = acc {
+			// Finalize the accumulator
+			accumulator.finalize().unwrap_or(Value::Null)
 		} else {
-			// Finalize the aggregate state
-			state.field_states[i].clone().finalize()
+			// Return first value for non-aggregate fields
+			first_value
 		};
 		result.insert(agg.name.clone(), field_value);
 	}

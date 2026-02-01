@@ -4,10 +4,12 @@
 //! - Pure scalar functions (no context needed)
 //! - Context-aware scalar functions (need execution context)
 //! - Async scalar functions (HTTP, crypto, etc.)
+//! - Aggregate functions (operate over groups of values)
 //!
 //! Functions are registered in a `FunctionRegistry` which can be accessed
 //! through the execution context.
 
+mod aggregate;
 mod builtin;
 mod macros;
 mod registry;
@@ -15,6 +17,7 @@ mod signature;
 
 use std::fmt::Debug;
 
+pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub use registry::FunctionRegistry;
 pub use signature::{ArgSpec, Signature};

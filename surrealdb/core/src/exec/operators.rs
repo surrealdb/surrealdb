@@ -27,7 +27,7 @@ mod timeout;
 mod union;
 mod update;
 
-pub use aggregate::{Aggregate, AggregateField, AggregateType};
+pub use aggregate::{Aggregate, AggregateField, AggregateInfo};
 pub use closure::ClosurePlan;
 pub use context_mutating::LetPlan;
 pub use control_flow::{ControlFlowKind, ControlFlowPlan};

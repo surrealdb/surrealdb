@@ -7,23 +7,25 @@ use crate::exec::OperatorPlan;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ClosurePlan, ControlFlowKind, ControlFlowPlan,
+	Aggregate, AggregateField, AggregateInfo, ClosurePlan, ControlFlowKind, ControlFlowPlan,
 	DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, ForeachPlan,
 	IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField, Project,
 	ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort, SortDirection,
 	SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
 };
 use crate::expr::field::{Field, Fields, Selector};
-use crate::expr::{Expr, Function, Literal};
+use crate::expr::statements::IfelseStatement;
+use crate::expr::{Expr, Function, FunctionCall, Literal};
 
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, BlockPhysicalExpr, ClosurePhysicalExpr, FunctionCallExpr,
-		IfElseExpr, Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp, ScalarSubquery,
-		SetLiteral, UnaryOp,
+		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureExec, IfElseExpr,
+		JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec, ObjectLiteral, Param,
+		PostfixOp, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
+		UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -112,32 +114,78 @@ pub(crate) fn expr_to_physical_expr(
 			))))
 		}
 		Expr::FunctionCall(func_call) => {
+			let FunctionCall {
+				receiver,
+				arguments,
+			} = *func_call;
+
 			// Function call - convert arguments to physical expressions
-			let mut phys_args = Vec::with_capacity(func_call.arguments.len());
-			for arg in &func_call.arguments {
-				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
+			let mut phys_args = Vec::with_capacity(arguments.len());
+			for arg in arguments {
+				phys_args.push(expr_to_physical_expr(arg, ctx)?);
 			}
-			Ok(Arc::new(FunctionCallExpr {
-				function: func_call.receiver.clone(),
-				arguments: phys_args,
-			}))
+
+			// Dispatch to appropriate PhysicalExpr type based on function variant
+			match receiver {
+				Function::Normal(name) => Ok(Arc::new(BuiltinFunctionExec {
+					name,
+					arguments: phys_args,
+				})),
+				Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
+					name,
+					arguments: phys_args,
+				})),
+				Function::Script(script) => Ok(Arc::new(JsFunctionExec {
+					script,
+					arguments: phys_args,
+				})),
+				Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
+					model,
+					arguments: phys_args,
+				})),
+				Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
+					module,
+					sub,
+					arguments: phys_args,
+				})),
+				Function::Silo {
+					org,
+					pkg,
+					major,
+					minor,
+					patch,
+					sub,
+				} => Ok(Arc::new(SiloModuleExec {
+					org,
+					pkg,
+					major,
+					minor,
+					patch,
+					sub,
+					arguments: phys_args,
+				})),
+			}
 		}
 		Expr::Closure(closure) => {
 			// Closure expression - wrap in physical expression
-			Ok(Arc::new(ClosurePhysicalExpr {
-				closure: (*closure).clone(),
+			Ok(Arc::new(ClosureExec {
+				closure: *closure,
 			}))
 		}
 		Expr::IfElse(ifelse) => {
+			let IfelseStatement {
+				exprs,
+				close,
+			} = *ifelse;
 			// IF/THEN/ELSE expression - convert all branches
-			let mut branches = Vec::with_capacity(ifelse.exprs.len());
-			for (condition, body) in &ifelse.exprs {
-				let cond_phys = expr_to_physical_expr(condition.clone(), ctx)?;
-				let body_phys = expr_to_physical_expr(body.clone(), ctx)?;
+			let mut branches = Vec::with_capacity(exprs.len());
+			for (condition, body) in exprs {
+				let cond_phys = expr_to_physical_expr(condition, ctx)?;
+				let body_phys = expr_to_physical_expr(body, ctx)?;
 				branches.push((cond_phys, body_phys));
 			}
-			let otherwise = if let Some(else_expr) = &ifelse.close {
-				Some(expr_to_physical_expr(else_expr.clone(), ctx)?)
+			let otherwise = if let Some(else_expr) = close {
+				Some(expr_to_physical_expr(else_expr, ctx)?)
 			} else {
 				None
 			};
@@ -976,31 +1024,36 @@ fn plan_fetch(
 ///
 /// This extracts:
 /// - Group-by keys (passed through unchanged)
-/// - Aggregate functions (COUNT, SUM, MIN, MAX, AVG, etc.)
+/// - Aggregate functions (detected via the function registry)
 /// - Other expressions (evaluated with the first value in the group)
 fn plan_aggregation(
 	fields: &Fields,
 	group_by: &[crate::expr::idiom::Idiom],
 	ctx: &FrozenContext,
 ) -> Result<Vec<AggregateField>, Error> {
+	// Use the global built-in function registry
+	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+
 	match fields {
 		// SELECT VALUE with GROUP BY - the VALUE expression may contain aggregates
 		Fields::Value(selector) => {
 			// Check if the VALUE expression is a group-by key
 			let is_group_key = is_group_key_expression(&selector.expr, group_by);
-			let agg_type = if is_group_key {
-				None
+
+			let (aggregate_info, fallback_expr) = if is_group_key {
+				// Group-by key - no aggregate, no fallback expr needed
+				(None, None)
 			} else {
-				detect_aggregate_type(&selector.expr)
+				// Try to extract aggregate function info
+				extract_aggregate_info(&selector.expr, &registry, ctx)?
 			};
-			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
 			// For VALUE, we use an empty name since the result isn't wrapped in an object
 			Ok(vec![AggregateField {
 				name: String::new(),
-				expr,
 				is_group_key,
-				aggregate_type: agg_type,
+				aggregate_info,
+				fallback_expr,
 			}])
 		}
 
@@ -1027,21 +1080,19 @@ fn plan_aggregation(
 						// Check if this is a group-by key
 						let is_group_key = is_group_key_expression(&selector.expr, group_by);
 
-						// Detect aggregate function type
-						let agg_type = if is_group_key {
-							None
+						let (aggregate_info, fallback_expr) = if is_group_key {
+							// Group-by key - no aggregate, no fallback expr needed
+							(None, None)
 						} else {
-							detect_aggregate_type(&selector.expr)
+							// Try to extract aggregate function info
+							extract_aggregate_info(&selector.expr, &registry, ctx)?
 						};
-
-						// Convert expression to physical
-						let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
 						aggregates.push(AggregateField {
 							name: output_name,
-							expr,
 							is_group_key,
-							aggregate_type: agg_type,
+							aggregate_info,
+							fallback_expr,
 						});
 					}
 				}
@@ -1050,6 +1101,56 @@ fn plan_aggregation(
 			Ok(aggregates)
 		}
 	}
+}
+
+/// Extract aggregate function information from an expression.
+///
+/// If the expression is a direct aggregate function call (e.g., `math::mean(a)`),
+/// returns the aggregate info with the function and argument expression.
+///
+/// If the expression is not an aggregate, returns a fallback physical expression
+/// that will be evaluated to get the first value in the group.
+fn extract_aggregate_info(
+	expr: &Expr,
+	registry: &crate::exec::function::FunctionRegistry,
+	ctx: &FrozenContext,
+) -> Result<(Option<AggregateInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
+	// Check if this is a function call that might be an aggregate
+	if let Expr::FunctionCall(func_call) = expr {
+		if let Function::Normal(name) = &func_call.receiver {
+			// Look up the function in the aggregate registry
+			if let Some(agg_func) = registry.get_aggregate(name.as_str()) {
+				// This is a registered aggregate function
+				// Extract the argument expression (if any)
+				let argument_expr = if func_call.arguments.is_empty() {
+					// For count() with no args, use a dummy literal
+					expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?
+				} else if func_call.arguments.len() == 1 {
+					// Single argument - convert to physical expression
+					expr_to_physical_expr(func_call.arguments[0].clone(), ctx)?
+				} else {
+					// Multiple arguments - not yet supported for aggregates
+					return Err(Error::Unimplemented(format!(
+						"Aggregate function '{}' with multiple arguments not yet supported",
+						name
+					)));
+				};
+
+				return Ok((
+					Some(AggregateInfo {
+						function: agg_func.clone(),
+						argument_expr,
+					}),
+					None,
+				));
+			}
+		}
+	}
+
+	// Not an aggregate function - convert the whole expression as a fallback
+	// This will be evaluated to get the first value in the group
+	let fallback = expr_to_physical_expr(expr.clone(), ctx)?;
+	Ok((None, Some(fallback)))
 }
 
 /// Check if an expression is a group-by key reference.
@@ -1062,45 +1163,6 @@ fn is_group_key_expression(expr: &Expr, group_by: &[crate::expr::idiom::Idiom]) 
 		return group_by.iter().any(|g| g.to_sql() == idiom.to_sql());
 	}
 	false
-}
-
-/// Detect the aggregate function type from an expression.
-/// Returns None if the expression is not a simple aggregate function.
-fn detect_aggregate_type(expr: &Expr) -> Option<AggregateType> {
-	match expr {
-		Expr::FunctionCall(func_call) => {
-			// Check for aggregate functions
-			match &func_call.receiver {
-				Function::Normal(name) => {
-					match name.as_str() {
-						// Core aggregate functions
-						"count" => {
-							if func_call.arguments.is_empty() {
-								Some(AggregateType::Count)
-							} else {
-								Some(AggregateType::CountField)
-							}
-						}
-						"sum" => Some(AggregateType::Sum),
-						"min" => Some(AggregateType::Min),
-						"max" => Some(AggregateType::Max),
-						// Math module aggregates
-						"math::sum" => Some(AggregateType::Sum),
-						"math::min" => Some(AggregateType::Min),
-						"math::max" => Some(AggregateType::Max),
-						"math::mean" => Some(AggregateType::Avg),
-						// Array aggregates
-						"array::group" => Some(AggregateType::ArrayGroup),
-						_ => None,
-					}
-				}
-				_ => None,
-			}
-		}
-		// Nested expressions - check if they contain aggregates
-		// For simplicity, we don't support nested aggregate expressions for now
-		_ => None,
-	}
 }
 
 /// Extract version timestamp from VERSION clause expression.
