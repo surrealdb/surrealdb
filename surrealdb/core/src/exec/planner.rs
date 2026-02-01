@@ -7,11 +7,11 @@ use crate::exec::OperatorPlan;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ControlFlowKind, ControlFlowPlan, DatabaseInfoPlan,
-	ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, ForeachPlan, IfElsePlan, IndexInfoPlan,
-	LetPlan, Limit, NamespaceInfoPlan, OrderByField, Project, ProjectValue, RandomShuffle,
-	RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split,
-	TableInfoPlan, Timeout, Union, UserInfoPlan,
+	Aggregate, AggregateField, AggregateType, ClosurePlan, ControlFlowKind, ControlFlowPlan,
+	DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, ForeachPlan,
+	IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField, Project,
+	ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort, SortDirection,
+	SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -478,9 +478,11 @@ pub(crate) fn try_plan_expr(
 				expr: phys_expr,
 			}) as Arc<dyn OperatorPlan>)
 		}
-		Expr::Closure(_) => Err(Error::Unimplemented(
-			"Closure expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::Closure(closure) => Ok(Arc::new(ClosurePlan {
+			args: closure.args.clone(),
+			returns: closure.returns.clone(),
+			body: closure.body.clone(),
+		}) as Arc<dyn OperatorPlan>),
 		Expr::Return(output_stmt) => {
 			// Plan the inner expression
 			let inner = try_plan_expr(output_stmt.what, ctx)?;

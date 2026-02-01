@@ -1,5 +1,6 @@
 mod aggregate;
 mod broadcast;
+mod closure;
 mod context_mutating;
 mod control_flow;
 mod create;
@@ -27,6 +28,7 @@ mod union;
 mod update;
 
 pub use aggregate::{Aggregate, AggregateField, AggregateType};
+pub use closure::ClosurePlan;
 pub use context_mutating::LetPlan;
 pub use control_flow::{ControlFlowKind, ControlFlowPlan};
 pub use explain::ExplainPlan;
