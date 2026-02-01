@@ -15,7 +15,7 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum TaskLeaseType {
 	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
@@ -56,6 +56,7 @@ impl TaskLease {
 /// - Lease acquisition with exponential backoff and jitter to handle contention
 /// - Automatic lease expiration based on configurable duration
 /// - Lease ownership verification
+#[derive(Clone)]
 pub struct LeaseHandler {
 	sequences: Sequences,
 	/// UUID of the current node trying to acquire or check leases

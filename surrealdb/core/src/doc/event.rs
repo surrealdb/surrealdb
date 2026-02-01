@@ -127,7 +127,7 @@ impl Document {
 				if ev.asynchronous {
 					Self::process_async(ctx, opt, ev, &self.doc_ctx, doc).await?;
 				} else {
-					Self::process_sync(stk, ctx, opt, ev, doc).await?;
+					Self::process_sync(stk, ctx, opt, None, ev, doc).await?;
 				}
 			}
 		}
@@ -160,6 +160,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: FrozenContext,
 		opt: Options,
+		lh: Option<&LeaseHandler>,
 		ev: &EventDefinition,
 		doc: &CursorDoc,
 	) -> Result<()> {
@@ -170,6 +171,9 @@ impl Document {
 					|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e),
 				)?;
 			trace!("Event statement returns: {}", res.to_sql());
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?;
+			}
 		}
 		Ok(())
 	}
@@ -277,11 +281,11 @@ impl AsyncEventRecord {
 	/// Returns the number of events fetched (not necessarily successfully processed).
 	pub async fn process_next_events_batch(
 		ds: &Datastore,
-		lh: Option<&LeaseHandler>,
+		lh: Option<LeaseHandler>,
 	) -> Result<usize> {
 		// Collect the next batch
 		let res = {
-			if let Some(lh) = lh {
+			if let Some(lh) = lh.as_ref() {
 				lh.try_maintain_lease().await?;
 			}
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -300,7 +304,7 @@ impl AsyncEventRecord {
 	async fn process_events_batch(
 		ds: &Datastore,
 		res: Vec<(Key, Val)>,
-		lh: Option<&LeaseHandler>,
+		lh: Option<LeaseHandler>,
 	) -> Result<()> {
 		// Limit in-flight event processing to avoid oversubscription.
 		let concurrency: usize = num_cpus::get().max(4);
@@ -309,7 +313,7 @@ impl AsyncEventRecord {
 		let mut join_handles = Vec::with_capacity(res.len());
 
 		for (k, v) in res {
-			if let Some(lh) = lh {
+			if let Some(lh) = lh.as_ref() {
 				lh.try_maintain_lease().await?;
 			}
 			// Acquire a concurrency slot per event.
@@ -321,8 +325,9 @@ impl AsyncEventRecord {
 			// Extract sequences and transaction factory
 			let sequences = ds.sequences().clone();
 			let tf = ds.transaction_factory().clone();
+			let lh = lh.clone();
 			let jh = spawn(async move {
-				Self::run_event_checked(ctx, opt, tf, sequences, k, v).await;
+				Self::run_event_checked(ctx, opt, tf, sequences, lh, k, v).await;
 				drop(permit); // releases a slot so the loop can enqueue another task
 			});
 			join_handles.push(jh);
@@ -363,10 +368,11 @@ impl AsyncEventRecord {
 		opt: Options,
 		tf: TransactionFactory,
 		sequences: Sequences,
+		lh: Option<LeaseHandler>,
 		k: Key,
 		v: Val,
 	) {
-		if let Err(e) = Self::run_event(ctx, opt, tf, sequences, k, v).await {
+		if let Err(e) = Self::run_event(ctx, opt, tf, sequences, lh, k, v).await {
 			error!("Error while processing an event: {e}");
 		}
 	}
@@ -375,6 +381,7 @@ impl AsyncEventRecord {
 		opt: Options,
 		tf: TransactionFactory,
 		sequences: Sequences,
+		lh: Option<LeaseHandler>,
 		k: Key,
 		v: Val,
 	) -> Result<()> {
@@ -388,7 +395,7 @@ impl AsyncEventRecord {
 		ev.attempt += 1;
 		let ev = ev;
 		let tx = ctx.tx();
-		match Self::process_event(&ctx, &opt, &eq, &ev).await {
+		match Self::process_event(&ctx, &opt, lh.as_ref(), &eq, &ev).await {
 			Ok(_) => {
 				catch!(tx, tx.del(&k).await);
 			}
@@ -441,6 +448,7 @@ impl AsyncEventRecord {
 	async fn process_event(
 		ctx: &FrozenContext,
 		opt: &Options,
+		lh: Option<&LeaseHandler>,
 		eq: &eq::Eq<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
@@ -451,7 +459,7 @@ impl AsyncEventRecord {
 		// Run event statements in a new stack scope.
 		stack
 			.enter(|stk| {
-				stk.run(|stk| Document::process_sync(stk, ctx, opt, &ev.event_definition, &doc))
+				stk.run(|stk| Document::process_sync(stk, ctx, opt, lh, &ev.event_definition, &doc))
 			})
 			.finish()
 			.await?;
