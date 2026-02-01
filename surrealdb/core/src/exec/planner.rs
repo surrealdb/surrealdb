@@ -8,10 +8,10 @@ use crate::exec::OperatorPlan;
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
 	Aggregate, AggregateField, AggregateType, ControlFlowKind, ControlFlowPlan, DatabaseInfoPlan,
-	ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, IfElsePlan, IndexInfoPlan, LetPlan,
-	Limit, NamespaceInfoPlan, OrderByField, Project, ProjectValue, RandomShuffle, RootInfoPlan,
-	Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan,
-	Timeout, Union, UserInfoPlan,
+	ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, ForeachPlan, IfElsePlan, IndexInfoPlan,
+	LetPlan, Limit, NamespaceInfoPlan, OrderByField, Project, ProjectValue, RandomShuffle,
+	RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split,
+	TableInfoPlan, Timeout, Union, UserInfoPlan,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -436,9 +436,11 @@ pub(crate) fn try_plan_expr(
 				}
 			}
 		}
-		Expr::Foreach(_) => Err(Error::Unimplemented(
-			"FOR statements not yet supported in execution plans".to_string(),
-		)),
+		Expr::Foreach(stmt) => Ok(Arc::new(ForeachPlan {
+			param: stmt.param.clone(),
+			range: stmt.range.clone(),
+			body: stmt.block.clone(),
+		}) as Arc<dyn OperatorPlan>),
 		Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
 			branches: stmt.exprs.clone(),
 			else_body: stmt.close.clone(),

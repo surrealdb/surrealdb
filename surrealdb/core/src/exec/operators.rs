@@ -8,6 +8,7 @@ mod explain;
 mod expr;
 mod fetch;
 mod filter;
+mod foreach;
 mod graph_edge_scan;
 mod ifelse;
 mod info;
@@ -32,6 +33,7 @@ pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
 pub use filter::Filter;
+pub use foreach::ForeachPlan;
 pub use graph_edge_scan::{GraphEdgeScan, GraphScanOutput};
 pub use ifelse::IfElsePlan;
 pub use info::{
