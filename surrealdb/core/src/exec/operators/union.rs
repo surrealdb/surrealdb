@@ -70,8 +70,3 @@ impl OperatorPlan for Union {
 		Ok(Box::pin(combined))
 	}
 }
-
-#[cfg(test)]
-mod tests {
-	// Tests are in exec/mod.rs as end-to-end tests
-}

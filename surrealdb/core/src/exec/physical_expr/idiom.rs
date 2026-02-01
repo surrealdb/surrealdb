@@ -199,13 +199,18 @@ pub(crate) async fn evaluate_field(
 	}
 }
 
-/// Index access on arrays and objects.
+/// Index access on arrays, sets, and objects.
 pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Value> {
 	match (value, index) {
 		// Array with numeric index
 		(Value::Array(arr), Value::Number(n)) => {
 			let idx = n.to_usize();
 			Ok(arr.get(idx).cloned().unwrap_or(Value::None))
+		}
+		// Set with numeric index
+		(Value::Set(set), Value::Number(n)) => {
+			let idx = n.to_usize();
+			Ok(set.nth(idx).cloned().unwrap_or(Value::None))
 		}
 		// Array with range
 		(Value::Array(arr), Value::Range(range)) => {

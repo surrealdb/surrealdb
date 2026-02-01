@@ -32,7 +32,9 @@ pub use project::{FieldSelection, Project};
 pub use project_value::ProjectValue;
 pub use reference_scan::ReferenceScan;
 pub use scan::Scan;
-pub use sort::{NullsOrder, OrderByField, Sort, SortDirection};
+#[cfg(storage)]
+pub use sort::ExternalSort;
+pub use sort::{OrderByField, RandomShuffle, Sort, SortDirection, SortTopK};
 pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;

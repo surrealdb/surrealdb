@@ -48,5 +48,5 @@ SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
 
 { id: person:a, age: person:b }.*;
 
-SELECT id, a, b FROM test SPLIT a, b ORDER BY a;
+EXPLAIN FORMAT JSON SELECT id, a, b FROM test SPLIT a, b ORDER BY id;
 

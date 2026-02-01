@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
+use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::OperatorPlan;
+#[cfg(storage)]
+use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
 	Aggregate, AggregateField, AggregateType, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter,
-	LetPlan, Limit, Project, ProjectValue, Scan, Sort, SourceExpr, Split, Timeout, Union,
+	LetPlan, Limit, OrderByField, Project, ProjectValue, RandomShuffle, Scan, Sort, SortDirection,
+	SortTopK, SourceExpr, Split, Timeout, Union,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -519,7 +523,7 @@ fn plan_select(
 		version,
 		timeout,
 		explain,
-		tempfiles: _,
+		tempfiles,
 	} = select;
 
 	// ONLY clause (unwraps single results)
@@ -593,12 +597,13 @@ fn plan_select(
 	};
 
 	// Apply ORDER BY if present
+	// Select the appropriate sort operator based on query characteristics:
+	// - RandomShuffle: for ORDER BY RAND()
+	// - ExternalSort: when TEMPFILES is specified (disk-based sorting)
+	// - SortTopK: when limit is small (heap-based top-k selection)
+	// - Sort: default full in-memory sort
 	let sorted = if let Some(order) = &order {
-		let order_by = plan_order_by(order, ctx)?;
-		Arc::new(Sort {
-			input: grouped,
-			order_by,
-		}) as Arc<dyn OperatorPlan>
+		plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?
 	} else {
 		grouped
 	};
@@ -1197,52 +1202,121 @@ fn convert_let_statement(
 	}) as Arc<dyn OperatorPlan>)
 }
 
-/// Plan ORDER BY clause into OrderByField list
-fn plan_order_by(
+/// Plan ORDER BY clause by selecting the appropriate sort operator.
+///
+/// This function chooses the optimal sort operator based on query characteristics:
+/// - `RandomShuffle`: for ORDER BY RAND()
+/// - `ExternalSort`: when TEMPFILES is specified (disk-based sorting)
+/// - `SortTopK`: when limit is small (heap-based top-k selection)
+/// - `Sort`: default full in-memory sort with parallel sorting
+fn plan_sort(
+	input: Arc<dyn OperatorPlan>,
 	order: &crate::expr::order::Ordering,
+	start: &Option<crate::expr::start::Start>,
+	limit: &Option<crate::expr::limit::Limit>,
+	#[allow(unused)] tempfiles: bool,
 	ctx: &FrozenContext,
-) -> Result<Vec<crate::exec::operators::OrderByField>, Error> {
-	use crate::exec::operators::{NullsOrder, OrderByField, SortDirection};
+) -> Result<Arc<dyn OperatorPlan>, Error> {
 	use crate::expr::order::Ordering;
 
 	match order {
 		Ordering::Random => {
-			// ORDER BY RAND() - not yet supported in the new executor
-			Err(Error::Unimplemented(
-				"ORDER BY RAND() not yet supported in execution plans".to_string(),
-			))
+			// ORDER BY RAND() - use RandomShuffle operator
+			// Try to get effective limit if both start and limit are literals
+			let effective_limit = get_effective_limit_literal(start, limit);
+			Ok(Arc::new(RandomShuffle {
+				input,
+				limit: effective_limit,
+			}) as Arc<dyn OperatorPlan>)
 		}
 		Ordering::Order(order_list) => {
-			let mut fields = Vec::with_capacity(order_list.len());
-			for order_field in order_list.iter() {
-				// Convert idiom to IdiomExpr
-				let expr: Arc<dyn crate::exec::PhysicalExpr> =
-					convert_idiom_to_physical_expr(&order_field.value, ctx)?;
+			// Convert order list to OrderByField vec
+			let order_by = convert_order_list(order_list, ctx)?;
 
-				let direction = if order_field.direction {
-					SortDirection::Asc
-				} else {
-					SortDirection::Desc
-				};
-
-				// Default nulls order based on direction
-				// ASC -> nulls last, DESC -> nulls first
-				let nulls = if order_field.direction {
-					NullsOrder::Last
-				} else {
-					NullsOrder::First
-				};
-
-				fields.push(OrderByField {
-					expr,
-					direction,
-					nulls,
-				});
+			// Check if we should use ExternalSort (TEMPFILES specified)
+			#[cfg(storage)]
+			if tempfiles {
+				if let Some(temp_dir) = ctx.temporary_directory() {
+					return Ok(Arc::new(ExternalSort {
+						input,
+						order_by,
+						temp_dir: temp_dir.to_path_buf(),
+					}) as Arc<dyn OperatorPlan>);
+				}
 			}
 
-			Ok(fields)
+			// Check if we should use SortTopK (small limit)
+			if let Some(effective_limit) = get_effective_limit_literal(start, limit) {
+				if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize {
+					return Ok(Arc::new(SortTopK {
+						input,
+						order_by,
+						limit: effective_limit,
+					}) as Arc<dyn OperatorPlan>);
+				}
+			}
+
+			// Default: full in-memory sort with parallel sorting
+			Ok(Arc::new(Sort {
+				input,
+				order_by,
+			}) as Arc<dyn OperatorPlan>)
 		}
 	}
+}
+
+/// Convert an OrderList to a Vec of OrderByField.
+fn convert_order_list(
+	order_list: &crate::expr::order::OrderList,
+	ctx: &FrozenContext,
+) -> Result<Vec<OrderByField>, Error> {
+	let mut fields = Vec::with_capacity(order_list.len());
+	for order_field in order_list.iter() {
+		// Convert idiom to physical expression
+		let expr: Arc<dyn crate::exec::PhysicalExpr> =
+			convert_idiom_to_physical_expr(&order_field.value, ctx)?;
+
+		let direction = if order_field.direction {
+			SortDirection::Asc
+		} else {
+			SortDirection::Desc
+		};
+
+		fields.push(OrderByField {
+			expr,
+			direction,
+			collate: order_field.collate,
+			numeric: order_field.numeric,
+		});
+	}
+	Ok(fields)
+}
+
+/// Try to get the effective limit (start + limit) if both are literals.
+///
+/// Returns None if either value is not a literal or cannot be evaluated at plan time.
+fn get_effective_limit_literal(
+	start: &Option<crate::expr::start::Start>,
+	limit: &Option<crate::expr::limit::Limit>,
+) -> Option<usize> {
+	// Get limit value if it's a literal
+	let limit_val = limit.as_ref().and_then(|l| match &l.0 {
+		Expr::Literal(Literal::Integer(n)) if *n >= 0 => Some(*n as usize),
+		Expr::Literal(Literal::Float(n)) if *n >= 0.0 => Some(*n as usize),
+		_ => None,
+	})?;
+
+	// Get start value if it's a literal (default to 0)
+	let start_val = start
+		.as_ref()
+		.map(|s| match &s.0 {
+			Expr::Literal(Literal::Integer(n)) if *n >= 0 => Some(*n as usize),
+			Expr::Literal(Literal::Float(n)) if *n >= 0.0 => Some(*n as usize),
+			_ => None,
+		})
+		.unwrap_or(Some(0))?;
+
+	Some(start_val + limit_val)
 }
 
 // ============================================================================
