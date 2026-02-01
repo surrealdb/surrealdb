@@ -9,6 +9,8 @@ mod expr;
 mod fetch;
 mod filter;
 mod graph_edge_scan;
+mod ifelse;
+mod info;
 mod limit;
 mod project;
 mod project_value;
@@ -31,6 +33,10 @@ pub use expr::ExprPlan;
 pub use fetch::Fetch;
 pub use filter::Filter;
 pub use graph_edge_scan::{GraphEdgeScan, GraphScanOutput};
+pub use ifelse::IfElsePlan;
+pub use info::{
+	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
+};
 pub use limit::Limit;
 pub use project::{FieldSelection, Project};
 pub use project_value::ProjectValue;

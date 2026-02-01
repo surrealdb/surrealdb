@@ -7,10 +7,11 @@ use crate::exec::OperatorPlan;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ControlFlowKind, ControlFlowPlan, ExplainPlan,
-	ExprPlan, Fetch, FieldSelection, Filter, LetPlan, Limit, OrderByField, Project, ProjectValue,
-	RandomShuffle, Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split,
-	Timeout, Union,
+	Aggregate, AggregateField, AggregateType, ControlFlowKind, ControlFlowPlan, DatabaseInfoPlan,
+	ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, IfElsePlan, IndexInfoPlan, LetPlan,
+	Limit, NamespaceInfoPlan, OrderByField, Project, ProjectValue, RandomShuffle, RootInfoPlan,
+	Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan,
+	Timeout, Union, UserInfoPlan,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -390,16 +391,58 @@ pub(crate) fn try_plan_expr(
 			"ALTER statements not yet supported in execution plans".to_string(),
 		)),
 
-		// Other statements - not yet supported
-		Expr::Info(_) => Err(Error::Unimplemented(
-			"INFO statements not yet supported in execution plans".to_string(),
-		)),
+		// INFO statements
+		Expr::Info(info) => {
+			use crate::expr::statements::info::InfoStatement;
+			match *info {
+				InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
+					structured,
+				}) as Arc<dyn OperatorPlan>),
+				InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
+					structured,
+				}) as Arc<dyn OperatorPlan>),
+				InfoStatement::Db(structured, version) => {
+					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					Ok(Arc::new(DatabaseInfoPlan {
+						structured,
+						version,
+					}) as Arc<dyn OperatorPlan>)
+				}
+				InfoStatement::Tb(table, structured, version) => {
+					let table = expr_to_physical_expr(table, ctx)?;
+					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					Ok(Arc::new(TableInfoPlan {
+						table,
+						structured,
+						version,
+					}) as Arc<dyn OperatorPlan>)
+				}
+				InfoStatement::User(user, base, structured) => {
+					let user = expr_to_physical_expr(user, ctx)?;
+					Ok(Arc::new(UserInfoPlan {
+						user,
+						base,
+						structured,
+					}) as Arc<dyn OperatorPlan>)
+				}
+				InfoStatement::Index(index, table, structured) => {
+					let index = expr_to_physical_expr(index, ctx)?;
+					let table = expr_to_physical_expr(table, ctx)?;
+					Ok(Arc::new(IndexInfoPlan {
+						index,
+						table,
+						structured,
+					}) as Arc<dyn OperatorPlan>)
+				}
+			}
+		}
 		Expr::Foreach(_) => Err(Error::Unimplemented(
 			"FOR statements not yet supported in execution plans".to_string(),
 		)),
-		Expr::IfElse(_) => Err(Error::Unimplemented(
-			"IF statements not yet supported in execution plans".to_string(),
-		)),
+		Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
+			branches: stmt.exprs.clone(),
+			else_body: stmt.close.clone(),
+		}) as Arc<dyn OperatorPlan>),
 		Expr::Block(block) => {
 			// Deferred planning: wrap the block without converting inner expressions.
 			// The SequencePlan will plan and execute each expression at runtime,
