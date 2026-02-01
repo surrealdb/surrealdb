@@ -3,12 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
-use crate::expr::FlowResult;
 
 /// Filters a stream of values based on a predicate.
 ///
@@ -46,7 +44,7 @@ impl OperatorPlan for Filter {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context - we declared Database level, so this should succeed
 		// let db_ctx = ctx.database()?;
 

@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
 
 /// COMMIT operator - commits the current transaction.
 ///
@@ -34,7 +34,7 @@ impl OperatorPlan for CommitPlan {
 		AccessMode::ReadOnly
 	}
 
-	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// COMMIT returns NONE as its result
 		Ok(Box::pin(stream::once(async {
 			Ok(crate::exec::ValueBatch {

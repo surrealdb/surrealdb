@@ -239,7 +239,20 @@ impl ComputeExecutor {
 		};
 
 		// Execute the plan
-		let stream = plan.execute(&exec_ctx)?;
+		// Handle control flow signals from execute()
+		let stream = match plan.execute(&exec_ctx) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(v)) => {
+				// Early return - return the value directly
+				return Ok(v);
+			}
+			Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
+				return Err(anyhow::anyhow!(Error::InvalidControlFlow));
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(e);
+			}
+		};
 
 		// Collect all results
 		let mut results = Vec::new();

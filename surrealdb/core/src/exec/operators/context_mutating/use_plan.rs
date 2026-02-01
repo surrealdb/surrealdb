@@ -14,7 +14,7 @@ use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
 
 /// USE operator - switches namespace and/or database.
 ///
@@ -64,7 +64,7 @@ impl OperatorPlan for UsePlan {
 		mode
 	}
 
-	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// USE returns NONE as its result
 		Ok(Box::pin(stream::once(async {
 			Ok(crate::exec::ValueBatch {

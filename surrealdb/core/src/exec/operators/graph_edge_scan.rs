@@ -10,11 +10,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
-use crate::err::Error;
 use crate::exec::physical_part::LookupDirection;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
@@ -98,7 +97,7 @@ impl OperatorPlan for GraphEdgeScan {
 		self.source.access_mode()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		let source_expr = Arc::clone(&self.source);
 		let direction = self.direction;

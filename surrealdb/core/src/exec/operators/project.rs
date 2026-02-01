@@ -9,10 +9,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, OperatorPlan,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
+	OperatorPlan, PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -66,7 +65,7 @@ impl OperatorPlan for Project {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let fields = self.fields.clone();
 		let omit = self.omit.clone();

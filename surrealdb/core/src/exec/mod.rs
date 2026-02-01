@@ -41,7 +41,8 @@ use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
-use crate::expr::FlowResult;
+// Re-export FlowResult for operator implementations
+pub(crate) use crate::expr::FlowResult;
 use crate::val::Value;
 
 pub(crate) mod access_mode;
@@ -106,9 +107,16 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	/// The context is guaranteed to meet the requirements declared by `required_context()`
 	/// if the executor performs proper validation.
 	///
-	/// NOTE: This is intentionally not async to ensure that the executiion graph is constructed
+	/// Returns `FlowResult` to support control flow signals:
+	/// - `Ok(stream)` - normal execution producing a stream of batches
+	/// - `Err(ControlFlow::Return(value))` - early return from block/function
+	/// - `Err(ControlFlow::Break)` - break from loop
+	/// - `Err(ControlFlow::Continue)` - continue to next loop iteration
+	/// - `Err(ControlFlow::Err(e))` - error condition
+	///
+	/// NOTE: This is intentionally not async to ensure that the execution graph is constructed
 	/// fully before any execution begins.
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error>;
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream>;
 
 	/// Returns references to child execution plans for tree traversal.
 	///

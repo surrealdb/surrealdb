@@ -22,6 +22,14 @@ value = "[{ age: 17, can_drive: false, id: person:a, knows: [[person:b]], name: 
 [[test.results]]
 value = "{ age: person:b, id: person:a }"
 
+[[test.results]]
+value = """\
+["Project [ctx: Db]
+└────> Sort [ctx: Db] [order_by: id ASC]
+       └────> Split [ctx: Db] [on: a, b]
+              └────> Scan [ctx: Db] [source: 'test']
+"]"""
+
 */
 
 {

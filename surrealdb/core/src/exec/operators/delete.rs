@@ -13,13 +13,13 @@ use futures::StreamExt;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
-use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	ValueBatchStream,
 };
 use crate::iam::Action;
 use crate::val::TableName;
@@ -55,7 +55,7 @@ impl OperatorPlan for Delete {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context
 		let db_ctx = ctx.database()?;
 

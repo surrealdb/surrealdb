@@ -7,9 +7,10 @@ use crate::exec::OperatorPlan;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateType, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter,
-	LetPlan, Limit, OrderByField, Project, ProjectValue, RandomShuffle, Scan, SequencePlan, Sort,
-	SortDirection, SortTopK, SourceExpr, Split, Timeout, Union,
+	Aggregate, AggregateField, AggregateType, ControlFlowKind, ControlFlowPlan, ExplainPlan,
+	ExprPlan, Fetch, FieldSelection, Filter, LetPlan, Limit, OrderByField, Project, ProjectValue,
+	RandomShuffle, Scan, SequencePlan, SleepPlan, Sort, SortDirection, SortTopK, SourceExpr, Split,
+	Timeout, Union,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -435,21 +436,61 @@ pub(crate) fn try_plan_expr(
 		Expr::Closure(_) => Err(Error::Unimplemented(
 			"Closure expressions not yet supported in execution plans".to_string(),
 		)),
-		Expr::Return(_) => Err(Error::Unimplemented(
-			"RETURN statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Throw(_) => Err(Error::Unimplemented(
-			"THROW statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Break => Err(Error::Unimplemented(
-			"BREAK statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Continue => Err(Error::Unimplemented(
-			"CONTINUE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Sleep(_) => Err(Error::Unimplemented(
-			"SLEEP statements not yet supported in execution plans".to_string(),
-		)),
+		Expr::Return(output_stmt) => {
+			// Plan the inner expression
+			let inner = try_plan_expr(output_stmt.what, ctx)?;
+
+			// Wrap with Fetch operator if FETCH clause is present
+			let inner = if let Some(fetchs) = output_stmt.fetch {
+				// Extract idioms from fetch expressions
+				// FETCH expressions are typically Expr::Idiom(idiom)
+				let fields: Vec<_> = fetchs
+					.iter()
+					.filter_map(|f| {
+						if let Expr::Idiom(idiom) = &f.0 {
+							Some(idiom.clone())
+						} else {
+							// Non-idiom fetch expressions are not supported in the new planner
+							None
+						}
+					})
+					.collect();
+				if fields.is_empty() {
+					// No idiom fields to fetch, pass through
+					inner
+				} else {
+					Arc::new(Fetch {
+						input: inner,
+						fields,
+					}) as Arc<dyn OperatorPlan>
+				}
+			} else {
+				inner
+			};
+
+			Ok(Arc::new(ControlFlowPlan {
+				kind: ControlFlowKind::Return,
+				inner: Some(inner),
+			}))
+		}
+		Expr::Throw(expr) => {
+			let inner = try_plan_expr(*expr, ctx)?;
+			Ok(Arc::new(ControlFlowPlan {
+				kind: ControlFlowKind::Throw,
+				inner: Some(inner),
+			}))
+		}
+		Expr::Break => Ok(Arc::new(ControlFlowPlan {
+			kind: ControlFlowKind::Break,
+			inner: None,
+		})),
+		Expr::Continue => Ok(Arc::new(ControlFlowPlan {
+			kind: ControlFlowKind::Continue,
+			inner: None,
+		})),
+		Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
+			duration: sleep_stmt.duration.clone(),
+		})),
 		Expr::Explain {
 			format,
 			statement,

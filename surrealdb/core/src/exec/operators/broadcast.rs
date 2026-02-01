@@ -9,9 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use tokio::sync::{RwLock, watch};
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	ValueBatchStream,
 };
 
 /// A source that executes once, caches incrementally, and allows multiple
@@ -78,8 +78,16 @@ impl BroadcastSource {
 		ctx: &ExecutionContext,
 		state: &BroadcastState,
 	) -> Result<(), anyhow::Error> {
-		let mut stream =
-			input.execute(ctx).map_err(|e| anyhow::anyhow!("Failed to execute input: {}", e))?;
+		let mut stream = match input.execute(ctx) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(_)) => return Ok(()),
+			Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
+				return Ok(());
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(anyhow::anyhow!("Failed to execute input: {}", e));
+			}
+		};
 
 		use futures::StreamExt;
 
@@ -126,7 +134,7 @@ impl OperatorPlan for BroadcastSource {
 		self.input.access_mode()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let needs_spawn = !self.state.started.swap(true, Ordering::SeqCst);
 
 		// Return a cursor stream into the shared cache

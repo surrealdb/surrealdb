@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
 use crate::val::{Array, Value};
 
 /// LET operator - binds a value to a parameter.
@@ -49,7 +49,7 @@ impl OperatorPlan for LetPlan {
 		self.value.access_mode()
 	}
 
-	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// LET returns NONE as its result (the binding happens in output_context)
 		Ok(Box::pin(stream::once(async {
 			Ok(crate::exec::ValueBatch {
@@ -64,7 +64,20 @@ impl OperatorPlan for LetPlan {
 
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		// Execute the value plan and collect results
-		let stream = self.value.execute(input)?;
+		// Handle control flow signals explicitly
+		let stream = match self.value.execute(input) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(v)) => {
+				// If value expression returns early, use that value
+				return Ok(input.with_param(self.name.clone(), v));
+			}
+			Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
+				return Err(Error::InvalidControlFlow);
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(Error::Thrown(e.to_string()));
+			}
+		};
 		let results = collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
 
 		// If the value is a scalar expression, use the single result directly

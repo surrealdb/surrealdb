@@ -14,9 +14,9 @@ use rand::{Rng, thread_rng};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -61,7 +61,7 @@ impl OperatorPlan for RandomShuffle {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let limit = self.limit;
 

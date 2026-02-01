@@ -4,10 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 
@@ -62,16 +61,18 @@ impl OperatorPlan for Limit {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Evaluate limit and offset expressions upfront
 		let eval_ctx = EvalContext::from_exec_ctx(ctx);
 
 		let limit_value = match &self.limit {
 			Some(expr) => {
-				let value = futures::executor::block_on(expr.evaluate(eval_ctx.clone()))
-					.map_err(|e| Error::Thrown(format!("Failed to evaluate LIMIT: {}", e)))?;
+				let value =
+					futures::executor::block_on(expr.evaluate(eval_ctx.clone())).map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
+					})?;
 				Some(coerce_to_usize(&value).map_err(|e| {
-					Error::Thrown(format!("LIMIT must be a non-negative integer: {}", e))
+					ControlFlow::Err(anyhow::anyhow!("LIMIT must be a non-negative integer: {}", e))
 				})?)
 			}
 			None => None,
@@ -79,10 +80,11 @@ impl OperatorPlan for Limit {
 
 		let offset_value = match &self.offset {
 			Some(expr) => {
-				let value = futures::executor::block_on(expr.evaluate(eval_ctx))
-					.map_err(|e| Error::Thrown(format!("Failed to evaluate START: {}", e)))?;
+				let value = futures::executor::block_on(expr.evaluate(eval_ctx)).map_err(|e| {
+					ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
+				})?;
 				coerce_to_usize(&value).map_err(|e| {
-					Error::Thrown(format!("START must be a non-negative integer: {}", e))
+					ControlFlow::Err(anyhow::anyhow!("START must be a non-negative integer: {}", e))
 				})?
 			}
 			None => 0,

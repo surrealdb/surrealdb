@@ -9,9 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::expr::ExplainFormat;
 use crate::val::{Array, Object, Value};
 
@@ -50,7 +49,7 @@ impl OperatorPlan for ExplainPlan {
 		AccessMode::ReadOnly
 	}
 
-	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let output = match self.format {
 			ExplainFormat::Text => {
 				let mut plan_text = String::new();

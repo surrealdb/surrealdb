@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, ExecutionContext, OperatorPlan, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, ExecutionContext, FlowResult, OperatorPlan,
+	ValueBatchStream,
 };
 
 /// Union operator - combines results from multiple execution plans.
@@ -40,7 +40,7 @@ impl OperatorPlan for Union {
 		self.inputs.iter().collect()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		if self.inputs.is_empty() {
 			// Empty union returns empty stream
 			return Ok(Box::pin(stream::empty()));

@@ -1,6 +1,7 @@
 mod aggregate;
 mod broadcast;
 mod context_mutating;
+mod control_flow;
 mod create;
 mod delete;
 mod explain;
@@ -14,6 +15,7 @@ mod project_value;
 mod reference_scan;
 mod scan;
 mod sequence;
+mod sleep;
 mod sort;
 mod source_expr;
 mod split;
@@ -23,6 +25,7 @@ mod update;
 
 pub use aggregate::{Aggregate, AggregateField, AggregateType};
 pub use context_mutating::LetPlan;
+pub use control_flow::{ControlFlowKind, ControlFlowPlan};
 pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
@@ -34,6 +37,7 @@ pub use project_value::ProjectValue;
 pub use reference_scan::ReferenceScan;
 pub use scan::Scan;
 pub use sequence::SequencePlan;
+pub use sleep::SleepPlan;
 #[cfg(storage)]
 pub use sort::ExternalSort;
 pub use sort::{OrderByField, RandomShuffle, Sort, SortDirection, SortTopK};

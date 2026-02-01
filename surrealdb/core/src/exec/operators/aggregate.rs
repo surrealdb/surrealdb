@@ -4,10 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
 use crate::val::{Number, Object, Value};
@@ -224,7 +223,7 @@ impl OperatorPlan for Aggregate {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let group_by = self.group_by.clone();
 		let aggregates = self.aggregates.clone();

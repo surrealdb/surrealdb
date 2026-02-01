@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
 use crate::kvs::{LockType, TransactionType};
 
 /// BEGIN operator - starts a write transaction.
@@ -38,7 +38,7 @@ impl OperatorPlan for BeginPlan {
 		AccessMode::ReadOnly
 	}
 
-	fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// BEGIN returns NONE as its result
 		Ok(Box::pin(stream::once(async {
 			Ok(crate::exec::ValueBatch {

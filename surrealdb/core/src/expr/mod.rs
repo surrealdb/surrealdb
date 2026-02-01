@@ -115,9 +115,26 @@ pub(crate) enum ControlFlow {
 	Err(anyhow::Error),
 }
 
+impl std::fmt::Display for ControlFlow {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ControlFlow::Break => write!(f, "BREAK"),
+			ControlFlow::Continue => write!(f, "CONTINUE"),
+			ControlFlow::Return(v) => write!(f, "RETURN {:?}", v),
+			ControlFlow::Err(e) => write!(f, "{}", e),
+		}
+	}
+}
+
 impl From<anyhow::Error> for ControlFlow {
 	fn from(error: anyhow::Error) -> Self {
 		ControlFlow::Err(error)
+	}
+}
+
+impl From<crate::err::Error> for ControlFlow {
+	fn from(error: crate::err::Error) -> Self {
+		ControlFlow::Err(error.into())
 	}
 }
 

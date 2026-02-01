@@ -12,10 +12,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, OperatorPlan,
-	ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
+	OperatorPlan, ValueBatch, ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -102,7 +101,7 @@ impl OperatorPlan for SortTopK {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;

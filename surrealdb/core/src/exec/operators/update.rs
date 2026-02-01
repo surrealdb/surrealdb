@@ -13,14 +13,13 @@ use futures::StreamExt;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
-use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::iam::Action;
 use crate::val::{TableName, Value};
@@ -67,7 +66,7 @@ impl OperatorPlan for Update {
 		vec![&self.input]
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context
 		let db_ctx = ctx.database()?;
 

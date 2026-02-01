@@ -10,10 +10,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::val::Value;
 
 /// SourceExpr operator - evaluates an expression and yields values for iteration.
@@ -50,7 +49,7 @@ impl OperatorPlan for SourceExpr {
 		self.expr.access_mode()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let expr = self.expr.clone();
 		let ctx = ctx.clone();
 

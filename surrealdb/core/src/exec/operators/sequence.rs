@@ -20,7 +20,7 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::planner::try_plan_expr;
-use crate::exec::{AccessMode, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
 use crate::expr::Block;
 use crate::val::Value;
 
@@ -86,7 +86,7 @@ impl OperatorPlan for SequencePlan {
 		}
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// We need to execute each statement in sequence with deferred planning
 		// Since execute() is sync but we need async, we create a stream that
 		// will do the work when polled
@@ -166,9 +166,40 @@ async fn execute_block_with_context(
 					result = Value::None; // Context-mutating statements return NONE
 				} else {
 					// Execute the plan and get the result
-					let stream = plan.execute(&current_ctx)?;
-					let values =
-						collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
+					// Handle control flow signals from execute()
+					let stream = match plan.execute(&current_ctx) {
+						Ok(s) => s,
+						Err(crate::expr::ControlFlow::Return(v)) => {
+							// RETURN statement - return immediately
+							return Ok((v, current_ctx));
+						}
+						Err(crate::expr::ControlFlow::Break) => {
+							// BREAK outside of loop context is an error
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Continue) => {
+							// CONTINUE outside of loop context is an error
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Err(e)) => {
+							return Err(Error::Thrown(e.to_string()));
+						}
+					};
+
+					let values = match collect_stream(stream).await {
+						Ok(v) => v,
+						Err(crate::expr::ControlFlow::Return(v)) => {
+							// RETURN statement - propagate immediately
+							return Ok((v, current_ctx));
+						}
+						Err(crate::expr::ControlFlow::Err(e)) => {
+							return Err(Error::Thrown(e.to_string()));
+						}
+						Err(ctrl) => {
+							// Break/Continue outside loop context
+							return Err(Error::Thrown(format!("Invalid control flow: {}", ctrl)));
+						}
+					};
 
 					// For scalar expressions, return the single value
 					// For queries, the result is already an array from the plan
@@ -250,26 +281,30 @@ fn get_legacy_context<'a>(
 }
 
 /// Collect all values from a stream into a Vec
-async fn collect_stream(stream: ValueBatchStream) -> anyhow::Result<Vec<Value>> {
+///
+/// Returns `FlowResult` to properly propagate control flow signals:
+/// - `Ok(values)` - normal completion with collected values
+/// - `Err(ControlFlow::Return(v))` - early return from RETURN statement
+/// - `Err(ControlFlow::Err(e))` - error during execution
+async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
+	use crate::expr::ControlFlow;
+
 	let mut results = Vec::new();
 	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
 			Ok(batch) => results.extend(batch.values),
-			Err(ctrl) => {
-				use crate::expr::ControlFlow;
-				match ctrl {
-					ControlFlow::Break | ControlFlow::Continue => continue,
-					ControlFlow::Return(v) => {
-						results.push(v);
-						break;
-					}
-					ControlFlow::Err(e) => {
-						return Err(e);
-					}
+			Err(ctrl) => match ctrl {
+				ControlFlow::Break | ControlFlow::Continue => continue,
+				ControlFlow::Return(v) => {
+					// Propagate RETURN as control flow signal
+					return Err(ControlFlow::Return(v));
 				}
-			}
+				ControlFlow::Err(e) => {
+					return Err(ControlFlow::Err(e));
+				}
+			},
 		}
 	}
 

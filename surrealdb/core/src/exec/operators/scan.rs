@@ -7,15 +7,14 @@ use futures::StreamExt;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
-use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, OperatorPlan, PhysicalExpr,
-	ValueBatch, ValueBatchStream,
+	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
@@ -80,7 +79,7 @@ impl OperatorPlan for Scan {
 		self.source.access_mode()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?.clone();
 
