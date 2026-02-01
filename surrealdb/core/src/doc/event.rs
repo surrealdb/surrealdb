@@ -345,10 +345,10 @@ impl AsyncEventRecord {
 	async fn process_events_batch(
 		ds: &Datastore,
 		res: Vec<(Key, Val)>,
-		lh: Option<&LeaseHandler>,
+		lh: Option<LeaseHandler>,
 	) -> Result<()> {
 		for (k, v) in res {
-			if let Some(lh) = lh {
+			if let Some(lh) = lh.as_ref() {
 				lh.try_maintain_lease().await?;
 			}
 			// Setup a context
@@ -358,7 +358,8 @@ impl AsyncEventRecord {
 			// Extract sequences and transaction factory
 			let sequences = ds.sequences().clone();
 			let tf = ds.transaction_factory().clone();
-			Self::run_event_checked(ctx, opt, tf, sequences, k, v).await;
+			let lh = lh.clone();
+			Self::run_event_checked(ctx, opt, tf, sequences, lh, k, v).await;
 		}
 		Ok(())
 	}
