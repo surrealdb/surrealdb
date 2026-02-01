@@ -46,6 +46,7 @@ use crate::val::Value;
 
 pub(crate) mod access_mode;
 pub(crate) mod context;
+pub(crate) mod function;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
@@ -59,6 +60,8 @@ pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
 };
+// Re-export function types
+pub(crate) use function::{FunctionRegistry, ScalarFunction, Signature};
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 

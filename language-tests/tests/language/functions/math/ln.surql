@@ -11,6 +11,6 @@ value = "2.995732273553991f"
 value = "0.9162907318741551f"
 
 */
-math::ln(1);
+EXPLAIN math::ln(1);
 math::ln(20);
 math::ln(2.5);

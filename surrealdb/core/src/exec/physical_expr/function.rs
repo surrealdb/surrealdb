@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes};
+use crate::expr::Function;
 use crate::val::Value;
 
 /// Function call - count(), string::concat(a, b), etc.
@@ -20,13 +21,68 @@ impl PhysicalExpr for FunctionCallExpr {
 		"FunctionCall"
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// TODO: Function calls need full execution context with Stk, Options, and CursorDoc
-		// These are not yet available in EvalContext for physical expressions
-		// This will need to be implemented when the execution context is extended
-		Err(anyhow::anyhow!(
-			"Function call evaluation not yet supported in physical expressions - need Stk and Options in EvalContext"
-		))
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// Get the function name - only Normal (built-in) functions supported for now
+		let name = match &self.function {
+			Function::Normal(name) => name.as_str(),
+			Function::Custom(name) => {
+				return Err(anyhow::anyhow!(
+					"Custom function 'fn::{}' requires execution context - not yet supported in streaming executor",
+					name
+				));
+			}
+			Function::Script(_) => {
+				return Err(anyhow::anyhow!(
+					"Script functions require execution context - not yet supported in streaming executor"
+				));
+			}
+			Function::Model(m) => {
+				return Err(anyhow::anyhow!(
+					"Model function '{:?}' requires execution context - not yet supported in streaming executor",
+					m
+				));
+			}
+			Function::Module(m, s) => {
+				let name = match s {
+					Some(s) => format!("mod::{}::{}", m, s),
+					None => format!("mod::{}", m),
+				};
+				return Err(anyhow::anyhow!(
+					"Module function '{}' requires execution context - not yet supported in streaming executor",
+					name
+				));
+			}
+			Function::Silo {
+				org,
+				pkg,
+				..
+			} => {
+				return Err(anyhow::anyhow!(
+					"Silo function 'silo::{}::{}' requires execution context - not yet supported in streaming executor",
+					org,
+					pkg
+				));
+			}
+		};
+
+		// Look up the function in the registry
+		let registry = ctx.exec_ctx.function_registry();
+		let func = registry.get(name).ok_or_else(|| {
+			anyhow::anyhow!("Unknown function '{}' - not found in function registry", name)
+		})?;
+
+		// Evaluate all arguments first
+		let mut args = Vec::with_capacity(self.arguments.len());
+		for arg_expr in &self.arguments {
+			args.push(arg_expr.evaluate(ctx.clone()).await?);
+		}
+
+		// Invoke the function based on whether it's pure or needs context
+		if func.is_pure() && !func.is_async() {
+			func.invoke(args)
+		} else {
+			func.invoke_async(&ctx, args).await
+		}
 	}
 
 	fn references_current_value(&self) -> bool {
