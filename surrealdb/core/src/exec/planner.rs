@@ -397,9 +397,19 @@ pub(crate) fn try_plan_expr(
 		Expr::Block(_) => Err(Error::Unimplemented(
 			"Block expressions not yet supported in execution plans".to_string(),
 		)),
-		Expr::FunctionCall(_) => Err(Error::Unimplemented(
-			"Function call expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::FunctionCall(_) => {
+			// Function calls are value expressions - convert to physical expression
+			let phys_expr = expr_to_physical_expr(expr, ctx)?;
+			// Validate that the expression doesn't require row context
+			if phys_expr.references_current_value() {
+				return Err(Error::Unimplemented(
+					"Function call references row context but no table specified".to_string(),
+				));
+			}
+			Ok(Arc::new(ExprPlan {
+				expr: phys_expr,
+			}) as Arc<dyn OperatorPlan>)
+		}
 		Expr::Closure(_) => Err(Error::Unimplemented(
 			"Closure expressions not yet supported in execution plans".to_string(),
 		)),

@@ -167,6 +167,8 @@ impl OperatorPlan for Update {
 								auth: auth.clone(),
 								auth_enabled,
 								txn: txn.clone(),
+								session: None,
+								capabilities: None,
 							},
 							ns: ns.clone(),
 						},

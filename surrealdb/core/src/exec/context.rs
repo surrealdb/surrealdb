@@ -16,13 +16,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
+use crate::dbs::Capabilities;
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::iam::{Action, Auth};
 use crate::kvs::{Datastore, Transaction};
-use crate::val::Value;
+use crate::val::{Datetime, Value};
 
 /// Global function registry containing all built-in functions.
 ///
@@ -60,6 +62,32 @@ impl ContextLevel {
 	}
 }
 
+/// Session information for context-aware functions.
+///
+/// This contains session data that can be accessed by functions like
+/// `session::ns()`, `session::db()`, `session::id()`, etc.
+#[derive(Debug, Clone, Default)]
+pub struct SessionInfo {
+	/// The currently selected namespace
+	pub ns: Option<String>,
+	/// The currently selected database
+	pub db: Option<String>,
+	/// The current session ID
+	pub id: Option<Uuid>,
+	/// The current connection IP address
+	pub ip: Option<String>,
+	/// The current connection origin
+	pub origin: Option<String>,
+	/// The current access method
+	pub ac: Option<String>,
+	/// The current record authentication data
+	pub rd: Option<Value>,
+	/// The current authentication token
+	pub token: Option<Value>,
+	/// The current expiration time of the session
+	pub exp: Option<Datetime>,
+}
+
 /// Root-level context - always available.
 ///
 /// Contains resources that don't require a namespace or database selection:
@@ -85,6 +113,10 @@ pub struct RootContext {
 	pub auth_enabled: bool,
 	/// The transaction for this execution
 	pub txn: Arc<Transaction>,
+	/// Session information for context-aware functions
+	pub session: Option<Arc<SessionInfo>>,
+	/// Capabilities for the current session (network, functions, etc.)
+	pub capabilities: Option<Arc<Capabilities>>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -96,6 +128,8 @@ impl std::fmt::Debug for RootContext {
 			.field("auth", &self.auth)
 			.field("auth_enabled", &self.auth_enabled)
 			.field("txn", &"<Transaction>")
+			.field("session", &self.session)
+			.field("capabilities", &self.capabilities.as_ref().map(|_| "<Capabilities>"))
 			.finish()
 	}
 }
@@ -349,6 +383,8 @@ impl ExecutionContext {
 				auth: r.auth.clone(),
 				auth_enabled: r.auth_enabled,
 				txn: r.txn.clone(),
+				session: r.session.clone(),
+				capabilities: r.capabilities.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -358,6 +394,8 @@ impl ExecutionContext {
 					auth: n.root.auth.clone(),
 					auth_enabled: n.root.auth_enabled,
 					txn: n.root.txn.clone(),
+					session: n.root.session.clone(),
+					capabilities: n.root.capabilities.clone(),
 				},
 				ns: n.ns.clone(),
 			}),
@@ -370,6 +408,8 @@ impl ExecutionContext {
 						auth: d.ns_ctx.root.auth.clone(),
 						auth_enabled: d.ns_ctx.root.auth_enabled,
 						txn: d.ns_ctx.root.txn.clone(),
+						session: d.ns_ctx.root.session.clone(),
+						capabilities: d.ns_ctx.root.capabilities.clone(),
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -413,6 +453,8 @@ impl ExecutionContext {
 			cancellation: self.root().cancellation.clone(),
 			auth: self.root().auth.clone(),
 			auth_enabled: self.root().auth_enabled,
+			session: self.root().session.clone(),
+			capabilities: self.root().capabilities.clone(),
 		};
 
 		Ok(match self {
@@ -438,5 +480,20 @@ impl ExecutionContext {
 	/// registries for sandboxing or custom function sets.
 	pub fn function_registry(&self) -> &Arc<FunctionRegistry> {
 		builtin_registry()
+	}
+
+	/// Get the session information (if available).
+	pub fn session(&self) -> Option<&SessionInfo> {
+		self.root().session.as_deref()
+	}
+
+	/// Get the capabilities (if available).
+	pub fn capabilities(&self) -> Option<&Capabilities> {
+		self.root().capabilities.as_deref()
+	}
+
+	/// Get the cancellation token.
+	pub fn cancellation(&self) -> &CancellationToken {
+		&self.root().cancellation
 	}
 }

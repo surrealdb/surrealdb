@@ -97,6 +97,74 @@ impl ComputeExecutor {
 		}
 	}
 
+	/// Extract session information from the FrozenContext.
+	///
+	/// The session is stored as a Value object in the context with keys like
+	/// "ns", "db", "id", "ip", "or", "ac", "rd", "tk".
+	fn extract_session_info(&self) -> Option<std::sync::Arc<crate::exec::context::SessionInfo>> {
+		use crate::exec::context::SessionInfo;
+		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+
+		let session_value = self.ctx.value("session")?;
+
+		// Extract fields from the session Value
+		let ns = match session_value.pick(NS.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let db = match session_value.pick(DB.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let id = match session_value.pick(ID.as_ref()) {
+			Value::Uuid(u) => Some(*u.as_ref()),
+			_ => None,
+		};
+
+		let ip = match session_value.pick(IP.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let origin = match session_value.pick(OR.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let ac = match session_value.pick(AC.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let rd = match session_value.pick(RD.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		let token = match session_value.pick(TK.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		// Note: exp is not in the session object, it's in the Session struct
+		// For now, we leave it as None
+		let exp = None;
+
+		Some(std::sync::Arc::new(SessionInfo {
+			ns,
+			db,
+			id,
+			ip,
+			origin,
+			ac,
+			rd,
+			token,
+			exp,
+		}))
+	}
+
 	/// Execute an OperatorPlan and collect results into a Value.
 	///
 	/// This builds an ExecutionContext from the current session state and executes
@@ -120,6 +188,12 @@ impl ComputeExecutor {
 		// stores values differently. In a future iteration, we can properly convert.
 		let params: Arc<Parameters> = Arc::new(HashMap::new());
 
+		// Extract session info from the FrozenContext
+		let session = self.extract_session_info();
+
+		// Get capabilities from the FrozenContext
+		let capabilities = Some(self.ctx.get_capabilities());
+
 		// Build the root context
 		let root_ctx = RootContext {
 			datastore: None,
@@ -128,6 +202,8 @@ impl ComputeExecutor {
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
 			txn: txn.clone(),
+			session,
+			capabilities,
 		};
 
 		// Check what level of context we need

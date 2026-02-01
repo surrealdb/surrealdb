@@ -327,5 +327,344 @@ macro_rules! register_functions {
 	};
 }
 
+/// Define a context-aware scalar function that needs access to EvalContext.
+///
+/// Context-aware functions are not pure (they depend on session state) but are
+/// not async. They synchronously access context information like session::ns(),
+/// session::db(), etc.
+///
+/// # Usage
+///
+/// ```ignore
+/// // Function with no arguments that reads from context
+/// define_context_function!(
+///     SessionNs,                      // Struct name
+///     "session::ns",                  // Function name
+///     () -> Any,                      // Signature: () -> return type
+///     session_ns_impl                 // Implementation function
+/// );
+/// ```
+#[macro_export]
+macro_rules! define_context_function {
+	// No arguments: () -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		() -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires context", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				_args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx) })
+			}
+		}
+	};
+}
+
+/// Define an async scalar function that needs access to EvalContext.
+///
+/// Async functions are used for:
+/// - I/O-bound operations (HTTP requests)
+/// - CPU-intensive operations (crypto hashing)
+/// - Timer-based operations (sleep)
+///
+/// # Usage
+///
+/// ```ignore
+/// // Async function with one argument
+/// define_async_function!(
+///     Sleep,                          // Struct name
+///     "sleep",                        // Function name
+///     (duration: Duration) -> None,   // Signature
+///     sleep_impl                      // Async implementation function
+/// );
+///
+/// // Async function with two arguments
+/// define_async_function!(
+///     HttpGet,
+///     "http::get",
+///     (url: String, ?opts: Object) -> Any,
+///     http_get_impl
+/// );
+/// ```
+#[macro_export]
+macro_rules! define_async_function {
+	// No arguments: () -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		() -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				_args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx).await })
+			}
+		}
+	};
+
+	// Single required argument: (name: Type) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg_name:ident : $arg_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx, args).await })
+			}
+		}
+	};
+
+	// Two required arguments: (a: Type1, b: Type2) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx, args).await })
+			}
+		}
+	};
+
+	// One required + one optional: (req: Type1, ?opt: Type2) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx, args).await })
+			}
+		}
+	};
+
+	// One required + two optional: (req: Type1, ?opt1: Type2, ?opt2: Type3) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				args: Vec<$crate::val::Value>,
+			) -> std::pin::Pin<
+				Box<
+					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
+						+ Send
+						+ 'a,
+				>,
+			> {
+				Box::pin(async move { $impl_fn(ctx, args).await })
+			}
+		}
+	};
+}
+
 // Note: The macros are exported from the crate root via #[macro_export]
 // so they can be used as crate::define_pure_function and crate::register_functions

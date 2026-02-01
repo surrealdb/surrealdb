@@ -60,7 +60,8 @@ pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 pub(crate) use context::{
 	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
 };
-// Re-export function types
+// Re-export function types (allow unused for now - these are public API)
+#[allow(unused_imports)]
 pub(crate) use function::{FunctionRegistry, ScalarFunction, Signature};
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};

@@ -1,9 +1,14 @@
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
 
+use crate::dbs::Capabilities;
+use crate::exec::context::{Parameters, SessionInfo};
 use crate::exec::{AccessMode, ExecutionContext};
+use crate::iam::Auth;
+use crate::kvs::Transaction;
 use crate::val::Value;
 
 /// Evaluation context - what's available during expression evaluation.
@@ -56,6 +61,97 @@ impl<'a> EvalContext<'a> {
 			current_value: Some(value),
 			..*self
 		}
+	}
+
+	// =========================================================================
+	// Session accessors
+	// =========================================================================
+
+	/// Get the session information (if available).
+	pub fn session(&self) -> Option<&SessionInfo> {
+		self.exec_ctx.session()
+	}
+
+	/// Get the session namespace (if available).
+	pub fn session_ns(&self) -> Option<&str> {
+		self.session().and_then(|s| s.ns.as_deref())
+	}
+
+	/// Get the session database (if available).
+	pub fn session_db(&self) -> Option<&str> {
+		self.session().and_then(|s| s.db.as_deref())
+	}
+
+	// =========================================================================
+	// Context accessors (shortcuts)
+	// =========================================================================
+
+	/// Get the transaction.
+	pub fn txn(&self) -> &Arc<Transaction> {
+		self.exec_ctx.txn()
+	}
+
+	/// Get the parameters.
+	pub fn params(&self) -> &Parameters {
+		self.exec_ctx.params()
+	}
+
+	/// Get the authentication context.
+	pub fn auth(&self) -> &Auth {
+		self.exec_ctx.auth()
+	}
+
+	/// Get the capabilities (if available).
+	pub fn capabilities(&self) -> Option<&Capabilities> {
+		self.exec_ctx.capabilities()
+	}
+
+	// =========================================================================
+	// Capability checks
+	// =========================================================================
+
+	/// Check if a network target is allowed.
+	///
+	/// Returns an error if the URL is not allowed by the capabilities.
+	#[cfg(feature = "http")]
+	pub async fn check_allowed_net(&self, url: &url::Url) -> anyhow::Result<()> {
+		use std::str::FromStr;
+
+		use crate::dbs::capabilities::NetTarget;
+		use crate::err::Error;
+
+		let capabilities = match self.capabilities() {
+			Some(cap) => cap,
+			None => {
+				// No capabilities means no restrictions
+				return Ok(());
+			}
+		};
+
+		// Check if the URL host is allowed
+		let host = url.host_str().ok_or_else(|| Error::InvalidUrl(url.to_string()))?;
+
+		let target = NetTarget::from_str(host)
+			.map_err(|_| Error::InvalidUrl(format!("Invalid host: {}", host)))?;
+
+		if !capabilities.matches_any_allow_net(&target)
+			|| capabilities.matches_any_deny_net(&target)
+		{
+			return Err(Error::NetTargetNotAllowed(url.to_string()).into());
+		}
+
+		Ok(())
+	}
+
+	/// Get a clone of the capabilities as an Arc.
+	///
+	/// Returns a default capabilities if none are available.
+	pub fn get_capabilities(&self) -> Arc<Capabilities> {
+		self.exec_ctx
+			.root()
+			.capabilities
+			.clone()
+			.unwrap_or_else(|| Arc::new(Capabilities::default()))
 	}
 }
 

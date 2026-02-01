@@ -157,6 +157,8 @@ impl OperatorPlan for Delete {
 								auth: auth.clone(),
 								auth_enabled,
 								txn: txn.clone(),
+								session: None,
+								capabilities: None,
 							},
 							ns: ns.clone(),
 						},
