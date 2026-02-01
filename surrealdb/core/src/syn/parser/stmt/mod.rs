@@ -90,10 +90,6 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_commit()
 			}
-			t!("EXPLAIN") => {
-				self.pop_peek();
-				self.parse_explain_stmt(stk).await
-			}
 			t!("KILL") => {
 				self.pop_peek();
 				self.parse_kill_stmt().map(TopLevelExpr::Kill)
@@ -299,11 +295,11 @@ impl Parser<'_> {
 		Ok(TopLevelExpr::Commit)
 	}
 
-	/// Parsers an EXPLAIN statement.
+	/// Parses an EXPLAIN expression.
 	///
 	/// # Parser State
 	/// Expects `EXPLAIN` to already be consumed.
-	async fn parse_explain_stmt(&mut self, stk: &mut Stk) -> ParseResult<TopLevelExpr> {
+	pub(super) async fn parse_explain_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		// Check for optional ANALYZE keyword (not yet supported)
 		// ANALYZE is not a reserved keyword, so we need to check if it's an identifier
 		let peek = self.peek();
@@ -348,12 +344,12 @@ impl Parser<'_> {
 		};
 
 		// Parse the inner statement as an expression
-		let statement = self.parse_expr_start(stk).await?;
+		let statement = stk.run(|ctx| self.parse_expr_start(ctx)).await?;
 
-		Ok(TopLevelExpr::Expr(Expr::Explain {
+		Ok(Expr::Explain {
 			format,
 			statement: Box::new(statement),
-		}))
+		})
 	}
 
 	/// Parsers a USE statement.

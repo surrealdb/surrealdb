@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::dbs::Capabilities;
+use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::iam::{Action, Auth};
@@ -117,6 +117,9 @@ pub struct RootContext {
 	pub session: Option<Arc<SessionInfo>>,
 	/// Capabilities for the current session (network, functions, etc.)
 	pub capabilities: Option<Arc<Capabilities>>,
+	/// Legacy Options for fallback to compute path when streaming executor
+	/// encounters unimplemented expressions.
+	pub options: Option<Options>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -385,6 +388,7 @@ impl ExecutionContext {
 				txn: r.txn.clone(),
 				session: r.session.clone(),
 				capabilities: r.capabilities.clone(),
+				options: r.options.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -396,6 +400,7 @@ impl ExecutionContext {
 					txn: n.root.txn.clone(),
 					session: n.root.session.clone(),
 					capabilities: n.root.capabilities.clone(),
+					options: n.root.options.clone(),
 				},
 				ns: n.ns.clone(),
 			}),
@@ -410,6 +415,7 @@ impl ExecutionContext {
 						txn: d.ns_ctx.root.txn.clone(),
 						session: d.ns_ctx.root.session.clone(),
 						capabilities: d.ns_ctx.root.capabilities.clone(),
+						options: d.ns_ctx.root.options.clone(),
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -455,6 +461,7 @@ impl ExecutionContext {
 			auth_enabled: self.root().auth_enabled,
 			session: self.root().session.clone(),
 			capabilities: self.root().capabilities.clone(),
+			options: self.root().options.clone(),
 		};
 
 		Ok(match self {
@@ -495,5 +502,13 @@ impl ExecutionContext {
 	/// Get the cancellation token.
 	pub fn cancellation(&self) -> &CancellationToken {
 		&self.root().cancellation
+	}
+
+	/// Get the legacy Options (if available).
+	///
+	/// This is used for fallback to the legacy compute path when the streaming
+	/// executor encounters unimplemented expressions.
+	pub fn options(&self) -> Option<&Options> {
+		self.root().options.as_ref()
 	}
 }

@@ -204,6 +204,8 @@ impl ComputeExecutor {
 			txn: txn.clone(),
 			session,
 			capabilities,
+			// Include Options for fallback to legacy compute path
+			options: Some(self.opt.clone()),
 		};
 
 		// Check what level of context we need

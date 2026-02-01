@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -23,6 +24,10 @@ pub struct EvalContext<'a> {
 	/// Current row for per-row expressions (projections, filters).
 	/// None when evaluating in "scalar context" (USE, LIMIT, TIMEOUT, etc.)
 	pub current_value: Option<&'a Value>,
+
+	/// Block-local parameters (LET bindings within current block scope).
+	/// These shadow global parameters with the same name.
+	pub local_params: Option<&'a HashMap<String, Value>>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -52,6 +57,7 @@ impl<'a> EvalContext<'a> {
 		Self {
 			exec_ctx,
 			current_value: None,
+			local_params: None,
 		}
 	}
 
@@ -59,6 +65,16 @@ impl<'a> EvalContext<'a> {
 	pub fn with_value(&self, value: &'a Value) -> Self {
 		Self {
 			current_value: Some(value),
+			..*self
+		}
+	}
+
+	/// Create a new context with block-local parameters.
+	///
+	/// Local parameters shadow global parameters with the same name.
+	pub fn with_local_params(&self, params: &'a HashMap<String, Value>) -> Self {
+		Self {
+			local_params: Some(params),
 			..*self
 		}
 	}
@@ -177,6 +193,7 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 }
 
 // Submodules
+mod block;
 mod collections;
 mod conditional;
 mod function;
@@ -188,6 +205,7 @@ mod recurse;
 mod subquery;
 
 // Re-export all expression types for external use
+pub(crate) use block::BlockPhysicalExpr;
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{ClosurePhysicalExpr, FunctionCallExpr};

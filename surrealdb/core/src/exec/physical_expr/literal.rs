@@ -46,6 +46,14 @@ impl PhysicalExpr for Param {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// First check block-local parameters (they shadow global params)
+		if let Some(local_params) = ctx.local_params {
+			if let Some(value) = local_params.get(&self.0) {
+				return Ok(value.clone());
+			}
+		}
+
+		// Fall back to global parameters from execution context
 		ctx.exec_ctx
 			.params()
 			.get(self.0.as_str())

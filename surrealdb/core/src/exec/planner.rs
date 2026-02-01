@@ -8,8 +8,8 @@ use crate::exec::OperatorPlan;
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
 	Aggregate, AggregateField, AggregateType, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter,
-	LetPlan, Limit, OrderByField, Project, ProjectValue, RandomShuffle, Scan, Sort, SortDirection,
-	SortTopK, SourceExpr, Split, Timeout, Union,
+	LetPlan, Limit, OrderByField, Project, ProjectValue, RandomShuffle, Scan, SequencePlan, Sort,
+	SortDirection, SortTopK, SourceExpr, Split, Timeout, Union,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::{Expr, Function, Literal};
@@ -19,9 +19,9 @@ pub(crate) fn expr_to_physical_expr(
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, ClosurePhysicalExpr, FunctionCallExpr, IfElseExpr,
-		Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp, ScalarSubquery, SetLiteral,
-		UnaryOp,
+		ArrayLiteral, BinaryOp, BlockPhysicalExpr, ClosurePhysicalExpr, FunctionCallExpr,
+		IfElseExpr, Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp, ScalarSubquery,
+		SetLiteral, UnaryOp,
 	};
 
 	match expr {
@@ -200,9 +200,14 @@ pub(crate) fn expr_to_physical_expr(
 		Expr::Mock(_) => Err(Error::Unimplemented(
 			"Mock expressions not yet supported in execution plans".to_string(),
 		)),
-		Expr::Block(_) => Err(Error::Unimplemented(
-			"Block expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::Block(block) => {
+			// Deferred planning: wrap the block without converting inner expressions.
+			// The BlockPhysicalExpr will plan and execute each expression at evaluation
+			// time, allowing LET bindings to inform subsequent expression planning.
+			Ok(Arc::new(BlockPhysicalExpr {
+				block: *block,
+			}))
+		}
 		Expr::Throw(_) => Err(Error::Unimplemented(
 			"THROW expressions not yet supported in execution plans".to_string(),
 		)),
@@ -394,9 +399,26 @@ pub(crate) fn try_plan_expr(
 		Expr::IfElse(_) => Err(Error::Unimplemented(
 			"IF statements not yet supported in execution plans".to_string(),
 		)),
-		Expr::Block(_) => Err(Error::Unimplemented(
-			"Block expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::Block(block) => {
+			// Deferred planning: wrap the block without converting inner expressions.
+			// The SequencePlan will plan and execute each expression at runtime,
+			// allowing LET bindings to inform subsequent expression planning.
+			if block.0.is_empty() {
+				// Empty block returns NONE immediately
+				use crate::exec::physical_expr::Literal as PhysicalLiteral;
+				Ok(Arc::new(ExprPlan {
+					expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
+				}) as Arc<dyn OperatorPlan>)
+			} else if block.0.len() == 1 {
+				// Single statement - plan directly without wrapper
+				try_plan_expr(block.0.into_iter().next().unwrap(), ctx)
+			} else {
+				// Multiple statements - use SequencePlan with deferred planning
+				Ok(Arc::new(SequencePlan {
+					block: *block,
+				}) as Arc<dyn OperatorPlan>)
+			}
+		}
 		Expr::FunctionCall(_) => {
 			// Function calls are value expressions - convert to physical expression
 			let phys_expr = expr_to_physical_expr(expr, ctx)?;

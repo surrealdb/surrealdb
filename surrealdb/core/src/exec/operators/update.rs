@@ -169,6 +169,7 @@ impl OperatorPlan for Update {
 								txn: txn.clone(),
 								session: None,
 								capabilities: None,
+								options: None,
 							},
 							ns: ns.clone(),
 						},

@@ -13,6 +13,7 @@ mod project;
 mod project_value;
 mod reference_scan;
 mod scan;
+mod sequence;
 mod sort;
 mod source_expr;
 mod split;
@@ -32,6 +33,7 @@ pub use project::{FieldSelection, Project};
 pub use project_value::ProjectValue;
 pub use reference_scan::ReferenceScan;
 pub use scan::Scan;
+pub use sequence::SequencePlan;
 #[cfg(storage)]
 pub use sort::ExternalSort;
 pub use sort::{OrderByField, RandomShuffle, Sort, SortDirection, SortTopK};

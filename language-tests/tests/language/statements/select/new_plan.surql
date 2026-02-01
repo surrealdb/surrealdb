@@ -44,9 +44,10 @@ SELECT name FROM person:a;
 SELECT * FROM [1, 2, 3];
 SELECT name FROM [{ name: 'A', age: 1 }, { name: 'B', age: 2 }, { name: 'C', age: 3 }] WHERE age > 1;
 
-SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
+EXPLAIN SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
 
 { id: person:a, age: person:b }.*;
 
-EXPLAIN FORMAT JSON SELECT id, a, b FROM test SPLIT a, b ORDER BY id;
+EXPLAIN SELECT id, a, b FROM test SPLIT a, b ORDER BY id;
 
+{ EXPLAIN SELECT * FROM person; EXPLAIN RETURN "OK"; };
