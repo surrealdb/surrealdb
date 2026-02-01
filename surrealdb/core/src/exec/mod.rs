@@ -45,8 +45,6 @@ use crate::expr::FlowResult;
 use crate::val::Value;
 
 pub(crate) mod access_mode;
-pub(crate) mod block;
-pub(crate) mod completion_map;
 pub(crate) mod context;
 pub(crate) mod operators;
 pub(crate) mod permission;

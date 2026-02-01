@@ -33,6 +33,9 @@ value = "{ age: person:b, id: person:a }"
     
     RELATE person:a->knows->person:b;
     RELATE person:b->knows->person:c;
+
+    CREATE test:a SET a = [2, 1], b = [3, 4];
+
     RETURN "OK";
 };
 
@@ -44,3 +47,6 @@ SELECT name FROM [{ name: 'A', age: 1 }, { name: 'B', age: 2 }, { name: 'C', age
 SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
 
 { id: person:a, age: person:b }.*;
+
+SELECT id, a, b FROM test SPLIT a, b ORDER BY a;
+
