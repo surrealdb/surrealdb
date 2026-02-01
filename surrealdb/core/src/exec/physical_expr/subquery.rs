@@ -19,6 +19,11 @@ impl PhysicalExpr for ScalarSubquery {
 		"ScalarSubquery"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Subqueries execute against the database
+		crate::exec::ContextLevel::Database
+	}
+
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// TODO: Implement scalar subquery evaluation
 		// This requires bridging EvalContext (which has borrowed &Transaction)

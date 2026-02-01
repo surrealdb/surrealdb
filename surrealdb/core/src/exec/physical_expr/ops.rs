@@ -21,6 +21,11 @@ impl PhysicalExpr for BinaryOp {
 		"BinaryOp"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Combine both operands' context requirements
+		self.left.required_context().max(self.right.required_context())
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		use crate::expr::operator::BinaryOperator;
 		use crate::fnc::operate;
@@ -172,6 +177,11 @@ impl PhysicalExpr for UnaryOp {
 		"UnaryOp"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Propagate inner expression's context requirement
+		self.expr.required_context()
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		use crate::expr::operator::PrefixOperator;
 		use crate::fnc::operate;
@@ -233,6 +243,11 @@ pub struct PostfixOp {
 impl PhysicalExpr for PostfixOp {
 	fn name(&self) -> &'static str {
 		"PostfixOp"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Propagate inner expression's context requirement
+		self.expr.required_context()
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {

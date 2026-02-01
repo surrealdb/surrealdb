@@ -34,13 +34,10 @@ impl OperatorPlan for ExprPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Scalar expressions can run at root level
-		// (they only need parameters, not database access)
-		ContextLevel::Root
+		self.expr.required_context()
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Delegate to the wrapped expression
 		self.expr.access_mode()
 	}
 

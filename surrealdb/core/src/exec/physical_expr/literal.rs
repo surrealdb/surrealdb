@@ -20,6 +20,11 @@ impl PhysicalExpr for Literal {
 		"Literal"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Literals are constant values, no context needed
+		crate::exec::ContextLevel::Root
+	}
+
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		Ok(self.0.clone())
 	}
@@ -92,6 +97,14 @@ impl Param {
 impl PhysicalExpr for Param {
 	fn name(&self) -> &'static str {
 		"Param"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Parameters can be local, session-level, or database-defined.
+		// Local and session params work at Root level; database params
+		// will fail at runtime if database context is unavailable.
+		// We report Root to allow simple parameter usage without DB.
+		crate::exec::ContextLevel::Root
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {

@@ -22,6 +22,23 @@ impl PhysicalExpr for IfElseExpr {
 		"IfElse"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		use crate::exec::ContextLevel;
+
+		// Combine all branches' context requirements
+		let branches_ctx = self
+			.branches
+			.iter()
+			.flat_map(|(cond, val)| [cond.required_context(), val.required_context()])
+			.max()
+			.unwrap_or(ContextLevel::Root);
+
+		let otherwise_ctx =
+			self.otherwise.as_ref().map_or(ContextLevel::Root, |e| e.required_context());
+
+		branches_ctx.max(otherwise_ctx)
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// Evaluate each condition in order
 		for (condition, value) in &self.branches {

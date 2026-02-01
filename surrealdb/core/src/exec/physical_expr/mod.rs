@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::{Parameters, SessionInfo};
-use crate::exec::{AccessMode, ExecutionContext};
+use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
 use crate::iam::Auth;
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -174,6 +174,12 @@ impl<'a> EvalContext<'a> {
 #[async_trait]
 pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 	fn name(&self) -> &'static str;
+
+	/// The minimum context level required to evaluate this expression.
+	///
+	/// Used for pre-flight validation: the executor checks that the current session
+	/// has at least this context level before calling `evaluate()`.
+	fn required_context(&self) -> ContextLevel;
 
 	/// Evaluate this expression to a value.
 	///

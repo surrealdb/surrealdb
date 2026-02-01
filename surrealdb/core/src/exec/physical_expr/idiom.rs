@@ -58,6 +58,61 @@ impl PhysicalExpr for IdiomExpr {
 		"IdiomExpr"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		use crate::exec::ContextLevel;
+		use crate::exec::physical_part::PhysicalPart;
+
+		// Check if any part requires database context
+		// - Lookup parts (graph traversal) require database
+		// - Field access on RecordId requires database (but we can't know types at plan time)
+		// - Where clauses depend on their predicates
+		// - Method calls may require database
+		for part in &self.parts {
+			match part {
+				PhysicalPart::Lookup(_) => return ContextLevel::Database,
+				PhysicalPart::Field(_) => {
+					// Field access might trigger record fetch if applied to RecordId,
+					// so we conservatively require database context
+					return ContextLevel::Database;
+				}
+				PhysicalPart::Where(predicate) => {
+					if predicate.required_context() == ContextLevel::Database {
+						return ContextLevel::Database;
+					}
+				}
+				PhysicalPart::Method {
+					..
+				} => {
+					// Methods may require database context
+					return ContextLevel::Database;
+				}
+				PhysicalPart::Recurse(_) => {
+					// Recursion requires database access
+					return ContextLevel::Database;
+				}
+				PhysicalPart::Index(expr) => {
+					if expr.required_context() == ContextLevel::Database {
+						return ContextLevel::Database;
+					}
+				}
+				PhysicalPart::Destructure(parts) => {
+					// Check nested parts
+					if parts.iter().any(|p| p.required_context() == ContextLevel::Database) {
+						return ContextLevel::Database;
+					}
+				}
+				// Simple parts that don't need database access
+				PhysicalPart::All
+				| PhysicalPart::Flatten
+				| PhysicalPart::First
+				| PhysicalPart::Last
+				| PhysicalPart::Optional => {}
+			}
+		}
+
+		ContextLevel::Root
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let current = ctx
 			.current_value

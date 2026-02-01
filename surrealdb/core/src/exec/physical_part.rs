@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::exec::{AccessMode, CombineAccessModes, OperatorPlan, PhysicalExpr};
+use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, OperatorPlan, PhysicalExpr};
 use crate::expr::part::DestructurePart;
 use crate::expr::{Dir, Idiom};
 use crate::val::TableName;
@@ -106,6 +106,38 @@ impl PhysicalPart {
 			// Lookup and Recurse inherit from their plans
 			PhysicalPart::Lookup(lookup) => lookup.access_mode(),
 			PhysicalPart::Recurse(recurse) => recurse.access_mode(),
+		}
+	}
+
+	/// Returns the required context level for this part.
+	pub fn required_context(&self) -> ContextLevel {
+		match self {
+			// Simple parts don't need database access
+			PhysicalPart::All
+			| PhysicalPart::Flatten
+			| PhysicalPart::First
+			| PhysicalPart::Last
+			| PhysicalPart::Optional => ContextLevel::Root,
+
+			// Field access might need database (for RecordId auto-fetch)
+			PhysicalPart::Field(_) => ContextLevel::Database,
+
+			// Expression-based parts inherit from the expression
+			PhysicalPart::Index(expr) => expr.required_context(),
+			PhysicalPart::Where(expr) => expr.required_context(),
+			PhysicalPart::Method {
+				args,
+				..
+			} => args.iter().map(|a| a.required_context()).max().unwrap_or(ContextLevel::Database),
+
+			// Destructure inherits from all parts
+			PhysicalPart::Destructure(parts) => {
+				parts.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root)
+			}
+
+			// Lookup and Recurse require database access
+			PhysicalPart::Lookup(_) => ContextLevel::Database,
+			PhysicalPart::Recurse(recurse) => recurse.required_context(),
 		}
 	}
 }
@@ -221,6 +253,26 @@ impl PhysicalDestructurePart {
 				parts,
 				..
 			} => parts.iter().map(|p| p.access_mode()).combine_all(),
+		}
+	}
+
+	/// Returns the required context level for this destructure part.
+	pub fn required_context(&self) -> ContextLevel {
+		match self {
+			// Simple field extraction doesn't need database
+			PhysicalDestructurePart::All(_) | PhysicalDestructurePart::Field(_) => {
+				ContextLevel::Root
+			}
+			// Aliased paths may require database (for lookups, etc.)
+			PhysicalDestructurePart::Aliased {
+				path,
+				..
+			} => path.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root),
+			// Nested destructures inherit from all parts
+			PhysicalDestructurePart::Nested {
+				parts,
+				..
+			} => parts.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root),
 		}
 	}
 }
@@ -396,6 +448,23 @@ impl PhysicalRecurse {
 		};
 
 		path_mode.combine(instruction_mode)
+	}
+
+	/// Returns the required context level for this recursion.
+	pub fn required_context(&self) -> ContextLevel {
+		let path_ctx =
+			self.path.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root);
+
+		let instruction_ctx = match &self.instruction {
+			PhysicalRecurseInstruction::Default
+			| PhysicalRecurseInstruction::Collect
+			| PhysicalRecurseInstruction::Path => ContextLevel::Root,
+			PhysicalRecurseInstruction::Shortest {
+				target,
+			} => target.required_context(),
+		};
+
+		path_ctx.max(instruction_ctx)
 	}
 }
 

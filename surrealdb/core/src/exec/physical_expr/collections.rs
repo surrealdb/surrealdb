@@ -19,6 +19,14 @@ impl PhysicalExpr for ArrayLiteral {
 		"ArrayLiteral"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.elements
+			.iter()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(crate::exec::ContextLevel::Root)
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let mut values = Vec::with_capacity(self.elements.len());
 		for elem in &self.elements {
@@ -62,6 +70,14 @@ impl PhysicalExpr for ObjectLiteral {
 		"ObjectLiteral"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.entries
+			.iter()
+			.map(|(_, e)| e.required_context())
+			.max()
+			.unwrap_or(crate::exec::ContextLevel::Root)
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let mut map = std::collections::BTreeMap::new();
 		for (key, expr) in &self.entries {
@@ -103,6 +119,14 @@ pub struct SetLiteral {
 impl PhysicalExpr for SetLiteral {
 	fn name(&self) -> &'static str {
 		"SetLiteral"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.elements
+			.iter()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(crate::exec::ContextLevel::Root)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {

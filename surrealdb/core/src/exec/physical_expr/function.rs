@@ -148,6 +148,11 @@ fn args_reference_current_value(args: &[Arc<dyn PhysicalExpr>]) -> bool {
 	args.iter().any(|e| e.references_current_value())
 }
 
+/// Helper to compute the maximum required context from arguments.
+fn args_required_context(args: &[Arc<dyn PhysicalExpr>]) -> crate::exec::ContextLevel {
+	args.iter().map(|e| e.required_context()).max().unwrap_or(crate::exec::ContextLevel::Root)
+}
+
 // =============================================================================
 // BuiltinFunctionExpr - for Function::Normal
 // =============================================================================
@@ -165,6 +170,11 @@ pub struct BuiltinFunctionExec {
 impl PhysicalExpr for BuiltinFunctionExec {
 	fn name(&self) -> &'static str {
 		"BuiltinFunction"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Built-in functions only need whatever context their arguments need
+		args_required_context(&self.arguments)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
@@ -227,6 +237,11 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		"UserDefinedFunction"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// User-defined functions are stored in the database
+		crate::exec::ContextLevel::Database
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let func_name = format!("fn::{}", self.name);
 
@@ -265,8 +280,8 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args.into_iter())
 		{
 			let coerced = arg_value.coerce_to_kind(kind).map_err(|e| Error::InvalidArguments {
-				name: format!("${}", param_name),
-				message: format!("Failed to coerce argument: {}", e),
+				name: func_name.clone(),
+				message: format!("Failed to coerce argument `${param_name}`: {e}"),
 			})?;
 			local_params.insert(param_name.clone(), coerced);
 		}
@@ -327,6 +342,11 @@ impl PhysicalExpr for JsFunctionExec {
 		"JsFunction"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Script functions require database context for full execution
+		crate::exec::ContextLevel::Database
+	}
+
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// Script functions require the scripting feature and full context
 		Err(anyhow::anyhow!("Script functions are not yet supported in the streaming executor"))
@@ -363,6 +383,11 @@ pub struct ModelFunctionExec {
 impl PhysicalExpr for ModelFunctionExec {
 	fn name(&self) -> &'static str {
 		"ModelFunction"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// ML models are stored in the database
+		crate::exec::ContextLevel::Database
 	}
 
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
@@ -406,6 +431,11 @@ pub struct SurrealismModuleExec {
 impl PhysicalExpr for SurrealismModuleExec {
 	fn name(&self) -> &'static str {
 		"SurrealismModule"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Module functions may require database context
+		crate::exec::ContextLevel::Database
 	}
 
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
@@ -461,6 +491,11 @@ pub struct SiloModuleExec {
 impl PhysicalExpr for SiloModuleExec {
 	fn name(&self) -> &'static str {
 		"SiloModule"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Silo package functions may require database context
+		crate::exec::ContextLevel::Database
 	}
 
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
@@ -519,6 +554,11 @@ pub struct ClosureExec {
 impl PhysicalExpr for ClosureExec {
 	fn name(&self) -> &'static str {
 		"Closure"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Closures are just values, they don't need any special context
+		crate::exec::ContextLevel::Root
 	}
 
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {

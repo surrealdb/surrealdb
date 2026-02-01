@@ -45,6 +45,25 @@ impl PhysicalExpr for RecurseExpr {
 		"RecurseExpr"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		use crate::exec::ContextLevel;
+		use crate::exec::physical_part::PhysicalRecurseInstruction;
+
+		// Combine path_expr context with instruction context
+		let path_ctx = self.path_expr.required_context();
+
+		let instruction_ctx = match &self.instruction {
+			PhysicalRecurseInstruction::Default
+			| PhysicalRecurseInstruction::Collect
+			| PhysicalRecurseInstruction::Path => ContextLevel::Root,
+			PhysicalRecurseInstruction::Shortest {
+				target,
+			} => target.required_context(),
+		};
+
+		path_ctx.max(instruction_ctx)
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let current =
 			ctx.current_value.ok_or_else(|| anyhow::anyhow!("Recursion requires current value"))?;

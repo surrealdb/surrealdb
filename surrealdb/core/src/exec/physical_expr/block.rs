@@ -108,6 +108,12 @@ impl PhysicalExpr for BlockPhysicalExpr {
 		"Block"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Blocks can contain anything and are planned dynamically,
+		// so we conservatively require database context
+		crate::exec::ContextLevel::Database
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// Empty block returns NONE
 		if self.block.0.is_empty() {

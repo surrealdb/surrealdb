@@ -63,6 +63,11 @@ impl PhysicalExpr for LookupExpr {
 		"LookupExpr"
 	}
 
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Graph/reference traversal requires database context
+		crate::exec::ContextLevel::Database
+	}
+
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		// Execute the lookup plan
 		// The plan should be a GraphEdgeScan or ReferenceScan that has been
