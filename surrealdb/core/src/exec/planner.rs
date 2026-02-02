@@ -957,6 +957,11 @@ fn derive_field_name(expr: &Expr) -> String {
 	match expr {
 		// Simple field reference - extract the raw field name
 		Expr::Idiom(idiom) => idiom_to_field_name(idiom),
+		// Function call - use the function's idiom representation (name without arguments)
+		Expr::FunctionCall(call) => {
+			let idiom: crate::expr::idiom::Idiom = call.receiver.to_idiom().into();
+			idiom_to_field_name(&idiom)
+		}
 		// For other expressions, use the SQL representation
 		_ => {
 			use surrealdb_types::ToSql;
@@ -966,19 +971,26 @@ fn derive_field_name(expr: &Expr) -> String {
 }
 
 /// Extract a field name from an idiom, preferring raw names for simple idioms.
+///
+/// This mirrors the legacy behavior where the idiom is simplified (removing
+/// Destructure, All, Where, etc.) before deriving the field name.
 fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	use surrealdb_types::ToSql;
 
 	use crate::expr::part::Part;
 
+	// Simplify the idiom first - this removes Destructure, All, Where, etc.
+	// and keeps only Field, Start, and Lookup parts
+	let simplified = idiom.simplify();
+
 	// For simple single-part idioms, use the raw field name
-	if idiom.len() == 1 {
-		if let Some(Part::Field(name)) = idiom.first() {
+	if simplified.len() == 1 {
+		if let Some(Part::Field(name)) = simplified.first() {
 			return name.to_string();
 		}
 	}
-	// For complex idioms, use the SQL representation
-	idiom.to_sql()
+	// For complex idioms, use the SQL representation of the simplified idiom
+	simplified.to_sql()
 }
 
 /// Plan FETCH clause
@@ -1123,25 +1135,31 @@ fn extract_aggregate_info(
 			// Look up the function in the aggregate registry
 			if let Some(agg_func) = registry.get_aggregate(name.as_str()) {
 				// This is a registered aggregate function
-				// Extract the argument expression (if any)
+				// Extract the first argument expression (the accumulated value)
 				let argument_expr = if func_call.arguments.is_empty() {
 					// For count() with no args, use a dummy literal
 					expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?
-				} else if func_call.arguments.len() == 1 {
-					// Single argument - convert to physical expression
-					expr_to_physical_expr(func_call.arguments[0].clone(), ctx)?
 				} else {
-					// Multiple arguments - not yet supported for aggregates
-					return Err(Error::Unimplemented(format!(
-						"Aggregate function '{}' with multiple arguments not yet supported",
-						name
-					)));
+					// First argument is the one to accumulate per-row
+					expr_to_physical_expr(func_call.arguments[0].clone(), ctx)?
+				};
+
+				// Convert any additional arguments to extra_args
+				// These are evaluated once per group (e.g., separator in array::join)
+				let extra_args = if func_call.arguments.len() > 1 {
+					func_call.arguments[1..]
+						.iter()
+						.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
+						.collect::<Result<Vec<_>, _>>()?
+				} else {
+					vec![]
 				};
 
 				return Ok((
 					Some(AggregateInfo {
 						function: agg_func.clone(),
 						argument_expr,
+						extra_args,
 					}),
 					None,
 				));
@@ -1149,10 +1167,21 @@ fn extract_aggregate_info(
 		}
 	}
 
-	// Not an aggregate function - convert the whole expression as a fallback
-	// This will be evaluated to get the first value in the group
-	let fallback = expr_to_physical_expr(expr.clone(), ctx)?;
-	Ok((None, Some(fallback)))
+	// Not an explicit aggregate function - use implicit array::group aggregation
+	// This collects all values into an array (SurrealDB's default GROUP BY behavior)
+	let argument_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+	let array_group = registry
+		.get_aggregate("array::group")
+		.expect("array::group should always be registered")
+		.clone();
+	Ok((
+		Some(AggregateInfo {
+			function: array_group,
+			argument_expr,
+			extra_args: vec![],
+		}),
+		None,
+	))
 }
 
 /// Check if an expression is a group-by key reference.

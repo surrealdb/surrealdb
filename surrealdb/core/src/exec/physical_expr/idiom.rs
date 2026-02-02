@@ -438,6 +438,30 @@ async fn evaluate_destructure(
 
 			Ok(Value::Object(crate::val::Object(result)))
 		}
+		Value::RecordId(rid) => {
+			// Fetch the record from the database, then apply destructure to it
+			let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
+			let txn = ctx.exec_ctx.txn();
+			let record = txn
+				.get_record(
+					db_ctx.ns_ctx.ns.namespace_id,
+					db_ctx.db.database_id,
+					&rid.table,
+					&rid.key,
+					None,
+				)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
+
+			// Get the record data as an object
+			let fetched = record.data.as_ref();
+			if fetched.is_none() {
+				return Ok(Value::None);
+			}
+
+			// Continue destructure on the fetched object
+			Box::pin(evaluate_destructure(fetched, parts, ctx)).await
+		}
 		Value::Array(arr) => {
 			// Apply destructure to each element
 			let mut results = Vec::with_capacity(arr.len());
@@ -477,13 +501,17 @@ async fn evaluate_lookup(
 			}
 		}
 		Value::Array(arr) => {
-			// Apply lookup to each element in the array
-			// Do NOT flatten - each element's lookup result is kept as-is
-			// This matches SurrealDB semantics where chained lookups produce nested arrays
-			let mut results = Vec::with_capacity(arr.len());
+			// Apply lookup to each element and flatten results
+			// This matches SurrealDB semantics: `->edge` on an array of records
+			// returns a flat array of all targets, not nested arrays
+			let mut results = Vec::new();
 			for item in arr.iter() {
 				let result = Box::pin(evaluate_lookup(item, lookup, ctx.clone())).await?;
-				results.push(result);
+				// Flatten: extend results with array elements, or push single values
+				match result {
+					Value::Array(inner) => results.extend(inner.into_iter()),
+					other => results.push(other),
+				}
 			}
 			Ok(Value::Array(results.into()))
 		}

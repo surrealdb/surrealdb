@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ExecOperator};
-use crate::val::Value;
+use crate::expr::ControlFlow;
+use crate::val::{Array, Value};
 
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
@@ -24,19 +26,41 @@ impl PhysicalExpr for ScalarSubquery {
 		crate::exec::ContextLevel::Database
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// TODO: Implement scalar subquery evaluation
-		// This requires bridging EvalContext (which has borrowed &Transaction)
-		// with ExecutionContext (which needs Arc<Transaction>).
-		// Options:
-		// 1. Store Arc<Transaction> in EvalContext
-		// 2. Add a method to create ExecutionContext from borrowed context
-		// 3. Make ExecutionContext work with borrowed Transaction (but this conflicts with 'static
-		//    stream requirement)
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// Execute the subquery plan
+		let mut stream = match self.plan.execute(ctx.exec_ctx) {
+			Ok(s) => s,
+			Err(ControlFlow::Err(e)) => return Err(e),
+			Err(ControlFlow::Return(v)) => return Ok(v),
+			Err(other) => {
+				return Err(anyhow::anyhow!(
+					"Unexpected control flow when executing subquery: {:?}",
+					other
+				));
+			}
+		};
 
-		Err(anyhow::anyhow!(
-			"ScalarSubquery evaluation not yet fully implemented - need Arc<Transaction> in EvalContext"
-		))
+		// Collect all values from the stream
+		let mut values = Vec::new();
+		while let Some(batch_result) = stream.next().await {
+			match batch_result {
+				Ok(batch) => values.extend(batch.values),
+				Err(ControlFlow::Return(v)) => {
+					// Return statement in subquery - use the returned value
+					return Ok(v);
+				}
+				Err(ControlFlow::Err(e)) => return Err(e),
+				Err(other) => {
+					return Err(anyhow::anyhow!(
+						"Unexpected control flow in subquery: {:?}",
+						other
+					));
+				}
+			}
+		}
+
+		// Return collected values as array (matches legacy SELECT behavior)
+		Ok(Value::Array(Array(values)))
 	}
 
 	fn references_current_value(&self) -> bool {

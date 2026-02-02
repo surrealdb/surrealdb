@@ -68,6 +68,18 @@ pub trait AggregateFunction: Send + Sync + Debug {
 	/// Called once per group during query execution.
 	fn create_accumulator(&self) -> Box<dyn Accumulator>;
 
+	/// Create a new accumulator instance with additional arguments.
+	///
+	/// Called once per group during query execution. The `args` parameter
+	/// contains the evaluated values of any extra arguments (beyond the first
+	/// accumulated argument). For example, `array::join(txt, " ")` would
+	/// receive `[" "]` as args.
+	///
+	/// The default implementation ignores the args and delegates to `create_accumulator`.
+	fn create_accumulator_with_args(&self, _args: &[Value]) -> Box<dyn Accumulator> {
+		self.create_accumulator()
+	}
+
 	/// The function signature describing arguments and return type.
 	fn signature(&self) -> Signature;
 

@@ -787,6 +787,84 @@ impl Accumulator for ArrayGroupAccumulator {
 	}
 }
 
+/// array::join - collects values and joins them with a separator
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArrayJoin;
+
+impl AggregateFunction for ArrayJoin {
+	fn name(&self) -> &'static str {
+		"array::join"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		// Default accumulator with empty separator
+		Box::new(ArrayJoinAccumulator {
+			values: Vec::new(),
+			separator: String::new(),
+		})
+	}
+
+	fn create_accumulator_with_args(&self, args: &[Value]) -> Box<dyn Accumulator> {
+		// Extract separator from extra args (first extra arg after the accumulated value)
+		let separator = args.first().map(|v| v.clone().into_raw_string()).unwrap_or_default();
+		Box::new(ArrayJoinAccumulator {
+			values: Vec::new(),
+			separator,
+		})
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new()
+			.arg("value", Kind::Any)
+			.arg("separator", Kind::String)
+			.returns(Kind::String)
+	}
+}
+
+#[derive(Debug, Clone)]
+struct ArrayJoinAccumulator {
+	values: Vec<Value>,
+	separator: String,
+}
+
+impl Accumulator for ArrayJoinAccumulator {
+	fn update(&mut self, value: Value) -> Result<()> {
+		self.values.push(value);
+		Ok(())
+	}
+
+	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
+		let other = other
+			.as_any()
+			.downcast_ref::<ArrayJoinAccumulator>()
+			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.values.extend(other.values.iter().cloned());
+		Ok(())
+	}
+
+	fn finalize(&self) -> Result<Value> {
+		let joined = self
+			.values
+			.iter()
+			.map(|v| v.clone().into_raw_string())
+			.collect::<Vec<_>>()
+			.join(&self.separator);
+		Ok(Value::String(joined.into()))
+	}
+
+	fn reset(&mut self) {
+		self.values.clear();
+	}
+
+	fn clone_box(&self) -> Box<dyn Accumulator> {
+		Box::new(self.clone())
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+}
+
 // ============================================================================
 // Registration
 // ============================================================================
@@ -811,4 +889,5 @@ pub fn register(registry: &mut FunctionRegistry) {
 
 	// Array aggregates
 	registry.register_aggregate(ArrayGroup);
+	registry.register_aggregate(ArrayJoin);
 }

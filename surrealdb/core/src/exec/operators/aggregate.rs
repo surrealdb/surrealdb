@@ -52,6 +52,9 @@ pub struct AggregateInfo {
 	/// The expression to evaluate per-row to get the value to accumulate.
 	/// For `math::mean(a)`, this would be the expression for `a`.
 	pub argument_expr: Arc<dyn PhysicalExpr>,
+	/// Additional arguments (evaluated once per group, not per-row).
+	/// For `array::join(txt, " ")`, this would contain the separator expression.
+	pub extra_args: Vec<Arc<dyn PhysicalExpr>>,
 }
 
 impl std::fmt::Debug for AggregateInfo {
@@ -100,6 +103,9 @@ impl ExecOperator for Aggregate {
 		for agg in &self.aggregates {
 			if let Some(info) = &agg.aggregate_info {
 				mode = mode.combine(info.argument_expr.access_mode());
+				for extra_arg in &info.extra_args {
+					mode = mode.combine(extra_arg.access_mode());
+				}
 			}
 			if let Some(expr) = &agg.fallback_expr {
 				mode = mode.combine(expr.access_mode());
@@ -120,6 +126,23 @@ impl ExecOperator for Aggregate {
 
 		// Collect all input batches, then group and aggregate
 		let aggregate_stream = async_stream::try_stream! {
+			// Pre-evaluate extra_args for each aggregate (evaluated once, not per-row)
+			// This is needed for functions like array::join(txt, " ") where " " is evaluated once
+			let eval_ctx_for_args = EvalContext::from_exec_ctx(&ctx);
+			let mut evaluated_extra_args: Vec<Vec<Value>> = Vec::with_capacity(aggregates.len());
+			for agg in &aggregates {
+				if let Some(info) = &agg.aggregate_info {
+					let mut args = Vec::with_capacity(info.extra_args.len());
+					for extra_arg in &info.extra_args {
+						let value = extra_arg.evaluate(eval_ctx_for_args.clone()).await.unwrap_or(Value::None);
+						args.push(value);
+					}
+					evaluated_extra_args.push(args);
+				} else {
+					evaluated_extra_args.push(vec![]);
+				}
+			}
+
 			// Accumulate all values into groups
 			let mut groups: BTreeMap<GroupKey, GroupState> = BTreeMap::new();
 
@@ -132,7 +155,7 @@ impl ExecOperator for Aggregate {
 					let key = compute_group_key(&value, &group_by);
 
 					// Get or create the group state
-					let state = groups.entry(key).or_insert_with(|| create_group_state(&aggregates));
+					let state = groups.entry(key).or_insert_with(|| create_group_state(&aggregates, &evaluated_extra_args));
 
 					// Update aggregate states with this value
 					for (i, agg) in aggregates.iter().enumerate() {
@@ -177,7 +200,7 @@ impl ExecOperator for Aggregate {
 
 			// If no groups and we have GROUP ALL, create an empty group
 			if groups.is_empty() && group_by.is_empty() {
-				groups.insert(vec![], create_group_state(&aggregates));
+				groups.insert(vec![], create_group_state(&aggregates, &evaluated_extra_args));
 			}
 
 			// Now compute final results for each group
@@ -195,10 +218,22 @@ impl ExecOperator for Aggregate {
 }
 
 /// Create initial group state with accumulators for each aggregate field.
-fn create_group_state(aggregates: &[AggregateField]) -> GroupState {
+///
+/// The `evaluated_extra_args` parameter contains the pre-evaluated extra arguments
+/// for each aggregate field (in the same order as `aggregates`).
+fn create_group_state(
+	aggregates: &[AggregateField],
+	evaluated_extra_args: &[Vec<Value>],
+) -> GroupState {
 	let accumulators = aggregates
 		.iter()
-		.map(|agg| agg.aggregate_info.as_ref().map(|info| info.function.create_accumulator()))
+		.enumerate()
+		.map(|(i, agg)| {
+			agg.aggregate_info.as_ref().map(|info| {
+				let extra_args = evaluated_extra_args.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
+				info.function.create_accumulator_with_args(extra_args)
+			})
+		})
 		.collect();
 
 	let first_values = aggregates.iter().map(|_| Value::None).collect();
