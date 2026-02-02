@@ -109,6 +109,19 @@ impl FunctionRegistry {
 		self.aggregates.iter().map(|(k, v)| (*k, v))
 	}
 
+	/// Get the appropriate aggregate function for "count", handling the special case:
+	/// - count() with no arguments counts all rows (uses Count)
+	/// - count(expr) with arguments counts truthy values (uses CountField)
+	pub fn get_count_aggregate(&self, has_arguments: bool) -> Arc<dyn AggregateFunction> {
+		if has_arguments {
+			// Use CountField for count with arguments
+			Arc::new(builtin::aggregates::CountField)
+		} else {
+			// Use Count for count with no arguments
+			self.aggregates.get("count").expect("count should be registered").clone()
+		}
+	}
+
 	// =========================================================================
 	// Combined methods
 	// =========================================================================

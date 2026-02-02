@@ -8,6 +8,7 @@ use crate::exec::{
 	ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
+use crate::expr::part::Part;
 use crate::val::{RecordId, Value};
 
 /// Fetches related records for specified fields.
@@ -86,42 +87,127 @@ async fn fetch_fields(
 	fields: &[Idiom],
 ) -> crate::expr::FlowResult<Value> {
 	for field in fields {
-		fetch_field_in_place(ctx, &mut value, field).await?;
+		fetch_field_recursive(ctx, &mut value, &field.0, 0).await?;
 	}
 	Ok(value)
 }
 
-/// Fetch a single field, resolving record IDs to full records.
-async fn fetch_field_in_place(
-	ctx: &ExecutionContext,
-	value: &mut Value,
-	field: &Idiom,
-) -> crate::expr::FlowResult<()> {
-	// Get the value at the field path
-	let field_value = value.pick(field);
-
-	match field_value {
-		Value::RecordId(ref rid) => {
-			// Fetch the record and replace the field value
-			let fetched = fetch_record(ctx, rid).await?;
-			value.put(field, fetched);
+/// Recursively fetch a field path, handling wildcards and nested paths.
+///
+/// This traverses the path parts one by one:
+/// - Field: navigate into the object field
+/// - All (*): apply remaining path to all array/object elements
+/// - At the end, if we have a RecordId, fetch it; if we have an array of RecordIds, fetch each
+fn fetch_field_recursive<'a>(
+	ctx: &'a ExecutionContext,
+	value: &'a mut Value,
+	path: &'a [Part],
+	depth: usize,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<()>> + Send + 'a>> {
+	Box::pin(async move {
+		// If we've reached the end of the path, check if we need to fetch the current value
+		if depth >= path.len() {
+			return fetch_value_if_record(ctx, value).await;
 		}
-		Value::Array(ref arr) => {
-			// For arrays, fetch each element that is a record ID
-			let mut fetched_array = Vec::with_capacity(arr.len());
-			for item in arr.iter() {
-				if let Value::RecordId(rid) = item {
-					fetched_array.push(fetch_record(ctx, rid).await?);
-				} else {
-					fetched_array.push(item.clone());
+
+		let part = &path[depth];
+		let remaining = &path[depth + 1..];
+
+		match part {
+			Part::Field(field_name) => {
+				match value {
+					Value::Object(obj) => {
+						if let Some(field_value) = obj.get_mut(field_name.as_str()) {
+							// Continue traversing into this field
+							fetch_field_recursive(ctx, field_value, path, depth + 1).await?;
+						}
+					}
+					Value::Array(arr) => {
+						// Apply path to each element in the array
+						for item in arr.iter_mut() {
+							fetch_field_recursive(ctx, item, path, depth).await?;
+						}
+					}
+					_ => {}
 				}
 			}
-			value.put(field, Value::Array(fetched_array.into()));
+			Part::All => {
+				// Wildcard - apply remaining path to all elements
+				match value {
+					Value::Array(arr) => {
+						for item in arr.iter_mut() {
+							// If the item is a RecordId, we must fetch it first
+							// before we can navigate into its fields
+							if matches!(item, Value::RecordId(_)) {
+								fetch_value_if_record(ctx, item).await?;
+							}
+							if remaining.is_empty() {
+								// No more path - we're done (already fetched if needed)
+							} else {
+								// Continue with remaining path on the (possibly fetched) item
+								fetch_field_recursive(ctx, item, path, depth + 1).await?;
+							}
+						}
+					}
+					Value::Object(obj) => {
+						for (_, field_value) in obj.iter_mut() {
+							// If the field value is a RecordId, fetch it first
+							if matches!(field_value, Value::RecordId(_)) {
+								fetch_value_if_record(ctx, field_value).await?;
+							}
+							if !remaining.is_empty() {
+								// Continue with remaining path
+								fetch_field_recursive(ctx, field_value, path, depth + 1).await?;
+							}
+						}
+					}
+					_ => {}
+				}
+			}
+			Part::First => {
+				if let Value::Array(arr) = value {
+					if let Some(first) = arr.first_mut() {
+						fetch_field_recursive(ctx, first, path, depth + 1).await?;
+					}
+				}
+			}
+			Part::Last => {
+				if let Value::Array(arr) = value {
+					if let Some(last) = arr.last_mut() {
+						fetch_field_recursive(ctx, last, path, depth + 1).await?;
+					}
+				}
+			}
+			// For other path parts, we don't support fetching through them
+			_ => {}
 		}
-		// Other values are left unchanged
+
+		Ok(())
+	})
+}
+
+/// If the value is a RecordId, fetch it and replace the value.
+/// If it's an array of RecordIds, fetch each one.
+async fn fetch_value_if_record(
+	ctx: &ExecutionContext,
+	value: &mut Value,
+) -> crate::expr::FlowResult<()> {
+	match value {
+		Value::RecordId(rid) => {
+			let fetched = fetch_record(ctx, rid).await?;
+			*value = fetched;
+		}
+		Value::Array(arr) => {
+			// Fetch each RecordId in the array
+			for item in arr.iter_mut() {
+				if let Value::RecordId(rid) = item {
+					let fetched = fetch_record(ctx, rid).await?;
+					*item = fetched;
+				}
+			}
+		}
 		_ => {}
 	}
-
 	Ok(())
 }
 

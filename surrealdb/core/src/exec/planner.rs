@@ -14,7 +14,7 @@ use crate::exec::operators::{
 	SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
 	aggregate_field_name,
 };
-use crate::expr::field::{Field, Fields, Selector};
+use crate::expr::field::{Field, Fields};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
@@ -751,8 +751,10 @@ fn plan_select(
 	let (grouped, skip_projections) = if let Some(groups) = group {
 		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
 
-		// Build aggregate fields from the SELECT expression
-		let aggregates = plan_aggregation(&fields, &group_by, ctx)?;
+		// Build aggregate fields and group-by expressions from the SELECT expression
+		// This also expands GROUP BY aliases to their actual expressions
+		let (aggregates, group_by_exprs) =
+			plan_aggregation_with_group_exprs(&fields, &group_by, ctx)?;
 
 		// For GROUP BY, the Aggregate operator handles projections internally
 		// Skip the separate projection step
@@ -760,6 +762,7 @@ fn plan_select(
 			Arc::new(Aggregate {
 				input: split,
 				group_by,
+				group_by_exprs,
 				aggregates,
 			}) as Arc<dyn ExecOperator>,
 			true,
@@ -769,15 +772,26 @@ fn plan_select(
 	};
 
 	// Apply ORDER BY if present
-	// Select the appropriate sort operator based on query characteristics:
-	// - RandomShuffle: for ORDER BY RAND()
-	// - ExternalSort: when TEMPFILES is specified (disk-based sorting)
-	// - SortTopK: when limit is small (heap-based top-k selection)
-	// - Sort: default full in-memory sort
-	let sorted = if let Some(order) = &order {
-		plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?
+	// Use the consolidated approach that computes expressions once:
+	// 1. Resolve ORDER BY aliases to SELECT expressions
+	// 2. Compute complex expressions in a Compute operator
+	// 3. Sort by the computed field names
+	//
+	// Note: When GROUP BY is present, the Aggregate operator already handles
+	// expression evaluation, so we use the legacy approach.
+	//
+	// The consolidated approach returns a list of fields that were computed
+	// only for sorting (not in SELECT) - these need to be added to OMIT.
+	let (sorted, sort_only_omits) = if let Some(order) = &order {
+		if skip_projections {
+			// GROUP BY present - use legacy approach (Aggregate handles expressions)
+			(plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?, vec![])
+		} else {
+			// No GROUP BY - use consolidated approach
+			plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles, ctx)?
+		}
 	} else {
-		grouped
+		(grouped, vec![])
 	};
 
 	// Apply LIMIT/START if present
@@ -805,13 +819,19 @@ fn plan_select(
 	// Fetch adds to the projections list.
 	let fetched = plan_fetch(fetch, limited, &mut fields)?;
 
+	// Combine user-specified OMIT with sort-only computed fields
+	let mut all_omit = omit.to_vec();
+	for field_name in sort_only_omits {
+		all_omit.push(Expr::Idiom(Idiom::field(field_name)));
+	}
+
 	// Apply projections (SELECT fields or SELECT VALUE)
 	// Skip if GROUP BY is present (handled by Aggregate operator)
 	// However, still apply OMIT if present since Aggregate doesn't handle it
 	let projected = if skip_projections {
 		// GROUP BY case - skip projections but apply OMIT if needed
-		if !omit.is_empty() {
-			let omit_fields = plan_omit_fields(omit.to_vec(), ctx)?;
+		if !all_omit.is_empty() {
+			let omit_fields = plan_omit_fields(all_omit, ctx)?;
 			Arc::new(Project {
 				input: fetched,
 				fields: vec![], // No specific fields - pass through
@@ -822,7 +842,7 @@ fn plan_select(
 			fetched
 		}
 	} else {
-		plan_projections(&fields, &omit, fetched, ctx)?
+		plan_projections(&fields, &all_omit, fetched, ctx)?
 	};
 
 	// Apply TIMEOUT if present (timeout is always Expr but may be Literal::None)
@@ -937,10 +957,7 @@ fn plan_projections(
 					// Convert expression to physical
 					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
-					field_selections.push(FieldSelection {
-						output_name,
-						expr,
-					});
+					field_selections.push(FieldSelection::new(output_name, expr));
 				}
 				// Skip Field::All - handled by include_all flag
 			}
@@ -1031,7 +1048,7 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 fn plan_fetch(
 	fetch: Option<crate::expr::fetch::Fetchs>,
 	input: Arc<dyn ExecOperator>,
-	projection: &mut Fields,
+	_projection: &mut Fields,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	let Some(fetchs) = fetch else {
 		return Ok(input);
@@ -1045,12 +1062,10 @@ fn plan_fetch(
 		match fetch_item.0 {
 			Expr::Idiom(idiom) => {
 				fields.push(idiom.clone());
-
-				// Add to the final projection list to ensure the fetch is not dropped.
-				projection.push(Field::Single(Selector {
-					expr: Expr::Idiom(idiom),
-					alias: None,
-				}))?;
+				// Note: We don't add FETCH fields to the projection list.
+				// FETCH expands record references in-place but doesn't affect
+				// which fields appear in the final output - that's determined
+				// solely by the SELECT field list.
 			}
 			_ => {
 				// Complex fetch expressions (params, function calls) not yet supported
@@ -1074,19 +1089,63 @@ fn plan_fetch(
 /// - Group-by keys (passed through unchanged)
 /// - Aggregate functions (detected via the function registry)
 /// - Other expressions (evaluated with the first value in the group)
-fn plan_aggregation(
+///
+/// Also returns the physical expressions for computing group keys.
+/// GROUP BY aliases are expanded to their actual expressions.
+fn plan_aggregation_with_group_exprs(
 	fields: &Fields,
 	group_by: &[crate::expr::idiom::Idiom],
 	ctx: &FrozenContext,
-) -> Result<Vec<AggregateField>, Error> {
+) -> Result<(Vec<AggregateField>, Vec<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
+	use surrealdb_types::ToSql;
+
 	// Use the global built-in function registry
 	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+
+	// Build a map of alias -> expression from the SELECT fields
+	// This allows us to expand GROUP BY aliases to actual expressions
+	let mut alias_to_expr: std::collections::HashMap<String, Expr> =
+		std::collections::HashMap::new();
+	match fields {
+		Fields::Value(selector) => {
+			if let Some(alias) = &selector.alias {
+				alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
+			}
+		}
+		Fields::Select(field_list) => {
+			for field in field_list {
+				if let Field::Single(selector) = field {
+					if let Some(alias) = &selector.alias {
+						alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
+					}
+				}
+			}
+		}
+	}
+
+	// Build group-by expressions, expanding aliases where needed
+	let mut group_by_exprs = Vec::with_capacity(group_by.len());
+	for idiom in group_by {
+		let idiom_str = idiom.to_sql();
+		// Check if this idiom is an alias for a SELECT expression
+		let expr = if let Some(select_expr) = alias_to_expr.get(&idiom_str) {
+			// Alias found - use the actual expression
+			select_expr.clone()
+		} else {
+			// Not an alias - use the idiom directly
+			Expr::Idiom(idiom.clone())
+		};
+		let physical_expr = expr_to_physical_expr(expr, ctx)?;
+		group_by_exprs.push(physical_expr);
+	}
 
 	match fields {
 		// SELECT VALUE with GROUP BY - the VALUE expression may contain aggregates
 		Fields::Value(selector) => {
 			// Check if the VALUE expression is a group-by key
-			let is_group_key = is_group_key_expression(&selector.expr, group_by);
+			let group_key_index =
+				find_group_key_index(&selector.expr, selector.alias.as_ref(), group_by);
+			let is_group_key = group_key_index.is_some();
 
 			let (aggregate_expr_info, fallback_expr) = if is_group_key {
 				// Group-by key - no aggregate, no fallback expr needed
@@ -1097,12 +1156,16 @@ fn plan_aggregation(
 			};
 
 			// For VALUE, we use an empty name since the result isn't wrapped in an object
-			Ok(vec![AggregateField {
-				name: String::new(),
-				is_group_key,
-				aggregate_expr_info,
-				fallback_expr,
-			}])
+			Ok((
+				vec![AggregateField::new(
+					String::new(),
+					is_group_key,
+					group_key_index,
+					aggregate_expr_info,
+					fallback_expr,
+				)],
+				group_by_exprs,
+			))
 		}
 
 		// SELECT field1, field2, ... with GROUP BY
@@ -1126,7 +1189,9 @@ fn plan_aggregation(
 						};
 
 						// Check if this is a group-by key
-						let is_group_key = is_group_key_expression(&selector.expr, group_by);
+						let group_key_index =
+							find_group_key_index(&selector.expr, selector.alias.as_ref(), group_by);
+						let is_group_key = group_key_index.is_some();
 
 						let (aggregate_expr_info, fallback_expr) = if is_group_key {
 							// Group-by key - no aggregate, no fallback expr needed
@@ -1136,19 +1201,50 @@ fn plan_aggregation(
 							extract_aggregate_info(&selector.expr, &registry, ctx)?
 						};
 
-						aggregates.push(AggregateField {
-							name: output_name,
+						aggregates.push(AggregateField::new(
+							output_name,
 							is_group_key,
+							group_key_index,
 							aggregate_expr_info,
 							fallback_expr,
-						});
+						));
 					}
 				}
 			}
 
-			Ok(aggregates)
+			Ok((aggregates, group_by_exprs))
 		}
 	}
+}
+
+/// Find the index of the group-by key for an expression.
+///
+/// Returns the index if:
+/// 1. The expression is a simple idiom that matches a group-by idiom
+/// 2. The expression has an alias that matches a group-by idiom
+fn find_group_key_index(
+	expr: &Expr,
+	alias: Option<&Idiom>,
+	group_by: &[crate::expr::idiom::Idiom],
+) -> Option<usize> {
+	use surrealdb_types::ToSql;
+
+	// Check if the expression itself is a simple idiom that matches
+	if let Expr::Idiom(idiom) = expr {
+		if let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql()) {
+			return Some(idx);
+		}
+	}
+
+	// Check if the alias matches a group-by idiom
+	// This handles cases like `time::year(time) AS year` with `GROUP BY year`
+	if let Some(alias) = alias {
+		if let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql()) {
+			return Some(idx);
+		}
+	}
+
+	None
 }
 
 // ============================================================================
@@ -1371,8 +1467,14 @@ fn extract_aggregate_info(
 		.aggregates
 		.into_iter()
 		.map(|(name, call)| {
-			let func =
-				registry.get_aggregate(&name).expect("aggregate function should exist").clone();
+			// Special handling for count: count() vs count(expr)
+			// - count() with no arguments counts all rows (uses Count)
+			// - count(expr) with arguments counts truthy values (uses CountField)
+			let func = if name.as_str() == "count" {
+				registry.get_count_aggregate(!call.arguments.is_empty())
+			} else {
+				registry.get_aggregate(&name).expect("aggregate function should exist").clone()
+			};
 
 			// Extract the argument expression
 			let argument_expr = if call.arguments.is_empty() {
@@ -1421,18 +1523,6 @@ fn extract_aggregate_info(
 		}),
 		None,
 	))
-}
-
-/// Check if an expression is a group-by key reference.
-fn is_group_key_expression(expr: &Expr, group_by: &[crate::expr::idiom::Idiom]) -> bool {
-	use surrealdb_types::ToSql;
-
-	// Only simple idiom expressions can be group keys
-	if let Expr::Idiom(idiom) = expr {
-		// Check if this idiom matches any group-by idiom
-		return group_by.iter().any(|g| g.to_sql() == idiom.to_sql());
-	}
-	false
 }
 
 /// Extract version timestamp from VERSION clause expression.
@@ -1769,6 +1859,259 @@ fn get_effective_limit_literal(
 		.unwrap_or(Some(0))?;
 
 	Some(start_val + limit_val)
+}
+
+// ============================================================================
+// Consolidated Expression Evaluation Support
+// ============================================================================
+
+use crate::exec::expression_registry::{
+	ComputePoint, ExpressionRegistry, resolve_order_by_alias,
+};
+use crate::exec::field_path::FieldPath;
+use crate::exec::operators::{Compute, Projection, SelectProject, SortByKey, SortKey};
+
+/// Plan ORDER BY with consolidated expression evaluation.
+///
+/// This is the new approach that:
+/// 1. Resolves ORDER BY aliases to SELECT expressions
+/// 2. Tries to convert idioms to `FieldPath` for direct extraction
+/// 3. Falls back to Compute operator for complex expressions
+/// 4. Uses SortByKey with FieldPath for efficient nested field sorting
+///
+/// Returns a tuple of:
+/// - The input operator wrapped with Compute (if needed) and Sort
+/// - A list of synthetic field names that were computed only for sorting (for OMIT)
+pub(crate) fn plan_sort_consolidated(
+	input: Arc<dyn ExecOperator>,
+	order: &crate::expr::order::Ordering,
+	fields: &Fields,
+	start: &Option<crate::expr::start::Start>,
+	limit: &Option<crate::expr::limit::Limit>,
+	#[allow(unused)] tempfiles: bool,
+	ctx: &FrozenContext,
+) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
+	use crate::expr::order::Ordering;
+
+	match order {
+		Ordering::Random => {
+			// ORDER BY RAND() - use RandomShuffle operator (no expression eval needed)
+			let effective_limit = get_effective_limit_literal(start, limit);
+			Ok((
+				Arc::new(RandomShuffle {
+					input,
+					limit: effective_limit,
+				}) as Arc<dyn ExecOperator>,
+				vec![],
+			))
+		}
+		Ordering::Order(order_list) => {
+			// Build expression registry to collect expressions that need computation
+			let mut registry = ExpressionRegistry::new();
+			let mut sort_keys = Vec::with_capacity(order_list.len());
+			// Track fields computed only for sorting (not in SELECT) - need OMIT
+			let mut sort_only_fields: Vec<String> = Vec::new();
+
+			// Process each ORDER BY field
+			for order_field in order_list.iter() {
+				let idiom = &order_field.value;
+
+				// Try to resolve as a SELECT alias first
+				let field_path = if let Some((resolved_expr, alias)) =
+					resolve_order_by_alias(idiom, fields)
+				{
+					// ORDER BY references a SELECT alias - use the underlying expression
+					match &resolved_expr {
+						Expr::Idiom(inner_idiom) => {
+							// Try to convert to FieldPath
+							match FieldPath::try_from(inner_idiom) {
+								Ok(path) => path,
+								Err(_) => {
+									// Complex idiom (graph traversal, etc.) - register for computation
+									let name = registry.register(
+										&resolved_expr,
+										ComputePoint::BeforeSort,
+										Some(alias.clone()),
+										ctx,
+									)?;
+									FieldPath::field(name)
+								}
+							}
+						}
+						_ => {
+							// Non-idiom expression (function call, etc.) - register for computation
+							let name = registry.register(
+								&resolved_expr,
+								ComputePoint::BeforeSort,
+								Some(alias.clone()),
+								ctx,
+							)?;
+							FieldPath::field(name)
+						}
+					}
+				} else {
+					// Not an alias - try direct conversion to FieldPath
+					match FieldPath::try_from(idiom) {
+						Ok(path) => path,
+						Err(_) => {
+							// Complex idiom (graph traversal, etc.) - register for computation
+							let expr = Expr::Idiom(idiom.clone());
+							let name =
+								registry.register(&expr, ComputePoint::BeforeSort, None, ctx)?;
+							// Track that this field wasn't in SELECT - needs OMIT
+							sort_only_fields.push(name.clone());
+							FieldPath::field(name)
+						}
+					}
+				};
+
+				// Build SortKey with FieldPath
+				let direction = if order_field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+
+				let mut key = SortKey::new(field_path);
+				key.direction = direction;
+				key.collate = order_field.collate;
+				key.numeric = order_field.numeric;
+				sort_keys.push(key);
+			}
+
+			// Insert Compute operator if there are expressions to compute
+			let computed = if registry.has_expressions_for_point(ComputePoint::BeforeSort) {
+				let compute_fields = registry.get_expressions_for_point(ComputePoint::BeforeSort);
+				Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+			} else {
+				input
+			};
+
+			// Check if we should use SortTopK (small limit) - only if no complex expressions
+			// For now, always use SortByKey for consolidated approach
+			// TODO: Add SortTopKByKey for optimized top-k with pre-computed fields
+
+			// Create SortByKey operator
+			Ok((
+				Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
+				sort_only_fields,
+			))
+		}
+	}
+}
+
+/// Plan SELECT projections with consolidated approach.
+///
+/// This version uses SelectProject when expressions have been pre-computed,
+/// avoiding duplicate evaluation.
+#[allow(dead_code)] // Used for future expansion
+pub(crate) fn plan_projections_consolidated(
+	input: Arc<dyn ExecOperator>,
+	fields: &Fields,
+	omit: &[Expr],
+	computed_fields: &[(String, String)], // (internal_name, output_name) pairs
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn ExecOperator>, Error> {
+	match fields {
+		// SELECT VALUE - still needs expression evaluation (not consolidated yet)
+		Fields::Value(selector) => {
+			if !omit.is_empty() {
+				return Err(Error::Unimplemented(
+					"OMIT clause with SELECT VALUE not supported".to_string(),
+				));
+			}
+			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
+			Ok(Arc::new(ProjectValue {
+				input,
+				expr,
+			}) as Arc<dyn ExecOperator>)
+		}
+
+		Fields::Select(field_list) => {
+			// Check if this is just SELECT * (all fields, no specific fields)
+			let is_select_all =
+				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+
+			if is_select_all {
+				// SELECT * - pass through, apply OMIT if present
+				if !omit.is_empty() {
+					let omit_names: Vec<String> = omit
+						.iter()
+						.filter_map(|e| {
+							if let Expr::Idiom(idiom) = e {
+								Some(idiom_to_field_name(idiom))
+							} else {
+								None
+							}
+						})
+						.collect();
+					let projections: Vec<Projection> = std::iter::once(Projection::All)
+						.chain(omit_names.into_iter().map(Projection::Omit))
+						.collect();
+					return Ok(
+						Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>
+					);
+				}
+				return Ok(input);
+			}
+
+			// Build projections
+			let mut projections = Vec::with_capacity(field_list.len());
+			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
+
+			if has_wildcard {
+				projections.push(Projection::All);
+			}
+
+			for field in field_list {
+				match field {
+					Field::All => {
+						// Already handled above
+					}
+					Field::Single(selector) => {
+						// Determine output name
+						let output_name = if let Some(alias) = &selector.alias {
+							idiom_to_field_name(alias)
+						} else {
+							derive_field_name(&selector.expr)
+						};
+
+						// Check if this field was pre-computed
+						let maybe_computed =
+							computed_fields.iter().find(|(_, out)| out == &output_name);
+
+						if let Some((internal_name, _)) = maybe_computed {
+							if internal_name != &output_name {
+								// Need to rename from internal to output
+								projections.push(Projection::Rename {
+									from: internal_name.clone(),
+									to: output_name,
+								});
+							} else {
+								// Names match - just include
+								projections.push(Projection::Include(output_name));
+							}
+						} else {
+							// Not pre-computed - include by output name
+							// (for simple fields that don't need computation)
+							projections.push(Projection::Include(output_name));
+						}
+					}
+				}
+			}
+
+			// Apply OMIT
+			if !omit.is_empty() {
+				for e in omit {
+					if let Expr::Idiom(idiom) = e {
+						projections.push(Projection::Omit(idiom_to_field_name(idiom)));
+					}
+				}
+			}
+
+			Ok(Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>)
+		}
+	}
 }
 
 // ============================================================================

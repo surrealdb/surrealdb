@@ -470,14 +470,14 @@ impl Accumulator for StddevAccumulator {
 		if self.count <= 1 {
 			Ok(Value::Number(Number::Float(0.0)))
 		} else {
-			let mean = self.sum / Number::from(self.count);
-			let variance = (self.sum_of_squares - (self.sum * mean)) / Number::from(self.count - 1);
-			let stddev = if variance == Number::Float(0.0) {
-				Number::Float(0.0)
-			} else {
-				variance.sqrt()
-			};
-			Ok(Value::Number(stddev))
+			// Use float arithmetic to avoid integer division issues
+			let count_f = self.count as f64;
+			let sum_f = self.sum.to_float();
+			let sum_sq_f = self.sum_of_squares.to_float();
+			let mean = sum_f / count_f;
+			let variance = (sum_sq_f - sum_f * mean) / (count_f - 1.0);
+			let stddev = variance.sqrt();
+			Ok(Value::Number(Number::Float(stddev)))
 		}
 	}
 
@@ -546,9 +546,13 @@ impl Accumulator for VarianceAccumulator {
 		if self.count <= 1 {
 			Ok(Value::Number(Number::Float(0.0)))
 		} else {
-			let mean = self.sum / Number::from(self.count);
-			let variance = (self.sum_of_squares - (self.sum * mean)) / Number::from(self.count - 1);
-			Ok(Value::Number(variance))
+			// Use float arithmetic to avoid integer division issues
+			let count_f = self.count as f64;
+			let sum_f = self.sum.to_float();
+			let sum_sq_f = self.sum_of_squares.to_float();
+			let mean = sum_f / count_f;
+			let variance = (sum_sq_f - sum_f * mean) / (count_f - 1.0);
+			Ok(Value::Number(Number::Float(variance)))
 		}
 	}
 
@@ -556,6 +560,87 @@ impl Accumulator for VarianceAccumulator {
 		self.sum = Number::Int(0);
 		self.sum_of_squares = Number::Int(0);
 		self.count = 0;
+	}
+
+	fn clone_box(&self) -> Box<dyn Accumulator> {
+		Box::new(self.clone())
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+}
+
+// ============================================================================
+// Median Aggregate
+// ============================================================================
+
+/// math::median - calculates median of values
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MathMedian;
+
+impl AggregateFunction for MathMedian {
+	fn name(&self) -> &'static str {
+		"math::median"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(MedianAccumulator::default())
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Number).returns(Kind::Number)
+	}
+}
+
+#[derive(Debug, Clone, Default)]
+struct MedianAccumulator {
+	values: Vec<Number>,
+}
+
+impl Accumulator for MedianAccumulator {
+	fn update(&mut self, value: Value) -> Result<()> {
+		if let Value::Number(n) = value {
+			self.values.push(n);
+		}
+		Ok(())
+	}
+
+	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
+		let other = other
+			.as_any()
+			.downcast_ref::<MedianAccumulator>()
+			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		self.values.extend(other.values.iter().cloned());
+		Ok(())
+	}
+
+	fn finalize(&self) -> Result<Value> {
+		if self.values.is_empty() {
+			return Ok(Value::None);
+		}
+
+		// Sort the values
+		let mut sorted = self.values.clone();
+		sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+		let len = sorted.len();
+		let median = if len % 2 == 0 {
+			// Even number of elements: average of the two middle values
+			let mid = len / 2;
+			let a = sorted[mid - 1].to_float();
+			let b = sorted[mid].to_float();
+			Number::Float((a + b) / 2.0)
+		} else {
+			// Odd number of elements: middle value
+			sorted[len / 2]
+		};
+
+		Ok(Value::Number(median))
+	}
+
+	fn reset(&mut self) {
+		self.values.clear();
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {
@@ -963,6 +1048,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 	registry.register_aggregate(MathMax);
 	registry.register_aggregate(MathStddev);
 	registry.register_aggregate(MathVariance);
+	registry.register_aggregate(MathMedian);
 
 	// Time aggregates
 	registry.register_aggregate(TimeMin);

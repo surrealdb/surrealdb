@@ -22,8 +22,13 @@ use crate::val::{Object, Value};
 #[derive(Debug, Clone)]
 pub struct Aggregate {
 	pub(crate) input: Arc<dyn ExecOperator>,
-	/// The fields/expressions to group by. Empty means GROUP ALL.
+	/// The original GROUP BY idioms (for display/debugging purposes).
 	pub(crate) group_by: Vec<Idiom>,
+	/// Physical expressions to evaluate for computing group keys.
+	/// These are the actual expressions that determine grouping.
+	/// For `GROUP BY country, year` where `year` is an alias for `time::year(time)`,
+	/// this would contain expressions for `country` and `time::year(time)`.
+	pub(crate) group_by_exprs: Vec<Arc<dyn PhysicalExpr>>,
 	/// The aggregate expressions to compute for each group.
 	/// These are the selected fields that may contain aggregate functions.
 	pub(crate) aggregates: Vec<AggregateField>,
@@ -32,10 +37,14 @@ pub struct Aggregate {
 /// Represents a field in the SELECT that may be an aggregate.
 #[derive(Debug, Clone)]
 pub struct AggregateField {
-	/// The output field name (alias or computed)
-	pub name: String,
+	/// The output path for this field (e.g., ["address", "city"] for "address.city")
+	/// This allows proper nested object construction.
+	pub output_path: Vec<String>,
 	/// Whether this field is a group-by key (passed through unchanged)
 	pub is_group_key: bool,
+	/// If this is a group-by key, the index into the group key vector.
+	/// This allows retrieving the computed group key value directly.
+	pub group_key_index: Option<usize>,
 	/// Information about aggregate functions in this expression (if any).
 	/// When set, the accumulator-based evaluation is used.
 	/// Supports multiple aggregates per expression (e.g., `SUM(a) + AVG(a)`).
@@ -43,6 +52,37 @@ pub struct AggregateField {
 	/// Expression to evaluate for non-aggregate fields (e.g., group-by keys or first-value
 	/// fields). This is used when aggregate_expr_info is None.
 	pub fallback_expr: Option<Arc<dyn PhysicalExpr>>,
+}
+
+impl AggregateField {
+	/// Create a new AggregateField from an output name string.
+	/// If the name contains dots and represents a simple field path (no special characters),
+	/// it will be split into path components for nested object construction.
+	pub fn new(
+		name: String,
+		is_group_key: bool,
+		group_key_index: Option<usize>,
+		aggregate_expr_info: Option<AggregateExprInfo>,
+		fallback_expr: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		let output_path = if name.contains('.') && !name.contains(['[', '(', ' ']) {
+			name.split('.').map(|s| s.to_string()).collect()
+		} else {
+			vec![name]
+		};
+		Self {
+			output_path,
+			is_group_key,
+			group_key_index,
+			aggregate_expr_info,
+			fallback_expr,
+		}
+	}
+
+	/// Check if this is an empty name (used for SELECT VALUE with GROUP BY)
+	pub fn is_empty_name(&self) -> bool {
+		self.output_path.len() == 1 && self.output_path[0].is_empty()
+	}
 }
 
 /// Information about all aggregates extracted from a single SELECT expression.
@@ -137,6 +177,10 @@ impl ExecOperator for Aggregate {
 	fn access_mode(&self) -> AccessMode {
 		// Combine input's access mode with aggregate expression modes
 		let mut mode = self.input.access_mode();
+		// Include group-by expressions
+		for expr in &self.group_by_exprs {
+			mode = mode.combine(expr.access_mode());
+		}
 		for agg in &self.aggregates {
 			if let Some(info) = &agg.aggregate_expr_info {
 				// Check all extracted aggregates
@@ -165,6 +209,7 @@ impl ExecOperator for Aggregate {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let group_by = self.group_by.clone();
+		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
 		let ctx = ctx.clone();
 
@@ -200,8 +245,11 @@ impl ExecOperator for Aggregate {
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
 				for value in batch.values {
-					// Compute the group key from the value
-					let key = compute_group_key(&value, &group_by);
+					// Create evaluation context for this row
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
+
+					// Compute the group key by evaluating group-by expressions
+					let key = compute_group_key_async(&group_by_exprs, eval_ctx.clone()).await;
 
 					// Get or create the group state
 					let state = groups.entry(key).or_insert_with(|| create_group_state(&aggregates, &evaluated_extra_args));
@@ -212,8 +260,6 @@ impl ExecOperator for Aggregate {
 							// Group keys are extracted from the key, not the value
 							continue;
 						}
-
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
 
 						if let Some(info) = &agg.aggregate_expr_info {
 							// Evaluate and update ALL aggregates for this field
@@ -235,7 +281,7 @@ impl ExecOperator for Aggregate {
 						} else if let Some(expr) = &agg.fallback_expr {
 							// Non-aggregate field - store first value
 							if state.first_values[i].is_none() {
-								match expr.evaluate(eval_ctx).await {
+								match expr.evaluate(eval_ctx.clone()).await {
 									Ok(field_value) => {
 										state.first_values[i] = field_value;
 									}
@@ -249,18 +295,12 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
-			// If no groups and we have GROUP ALL, create an empty group
-			if groups.is_empty() && group_by.is_empty() {
-				groups.insert(vec![], create_group_state(&aggregates, &evaluated_extra_args));
-			}
-
 			// Now compute final results for each group
 			let mut results = Vec::new();
 			for (group_key, state) in groups {
 				let result = compute_group_result_async(
 					&group_key,
 					state,
-					&group_by,
 					&aggregates,
 					&ctx,
 				).await;
@@ -315,14 +355,19 @@ fn create_group_state(
 	}
 }
 
-/// Compute the group key for a value based on GROUP BY expressions.
-fn compute_group_key(value: &Value, group_by: &[Idiom]) -> GroupKey {
-	if group_by.is_empty() {
-		// GROUP ALL - single group for everything
-		vec![]
-	} else {
-		group_by.iter().map(|idiom| value.pick(idiom)).collect()
+/// Compute the group key by evaluating GROUP BY expressions.
+///
+/// Unlike simple idiom picking, this supports computed expressions like `time::year(time)`.
+async fn compute_group_key_async(
+	group_by_exprs: &[Arc<dyn PhysicalExpr>],
+	eval_ctx: EvalContext<'_>,
+) -> GroupKey {
+	let mut key = Vec::with_capacity(group_by_exprs.len());
+	for expr in group_by_exprs {
+		let value = expr.evaluate(eval_ctx.clone()).await.unwrap_or(Value::None);
+		key.push(value);
 	}
+	key
 }
 
 /// Compute the result value for a single group, with support for multiple aggregates per field.
@@ -333,17 +378,16 @@ fn compute_group_key(value: &Value, group_by: &[Idiom]) -> GroupKey {
 async fn compute_group_result_async(
 	group_key: &GroupKey,
 	state: GroupState,
-	group_by: &[Idiom],
 	aggregates: &[AggregateField],
 	ctx: &ExecutionContext,
 ) -> Value {
 	// Special case: SELECT VALUE with GROUP BY
 	// If there's exactly one aggregate with an empty name, return the raw value
-	if aggregates.len() == 1 && aggregates[0].name.is_empty() {
+	if aggregates.len() == 1 && aggregates[0].is_empty_name() {
 		let agg = &aggregates[0];
-		return if agg.is_group_key {
-			// For group-by keys, use the key value directly
-			find_matching_group_key_value(group_key, group_by, &agg.name)
+		return if let Some(idx) = agg.group_key_index {
+			// For group-by keys, use the key value directly by index
+			group_key.get(idx).cloned().unwrap_or(Value::None)
 		} else if let Some(info) = &agg.aggregate_expr_info {
 			// Compute the aggregate value(s)
 			compute_aggregate_field_value(info, &state.accumulators[0], ctx).await
@@ -363,9 +407,9 @@ async fn compute_group_result_async(
 		let field_accumulators = accumulators_iter.next().unwrap_or_default();
 		let first_value = first_values.next().unwrap_or(Value::None);
 
-		let field_value = if agg.is_group_key {
-			// For group-by keys, use the key value directly
-			find_matching_group_key_value(group_key, group_by, &agg.name)
+		let field_value = if let Some(idx) = agg.group_key_index {
+			// For group-by keys, use the key value directly by index
+			group_key.get(idx).cloned().unwrap_or(Value::None)
 		} else if let Some(info) = &agg.aggregate_expr_info {
 			// Compute the aggregate value(s)
 			compute_aggregate_field_value(info, &field_accumulators, ctx).await
@@ -373,10 +417,47 @@ async fn compute_group_result_async(
 			// Return first value for non-aggregate fields
 			first_value
 		};
-		result.insert(agg.name.clone(), field_value);
+		// Use nested setting to properly construct nested objects
+		// e.g., path ["address", "city"] creates { address: { city: value } }
+		set_nested_value(&mut result, &agg.output_path, field_value);
 	}
 
 	Value::Object(result)
+}
+
+/// Set a value at a nested path in an object.
+///
+/// For a path like ["address", "city"], this creates or updates:
+/// `{ address: { city: value } }`
+fn set_nested_value(obj: &mut Object, path: &[String], value: Value) {
+	if path.is_empty() {
+		return;
+	}
+
+	if path.len() == 1 {
+		// Simple case: just insert at this level
+		obj.insert(path[0].clone(), value);
+		return;
+	}
+
+	// Need to traverse/create nested structure
+	let key = &path[0];
+	let rest = &path[1..];
+
+	// Get or create the nested object
+	let nested = obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
+
+	match nested {
+		Value::Object(nested_obj) => {
+			set_nested_value(nested_obj, rest, value);
+		}
+		_ => {
+			// Replace non-object with new object containing the nested path
+			let mut new_obj = Object::default();
+			set_nested_value(&mut new_obj, rest, value);
+			*nested = Value::Object(new_obj);
+		}
+	}
 }
 
 /// Compute the final value for a field with aggregate expressions.
@@ -408,41 +489,5 @@ async fn compute_aggregate_field_value(
 	} else {
 		// No post-expression means direct single aggregate - return first value
 		agg_doc.0.into_values().next().unwrap_or(Value::Null)
-	}
-}
-
-/// Find the group key value that matches the given field name.
-fn find_matching_group_key_value(group_key: &GroupKey, group_by: &[Idiom], name: &str) -> Value {
-	// For empty name (VALUE queries), use the first group key
-	if name.is_empty() && !group_key.is_empty() {
-		return group_key[0].clone();
-	}
-
-	// Otherwise find by matching field name
-	let key_idx = group_by.iter().position(|g| idiom_to_field_name(g) == name).unwrap_or(0);
-	group_key.get(key_idx).cloned().unwrap_or(Value::None)
-}
-
-/// Extract a simple field name from an idiom for matching.
-fn idiom_to_field_name(idiom: &Idiom) -> String {
-	use surrealdb_types::ToSql;
-
-	use crate::expr::part::Part;
-	if let Some(Part::Field(f)) = idiom.first() {
-		f.to_string()
-	} else {
-		idiom.to_sql()
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_compute_group_key_empty() {
-		let value = Value::from(42);
-		let key = compute_group_key(&value, &[]);
-		assert!(key.is_empty());
 	}
 }

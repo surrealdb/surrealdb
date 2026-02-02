@@ -111,7 +111,22 @@ fn split_value_on_idiom(value: Value, idiom: &Idiom, output: &mut Vec<Value>) {
 				}
 			}
 		}
-		// Non-array values pass through unchanged
+		Value::Set(set) => {
+			if set.is_empty() {
+				// Empty set - keep the original value with the field as-is
+				output.push(value);
+			} else {
+				// For each element in the set, create a copy of the value
+				// with that field replaced by the element
+				for element in set.iter() {
+					let mut cloned = value.clone();
+					// Set the field to the individual element (synchronous)
+					cloned.put(idiom, element.clone());
+					output.push(cloned);
+				}
+			}
+		}
+		// Non-array/set values pass through unchanged
 		_ => {
 			output.push(value);
 		}
@@ -122,7 +137,7 @@ fn split_value_on_idiom(value: Value, idiom: &Idiom, output: &mut Vec<Value>) {
 mod tests {
 	use super::*;
 	use crate::expr::part::Part;
-	use crate::val::{Array, Object};
+	use crate::val::{Array, Object, Set};
 
 	#[test]
 	fn test_split_on_array() {
@@ -130,6 +145,20 @@ mod tests {
 		let value = Value::Object(Object::from_iter([
 			("id".to_string(), Value::from("t:1")),
 			("tags".to_string(), Value::Array(Array::from(vec![1, 2, 3]))),
+		]));
+
+		let mut output = Vec::new();
+		split_value_on_idiom(value, &idiom, &mut output);
+
+		assert_eq!(output.len(), 3);
+	}
+
+	#[test]
+	fn test_split_on_set() {
+		let idiom = Idiom(vec![Part::Field("tags".into())]);
+		let value = Value::Object(Object::from_iter([
+			("id".to_string(), Value::from("t:1")),
+			("tags".to_string(), Value::Set(Set::from(vec![1, 2, 3]))),
 		]));
 
 		let mut output = Vec::new();
@@ -159,6 +188,20 @@ mod tests {
 		let value = Value::Object(Object::from_iter([
 			("id".to_string(), Value::from("t:1")),
 			("tags".to_string(), Value::Array(Array::from(Vec::<Value>::new()))),
+		]));
+
+		let mut output = Vec::new();
+		split_value_on_idiom(value.clone(), &idiom, &mut output);
+
+		assert_eq!(output.len(), 1);
+	}
+
+	#[test]
+	fn test_split_empty_set() {
+		let idiom = Idiom(vec![Part::Field("tags".into())]);
+		let value = Value::Object(Object::from_iter([
+			("id".to_string(), Value::from("t:1")),
+			("tags".to_string(), Value::Set(Set::new())),
 		]));
 
 		let mut output = Vec::new();

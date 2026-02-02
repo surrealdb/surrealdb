@@ -47,6 +47,8 @@ use crate::val::Value;
 
 pub(crate) mod access_mode;
 pub(crate) mod context;
+pub(crate) mod expression_registry;
+pub(crate) mod field_path;
 pub(crate) mod function;
 pub(crate) mod operators;
 pub(crate) mod permission;

@@ -1,6 +1,7 @@
 mod aggregate;
 mod broadcast;
 mod closure;
+mod compute;
 mod context_mutating;
 mod control_flow;
 mod create;
@@ -31,6 +32,7 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 pub use closure::ClosurePlan;
+pub use compute::Compute;
 pub use context_mutating::LetPlan;
 pub use control_flow::{ControlFlowKind, ControlFlowPlan};
 pub use explain::ExplainPlan;
@@ -44,7 +46,7 @@ pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
 pub use limit::Limit;
-pub use project::{FieldSelection, Project};
+pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
 pub use reference_scan::ReferenceScan;
 pub use scan::Scan;
@@ -52,7 +54,7 @@ pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
 #[cfg(storage)]
 pub use sort::ExternalSort;
-pub use sort::{OrderByField, RandomShuffle, Sort, SortDirection, SortTopK};
+pub use sort::{OrderByField, RandomShuffle, Sort, SortByKey, SortDirection, SortKey, SortTopK};
 pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;
