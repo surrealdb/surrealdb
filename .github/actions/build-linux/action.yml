@@ -22,7 +22,7 @@ inputs:
   onnx-version:
     description: 'The ONNX library version'
     required: false
-    default: '1.16.3'
+    default: '1.23.2'
   extra-features:
     description: 'Extra features enabled in the binary'
     required: false
@@ -134,7 +134,7 @@ runs:
 
         # Download libonnxruntime's static library and tell ORT crate to use it
         tmpdir=$(mktemp -d)
-        curl -sSL https://github.com/surrealdb/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz | \
+        curl -sSL https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz | \
           tar -xz -C $tmpdir
         export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
