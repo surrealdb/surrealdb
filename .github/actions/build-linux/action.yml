@@ -132,11 +132,8 @@ runs:
           compile_profile="release"
         fi
 
-        # Download libonnxruntime's static library and tell ORT crate to use it
-        tmpdir=$(mktemp -d)
-        curl -sSL https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz | \
-          tar -xz -C $tmpdir
-        export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
+        # Builder entrypoint downloads ONNX Runtime in-container when ORT_DOWNLOAD_URL is set.
+        ORT_DOWNLOAD_URL="https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz"
 
         docker load -i ${folder}/surrealdb-builder-${tag}-${{ inputs.platform }}
 
@@ -146,9 +143,7 @@ runs:
           -e SURREAL_BUILD_VERSION=$SURREAL_BUILD_VERSION \
           -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
           -e RUSTFLAGS="${RUSTFLAGS}" \
-          -e ORT_STRATEGY=$ORT_STRATEGY \
-          -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
-          -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
+          -e ORT_DOWNLOAD_URL="$ORT_DOWNLOAD_URL" \
           surrealdb-builder:${tag}-${{ inputs.platform }} \
             --target ${{ inputs.arch }} --no-default-features ${extra_args} --locked
 
