@@ -233,6 +233,7 @@ fn spawn_task_event_processing(
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
+	let trigger = dbs.async_event_trigger().clone();
 	// Get the delay interval from the config
 	let interval = opts.event_processing_interval;
 	// Spawn a future
@@ -241,18 +242,21 @@ fn spawn_task_event_processing(
 		trace!("Running event processing every {interval:?}");
 		// Create a new time-based interval ticket
 		let mut ticker = interval_ticker(interval).await;
+		//
+		let process_events = async || {
+			if let Err(e) = dbs.event_processing(interval).await {
+				error!("Error running event processing: {e}");
+			}
+		};
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
+				_ = trigger.notified() => process_events().await,
 				// Receive a notification on the channel
-				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.event_processing(interval).await {
-						error!("Error running event processing: {e}");
-					}
-				}
+				Some(_) = ticker.next() => process_events().await
 			}
 		}
 		trace!("Background task exited: Running event processing");

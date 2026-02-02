@@ -1,6 +1,7 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -1246,7 +1247,7 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// TODO: Parameterization broke the guarentee that token duration is not none.
+	// TODO: Parameterization broke the guarantee that token duration is not none.
 	/*
 	// kjjification with JWT is explicitly defined only with symmetric key. Token
 	// duration is none.
@@ -1621,9 +1622,10 @@ fn parse_define_event() {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
-			asynchronous: true,
-			retry: Some(5),
-			max_depth: Some(64)
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			}
 		})))
 	)
 }

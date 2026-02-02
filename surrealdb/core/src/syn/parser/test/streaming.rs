@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess,
@@ -293,9 +294,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
-			asynchronous: true,
-			retry: Some(5),
-			max_depth: Some(64),
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			},
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,

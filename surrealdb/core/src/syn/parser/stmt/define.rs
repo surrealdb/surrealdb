@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::catalog::ApiMethod;
+use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -842,9 +842,7 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
-			asynchronous: false,
-			retry: None,
-			max_depth: None,
+			event_kind: EventKind::Sync,
 		};
 
 		loop {
@@ -869,21 +867,34 @@ impl Parser<'_> {
 				}
 				t!("ASYNC") => {
 					self.pop_peek();
-					res.asynchronous = true;
+					res.event_kind = EventKind::Async {
+						retry: EventDefinition::DEFAULT_RETRY,
+						max_depth: EventDefinition::DEFAULT_MAX_DEPTH,
+					};
 				}
 				t!("RETRY") => {
 					let token = self.pop_peek();
-					if !res.asynchronous {
+					if let EventKind::Async {
+						retry,
+						..
+					} = &mut res.event_kind
+					{
+						*retry = self.next_token_value()?;
+					} else {
 						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
 					}
-					res.retry = Some(self.next_token_value()?);
 				}
 				t!("MAXDEPTH") => {
 					let token = self.pop_peek();
-					if !res.asynchronous {
+					if let EventKind::Async {
+						max_depth,
+						..
+					} = &mut res.event_kind
+					{
+						*max_depth = self.next_token_value()?;
+					} else {
 						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
 					}
-					res.max_depth = Some(self.next_token_value()?);
 				}
 				_ => break,
 			}

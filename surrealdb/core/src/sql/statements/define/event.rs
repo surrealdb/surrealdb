@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::catalog::EventKind;
 use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Literal};
 
@@ -14,9 +15,7 @@ pub(crate) struct DefineEventStatement {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
 	pub comment: Expr,
-	pub asynchronous: bool,
-	pub retry: Option<u16>,
-	pub max_depth: Option<u16>,
+	pub event_kind: EventKind,
 }
 
 impl ToSql for DefineEventStatement {
@@ -28,14 +27,12 @@ impl ToSql for DefineEventStatement {
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.target_table),);
-		if self.asynchronous {
-			f.push_str(" ASYNC");
-			if let Some(retry) = self.retry {
-				write_sql!(f, fmt, " RETRY {}", retry);
-			}
-			if let Some(max_depth) = self.max_depth {
-				write_sql!(f, fmt, " MAXDEPTH {}", max_depth);
-			}
+		if let EventKind::Async {
+			retry,
+			max_depth,
+		} = self.event_kind
+		{
+			write_sql!(f, fmt, " ASYNC RETRY {} MAXDEPTH {}", retry, max_depth);
 		}
 		write_sql!(f, fmt, " WHEN {}", CoverStmts(&self.when),);
 		if !self.then.is_empty() {
@@ -56,9 +53,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
-			asynchronous: v.asynchronous,
-			retry: v.retry,
-			max_depth: v.max_depth,
+			event_kind: v.event_kind,
 		}
 	}
 }
@@ -73,9 +68,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
-			asynchronous: v.asynchronous,
-			retry: v.retry,
-			max_depth: v.max_depth,
+			event_kind: v.event_kind,
 		}
 	}
 }

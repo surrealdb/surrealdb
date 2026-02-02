@@ -13,7 +13,7 @@ use tokio::spawn;
 use tokio::sync::Semaphore;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::catalog::{EventDefinition, Record};
+use crate::catalog::{EventDefinition, EventKind, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session, Statement};
@@ -21,7 +21,7 @@ use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::err::Error;
 use crate::expr::FlowResultExt;
 use crate::iam::{Auth, AuthLimit};
-use crate::key::root::eq;
+use crate::key::root::eq::EventQueue;
 use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
@@ -124,7 +124,10 @@ impl Document {
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
 			// Execute or enqueue the event if the condition is truthy.
 			if val.is_truthy() {
-				if ev.asynchronous {
+				if let EventKind::Async {
+					..
+				} = ev.kind
+				{
 					Self::process_async(ctx, opt, ev, &self.doc_ctx, doc).await?;
 				} else {
 					Self::process_sync(stk, ctx, opt, None, ev, doc).await?;
@@ -149,10 +152,17 @@ impl Document {
 		// Persist the event payload so it can be processed out-of-band.
 		// Use the current transaction so enqueue is atomic with the document change.
 		// HLC timestamp + node ID keep the queue key ordered and unique.
-		let key =
-			eq::Eq::new(db.namespace_id, db.database_id, &ev.target_table, &ev.name, ts, node_id);
+		let key = EventQueue::new(
+			db.namespace_id,
+			db.database_id,
+			&ev.target_table,
+			&ev.name,
+			ts,
+			node_id,
+		);
 		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
 		tx.put(&key, &event_record, None).await?;
+		tx.trigger_async_event();
 		Ok(())
 	}
 
@@ -224,7 +234,7 @@ impl AsyncEventRecord {
 		let (ns, db) = opt.arc_ns_db()?;
 		// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
 		if let Some(d) = opt.async_event_depth()
-			&& d >= event_definition.max_depth
+			&& d >= event_definition.max_depth()
 		{
 			bail!(Error::EvReachMaxDepth(event_definition.name.clone(), d))
 		}
@@ -257,7 +267,7 @@ impl AsyncEventRecord {
 		&self,
 		tx: &Transaction,
 		parent_opts: &Options,
-		eq: &eq::Eq<'_>,
+		eq: &EventQueue<'_>,
 	) -> Result<Options> {
 		// Resolve namespace/database IDs and ensure they still match the queued key.
 		let ns = tx.expect_ns_by_name(&self.ns).await?;
@@ -301,7 +311,7 @@ impl AsyncEventRecord {
 				lh.try_maintain_lease().await?;
 			}
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
-			let (beg, end) = eq::Eq::range();
+			let (beg, end) = EventQueue::range();
 			// Read a bounded batch without holding a write transaction.
 			let res = catch!(tx, tx.scan(beg..end, *NORMAL_FETCH_SIZE, None).await);
 			tx.cancel().await?;
@@ -399,7 +409,7 @@ impl AsyncEventRecord {
 		let tx = tf.transaction(Write, LockType::Optimistic, sequences.clone()).await?;
 		ctx.set_transaction(Arc::new(tx));
 		let ctx = ctx.freeze();
-		let eq = eq::Eq::decode_key(&k)?;
+		let eq = EventQueue::decode_key(&k)?;
 		let mut ev = AsyncEventRecord::kv_decode_value(v)?;
 		// Count this attempt before processing so retries are bounded.
 		ev.attempt += 1;
@@ -438,12 +448,12 @@ impl AsyncEventRecord {
 	async fn retry_event(
 		tx: &Transaction,
 		e: anyhow::Error,
-		eq: &eq::Eq<'_>,
+		eq: &EventQueue<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
 		// `attempt` is incremented before processing; `retry` counts retries, so requeue while
 		// attempt <= retry.
-		if ev.attempt <= ev.event_definition.retry {
+		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied yet (will be implemented in a future version).
 			tx.set(eq, ev, None).await?;
@@ -459,7 +469,7 @@ impl AsyncEventRecord {
 		ctx: &FrozenContext,
 		opt: &Options,
 		lh: Option<LeaseHandler>,
-		eq: &eq::Eq<'_>,
+		eq: &EventQueue<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
 		let ctx = ev.build_event_context(ctx);

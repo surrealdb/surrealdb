@@ -244,6 +244,7 @@ mod tests {
 	use chrono::Utc;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
+	use tokio::sync::Notify;
 	use uuid::Uuid;
 
 	use crate::dbs::node::Timestamp;
@@ -331,8 +332,10 @@ mod tests {
 	async fn task_lease_concurrency(flavor: DatastoreFlavor) {
 		// Create a fake clock for deterministic testing
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+		// Async event trigger
+		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -426,7 +429,10 @@ mod tests {
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create an in-memory datastore
 		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		// Create an async event trigger
+		let async_event_trigger = Arc::new(Notify::new());
+		// Create the transaction factory
+		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 minutes

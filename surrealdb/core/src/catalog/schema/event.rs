@@ -22,14 +22,20 @@ pub struct EventDefinition {
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
 	/// Whether this event should be queued for async processing.
-	#[revision(start = 3)]
-	pub(crate) asynchronous: bool,
-	/// Maximum retry count for async events (0 disables retries; event still runs once).
-	#[revision(start = 3, default_fn = "default_retry")]
-	pub(crate) retry: u16,
-	/// Maximum async event nesting depth for this event (0 allows top-level only).
-	#[revision(start = 3, default_fn = "default_max_depth")]
-	pub(crate) max_depth: u16,
+	#[revision(start = 3, default_fn = "default_event_kind")]
+	pub(crate) kind: EventKind,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum EventKind {
+	Sync,
+	Async {
+		/// Maximum retry count for async events (0 disables retries; event still runs once).
+		retry: u16,
+		/// Maximum async event nesting depth for this event (0 allows top-level only).
+		max_depth: u16,
+	},
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
@@ -42,12 +48,8 @@ impl EventDefinition {
 		Ok(AuthLimit::new_no_limit())
 	}
 
-	fn default_retry(_revision: u16) -> Result<u16, revision::Error> {
-		Ok(Self::DEFAULT_RETRY)
-	}
-
-	fn default_max_depth(_revision: u16) -> Result<u16, revision::Error> {
-		Ok(Self::DEFAULT_MAX_DEPTH)
+	fn default_event_kind(_revision: u16) -> Result<EventKind, revision::Error> {
+		Ok(EventKind::Sync)
 	}
 }
 
@@ -66,25 +68,50 @@ impl EventDefinition {
 				.clone()
 				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
-			asynchronous: self.asynchronous,
-			retry: Some(self.retry),
-			max_depth: Some(self.max_depth),
+			event_kind: self.kind.clone(),
+		}
+	}
+
+	pub(crate) fn retry(&self) -> u16 {
+		match self.kind {
+			EventKind::Sync => 0,
+			EventKind::Async {
+				retry,
+				..
+			} => retry,
+		}
+	}
+
+	pub(crate) fn max_depth(&self) -> u16 {
+		match self.kind {
+			EventKind::Sync => 0,
+			EventKind::Async {
+				max_depth,
+				..
+			} => max_depth,
 		}
 	}
 }
 
 impl InfoStructure for EventDefinition {
 	fn structure(self) -> Value {
-		Value::from(map! {
+		let mut map = map! {
 			"name".to_string() => self.name.into(),
 			"what".to_string() => self.target_table.into(),
 			"when".to_string() => self.when.structure(),
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"async".to_string(), if self.asynchronous => Value::Bool(true),
-			"retry".to_string() =>  self.retry.into(),
-			"maxdepth".to_string() => self.max_depth.into(),
-		})
+		};
+		if let EventKind::Async {
+			retry,
+			max_depth,
+		} = &self.kind
+		{
+			map.insert("async".to_string(), Value::Bool(true));
+			map.insert("retry".to_string(), (*retry).into());
+			map.insert("maxdepth".to_string(), (*max_depth).into());
+		}
+		Value::from(map)
 	}
 }
 

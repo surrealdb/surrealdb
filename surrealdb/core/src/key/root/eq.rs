@@ -12,7 +12,7 @@ use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "()")]
-pub(crate) struct Eq<'a> {
+pub(crate) struct EventQueue<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -27,15 +27,15 @@ pub(crate) struct Eq<'a> {
 	pub node_id: Uuid,
 }
 
-impl_kv_key_storekey!(Eq<'_> => AsyncEventRecord);
+impl_kv_key_storekey!(EventQueue<'_> => AsyncEventRecord);
 
-impl Categorise for Eq<'_> {
+impl Categorise for EventQueue<'_> {
 	fn categorise(&self) -> Category {
 		Category::EventQueue
 	}
 }
 
-impl<'a> Eq<'a> {
+impl<'a> EventQueue<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -58,7 +58,7 @@ impl<'a> Eq<'a> {
 		}
 	}
 
-	pub(crate) fn decode_key(k: &[u8]) -> Result<Eq<'_>> {
+	pub(crate) fn decode_key(k: &[u8]) -> Result<EventQueue<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 
@@ -77,8 +77,8 @@ mod tests {
 		let id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let tb = TableName::from("testtb");
 		let ev = "testev";
-		let val = Eq::new(NamespaceId(1), DatabaseId(2), &tb, ev, HlcTimestamp(1), id);
-		let enc = Eq::encode_key(&val).unwrap();
+		let val = EventQueue::new(NamespaceId(1), DatabaseId(2), &tb, ev, HlcTimestamp(1), id);
+		let enc = EventQueue::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/!eq\x00\x00\x00\x01\x00\x00\x00\x02testtb\0testev\0\0\0\0\0\0\0\0\x01\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
@@ -87,6 +87,6 @@ mod tests {
 
 	#[test]
 	fn range() {
-		assert_eq!(Eq::range(), (b"/!eq\0".to_vec(), b"/!eq\0xff".to_vec()));
+		assert_eq!(EventQueue::range(), (b"/!eq\0".to_vec(), b"/!eq\0xff".to_vec()));
 	}
 }

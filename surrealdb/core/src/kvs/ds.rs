@@ -14,6 +14,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use surrealdb_types::{SurrealValue, object};
+use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -129,6 +130,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -155,13 +158,20 @@ pub(crate) struct TransactionFactory {
 	clock: Arc<SizedClock>,
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
+	pub(super) fn new(
+		clock: Arc<SizedClock>,
+		async_event_trigger: Arc<Notify>,
+		builder: Box<dyn TransactionBuilder>,
+	) -> Self {
 		Self {
 			clock,
 			builder: Arc::new(builder),
+			async_event_trigger,
 		}
 	}
 
@@ -192,6 +202,7 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
+			self.async_event_trigger.clone(),
 			Transactor {
 				inner,
 			},
@@ -686,7 +697,8 @@ impl Datastore {
 		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
-		let tf = TransactionFactory::new(clock, builder);
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(clock, async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		Ok(Self {
 			id,
@@ -708,6 +720,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger,
 		})
 	}
 
@@ -749,6 +762,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger: Arc::new(Notify::new()),
 		}
 	}
 
@@ -1571,6 +1585,9 @@ impl Datastore {
 
 	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
 		&self.transaction_factory
+	}
+	pub fn async_event_trigger(&self) -> &Arc<Notify> {
+		&self.async_event_trigger
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
