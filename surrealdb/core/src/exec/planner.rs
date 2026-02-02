@@ -1117,10 +1117,218 @@ fn plan_aggregation(
 	}
 }
 
+/// Check if an expression is a direct aggregate function call.
+fn is_aggregate_function(
+	expr: &Expr,
+	registry: &crate::exec::function::FunctionRegistry,
+) -> bool {
+	if let Expr::FunctionCall(func_call) = expr {
+		if let Function::Normal(name) = &func_call.receiver {
+			return registry.get_aggregate(name.as_str()).is_some();
+		}
+	}
+	false
+}
+
+/// Recursively check if an expression contains any aggregate function.
+fn contains_aggregate(expr: &Expr, registry: &crate::exec::function::FunctionRegistry) -> bool {
+	match expr {
+		Expr::FunctionCall(func_call) => {
+			// Check if this function itself is an aggregate
+			if let Function::Normal(name) = &func_call.receiver {
+				if registry.get_aggregate(name.as_str()).is_some() {
+					return true;
+				}
+			}
+			// Check arguments recursively
+			func_call.arguments.iter().any(|arg| contains_aggregate(arg, registry))
+		}
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => contains_aggregate(left, registry) || contains_aggregate(right, registry),
+		Expr::Prefix {
+			expr,
+			..
+		} => contains_aggregate(expr, registry),
+		Expr::Postfix {
+			expr,
+			..
+		} => contains_aggregate(expr, registry),
+		// Other expression types don't contain aggregates
+		_ => false,
+	}
+}
+
+/// Result of extracting a nested aggregate from an expression.
+struct NestedAggregateExtraction {
+	/// The aggregate function call that was found.
+	func_call: FunctionCall,
+	/// The original expression with the aggregate replaced by `$this`.
+	/// This becomes the post-aggregate expression.
+	post_expr: Expr,
+}
+
+/// Extract a single aggregate function from an expression, replacing it with `$this`.
+/// Returns None if no aggregate is found, or if there are multiple/nested aggregates.
+fn extract_nested_aggregate(
+	expr: &Expr,
+	registry: &crate::exec::function::FunctionRegistry,
+) -> Option<NestedAggregateExtraction> {
+	match expr {
+		Expr::FunctionCall(func_call) => {
+			if let Function::Normal(name) = &func_call.receiver {
+				if registry.get_aggregate(name.as_str()).is_some() {
+					// Check for nested aggregates in arguments (not allowed)
+					for arg in &func_call.arguments {
+						if contains_aggregate(arg, registry) {
+							return None; // Nested aggregates not supported
+						}
+					}
+					// This is an aggregate at the top level - no outer expression needed
+					return None;
+				}
+			}
+			// Not an aggregate - check arguments for nested aggregate
+			// (but this is a function call containing an aggregate, which we handle differently)
+			None
+		}
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			let left_has_agg = contains_aggregate(left, registry);
+			let right_has_agg = contains_aggregate(right, registry);
+
+			if left_has_agg && right_has_agg {
+				// Multiple aggregates in one expression - not supported in this simple model
+				// TODO: Support multiple aggregates by extracting each separately
+				return None;
+			}
+
+			if left_has_agg {
+				// Check if left is directly an aggregate
+				if is_aggregate_function(left, registry) {
+					if let Expr::FunctionCall(func_call) = left.as_ref() {
+						return Some(NestedAggregateExtraction {
+							func_call: func_call.as_ref().clone(),
+							post_expr: Expr::Binary {
+								left: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
+								op: op.clone(),
+								right: right.clone(),
+							},
+						});
+					}
+				}
+				// Left contains aggregate deeper - recurse
+				if let Some(nested) = extract_nested_aggregate(left, registry) {
+					return Some(NestedAggregateExtraction {
+						func_call: nested.func_call,
+						post_expr: Expr::Binary {
+							left: Box::new(nested.post_expr),
+							op: op.clone(),
+							right: right.clone(),
+						},
+					});
+				}
+			}
+
+			if right_has_agg {
+				// Check if right is directly an aggregate
+				if is_aggregate_function(right, registry) {
+					if let Expr::FunctionCall(func_call) = right.as_ref() {
+						return Some(NestedAggregateExtraction {
+							func_call: func_call.as_ref().clone(),
+							post_expr: Expr::Binary {
+								left: left.clone(),
+								op: op.clone(),
+								right: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
+							},
+						});
+					}
+				}
+				// Right contains aggregate deeper - recurse
+				if let Some(nested) = extract_nested_aggregate(right, registry) {
+					return Some(NestedAggregateExtraction {
+						func_call: nested.func_call,
+						post_expr: Expr::Binary {
+							left: left.clone(),
+							op: op.clone(),
+							right: Box::new(nested.post_expr),
+						},
+					});
+				}
+			}
+
+			None
+		}
+		Expr::Prefix {
+			op,
+			expr: inner,
+		} => {
+			if is_aggregate_function(inner, registry) {
+				if let Expr::FunctionCall(func_call) = inner.as_ref() {
+					return Some(NestedAggregateExtraction {
+						func_call: func_call.as_ref().clone(),
+						post_expr: Expr::Prefix {
+							op: op.clone(),
+							expr: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
+						},
+					});
+				}
+			}
+			// Check for deeper nested aggregate
+			if let Some(nested) = extract_nested_aggregate(inner, registry) {
+				return Some(NestedAggregateExtraction {
+					func_call: nested.func_call,
+					post_expr: Expr::Prefix {
+						op: op.clone(),
+						expr: Box::new(nested.post_expr),
+					},
+				});
+			}
+			None
+		}
+		Expr::Postfix {
+			expr: inner,
+			op,
+		} => {
+			if is_aggregate_function(inner, registry) {
+				if let Expr::FunctionCall(func_call) = inner.as_ref() {
+					return Some(NestedAggregateExtraction {
+						func_call: func_call.as_ref().clone(),
+						post_expr: Expr::Postfix {
+							expr: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
+							op: op.clone(),
+						},
+					});
+				}
+			}
+			// Check for deeper nested aggregate
+			if let Some(nested) = extract_nested_aggregate(inner, registry) {
+				return Some(NestedAggregateExtraction {
+					func_call: nested.func_call,
+					post_expr: Expr::Postfix {
+						expr: Box::new(nested.post_expr),
+						op: op.clone(),
+					},
+				});
+			}
+			None
+		}
+		_ => None,
+	}
+}
+
 /// Extract aggregate function information from an expression.
 ///
 /// If the expression is a direct aggregate function call (e.g., `math::mean(a)`),
 /// returns the aggregate info with the function and argument expression.
+///
+/// If the expression contains a nested aggregate (e.g., `math::mean(v) + 1`),
+/// extracts the aggregate and creates a post-aggregate expression.
 ///
 /// If the expression is not an aggregate, returns a fallback physical expression
 /// that will be evaluated to get the first value in the group.
@@ -1129,7 +1337,7 @@ fn extract_aggregate_info(
 	registry: &crate::exec::function::FunctionRegistry,
 	ctx: &FrozenContext,
 ) -> Result<(Option<AggregateInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-	// Check if this is a function call that might be an aggregate
+	// Check if this is a direct aggregate function call at the top level
 	if let Expr::FunctionCall(func_call) = expr {
 		if let Function::Normal(name) = &func_call.receiver {
 			// Look up the function in the aggregate registry
@@ -1160,6 +1368,7 @@ fn extract_aggregate_info(
 						function: agg_func.clone(),
 						argument_expr,
 						extra_args,
+						post_aggregate_expr: None,
 					}),
 					None,
 				));
@@ -1167,7 +1376,45 @@ fn extract_aggregate_info(
 		}
 	}
 
-	// Not an explicit aggregate function - use implicit array::group aggregation
+	// Check if this expression contains a nested aggregate (e.g., `math::mean(v) + 1`)
+	if let Some(extraction) = extract_nested_aggregate(expr, registry) {
+		// Found a nested aggregate - extract it
+		if let Function::Normal(name) = &extraction.func_call.receiver {
+			if let Some(agg_func) = registry.get_aggregate(name.as_str()) {
+				// Extract the argument expression for the aggregate
+				let argument_expr = if extraction.func_call.arguments.is_empty() {
+					expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?
+				} else {
+					expr_to_physical_expr(extraction.func_call.arguments[0].clone(), ctx)?
+				};
+
+				// Convert any additional arguments to extra_args
+				let extra_args = if extraction.func_call.arguments.len() > 1 {
+					extraction.func_call.arguments[1..]
+						.iter()
+						.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
+						.collect::<Result<Vec<_>, _>>()?
+				} else {
+					vec![]
+				};
+
+				// Convert the post-aggregate expression to physical form
+				let post_aggregate_expr = expr_to_physical_expr(extraction.post_expr, ctx)?;
+
+				return Ok((
+					Some(AggregateInfo {
+						function: agg_func.clone(),
+						argument_expr,
+						extra_args,
+						post_aggregate_expr: Some(post_aggregate_expr),
+					}),
+					None,
+				));
+			}
+		}
+	}
+
+	// Not an aggregate function - use implicit array::group aggregation
 	// This collects all values into an array (SurrealDB's default GROUP BY behavior)
 	let argument_expr = expr_to_physical_expr(expr.clone(), ctx)?;
 	let array_group = registry
@@ -1179,6 +1426,7 @@ fn extract_aggregate_info(
 			function: array_group,
 			argument_expr,
 			extra_args: vec![],
+			post_aggregate_expr: None,
 		}),
 		None,
 	))

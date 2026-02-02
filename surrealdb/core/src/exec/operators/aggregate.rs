@@ -55,6 +55,10 @@ pub struct AggregateInfo {
 	/// Additional arguments (evaluated once per group, not per-row).
 	/// For `array::join(txt, " ")`, this would contain the separator expression.
 	pub extra_args: Vec<Arc<dyn PhysicalExpr>>,
+	/// Expression to apply after aggregate finalization.
+	/// For `math::mean(v) + 1`, after computing the mean, we apply `+ 1` to the result.
+	/// The expression evaluates with the aggregate result as the current value context.
+	pub post_aggregate_expr: Option<Arc<dyn PhysicalExpr>>,
 }
 
 impl std::fmt::Debug for AggregateInfo {
@@ -105,6 +109,9 @@ impl ExecOperator for Aggregate {
 				mode = mode.combine(info.argument_expr.access_mode());
 				for extra_arg in &info.extra_args {
 					mode = mode.combine(extra_arg.access_mode());
+				}
+				if let Some(post_expr) = &info.post_aggregate_expr {
+					mode = mode.combine(post_expr.access_mode());
 				}
 			}
 			if let Some(expr) = &agg.fallback_expr {
@@ -206,7 +213,13 @@ impl ExecOperator for Aggregate {
 			// Now compute final results for each group
 			let mut results = Vec::new();
 			for (group_key, state) in groups {
-				let result = compute_group_result(&group_key, state, &group_by, &aggregates);
+				let result = compute_group_result_async(
+					&group_key,
+					state,
+					&group_by,
+					&aggregates,
+					&ctx,
+				).await;
 				results.push(result);
 			}
 
@@ -254,12 +267,13 @@ fn compute_group_key(value: &Value, group_by: &[Idiom]) -> GroupKey {
 	}
 }
 
-/// Compute the result value for a single group.
-fn compute_group_result(
+/// Compute the result value for a single group, with async support for post-aggregate expressions.
+async fn compute_group_result_async(
 	group_key: &GroupKey,
 	state: GroupState,
 	group_by: &[Idiom],
 	aggregates: &[AggregateField],
+	ctx: &ExecutionContext,
 ) -> Value {
 	// Special case: SELECT VALUE with GROUP BY
 	// If there's exactly one aggregate with an empty name, return the raw value
@@ -270,7 +284,15 @@ fn compute_group_result(
 			find_matching_group_key_value(group_key, group_by, &agg.name)
 		} else if let Some(acc) = state.accumulators.into_iter().next().flatten() {
 			// Finalize the accumulator
-			acc.finalize().unwrap_or(Value::Null)
+			let agg_value = acc.finalize().unwrap_or(Value::Null);
+			// Apply post-aggregate expression if present
+			if let Some(info) = &agg.aggregate_info {
+				if let Some(post_expr) = &info.post_aggregate_expr {
+					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&agg_value);
+					return post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null);
+				}
+			}
+			agg_value
 		} else {
 			// Return first value
 			state.first_values.into_iter().next().unwrap_or(Value::None)
@@ -292,7 +314,18 @@ fn compute_group_result(
 			find_matching_group_key_value(group_key, group_by, &agg.name)
 		} else if let Some(accumulator) = acc {
 			// Finalize the accumulator
-			accumulator.finalize().unwrap_or(Value::Null)
+			let agg_value = accumulator.finalize().unwrap_or(Value::Null);
+			// Apply post-aggregate expression if present
+			if let Some(info) = &agg.aggregate_info {
+				if let Some(post_expr) = &info.post_aggregate_expr {
+					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&agg_value);
+					post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null)
+				} else {
+					agg_value
+				}
+			} else {
+				agg_value
+			}
 		} else {
 			// Return first value for non-aggregate fields
 			first_value
