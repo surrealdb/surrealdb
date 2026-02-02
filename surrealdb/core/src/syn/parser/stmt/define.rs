@@ -854,10 +854,13 @@ impl Parser<'_> {
 					res.when = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("THEN") => {
-					self.pop_peek();
+					let token = self.pop_peek();
 					res.then = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
 						res.then.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+					}
+					if res.then.is_empty() {
+						bail!("Expected at least one `THEN` statement", @token.span => "`THEN` statement required");
 					}
 				}
 				t!("COMMENT") => {
@@ -884,6 +887,9 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+		if res.then.is_empty() {
+			bail!("Expected at least one `THEN` statement", @self.last_span => "`THEN` statement required");
 		}
 		Ok(res)
 	}

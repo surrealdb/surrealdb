@@ -37,13 +37,10 @@ impl ToSql for DefineEventStatement {
 				write_sql!(f, fmt, " MAXDEPTH {}", max_depth);
 			}
 		}
-		write_sql!(
-			f,
-			fmt,
-			" WHEN {} THEN {}",
-			CoverStmts(&self.when),
-			Fmt::comma_separated(self.then.iter().map(CoverStmts))
-		);
+		write_sql!(f, fmt, " WHEN {}", CoverStmts(&self.when),);
+		if !self.then.is_empty() {
+			write_sql!(f, fmt, " THEN {}", Fmt::comma_separated(self.then.iter().map(CoverStmts)));
+		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}

@@ -183,19 +183,31 @@ impl Document {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub struct AsyncEventRecord {
-	/// Number of processing attempts already made (incremented before execution).
+	/// Number of processing attempts already made; incremented before each run and
+	/// compared against the event retry limit.
 	attempt: u16,
-	/// Async event nesting depth for this record (0 for top-level).
+	/// Async event nesting depth for this record (0 for top-level); used to enforce max_depth.
 	event_depth: u16,
+	/// Record id of the cursor document, if one exists.
 	rid: Option<Arc<RecordId>>,
+	/// Read-only snapshot of the cursor record captured at enqueue time.
 	cursor_record: Arc<Record>,
+	/// Whether computed fields were already evaluated in the snapshot.
 	fields_computed: bool,
+	/// Namespace name captured at enqueue time; re-resolved to validate the queue key.
 	ns: Arc<str>,
+	/// Database name captured at enqueue time; re-resolved to validate the queue key.
 	db: Arc<str>,
+	/// Whether permission checks should run when processing the event.
 	perms: bool,
+	/// Whether authentication is enabled for this event execution.
 	auth_enabled: bool,
+	/// Captured context values (session variables and event inputs like event, value, before,
+	/// after, and input) restored for processing.
 	values: HashMap<Cow<'static, str>, Arc<Value>>,
-	auth: Arc<Auth>,
+	/// Auth context with any event-specific limits applied.
+	auth_with_limit: Arc<Auth>,
+	/// Snapshot of the event definition used for execution and retry policy.
 	event_definition: EventDefinition,
 }
 
@@ -227,7 +239,7 @@ impl AsyncEventRecord {
 			perms: opt.perms,
 			auth_enabled: opt.auth_enabled,
 			values: ctx.collect_values(HashMap::new()),
-			auth: opt.auth.clone(),
+			auth_with_limit: opt.auth.clone(),
 			event_definition: event_definition.clone(),
 			// session: ctx.value("session").map(|v| Arc::new(v.clone())),
 		})
@@ -260,7 +272,7 @@ impl AsyncEventRecord {
 		let opt = opt
 			.with_perms(self.perms)
 			.with_auth_enabled(self.auth_enabled)
-			.with_auth(self.auth.clone())
+			.with_auth(self.auth_with_limit.clone())
 			.with_async_event_depth(self.event_depth)
 			.with_ns(Some(self.ns.clone()))
 			.with_db(Some(self.db.clone()));
@@ -436,7 +448,7 @@ impl AsyncEventRecord {
 			// bounded here and no backoff is applied yet (will be implemented in a future version).
 			tx.set(eq, ev, None).await?;
 		} else {
-			error!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
+			warn!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
 			tx.del(eq).await?;
 		}
 		Ok(())

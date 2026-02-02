@@ -44,7 +44,7 @@ impl EventDefinition {
 	}
 
 	fn default_max_depth(_revision: u16) -> Result<u16, revision::Error> {
-		Ok(5)
+		Ok(3)
 	}
 }
 
