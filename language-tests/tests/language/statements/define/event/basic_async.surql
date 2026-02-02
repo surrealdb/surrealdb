@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ events: { test: 'DEFINE EVENT test ON user ASYNC RETRY 1 MAXDEPTH 5 WHEN true THEN (CREATE activity SET user = $parent.id, `value` = $after.email, action = $event, time = time::now())' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ events: { test: 'DEFINE EVENT test ON user ASYNC RETRY 1 MAXDEPTH 3 WHEN true THEN (CREATE activity SET user = $parent.id, `value` = $after.email, action = $event, time = time::now())' }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"
 
 [[test.results]]
 value = "NONE"
