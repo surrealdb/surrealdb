@@ -160,20 +160,20 @@ impl Document {
 		stk: &mut Stk,
 		ctx: FrozenContext,
 		opt: Options,
-		lh: Option<&LeaseHandler>,
+		lh: Option<LeaseHandler>,
 		ev: &EventDefinition,
 		doc: &CursorDoc,
 	) -> Result<()> {
 		// Evaluate each THEN expression in order.
 		for v in ev.then.iter() {
+			if let Some(lh) = lh.as_ref() {
+				lh.try_maintain_lease().await?;
+			}
 			let res =
 				stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc))).await.catch_return().map_err(
 					|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e),
 				)?;
 			trace!("Event statement returns: {}", res.to_sql());
-			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?;
-			}
 		}
 		Ok(())
 	}
@@ -281,7 +281,7 @@ impl AsyncEventRecord {
 	/// Returns the number of events fetched (not necessarily successfully processed).
 	pub async fn process_next_events_batch(
 		ds: &Datastore,
-		lh: Option<LeaseHandler>,
+		lh: Option<&LeaseHandler>,
 	) -> Result<usize> {
 		// Collect the next batch
 		let res = {
@@ -304,7 +304,7 @@ impl AsyncEventRecord {
 	async fn process_events_batch(
 		ds: &Datastore,
 		res: Vec<(Key, Val)>,
-		lh: Option<LeaseHandler>,
+		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		// Limit in-flight event processing to avoid oversubscription.
 		let concurrency: usize = num_cpus::get().max(4);
@@ -313,9 +313,6 @@ impl AsyncEventRecord {
 		let mut join_handles = Vec::with_capacity(res.len());
 
 		for (k, v) in res {
-			if let Some(lh) = lh.as_ref() {
-				lh.try_maintain_lease().await?;
-			}
 			// Acquire a concurrency slot per event.
 			let permit = sem.clone().acquire_owned().await?;
 			// Setup a context
@@ -325,7 +322,7 @@ impl AsyncEventRecord {
 			// Extract sequences and transaction factory
 			let sequences = ds.sequences().clone();
 			let tf = ds.transaction_factory().clone();
-			let lh = lh.clone();
+			let lh = lh.cloned();
 			let jh = spawn(async move {
 				Self::run_event_checked(ctx, opt, tf, sequences, lh, k, v).await;
 				drop(permit); // releases a slot so the loop can enqueue another task
@@ -345,11 +342,11 @@ impl AsyncEventRecord {
 	async fn process_events_batch(
 		ds: &Datastore,
 		res: Vec<(Key, Val)>,
-		lh: Option<LeaseHandler>,
+		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		for (k, v) in res {
-			if let Some(lh) = lh.as_ref() {
-				lh.try_maintain_lease().await?;
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?
 			}
 			// Setup a context
 			let ctx = ds.setup_ctx()?;
@@ -358,7 +355,7 @@ impl AsyncEventRecord {
 			// Extract sequences and transaction factory
 			let sequences = ds.sequences().clone();
 			let tf = ds.transaction_factory().clone();
-			let lh = lh.clone();
+			let lh = lh.cloned();
 			Self::run_event_checked(ctx, opt, tf, sequences, lh, k, v).await;
 		}
 		Ok(())
@@ -396,7 +393,7 @@ impl AsyncEventRecord {
 		ev.attempt += 1;
 		let ev = ev;
 		let tx = ctx.tx();
-		match Self::process_event(&ctx, &opt, lh.as_ref(), &eq, &ev).await {
+		match Self::process_event(&ctx, &opt, lh, &eq, &ev).await {
 			Ok(_) => {
 				catch!(tx, tx.del(&k).await);
 			}
@@ -449,7 +446,7 @@ impl AsyncEventRecord {
 	async fn process_event(
 		ctx: &FrozenContext,
 		opt: &Options,
-		lh: Option<&LeaseHandler>,
+		lh: Option<LeaseHandler>,
 		eq: &eq::Eq<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {

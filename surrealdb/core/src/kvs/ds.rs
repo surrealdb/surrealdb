@@ -1366,9 +1366,10 @@ impl Datastore {
 	/// Performs changefeed garbage collection as a background task.
 	///
 	/// This method is responsible for cleaning up old changefeed data across
-	/// all databases. It uses a distributed task lease mechanism to ensure
-	/// that only one node in a cluster performs this maintenance operation at
-	/// a time, preventing duplicate work and potential conflicts.
+	/// all databases. It uses a distributed task lease mechanism to coordinate
+	/// which node performs this maintenance operation. Once a batch starts it
+	/// runs to completion even if the lease expires, so brief overlap is
+	/// possible.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
@@ -1413,8 +1414,9 @@ impl Datastore {
 	///
 	/// This method is called periodically by the index compaction thread to
 	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to ensure only one node in a cluster performs the
-	/// compaction at a time.
+	/// distributed lease to coordinate compaction across the cluster. Once a
+	/// batch starts it runs to completion even if the lease expires, so brief
+	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
 	/// processes each index that needs compaction. Currently, only full-text
@@ -1509,7 +1511,9 @@ impl Datastore {
 		}
 	}
 
-	/// Process queued async events using a distributed lease to avoid duplication.
+	/// Process queued async events using a distributed lease to coordinate batches.
+	/// Once a batch starts it runs to completion even if the lease expires, so
+	/// brief overlap is possible.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
 		// Output function invocation details to logs
@@ -1531,7 +1535,7 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running event processing process");
-			if AsyncEventRecord::process_next_events_batch(self, Some(lh.clone())).await? == 0 {
+			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
 				// The last batch didn't have any events to process,
 				// we can sleep until the next wake-up call
 				return Ok(());
