@@ -36,17 +36,45 @@ pub struct AggregateField {
 	pub name: String,
 	/// Whether this field is a group-by key (passed through unchanged)
 	pub is_group_key: bool,
-	/// Information about the aggregate function (if this is an aggregate expression).
+	/// Information about aggregate functions in this expression (if any).
 	/// When set, the accumulator-based evaluation is used.
-	pub aggregate_info: Option<AggregateInfo>,
+	/// Supports multiple aggregates per expression (e.g., `SUM(a) + AVG(a)`).
+	pub aggregate_expr_info: Option<AggregateExprInfo>,
 	/// Expression to evaluate for non-aggregate fields (e.g., group-by keys or first-value
-	/// fields). This is used when aggregate_info is None.
+	/// fields). This is used when aggregate_expr_info is None.
 	pub fallback_expr: Option<Arc<dyn PhysicalExpr>>,
 }
 
-/// Information about an aggregate function call extracted during planning.
+/// Information about all aggregates extracted from a single SELECT expression.
+///
+/// Supports expressions with multiple aggregates like `SUM(a) + AVG(a)`.
+/// Each aggregate is extracted and assigned a synthetic field name (`_a0`, `_a1`, etc.).
+/// The original expression is transformed to reference these fields.
 #[derive(Clone)]
-pub struct AggregateInfo {
+pub struct AggregateExprInfo {
+	/// All extracted aggregate functions, indexed by their position.
+	/// For `SUM(a) + AVG(a)`, this would contain `[SUM(a), AVG(a)]`.
+	pub aggregates: Vec<ExtractedAggregate>,
+
+	/// The transformed expression with aggregates replaced by field references.
+	/// Uses synthetic field names like `_a0`, `_a1` that correspond to
+	/// indices in the `aggregates` vector.
+	/// None if the expression is a direct single aggregate (no transformation needed).
+	pub post_expr: Option<Arc<dyn PhysicalExpr>>,
+}
+
+impl std::fmt::Debug for AggregateExprInfo {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("AggregateExprInfo")
+			.field("num_aggregates", &self.aggregates.len())
+			.field("has_post_expr", &self.post_expr.is_some())
+			.finish()
+	}
+}
+
+/// A single aggregate function extracted from an expression.
+#[derive(Clone)]
+pub struct ExtractedAggregate {
 	/// The aggregate function from the registry.
 	pub function: Arc<dyn AggregateFunction>,
 	/// The expression to evaluate per-row to get the value to accumulate.
@@ -55,16 +83,18 @@ pub struct AggregateInfo {
 	/// Additional arguments (evaluated once per group, not per-row).
 	/// For `array::join(txt, " ")`, this would contain the separator expression.
 	pub extra_args: Vec<Arc<dyn PhysicalExpr>>,
-	/// Expression to apply after aggregate finalization.
-	/// For `math::mean(v) + 1`, after computing the mean, we apply `+ 1` to the result.
-	/// The expression evaluates with the aggregate result as the current value context.
-	pub post_aggregate_expr: Option<Arc<dyn PhysicalExpr>>,
 }
 
-impl std::fmt::Debug for AggregateInfo {
+impl std::fmt::Debug for ExtractedAggregate {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("AggregateInfo").field("function", &self.function.name()).finish()
+		f.debug_struct("ExtractedAggregate").field("function", &self.function.name()).finish()
 	}
+}
+
+/// Generate a synthetic field name for an aggregate at the given index.
+/// These names are used in the transformed expression to reference aggregate results.
+pub fn aggregate_field_name(idx: usize) -> String {
+	format!("_a{}", idx)
 }
 
 /// Key for grouping - a tuple of values corresponding to GROUP BY expressions
@@ -72,8 +102,11 @@ type GroupKey = Vec<Value>;
 
 /// Per-group aggregate state using accumulators
 struct GroupState {
-	/// Accumulators for each aggregate field (None for non-aggregate fields)
-	accumulators: Vec<Option<Box<dyn Accumulator>>>,
+	/// Accumulators for each aggregate field.
+	/// For fields with multiple aggregates (e.g., `SUM(a) + AVG(a)`),
+	/// this contains a Vec of accumulators, one per extracted aggregate.
+	/// Empty Vec for non-aggregate fields.
+	accumulators: Vec<Vec<Box<dyn Accumulator>>>,
 	/// First values seen for non-aggregate fields
 	first_values: Vec<Value>,
 }
@@ -105,12 +138,16 @@ impl ExecOperator for Aggregate {
 		// Combine input's access mode with aggregate expression modes
 		let mut mode = self.input.access_mode();
 		for agg in &self.aggregates {
-			if let Some(info) = &agg.aggregate_info {
-				mode = mode.combine(info.argument_expr.access_mode());
-				for extra_arg in &info.extra_args {
-					mode = mode.combine(extra_arg.access_mode());
+			if let Some(info) = &agg.aggregate_expr_info {
+				// Check all extracted aggregates
+				for extracted in &info.aggregates {
+					mode = mode.combine(extracted.argument_expr.access_mode());
+					for extra_arg in &extracted.extra_args {
+						mode = mode.combine(extra_arg.access_mode());
+					}
 				}
-				if let Some(post_expr) = &info.post_aggregate_expr {
+				// Check post-expression
+				if let Some(post_expr) = &info.post_expr {
 					mode = mode.combine(post_expr.access_mode());
 				}
 			}
@@ -135,16 +172,21 @@ impl ExecOperator for Aggregate {
 		let aggregate_stream = async_stream::try_stream! {
 			// Pre-evaluate extra_args for each aggregate (evaluated once, not per-row)
 			// This is needed for functions like array::join(txt, " ") where " " is evaluated once
+			// Structure: evaluated_extra_args[field_idx][aggregate_idx] = Vec<Value>
 			let eval_ctx_for_args = EvalContext::from_exec_ctx(&ctx);
-			let mut evaluated_extra_args: Vec<Vec<Value>> = Vec::with_capacity(aggregates.len());
+			let mut evaluated_extra_args: Vec<Vec<Vec<Value>>> = Vec::with_capacity(aggregates.len());
 			for agg in &aggregates {
-				if let Some(info) = &agg.aggregate_info {
-					let mut args = Vec::with_capacity(info.extra_args.len());
-					for extra_arg in &info.extra_args {
-						let value = extra_arg.evaluate(eval_ctx_for_args.clone()).await.unwrap_or(Value::None);
-						args.push(value);
+				if let Some(info) = &agg.aggregate_expr_info {
+					let mut field_args = Vec::with_capacity(info.aggregates.len());
+					for extracted in &info.aggregates {
+						let mut args = Vec::with_capacity(extracted.extra_args.len());
+						for extra_arg in &extracted.extra_args {
+							let value = extra_arg.evaluate(eval_ctx_for_args.clone()).await.unwrap_or(Value::None);
+							args.push(value);
+						}
+						field_args.push(args);
 					}
-					evaluated_extra_args.push(args);
+					evaluated_extra_args.push(field_args);
 				} else {
 					evaluated_extra_args.push(vec![]);
 				}
@@ -173,19 +215,21 @@ impl ExecOperator for Aggregate {
 
 						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
 
-						if let Some(info) = &agg.aggregate_info {
-							// Evaluate the ARGUMENT expression (not the full function call)
-							match info.argument_expr.evaluate(eval_ctx).await {
-								Ok(arg_value) => {
-									if let Some(acc) = &mut state.accumulators[i] {
-										// Update the accumulator with the argument value
-										if let Err(_e) = acc.update(arg_value) {
-											// On error, continue (value is effectively skipped)
+						if let Some(info) = &agg.aggregate_expr_info {
+							// Evaluate and update ALL aggregates for this field
+							for (agg_idx, extracted) in info.aggregates.iter().enumerate() {
+								match extracted.argument_expr.evaluate(eval_ctx.clone()).await {
+									Ok(arg_value) => {
+										if let Some(acc) = state.accumulators[i].get_mut(agg_idx) {
+											// Update the accumulator with the argument value
+											if let Err(_e) = acc.update(arg_value) {
+												// On error, continue (value is effectively skipped)
+											}
 										}
 									}
-								}
-								Err(_) => {
-									// On error, skip this value
+									Err(_) => {
+										// On error, skip this value for this aggregate
+									}
 								}
 							}
 						} else if let Some(expr) = &agg.fallback_expr {
@@ -233,19 +277,33 @@ impl ExecOperator for Aggregate {
 /// Create initial group state with accumulators for each aggregate field.
 ///
 /// The `evaluated_extra_args` parameter contains the pre-evaluated extra arguments
-/// for each aggregate field (in the same order as `aggregates`).
+/// for each aggregate field: `evaluated_extra_args[field_idx][aggregate_idx] = Vec<Value>`.
 fn create_group_state(
 	aggregates: &[AggregateField],
-	evaluated_extra_args: &[Vec<Value>],
+	evaluated_extra_args: &[Vec<Vec<Value>>],
 ) -> GroupState {
 	let accumulators = aggregates
 		.iter()
 		.enumerate()
 		.map(|(i, agg)| {
-			agg.aggregate_info.as_ref().map(|info| {
-				let extra_args = evaluated_extra_args.get(i).map(|v| v.as_slice()).unwrap_or(&[]);
-				info.function.create_accumulator_with_args(extra_args)
-			})
+			if let Some(info) = &agg.aggregate_expr_info {
+				// Create an accumulator for each extracted aggregate
+				info.aggregates
+					.iter()
+					.enumerate()
+					.map(|(agg_idx, extracted)| {
+						let extra_args = evaluated_extra_args
+							.get(i)
+							.and_then(|field_args| field_args.get(agg_idx))
+							.map(|v| v.as_slice())
+							.unwrap_or(&[]);
+						extracted.function.create_accumulator_with_args(extra_args)
+					})
+					.collect()
+			} else {
+				// Non-aggregate field - no accumulators
+				vec![]
+			}
 		})
 		.collect();
 
@@ -267,7 +325,11 @@ fn compute_group_key(value: &Value, group_by: &[Idiom]) -> GroupKey {
 	}
 }
 
-/// Compute the result value for a single group, with async support for post-aggregate expressions.
+/// Compute the result value for a single group, with support for multiple aggregates per field.
+///
+/// For expressions like `SUM(a) + AVG(a)`:
+/// 1. Finalize all accumulators to get `{ _a0: sum_value, _a1: avg_value }`
+/// 2. Evaluate the post-expression against this document to get the final value
 async fn compute_group_result_async(
 	group_key: &GroupKey,
 	state: GroupState,
@@ -282,17 +344,9 @@ async fn compute_group_result_async(
 		return if agg.is_group_key {
 			// For group-by keys, use the key value directly
 			find_matching_group_key_value(group_key, group_by, &agg.name)
-		} else if let Some(acc) = state.accumulators.into_iter().next().flatten() {
-			// Finalize the accumulator
-			let agg_value = acc.finalize().unwrap_or(Value::Null);
-			// Apply post-aggregate expression if present
-			if let Some(info) = &agg.aggregate_info {
-				if let Some(post_expr) = &info.post_aggregate_expr {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&agg_value);
-					return post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null);
-				}
-			}
-			agg_value
+		} else if let Some(info) = &agg.aggregate_expr_info {
+			// Compute the aggregate value(s)
+			compute_aggregate_field_value(info, &state.accumulators[0], ctx).await
 		} else {
 			// Return first value
 			state.first_values.into_iter().next().unwrap_or(Value::None)
@@ -302,30 +356,19 @@ async fn compute_group_result_async(
 	// Normal case: return an object with field names
 	let mut result = Object::default();
 
-	let mut accumulators = state.accumulators.into_iter();
+	let mut accumulators_iter = state.accumulators.into_iter();
 	let mut first_values = state.first_values.into_iter();
 
 	for agg in aggregates.iter() {
-		let acc = accumulators.next().flatten();
+		let field_accumulators = accumulators_iter.next().unwrap_or_default();
 		let first_value = first_values.next().unwrap_or(Value::None);
 
 		let field_value = if agg.is_group_key {
 			// For group-by keys, use the key value directly
 			find_matching_group_key_value(group_key, group_by, &agg.name)
-		} else if let Some(accumulator) = acc {
-			// Finalize the accumulator
-			let agg_value = accumulator.finalize().unwrap_or(Value::Null);
-			// Apply post-aggregate expression if present
-			if let Some(info) = &agg.aggregate_info {
-				if let Some(post_expr) = &info.post_aggregate_expr {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&agg_value);
-					post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null)
-				} else {
-					agg_value
-				}
-			} else {
-				agg_value
-			}
+		} else if let Some(info) = &agg.aggregate_expr_info {
+			// Compute the aggregate value(s)
+			compute_aggregate_field_value(info, &field_accumulators, ctx).await
 		} else {
 			// Return first value for non-aggregate fields
 			first_value
@@ -334,6 +377,38 @@ async fn compute_group_result_async(
 	}
 
 	Value::Object(result)
+}
+
+/// Compute the final value for a field with aggregate expressions.
+///
+/// If there's a post_expr, builds a document with all aggregate results
+/// and evaluates the expression against it. Otherwise returns the single
+/// aggregate value directly.
+async fn compute_aggregate_field_value(
+	info: &AggregateExprInfo,
+	accumulators: &[Box<dyn Accumulator>],
+	ctx: &ExecutionContext,
+) -> Value {
+	if info.aggregates.is_empty() {
+		return Value::Null;
+	}
+
+	// Finalize all accumulators and build the aggregate document
+	let mut agg_doc = Object::default();
+	for (idx, acc) in accumulators.iter().enumerate() {
+		let value = acc.finalize().unwrap_or(Value::Null);
+		agg_doc.insert(aggregate_field_name(idx), value);
+	}
+
+	// If there's a post-expression, evaluate it against the aggregate document
+	if let Some(post_expr) = &info.post_expr {
+		let doc_value = Value::Object(agg_doc);
+		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&doc_value);
+		post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null)
+	} else {
+		// No post-expression means direct single aggregate - return first value
+		agg_doc.0.into_values().next().unwrap_or(Value::Null)
+	}
 }
 
 /// Find the group key value that matches the given field name.

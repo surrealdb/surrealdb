@@ -106,6 +106,7 @@ impl GroupCollector {
 					aggregation::Aggregation::DatetimeMax(x) => format!("DatetimeMax(expr{x})"),
 					aggregation::Aggregation::DatetimeMin(x) => format!("DatetimeMin(expr{x})"),
 					aggregation::Aggregation::Accumulate(x) => format!("Accumulate(expr{x})"),
+					aggregation::Aggregation::Distinct(x) => format!("Distinct(expr{x})"),
 				};
 				(format!("_a{idx}"), Value::from(res))
 			})
@@ -230,6 +231,10 @@ impl GroupCollector {
 						..
 					} => min.into(),
 					AggregationStat::Accumulate {
+						values,
+						..
+					} => values.into(),
+					AggregationStat::Distinct {
 						values,
 						..
 					} => values.into(),

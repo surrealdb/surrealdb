@@ -7,15 +7,17 @@ use crate::exec::ExecOperator;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateField, AggregateInfo, ClosurePlan, ControlFlowKind, ControlFlowPlan,
-	DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, FieldSelection, Filter, ForeachPlan,
-	IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField, Project,
-	ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort, SortDirection,
-	SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
+	Aggregate, AggregateExprInfo, AggregateField, ClosurePlan, ControlFlowKind, ControlFlowPlan,
+	DatabaseInfoPlan, ExplainPlan, ExprPlan, ExtractedAggregate, Fetch, FieldSelection, Filter,
+	ForeachPlan, IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField,
+	Project, ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort,
+	SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
+	aggregate_field_name,
 };
 use crate::expr::field::{Field, Fields, Selector};
 use crate::expr::statements::IfelseStatement;
-use crate::expr::{Expr, Function, FunctionCall, Literal};
+use crate::expr::visit::{MutVisitor, VisitMut};
+use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
 
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
@@ -1054,7 +1056,7 @@ fn plan_aggregation(
 			// Check if the VALUE expression is a group-by key
 			let is_group_key = is_group_key_expression(&selector.expr, group_by);
 
-			let (aggregate_info, fallback_expr) = if is_group_key {
+			let (aggregate_expr_info, fallback_expr) = if is_group_key {
 				// Group-by key - no aggregate, no fallback expr needed
 				(None, None)
 			} else {
@@ -1066,7 +1068,7 @@ fn plan_aggregation(
 			Ok(vec![AggregateField {
 				name: String::new(),
 				is_group_key,
-				aggregate_info,
+				aggregate_expr_info,
 				fallback_expr,
 			}])
 		}
@@ -1094,7 +1096,7 @@ fn plan_aggregation(
 						// Check if this is a group-by key
 						let is_group_key = is_group_key_expression(&selector.expr, group_by);
 
-						let (aggregate_info, fallback_expr) = if is_group_key {
+						let (aggregate_expr_info, fallback_expr) = if is_group_key {
 							// Group-by key - no aggregate, no fallback expr needed
 							(None, None)
 						} else {
@@ -1105,7 +1107,7 @@ fn plan_aggregation(
 						aggregates.push(AggregateField {
 							name: output_name,
 							is_group_key,
-							aggregate_info,
+							aggregate_expr_info,
 							fallback_expr,
 						});
 					}
@@ -1117,316 +1119,273 @@ fn plan_aggregation(
 	}
 }
 
-/// Check if an expression is a direct aggregate function call.
-fn is_aggregate_function(
-	expr: &Expr,
-	registry: &crate::exec::function::FunctionRegistry,
-) -> bool {
-	if let Expr::FunctionCall(func_call) = expr {
-		if let Function::Normal(name) = &func_call.receiver {
-			return registry.get_aggregate(name.as_str()).is_some();
+// ============================================================================
+// Aggregate Extraction using MutVisitor
+// ============================================================================
+
+/// Visitor that extracts aggregate functions from an expression.
+///
+/// Walks the expression tree, finds all aggregate function calls, and replaces
+/// them with synthetic field references (`_a0`, `_a1`, etc.). The extracted
+/// aggregates are stored in the visitor for later processing.
+///
+/// Supports multiple aggregates in a single expression (e.g., `SUM(a) + AVG(a)`).
+struct AggregateExtractor<'a> {
+	/// The function registry to look up aggregate functions.
+	registry: &'a crate::exec::function::FunctionRegistry,
+	/// Extracted aggregates with their function names and calls.
+	aggregates: Vec<(String, FunctionCall)>,
+	/// Counter for generating unique synthetic field names.
+	aggregate_count: usize,
+	/// Track if we're inside an aggregate's arguments (to detect nesting).
+	inside_aggregate: bool,
+	/// Error encountered during traversal (nested aggregates).
+	error: Option<Error>,
+}
+
+impl<'a> AggregateExtractor<'a> {
+	fn new(registry: &'a crate::exec::function::FunctionRegistry) -> Self {
+		Self {
+			registry,
+			aggregates: Vec::new(),
+			aggregate_count: 0,
+			inside_aggregate: false,
+			error: None,
 		}
 	}
-	false
-}
 
-/// Recursively check if an expression contains any aggregate function.
-fn contains_aggregate(expr: &Expr, registry: &crate::exec::function::FunctionRegistry) -> bool {
-	match expr {
-		Expr::FunctionCall(func_call) => {
-			// Check if this function itself is an aggregate
+	/// Check if an expression directly contains an aggregate function call at the top level.
+	/// Used to determine if array::distinct should be treated as an aggregate or scalar.
+	fn contains_aggregate_call(&self, expr: &Expr) -> bool {
+		if let Expr::FunctionCall(func_call) = expr {
 			if let Function::Normal(name) = &func_call.receiver {
-				if registry.get_aggregate(name.as_str()).is_some() {
-					return true;
-				}
+				return self.registry.get_aggregate(name.as_str()).is_some();
 			}
-			// Check arguments recursively
-			func_call.arguments.iter().any(|arg| contains_aggregate(arg, registry))
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => contains_aggregate(left, registry) || contains_aggregate(right, registry),
-		Expr::Prefix {
-			expr,
-			..
-		} => contains_aggregate(expr, registry),
-		Expr::Postfix {
-			expr,
-			..
-		} => contains_aggregate(expr, registry),
-		// Other expression types don't contain aggregates
-		_ => false,
+		false
 	}
 }
 
-/// Result of extracting a nested aggregate from an expression.
-struct NestedAggregateExtraction {
-	/// The aggregate function call that was found.
-	func_call: FunctionCall,
-	/// The original expression with the aggregate replaced by `$this`.
-	/// This becomes the post-aggregate expression.
-	post_expr: Expr,
-}
+impl MutVisitor for AggregateExtractor<'_> {
+	type Error = std::convert::Infallible;
 
-/// Extract a single aggregate function from an expression, replacing it with `$this`.
-/// Returns None if no aggregate is found, or if there are multiple/nested aggregates.
-fn extract_nested_aggregate(
-	expr: &Expr,
-	registry: &crate::exec::function::FunctionRegistry,
-) -> Option<NestedAggregateExtraction> {
-	match expr {
-		Expr::FunctionCall(func_call) => {
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Don't continue if we've already encountered an error
+		if self.error.is_some() {
+			return Ok(());
+		}
+
+		// Check if this is an aggregate function call that we need to replace
+		// Note: We handle FunctionCall here because after visiting, we need to
+		// replace the entire Expr, not just the FunctionCall inside it
+		if let Expr::FunctionCall(func_call) = expr {
 			if let Function::Normal(name) = &func_call.receiver {
-				if registry.get_aggregate(name.as_str()).is_some() {
-					// Check for nested aggregates in arguments (not allowed)
-					for arg in &func_call.arguments {
-						if contains_aggregate(arg, registry) {
-							return None; // Nested aggregates not supported
-						}
+				// Special handling for array::distinct:
+				// - When its argument is another aggregate function, treat it as a scalar (e.g.,
+				//   array::distinct(array::group(name)) - array::distinct is scalar)
+				// - When its argument is NOT an aggregate function, treat it as an aggregate (e.g.,
+				//   array::distinct(name) - array::distinct collects unique values)
+				if name.as_str() == "array::distinct" {
+					if !func_call.arguments.is_empty()
+						&& self.contains_aggregate_call(&func_call.arguments[0])
+					{
+						// Argument contains an aggregate - treat array::distinct as scalar
+						// Just visit children to process the nested aggregate
+						return expr.visit_mut(self);
 					}
-					// This is an aggregate at the top level - no outer expression needed
-					return None;
+					// Fall through to normal aggregate handling
 				}
-			}
-			// Not an aggregate - check arguments for nested aggregate
-			// (but this is a function call containing an aggregate, which we handle differently)
-			None
-		}
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			let left_has_agg = contains_aggregate(left, registry);
-			let right_has_agg = contains_aggregate(right, registry);
 
-			if left_has_agg && right_has_agg {
-				// Multiple aggregates in one expression - not supported in this simple model
-				// TODO: Support multiple aggregates by extracting each separately
-				return None;
-			}
-
-			if left_has_agg {
-				// Check if left is directly an aggregate
-				if is_aggregate_function(left, registry) {
-					if let Expr::FunctionCall(func_call) = left.as_ref() {
-						return Some(NestedAggregateExtraction {
-							func_call: func_call.as_ref().clone(),
-							post_expr: Expr::Binary {
-								left: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
-								op: op.clone(),
-								right: right.clone(),
-							},
-						});
+				if self.registry.get_aggregate(name.as_str()).is_some() {
+					// Found an aggregate function
+					if self.inside_aggregate {
+						// Nested aggregates are not allowed
+						self.error = Some(Error::Unimplemented(
+							"Nested aggregate functions are not supported".to_string(),
+						));
+						return Ok(());
 					}
-				}
-				// Left contains aggregate deeper - recurse
-				if let Some(nested) = extract_nested_aggregate(left, registry) {
-					return Some(NestedAggregateExtraction {
-						func_call: nested.func_call,
-						post_expr: Expr::Binary {
-							left: Box::new(nested.post_expr),
-							op: op.clone(),
-							right: right.clone(),
-						},
-					});
-				}
-			}
 
-			if right_has_agg {
-				// Check if right is directly an aggregate
-				if is_aggregate_function(right, registry) {
-					if let Expr::FunctionCall(func_call) = right.as_ref() {
-						return Some(NestedAggregateExtraction {
-							func_call: func_call.as_ref().clone(),
-							post_expr: Expr::Binary {
-								left: left.clone(),
-								op: op.clone(),
-								right: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
-							},
-						});
+					// Visit arguments to check for nested aggregates
+					self.inside_aggregate = true;
+					for arg in &mut func_call.arguments {
+						arg.visit_mut(self)?;
 					}
-				}
-				// Right contains aggregate deeper - recurse
-				if let Some(nested) = extract_nested_aggregate(right, registry) {
-					return Some(NestedAggregateExtraction {
-						func_call: nested.func_call,
-						post_expr: Expr::Binary {
-							left: left.clone(),
-							op: op.clone(),
-							right: Box::new(nested.post_expr),
-						},
-					});
-				}
-			}
+					self.inside_aggregate = false;
 
-			None
-		}
-		Expr::Prefix {
-			op,
-			expr: inner,
-		} => {
-			if is_aggregate_function(inner, registry) {
-				if let Expr::FunctionCall(func_call) = inner.as_ref() {
-					return Some(NestedAggregateExtraction {
-						func_call: func_call.as_ref().clone(),
-						post_expr: Expr::Prefix {
-							op: op.clone(),
-							expr: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
-						},
-					});
+					// Check if visiting arguments found an error
+					if self.error.is_some() {
+						return Ok(());
+					}
+
+					// Store this aggregate and replace with field reference
+					let field_name = aggregate_field_name(self.aggregate_count);
+					self.aggregates.push((name.clone(), func_call.as_ref().clone()));
+					self.aggregate_count += 1;
+
+					// Replace the aggregate with a field reference idiom
+					*expr = Expr::Idiom(Idiom::field(field_name));
+					return Ok(());
 				}
 			}
-			// Check for deeper nested aggregate
-			if let Some(nested) = extract_nested_aggregate(inner, registry) {
-				return Some(NestedAggregateExtraction {
-					func_call: nested.func_call,
-					post_expr: Expr::Prefix {
-						op: op.clone(),
-						expr: Box::new(nested.post_expr),
-					},
-				});
-			}
-			None
 		}
-		Expr::Postfix {
-			expr: inner,
-			op,
-		} => {
-			if is_aggregate_function(inner, registry) {
-				if let Expr::FunctionCall(func_call) = inner.as_ref() {
-					return Some(NestedAggregateExtraction {
-						func_call: func_call.as_ref().clone(),
-						post_expr: Expr::Postfix {
-							expr: Box::new(Expr::Param(crate::expr::Param::from("this".to_string()))),
-							op: op.clone(),
-						},
-					});
-				}
-			}
-			// Check for deeper nested aggregate
-			if let Some(nested) = extract_nested_aggregate(inner, registry) {
-				return Some(NestedAggregateExtraction {
-					func_call: nested.func_call,
-					post_expr: Expr::Postfix {
-						expr: Box::new(nested.post_expr),
-						op: op.clone(),
-					},
-				});
-			}
-			None
+
+		// Continue visiting children for non-aggregate expressions
+		expr.visit_mut(self)
+	}
+
+	// Override visit_mut_function_call to ensure arguments go through visit_mut_expr.
+	// This is critical for detecting aggregates nested inside scalar functions
+	// (e.g., `array::distinct(array::group(name))`). By calling visit_mut_expr
+	// directly, we ensure aggregate detection and replacement happens properly.
+	fn visit_mut_function_call(&mut self, f: &mut FunctionCall) -> Result<(), Self::Error> {
+		if self.error.is_some() {
+			return Ok(());
 		}
-		_ => None,
+
+		// Visit all arguments through visit_mut_expr to ensure aggregate detection
+		// Note: We don't handle aggregates here - that's done in visit_mut_expr
+		// which can replace the entire Expr
+		for arg in &mut f.arguments {
+			self.visit_mut_expr(arg)?;
+		}
+		Ok(())
+	}
+
+	// Override to prevent descending into subqueries
+	// (aggregates in subqueries belong to a different context)
+	fn visit_mut_select(
+		&mut self,
+		_s: &mut crate::expr::statements::SelectStatement,
+	) -> Result<(), Self::Error> {
+		// Don't visit into SELECT subqueries - they have their own aggregate context
+		Ok(())
+	}
+
+	fn visit_mut_create(
+		&mut self,
+		_s: &mut crate::expr::statements::CreateStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_mut_update(
+		&mut self,
+		_s: &mut crate::expr::statements::UpdateStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_mut_delete(
+		&mut self,
+		_s: &mut crate::expr::statements::DeleteStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
 	}
 }
 
 /// Extract aggregate function information from an expression.
 ///
-/// If the expression is a direct aggregate function call (e.g., `math::mean(a)`),
-/// returns the aggregate info with the function and argument expression.
+/// Uses the MutVisitor pattern to walk the expression tree and find all
+/// aggregate functions. Supports:
+/// - Direct aggregate calls: `math::mean(v)`
+/// - Nested expressions: `math::mean(v) + 1`
+/// - Multiple aggregates: `SUM(a) + AVG(a)`
 ///
-/// If the expression contains a nested aggregate (e.g., `math::mean(v) + 1`),
-/// extracts the aggregate and creates a post-aggregate expression.
-///
-/// If the expression is not an aggregate, returns a fallback physical expression
-/// that will be evaluated to get the first value in the group.
+/// If no aggregates are found, uses implicit `array::group` aggregation
+/// (SurrealDB's default GROUP BY behavior for non-aggregate fields).
 fn extract_aggregate_info(
 	expr: &Expr,
 	registry: &crate::exec::function::FunctionRegistry,
 	ctx: &FrozenContext,
-) -> Result<(Option<AggregateInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-	// Check if this is a direct aggregate function call at the top level
-	if let Expr::FunctionCall(func_call) = expr {
-		if let Function::Normal(name) = &func_call.receiver {
-			// Look up the function in the aggregate registry
-			if let Some(agg_func) = registry.get_aggregate(name.as_str()) {
-				// This is a registered aggregate function
-				// Extract the first argument expression (the accumulated value)
-				let argument_expr = if func_call.arguments.is_empty() {
-					// For count() with no args, use a dummy literal
-					expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?
-				} else {
-					// First argument is the one to accumulate per-row
-					expr_to_physical_expr(func_call.arguments[0].clone(), ctx)?
-				};
+) -> Result<(Option<AggregateExprInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
+	// Clone the expression for mutation
+	let mut expr_clone = expr.clone();
 
-				// Convert any additional arguments to extra_args
-				// These are evaluated once per group (e.g., separator in array::join)
-				let extra_args = if func_call.arguments.len() > 1 {
-					func_call.arguments[1..]
-						.iter()
-						.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
-						.collect::<Result<Vec<_>, _>>()?
-				} else {
-					vec![]
-				};
+	// Run the extractor - must call visit_mut_expr directly, not visit_mut,
+	// so that our override is called first (otherwise VisitMut dispatches
+	// to visit_mut_function_call for FunctionCall expressions)
+	let mut extractor = AggregateExtractor::new(registry);
+	let _ = extractor.visit_mut_expr(&mut expr_clone);
 
-				return Ok((
-					Some(AggregateInfo {
-						function: agg_func.clone(),
-						argument_expr,
-						extra_args,
-						post_aggregate_expr: None,
-					}),
-					None,
-				));
-			}
-		}
+	// Check for errors (nested aggregates)
+	if let Some(err) = extractor.error {
+		return Err(err);
 	}
 
-	// Check if this expression contains a nested aggregate (e.g., `math::mean(v) + 1`)
-	if let Some(extraction) = extract_nested_aggregate(expr, registry) {
-		// Found a nested aggregate - extract it
-		if let Function::Normal(name) = &extraction.func_call.receiver {
-			if let Some(agg_func) = registry.get_aggregate(name.as_str()) {
-				// Extract the argument expression for the aggregate
-				let argument_expr = if extraction.func_call.arguments.is_empty() {
-					expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?
-				} else {
-					expr_to_physical_expr(extraction.func_call.arguments[0].clone(), ctx)?
-				};
-
-				// Convert any additional arguments to extra_args
-				let extra_args = if extraction.func_call.arguments.len() > 1 {
-					extraction.func_call.arguments[1..]
-						.iter()
-						.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
-						.collect::<Result<Vec<_>, _>>()?
-				} else {
-					vec![]
-				};
-
-				// Convert the post-aggregate expression to physical form
-				let post_aggregate_expr = expr_to_physical_expr(extraction.post_expr, ctx)?;
-
-				return Ok((
-					Some(AggregateInfo {
-						function: agg_func.clone(),
-						argument_expr,
-						extra_args,
-						post_aggregate_expr: Some(post_aggregate_expr),
-					}),
-					None,
-				));
-			}
-		}
+	if extractor.aggregates.is_empty() {
+		// No aggregates found - use implicit array::group aggregation
+		// This collects all values into an array (SurrealDB's default GROUP BY behavior)
+		let argument_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+		let array_group = registry
+			.get_aggregate("array::group")
+			.expect("array::group should always be registered")
+			.clone();
+		return Ok((
+			Some(AggregateExprInfo {
+				aggregates: vec![ExtractedAggregate {
+					function: array_group,
+					argument_expr,
+					extra_args: vec![],
+				}],
+				post_expr: None,
+			}),
+			None,
+		));
 	}
 
-	// Not an aggregate function - use implicit array::group aggregation
-	// This collects all values into an array (SurrealDB's default GROUP BY behavior)
-	let argument_expr = expr_to_physical_expr(expr.clone(), ctx)?;
-	let array_group = registry
-		.get_aggregate("array::group")
-		.expect("array::group should always be registered")
-		.clone();
+	// Convert extracted aggregates to ExtractedAggregate structs
+	let extracted_aggregates = extractor
+		.aggregates
+		.into_iter()
+		.map(|(name, call)| {
+			let func =
+				registry.get_aggregate(&name).expect("aggregate function should exist").clone();
+
+			// Extract the argument expression
+			let argument_expr = if call.arguments.is_empty() {
+				expr_to_physical_expr(Expr::Literal(Literal::None), ctx)
+			} else {
+				expr_to_physical_expr(call.arguments[0].clone(), ctx)
+			}?;
+
+			// Extract extra arguments (for functions like array::join)
+			let extra_args = if call.arguments.len() > 1 {
+				call.arguments[1..]
+					.iter()
+					.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
+					.collect::<Result<Vec<_>, _>>()?
+			} else {
+				vec![]
+			};
+
+			Ok(ExtractedAggregate {
+				function: func,
+				argument_expr,
+				extra_args,
+			})
+		})
+		.collect::<Result<Vec<_>, Error>>()?;
+
+	// Determine if we need a post-expression
+	// If it's a direct single aggregate (the transformed expr is just `_a0`),
+	// we don't need a post-expression
+	let is_direct_single_aggregate = extracted_aggregates.len() == 1 && {
+		use surrealdb_types::ToSql;
+		matches!(&expr_clone, Expr::Idiom(i) if i.to_sql() == "_a0")
+	};
+
+	let post_expr = if is_direct_single_aggregate {
+		None
+	} else {
+		// Convert the transformed expression (with _a0, _a1 references)
+		Some(expr_to_physical_expr(expr_clone, ctx)?)
+	};
+
 	Ok((
-		Some(AggregateInfo {
-			function: array_group,
-			argument_expr,
-			extra_args: vec![],
-			post_aggregate_expr: None,
+		Some(AggregateExprInfo {
+			aggregates: extracted_aggregates,
+			post_expr,
 		}),
 		None,
 	))

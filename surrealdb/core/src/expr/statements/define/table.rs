@@ -438,6 +438,9 @@ impl DefineTableStatement {
 				Aggregation::Accumulate(_) => {
 					fail!("Accumulate aggregation is not supported in materialized views")
 				}
+				Aggregation::Distinct(_) => {
+					fail!("Distinct aggregation is not supported in materialized views")
+				}
 			}
 		}
 
@@ -494,6 +497,9 @@ impl DefineTableStatement {
 					}
 					Aggregation::Accumulate(_) => {
 						fail!("Accumulate aggregation is not supported in materialized views")
+					}
+					Aggregation::Distinct(_) => {
+						fail!("Distinct aggregation is not supported in materialized views")
 					}
 				},
 			}));
@@ -709,6 +715,9 @@ impl DefineTableStatement {
 					Aggregation::Accumulate {
 						..
 					} => fail!("Accumulate aggregation is not supported in materialized views"),
+					Aggregation::Distinct {
+						..
+					} => fail!("Distinct aggregation is not supported in materialized views"),
 				}
 			}
 

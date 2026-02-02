@@ -172,6 +172,7 @@ mod tests {
 		assert!(registry.is_aggregate("time::min"));
 		assert!(registry.is_aggregate("time::max"));
 		assert!(registry.is_aggregate("array::group"));
+		assert!(registry.is_aggregate("array::distinct"));
 
 		// Scalar functions should not be aggregates
 		assert!(!registry.is_aggregate("math::abs"));

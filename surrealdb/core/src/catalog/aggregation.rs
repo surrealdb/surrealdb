@@ -38,7 +38,9 @@
 //!        here `_g0` refers to the group.
 //! ```
 
+use std::collections::HashSet;
 use std::fmt::Write;
+use std::hash::{Hash, Hasher};
 use std::mem;
 
 use ahash::HashMap;
@@ -75,6 +77,7 @@ pub enum Aggregation {
 	DatetimeMax(usize),
 	DatetimeMin(usize),
 	Accumulate(usize),
+	Distinct(usize),
 }
 
 impl Aggregation {
@@ -127,6 +130,11 @@ impl Aggregation {
 			Aggregation::Accumulate(arg) => AggregationStat::Accumulate {
 				arg,
 				values: Vec::new(),
+			},
+			Aggregation::Distinct(arg) => AggregationStat::Distinct {
+				arg,
+				values: Vec::new(),
+				seen_hashes: HashSet::new(),
 			},
 		}
 	}
@@ -184,6 +192,11 @@ pub enum AggregationStat {
 	Accumulate {
 		arg: usize,
 		values: Vec<Value>,
+	},
+	Distinct {
+		arg: usize,
+		values: Vec<Value>,
+		seen_hashes: HashSet<u64>,
 	},
 }
 
@@ -404,6 +417,21 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 			} => {
 				values.push(arguments[*arg].clone());
 			}
+			AggregationStat::Distinct {
+				arg,
+				values,
+				seen_hashes,
+			} => {
+				let value = &arguments[*arg];
+				// Compute hash of the value for O(1) distinctness checking
+				let mut hasher = std::collections::hash_map::DefaultHasher::new();
+				value.hash(&mut hasher);
+				let hash = hasher.finish();
+				// Only add if we haven't seen this hash before
+				if seen_hashes.insert(hash) {
+					values.push(value.clone());
+				}
+			}
 		}
 	}
 	Ok(())
@@ -485,6 +513,10 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				values,
 				..
 			} => Value::Array(Array(values.clone())),
+			AggregationStat::Distinct {
+				values,
+				..
+			} => Value::Array(Array(values.clone())),
 		};
 		res.0.insert(aggregate_field_name(idx), value);
 	}
@@ -492,6 +524,33 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 		res.0.insert(group_field_name(idx), g.clone());
 	}
 	res
+}
+
+/// List of known aggregate function names
+const AGGREGATE_FUNCTIONS: &[&str] = &[
+	"count",
+	"math::max",
+	"math::min",
+	"math::sum",
+	"math::mean",
+	"math::stddev",
+	"math::variance",
+	"time::max",
+	"time::min",
+	"array::group",
+	"array::distinct",
+];
+
+/// Check if an expression is a call to a known aggregate function.
+/// This is used to determine if array::distinct should be treated as an aggregate
+/// or as a scalar function applied to an aggregate result.
+fn is_aggregate_function_call(expr: &Expr) -> bool {
+	if let Expr::FunctionCall(f) = expr {
+		if let Function::Normal(name) = &f.receiver {
+			return AGGREGATE_FUNCTIONS.contains(&name.as_str());
+		}
+	}
+	false
 }
 
 /// Visitor which walks an expression to pull out the aggregate expressions to calculate.
@@ -600,6 +659,26 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								&f.arguments,
 								Aggregation::DatetimeMin,
 							)?;
+						}
+						"array::distinct" => {
+							// array::distinct can be used both as an aggregate and as a scalar
+							// When its argument is another aggregate function call (e.g.,
+							// array::distinct(array::group(name))) we treat it as a scalar
+							// applied to the aggregate result When its argument is a simple
+							// field (e.g., array::distinct(name)) we treat it as an
+							// aggregate that collects unique values
+							if f.arguments.len() == 1
+								&& !is_aggregate_function_call(&f.arguments[0])
+							{
+								self.push_aggregate_function(
+									"array::distinct",
+									&f.arguments,
+									Aggregation::Distinct,
+								)?;
+							} else {
+								// Treat as scalar - recurse into arguments
+								return f.visit_mut(self);
+							}
 						}
 						_ => {
 							return f.visit_mut(self);

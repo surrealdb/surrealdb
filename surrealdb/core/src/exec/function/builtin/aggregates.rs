@@ -3,6 +3,9 @@
 //! This module provides aggregate functions that operate over groups of values
 //! during GROUP BY query execution.
 
+use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+
 use anyhow::Result;
 
 use crate::exec::function::{Accumulator, AggregateFunction, FunctionRegistry, Signature};
@@ -865,6 +868,84 @@ impl Accumulator for ArrayJoinAccumulator {
 	}
 }
 
+/// array::distinct - collects unique values into an array (preserving insertion order)
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ArrayDistinct;
+
+impl AggregateFunction for ArrayDistinct {
+	fn name(&self) -> &'static str {
+		"array::distinct"
+	}
+
+	fn create_accumulator(&self) -> Box<dyn Accumulator> {
+		Box::new(ArrayDistinctAccumulator::default())
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).returns(Kind::Array(Box::new(Kind::Any), None))
+	}
+}
+
+#[derive(Debug, Clone, Default)]
+struct ArrayDistinctAccumulator {
+	/// Values in insertion order (for maintaining order)
+	values: Vec<Value>,
+	/// Hashes of values we've seen (for O(1) distinctness checking)
+	seen_hashes: HashSet<u64>,
+}
+
+impl ArrayDistinctAccumulator {
+	/// Compute hash of a value for distinctness checking
+	fn hash_value(value: &Value) -> u64 {
+		let mut hasher = std::collections::hash_map::DefaultHasher::new();
+		value.hash(&mut hasher);
+		hasher.finish()
+	}
+}
+
+impl Accumulator for ArrayDistinctAccumulator {
+	fn update(&mut self, value: Value) -> Result<()> {
+		let hash = Self::hash_value(&value);
+		// Only add if we haven't seen this hash before
+		if self.seen_hashes.insert(hash) {
+			self.values.push(value);
+		}
+		Ok(())
+	}
+
+	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
+		let other = other
+			.as_any()
+			.downcast_ref::<ArrayDistinctAccumulator>()
+			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
+		// Add values from other that we haven't seen
+		for value in &other.values {
+			let hash = Self::hash_value(value);
+			if self.seen_hashes.insert(hash) {
+				self.values.push(value.clone());
+			}
+		}
+		Ok(())
+	}
+
+	fn finalize(&self) -> Result<Value> {
+		Ok(Value::Array(self.values.clone().into()))
+	}
+
+	fn reset(&mut self) {
+		self.values.clear();
+		self.seen_hashes.clear();
+	}
+
+	fn clone_box(&self) -> Box<dyn Accumulator> {
+		Box::new(self.clone())
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+}
+
 // ============================================================================
 // Registration
 // ============================================================================
@@ -890,4 +971,5 @@ pub fn register(registry: &mut FunctionRegistry) {
 	// Array aggregates
 	registry.register_aggregate(ArrayGroup);
 	registry.register_aggregate(ArrayJoin);
+	registry.register_aggregate(ArrayDistinct);
 }
