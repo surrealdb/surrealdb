@@ -9,7 +9,7 @@ value = "NONE"
 # 1
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { id: '123' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { id: '123' }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -18,7 +18,7 @@ value = "NONE"
 # 3
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { id: '456', postId: 'abc' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { id: '456', postId: 'abc' }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
@@ -27,17 +27,17 @@ value = "NONE"
 # 5
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { id: 789 }, headers: {}, context: {  }, status: 200 }"
+value = "{ body: { id: 789 }, headers: {}, status: 200 }"
 
 # 6
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
+value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
 # 7
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
+value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
