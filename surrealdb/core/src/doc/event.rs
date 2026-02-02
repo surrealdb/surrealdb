@@ -329,6 +329,7 @@ impl AsyncEventRecord {
 		if res.is_empty() {
 			return Ok(());
 		}
+		// Best-effort parallel processing; queue order is not preserved.
 		// Limit in-flight event processing to avoid oversubscription.
 		let concurrency: usize = num_cpus::get().max(4);
 		// Cap workers by batch size and reuse one TreeStack per worker.
@@ -437,7 +438,9 @@ impl AsyncEventContext {
 				let se: Option<&Error> = e.downcast_ref();
 				if matches!(
 					se,
-					Some(Error::EvNamespaceMismatch(..)) | Some(Error::EvDatabaseMismatch(..))
+					Some(Error::EvNamespaceMismatch(..))
+						| Some(Error::EvDatabaseMismatch(..))
+						| Some(Error::EvReachMaxDepth(..))
 				) {
 					// This error is final, we won't retry. The namespace or the
 					// database has been recreated.

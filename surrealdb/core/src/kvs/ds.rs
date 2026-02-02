@@ -762,7 +762,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
-			async_event_trigger: Arc::new(Notify::new()),
+			async_event_trigger: self.async_event_trigger,
 		}
 	}
 
