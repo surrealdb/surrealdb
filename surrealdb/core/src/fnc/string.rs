@@ -327,6 +327,7 @@ pub mod distance {
 	/// Will result in an [`Error::InvalidArguments`] if the given strings are
 	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::hamming", &a, &b)?;
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
 			Err(_) => Err(anyhow::Error::new(Error::InvalidArguments {

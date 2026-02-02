@@ -151,9 +151,9 @@ pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 });
 
 /// The maximum input string length for similarity/distance functions (default:
-/// 4096 bytes)
+/// 16384 bytes)
 pub static STRING_SIMILARITY_LIMIT: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_STRING_SIMILARITY_LIMIT", usize, 4096);
+	lazy_env_parse!("SURREAL_STRING_SIMILARITY_LIMIT", usize, 16384);
 
 /// Specifies a list of paths in which files can be accessed (default: empty)
 pub static FILE_ALLOWLIST: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
