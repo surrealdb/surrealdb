@@ -13,8 +13,8 @@ use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
-	OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, ValueBatch, ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -60,14 +60,14 @@ impl Ord for KeyedValue {
 /// Use this operator when `limit <= MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE` (default 1000).
 #[derive(Debug, Clone)]
 pub struct SortTopK {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
 	/// The effective limit (start + limit from query)
 	pub(crate) limit: usize,
 }
 
 #[async_trait]
-impl OperatorPlan for SortTopK {
+impl ExecOperator for SortTopK {
 	fn name(&self) -> &'static str {
 		"SortTopK"
 	}
@@ -97,7 +97,7 @@ impl OperatorPlan for SortTopK {
 		self.input.access_mode().combine(expr_mode)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

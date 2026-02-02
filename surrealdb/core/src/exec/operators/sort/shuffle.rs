@@ -15,7 +15,7 @@ use rand::{Rng, thread_rng};
 use tokio::task::spawn_blocking;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 use crate::val::Value;
@@ -30,13 +30,13 @@ use crate::val::Value;
 /// Fisher-Yates shuffle.
 #[derive(Debug, Clone)]
 pub struct RandomShuffle {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	/// If set, use reservoir sampling to select this many values
 	pub(crate) limit: Option<usize>,
 }
 
 #[async_trait]
-impl OperatorPlan for RandomShuffle {
+impl ExecOperator for RandomShuffle {
 	fn name(&self) -> &'static str {
 		"RandomShuffle"
 	}
@@ -57,7 +57,7 @@ impl OperatorPlan for RandomShuffle {
 		self.input.access_mode()
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -41,7 +41,7 @@ pub struct ReferenceScan {
 }
 
 #[async_trait]
-impl OperatorPlan for ReferenceScan {
+impl ExecOperator for ReferenceScan {
 	fn name(&self) -> &'static str {
 		"ReferenceScan"
 	}

@@ -15,7 +15,7 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Object, TableName, Value};
 
@@ -33,7 +33,7 @@ pub struct IndexInfoPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for IndexInfoPlan {
+impl ExecOperator for IndexInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoIndex"
 	}

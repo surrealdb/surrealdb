@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 
@@ -14,12 +14,12 @@ use crate::exec::{
 /// inherits the context requirements of its input plan.
 #[derive(Debug, Clone)]
 pub struct Filter {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
 }
 
 #[async_trait]
-impl OperatorPlan for Filter {
+impl ExecOperator for Filter {
 	fn name(&self) -> &'static str {
 		"Filter"
 	}
@@ -40,7 +40,7 @@ impl OperatorPlan for Filter {
 		self.input.access_mode().combine(self.predicate.access_mode())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

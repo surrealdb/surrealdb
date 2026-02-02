@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, OperatorPlan};
+use crate::exec::{AccessMode, ExecOperator};
 use crate::val::Value;
 
 /// Scalar subquery - (SELECT ... LIMIT 1)
 #[derive(Debug, Clone)]
 pub struct ScalarSubquery {
-	pub(crate) plan: Arc<dyn OperatorPlan>,
+	pub(crate) plan: Arc<dyn ExecOperator>,
 }
 
 #[async_trait]

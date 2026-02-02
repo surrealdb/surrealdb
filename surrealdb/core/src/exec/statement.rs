@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::exec::{AccessMode, ExecutionContext, OperatorPlan};
+use crate::exec::{AccessMode, ExecOperator, ExecutionContext};
 use crate::val::Value;
 
 /// Unique identifier for statements within a script.
@@ -120,7 +120,7 @@ pub struct StatementPlan {
 	/// - Queries (SELECT, CREATE, UPDATE, DELETE, etc.)
 	/// - Context-mutating operators (USE, LET, BEGIN, COMMIT, CANCEL)
 	/// - Scalar expressions (wrapped in ExprPlan)
-	pub plan: Arc<dyn OperatorPlan>,
+	pub plan: Arc<dyn ExecOperator>,
 
 	/// Statement classification for dependency tracking
 	pub kind: StatementKind,

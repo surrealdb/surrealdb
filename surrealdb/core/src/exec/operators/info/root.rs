@@ -20,7 +20,7 @@ use crate::catalog::providers::{
 	AuthorisationProvider, NamespaceProvider, NodeProvider, RootProvider, UserProvider,
 };
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
@@ -37,7 +37,7 @@ pub struct RootInfoPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for RootInfoPlan {
+impl ExecOperator for RootInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoRoot"
 	}

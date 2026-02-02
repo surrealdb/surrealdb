@@ -27,7 +27,7 @@ use crate::catalog::providers::{
 };
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Datetime, Object, Value};
@@ -45,7 +45,7 @@ pub struct DatabaseInfoPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for DatabaseInfoPlan {
+impl ExecOperator for DatabaseInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoDatabase"
 	}

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::stream;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::ExplainFormat;
 use crate::val::{Array, Object, Value};
 
@@ -21,13 +21,13 @@ use crate::val::{Array, Object, Value};
 #[derive(Debug)]
 pub struct ExplainPlan {
 	/// The inner statement's planned content
-	pub plan: Arc<dyn OperatorPlan>,
+	pub plan: Arc<dyn ExecOperator>,
 	/// The output format (currently only Text is supported)
 	pub format: ExplainFormat,
 }
 
 #[async_trait]
-impl OperatorPlan for ExplainPlan {
+impl ExecOperator for ExplainPlan {
 	fn name(&self) -> &'static str {
 		"Explain"
 	}
@@ -72,7 +72,7 @@ impl OperatorPlan for ExplainPlan {
 
 /// Format an execution plan node as a text tree
 fn format_execution_plan(
-	plan: &dyn OperatorPlan,
+	plan: &dyn ExecOperator,
 	output: &mut String,
 	prefix: &str,
 	_is_last: bool,
@@ -124,7 +124,7 @@ fn format_execution_plan(
 }
 
 /// Format an execution plan node as a JSON object
-fn format_execution_plan_json(plan: &dyn OperatorPlan) -> Object {
+fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 	let mut obj = Object::default();
 
 	// Add operator name

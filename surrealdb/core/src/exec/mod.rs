@@ -89,7 +89,7 @@ pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + 
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
 #[async_trait]
-pub(crate) trait OperatorPlan: Debug + Send + Sync {
+pub(crate) trait ExecOperator: Debug + Send + Sync {
 	fn name(&self) -> &'static str;
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -124,7 +124,7 @@ pub(crate) trait OperatorPlan: Debug + Send + Sync {
 	/// - Pre-flight validation (recursive context requirement checking)
 	/// - Query optimization
 	/// - EXPLAIN output
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![]
 	}
 

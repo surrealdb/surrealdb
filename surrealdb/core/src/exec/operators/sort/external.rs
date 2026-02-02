@@ -23,8 +23,8 @@ use super::common::{OrderByField, SortDirection, compare_keys};
 use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
-	OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, ValueBatch, ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -37,13 +37,13 @@ use crate::val::Value;
 /// Requires the `storage` feature and is activated by the TEMPFILES keyword.
 #[derive(Debug, Clone)]
 pub struct ExternalSort {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
 	pub(crate) temp_dir: PathBuf,
 }
 
 #[async_trait]
-impl OperatorPlan for ExternalSort {
+impl ExecOperator for ExternalSort {
 	fn name(&self) -> &'static str {
 		"ExternalSort"
 	}
@@ -76,7 +76,7 @@ impl OperatorPlan for ExternalSort {
 		self.input.access_mode().combine(expr_mode)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

@@ -12,7 +12,7 @@ use futures::StreamExt;
 use crate::catalog::providers::TableProvider;
 use crate::exec::physical_part::LookupDirection;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, Dir};
@@ -62,7 +62,7 @@ pub struct GraphEdgeScan {
 }
 
 #[async_trait]
-impl OperatorPlan for GraphEdgeScan {
+impl ExecOperator for GraphEdgeScan {
 	fn name(&self) -> &'static str {
 		"GraphEdgeScan"
 	}

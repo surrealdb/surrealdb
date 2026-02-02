@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	ValueBatchStream,
 };
 
@@ -17,11 +17,11 @@ use crate::exec::{
 /// in parallel, but return results in order a → b → c.
 #[derive(Debug, Clone)]
 pub struct Union {
-	pub(crate) inputs: Vec<Arc<dyn OperatorPlan>>,
+	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
 }
 
 #[async_trait]
-impl OperatorPlan for Union {
+impl ExecOperator for Union {
 	fn name(&self) -> &'static str {
 		"Union"
 	}
@@ -36,7 +36,7 @@ impl OperatorPlan for Union {
 		self.inputs.iter().map(|input| input.access_mode()).combine_all()
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		self.inputs.iter().collect()
 	}
 

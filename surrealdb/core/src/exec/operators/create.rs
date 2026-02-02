@@ -16,7 +16,7 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -45,7 +45,7 @@ pub struct Create {
 }
 
 #[async_trait]
-impl OperatorPlan for Create {
+impl ExecOperator for Create {
 	fn name(&self) -> &'static str {
 		"Create"
 	}

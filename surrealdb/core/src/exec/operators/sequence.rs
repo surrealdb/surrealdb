@@ -20,7 +20,7 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::planner::try_plan_expr;
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::Block;
 use crate::val::Value;
 
@@ -62,7 +62,7 @@ fn create_planning_context(exec_ctx: &ExecutionContext) -> FrozenContext {
 }
 
 #[async_trait]
-impl OperatorPlan for SequencePlan {
+impl ExecOperator for SequencePlan {
 	fn name(&self) -> &'static str {
 		"Sequence"
 	}
@@ -111,7 +111,7 @@ impl OperatorPlan for SequencePlan {
 		Ok(final_ctx)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// With deferred planning, we don't have pre-built children
 		vec![]
 	}

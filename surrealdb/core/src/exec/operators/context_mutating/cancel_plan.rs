@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 
 /// CANCEL operator - cancels/rolls back the current transaction.
 ///
@@ -19,7 +19,7 @@ use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
 pub struct CancelPlan;
 
 #[async_trait]
-impl OperatorPlan for CancelPlan {
+impl ExecOperator for CancelPlan {
 	fn name(&self) -> &'static str {
 		"Cancel"
 	}

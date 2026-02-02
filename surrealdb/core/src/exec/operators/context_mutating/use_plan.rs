@@ -14,7 +14,7 @@ use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 
 /// USE operator - switches namespace and/or database.
 ///
@@ -30,7 +30,7 @@ pub struct UsePlan {
 }
 
 #[async_trait]
-impl OperatorPlan for UsePlan {
+impl ExecOperator for UsePlan {
 	fn name(&self) -> &'static str {
 		"Use"
 	}

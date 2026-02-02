@@ -6,7 +6,7 @@ use futures::StreamExt;
 
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
@@ -21,7 +21,7 @@ use crate::val::{Object, Value};
 /// before producing any output.
 #[derive(Debug, Clone)]
 pub struct Aggregate {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	/// The fields/expressions to group by. Empty means GROUP ALL.
 	pub(crate) group_by: Vec<Idiom>,
 	/// The aggregate expressions to compute for each group.
@@ -72,7 +72,7 @@ struct GroupState {
 }
 
 #[async_trait]
-impl OperatorPlan for Aggregate {
+impl ExecOperator for Aggregate {
 	fn name(&self) -> &'static str {
 		"Aggregate"
 	}
@@ -108,7 +108,7 @@ impl OperatorPlan for Aggregate {
 		mode
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

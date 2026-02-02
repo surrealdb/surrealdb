@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
@@ -18,12 +18,12 @@ use crate::val::Value;
 /// Non-array values pass through unchanged.
 #[derive(Debug, Clone)]
 pub struct Split {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) idioms: Vec<Idiom>,
 }
 
 #[async_trait]
-impl OperatorPlan for Split {
+impl ExecOperator for Split {
 	fn name(&self) -> &'static str {
 		"Split"
 	}
@@ -46,7 +46,7 @@ impl OperatorPlan for Split {
 		self.input.access_mode()
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

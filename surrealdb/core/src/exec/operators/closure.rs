@@ -11,10 +11,9 @@ use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::FrozenContext;
 use crate::dbs::ParameterCapturePass;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, Expr, Kind, Param};
 use crate::val::{Closure, Value};
 
@@ -46,18 +45,8 @@ pub struct ClosurePlan {
 	pub body: Expr,
 }
 
-/// Create a FrozenContext for parameter capture from the current execution context.
-fn create_capture_context(exec_ctx: &ExecutionContext) -> FrozenContext {
-	let mut ctx = crate::ctx::Context::background();
-	ctx.set_transaction(exec_ctx.txn().clone());
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-	ctx.freeze()
-}
-
 #[async_trait]
-impl OperatorPlan for ClosurePlan {
+impl ExecOperator for ClosurePlan {
 	fn name(&self) -> &'static str {
 		"Closure"
 	}
@@ -94,7 +83,7 @@ impl OperatorPlan for ClosurePlan {
 		Ok(Box::pin(stream))
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// Closures don't have children - body is captured, not planned
 		vec![]
 	}
@@ -112,11 +101,8 @@ async fn execute_closure(
 	body: &Expr,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<ValueBatch> {
-	// Create a frozen context for parameter capture
-	let frozen_ctx = create_capture_context(ctx);
-
 	// Capture all parameters referenced in the body from the current context
-	let captures = ParameterCapturePass::capture(&frozen_ctx, body);
+	let captures = ParameterCapturePass::capture(ctx.ctx(), body);
 
 	// Create the closure value with captured context
 	let closure_value = Value::Closure(Box::new(Closure::Expr {

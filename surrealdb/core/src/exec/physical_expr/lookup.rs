@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::physical_part::LookupDirection;
-use crate::exec::{AccessMode, OperatorPlan};
+use crate::exec::{AccessMode, ExecOperator};
 use crate::val::Value;
 
 // ============================================================================
@@ -31,7 +31,7 @@ use crate::val::Value;
 #[derive(Debug, Clone)]
 pub struct LookupExpr {
 	/// The pre-planned lookup operator tree
-	pub(crate) plan: Arc<dyn OperatorPlan>,
+	pub(crate) plan: Arc<dyn ExecOperator>,
 
 	/// Direction of the lookup (for display purposes)
 	pub(crate) direction: LookupDirection,
@@ -42,7 +42,7 @@ pub struct LookupExpr {
 
 impl LookupExpr {
 	/// Create a new LookupExpr with the given plan and direction.
-	pub fn new(plan: Arc<dyn OperatorPlan>, direction: LookupDirection) -> Self {
+	pub fn new(plan: Arc<dyn ExecOperator>, direction: LookupDirection) -> Self {
 		Self {
 			plan,
 			direction,

@@ -5,7 +5,7 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, PhysicalExpr,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, PhysicalExpr,
 	ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -17,13 +17,13 @@ use crate::val::Duration;
 /// This is typically applied as the outermost operator for a query.
 #[derive(Debug, Clone)]
 pub struct Timeout {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	/// The timeout duration. If None, no timeout is applied.
 	pub(crate) timeout: Option<Arc<dyn PhysicalExpr>>,
 }
 
 #[async_trait]
-impl OperatorPlan for Timeout {
+impl ExecOperator for Timeout {
 	fn name(&self) -> &'static str {
 		"Timeout"
 	}
@@ -46,7 +46,7 @@ impl OperatorPlan for Timeout {
 		self.input.access_mode()
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

@@ -13,7 +13,7 @@ use crate::exec::permission::{
 };
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -60,7 +60,7 @@ pub struct Scan {
 }
 
 #[async_trait]
-impl OperatorPlan for Scan {
+impl ExecOperator for Scan {
 	fn name(&self) -> &'static str {
 		"Scan"
 	}

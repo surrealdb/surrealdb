@@ -8,7 +8,7 @@ use futures::stream;
 use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::ControlFlow;
 use crate::val::{Duration, Value};
 
@@ -24,7 +24,7 @@ pub struct SleepPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for SleepPlan {
+impl ExecOperator for SleepPlan {
 	fn name(&self) -> &'static str {
 		"Sleep"
 	}

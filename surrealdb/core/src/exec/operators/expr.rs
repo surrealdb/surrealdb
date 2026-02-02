@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 
 /// Expr operator - evaluates a scalar expression.
 ///
@@ -24,7 +24,7 @@ pub struct ExprPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for ExprPlan {
+impl ExecOperator for ExprPlan {
 	fn name(&self) -> &'static str {
 		"Expr"
 	}

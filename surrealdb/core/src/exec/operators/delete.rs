@@ -18,7 +18,7 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 use crate::iam::Action;
@@ -33,11 +33,11 @@ pub struct Delete {
 	/// The table to delete records from
 	pub table: TableName,
 	/// The input plan providing records to delete
-	pub input: Arc<dyn OperatorPlan>,
+	pub input: Arc<dyn ExecOperator>,
 }
 
 #[async_trait]
-impl OperatorPlan for Delete {
+impl ExecOperator for Delete {
 	fn name(&self) -> &'static str {
 		"Delete"
 	}
@@ -51,7 +51,7 @@ impl OperatorPlan for Delete {
 		AccessMode::ReadWrite
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 
@@ -73,6 +73,7 @@ impl OperatorPlan for Delete {
 		let params = db_ctx.ns_ctx.root.params.clone();
 		let auth = db_ctx.ns_ctx.root.auth.clone();
 		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
+		let frozen_ctx = ctx.ctx().clone();
 
 		// Cache for permission (resolved on first batch)
 		let delete_permission: Arc<tokio::sync::Mutex<Option<PhysicalPermission>>> =
@@ -89,6 +90,7 @@ impl OperatorPlan for Delete {
 			let params = params.clone();
 			let auth = auth.clone();
 			let delete_permission = delete_permission.clone();
+			let frozen_ctx = frozen_ctx.clone();
 
 			async move {
 				use crate::expr::ControlFlow;
@@ -160,6 +162,7 @@ impl OperatorPlan for Delete {
 								session: None,
 								capabilities: None,
 								options: None,
+								ctx: frozen_ctx.clone(),
 							},
 							ns: ns.clone(),
 						},

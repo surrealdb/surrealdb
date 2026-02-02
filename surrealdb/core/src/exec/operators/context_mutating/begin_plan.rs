@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 use crate::kvs::{LockType, TransactionType};
 
 /// BEGIN operator - starts a write transaction.
@@ -23,7 +23,7 @@ use crate::kvs::{LockType, TransactionType};
 pub struct BeginPlan;
 
 #[async_trait]
-impl OperatorPlan for BeginPlan {
+impl ExecOperator for BeginPlan {
 	fn name(&self) -> &'static str {
 		"Begin"
 	}

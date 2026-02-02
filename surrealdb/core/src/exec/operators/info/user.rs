@@ -14,7 +14,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvide
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -45,7 +45,7 @@ impl UserInfoPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for UserInfoPlan {
+impl ExecOperator for UserInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoUser"
 	}

@@ -16,7 +16,6 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::physical_expr::block::BlockPhysicalExpr;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -41,16 +40,6 @@ async fn evaluate_args(
 	Ok(values)
 }
 
-/// Create a FrozenContext for planning expressions during evaluation.
-fn create_planning_context(exec_ctx: &ExecutionContext) -> FrozenContext {
-	let mut ctx = crate::ctx::Context::background();
-	ctx.set_transaction(exec_ctx.txn().clone());
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-	ctx.freeze()
-}
-
 /// Check function permission.
 async fn check_permission(
 	permission: &Permission,
@@ -65,8 +54,7 @@ async fn check_permission(
 		.into()),
 		Permission::Specific(expr) => {
 			// Plan and evaluate the permission expression
-			let frozen_ctx = create_planning_context(ctx.exec_ctx);
-			match expr_to_physical_expr(expr.clone(), &frozen_ctx) {
+			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()) {
 				Ok(phys_expr) => {
 					let result = phys_expr.evaluate(ctx.clone()).await?;
 					if !result.is_truthy() {

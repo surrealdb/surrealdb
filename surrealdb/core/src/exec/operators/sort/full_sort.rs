@@ -15,8 +15,8 @@ use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
-	OperatorPlan, ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, ValueBatch, ValueBatchStream,
 };
 use crate::val::Value;
 
@@ -29,12 +29,12 @@ use crate::val::Value;
 /// executes the sort in a blocking task to avoid blocking the async executor.
 #[derive(Debug, Clone)]
 pub struct Sort {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
 }
 
 #[async_trait]
-impl OperatorPlan for Sort {
+impl ExecOperator for Sort {
 	fn name(&self) -> &'static str {
 		"Sort"
 	}
@@ -66,7 +66,7 @@ impl OperatorPlan for Sort {
 		self.input.access_mode().combine(expr_mode)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

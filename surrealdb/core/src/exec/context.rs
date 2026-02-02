@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
+use crate::ctx::FrozenContext;
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
@@ -120,6 +121,9 @@ pub struct RootContext {
 	/// Legacy Options for fallback to compute path when streaming executor
 	/// encounters unimplemented expressions.
 	pub options: Option<Options>,
+	/// The FrozenContext from which this ExecutionContext was built.
+	/// Used for calling legacy compute methods without manual reconstruction.
+	pub ctx: FrozenContext,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -133,6 +137,7 @@ impl std::fmt::Debug for RootContext {
 			.field("txn", &"<Transaction>")
 			.field("session", &self.session)
 			.field("capabilities", &self.capabilities.as_ref().map(|_| "<Capabilities>"))
+			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
 }
@@ -389,6 +394,7 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				capabilities: r.capabilities.clone(),
 				options: r.options.clone(),
+				ctx: r.ctx.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -401,6 +407,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					capabilities: n.root.capabilities.clone(),
 					options: n.root.options.clone(),
+					ctx: n.root.ctx.clone(),
 				},
 				ns: n.ns.clone(),
 			}),
@@ -416,6 +423,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						capabilities: d.ns_ctx.root.capabilities.clone(),
 						options: d.ns_ctx.root.options.clone(),
+						ctx: d.ns_ctx.root.ctx.clone(),
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -462,6 +470,7 @@ impl ExecutionContext {
 			session: self.root().session.clone(),
 			capabilities: self.root().capabilities.clone(),
 			options: self.root().options.clone(),
+			ctx: self.root().ctx.clone(),
 		};
 
 		Ok(match self {
@@ -510,5 +519,14 @@ impl ExecutionContext {
 	/// executor encounters unimplemented expressions.
 	pub fn options(&self) -> Option<&Options> {
 		self.root().options.as_ref()
+	}
+
+	/// Get the underlying FrozenContext.
+	///
+	/// This provides access to the original FrozenContext from which this
+	/// ExecutionContext was built. Used for calling legacy compute methods
+	/// without manual reconstruction of the context.
+	pub fn ctx(&self) -> &FrozenContext {
+		&self.root().ctx
 	}
 }

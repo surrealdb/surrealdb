@@ -15,7 +15,7 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::planner::try_plan_expr;
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::{Block, ControlFlow, Expr, Param};
 use crate::val::Value;
 use crate::val::range::IntegerRangeIter;
@@ -58,35 +58,18 @@ impl Iterator for ForeachIter {
 	}
 }
 
-/// Create a FrozenContext for planning that includes the current parameters.
-fn create_planning_context(exec_ctx: &ExecutionContext) -> FrozenContext {
-	let mut ctx = crate::ctx::Context::background();
-	ctx.set_transaction(exec_ctx.txn().clone());
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-	ctx.freeze()
-}
-
 /// Get the Options and FrozenContext for legacy compute fallback.
 fn get_legacy_context(
 	exec_ctx: &ExecutionContext,
-) -> Result<(&crate::dbs::Options, FrozenContext), Error> {
+) -> Result<(&crate::dbs::Options, &FrozenContext), Error> {
 	let options = exec_ctx
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-
-	let mut ctx = crate::ctx::Context::background();
-	ctx.set_transaction(exec_ctx.txn().clone());
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-
-	Ok((options, ctx.freeze()))
+	Ok((options, exec_ctx.ctx()))
 }
 
 #[async_trait]
-impl OperatorPlan for ForeachPlan {
+impl ExecOperator for ForeachPlan {
 	fn name(&self) -> &'static str {
 		"Foreach"
 	}
@@ -128,7 +111,7 @@ impl OperatorPlan for ForeachPlan {
 		Ok(Box::pin(stream))
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// With deferred planning, we don't have pre-built children
 		vec![]
 	}
@@ -217,9 +200,7 @@ async fn execute_foreach(
 /// Tries to plan the expression with the streaming engine first,
 /// falling back to legacy compute if unimplemented.
 async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	let frozen_ctx = create_planning_context(ctx);
-
-	match try_plan_expr(expr.clone(), &frozen_ctx) {
+	match try_plan_expr(expr.clone(), ctx.ctx()) {
 		Ok(plan) => {
 			// Execute the plan and collect the result
 			let stream = plan.execute(ctx)?;
@@ -231,7 +212,7 @@ async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::Flow
 			let (opt, frozen) = get_legacy_context(ctx)
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
 			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
+			stack.enter(|stk| expr.compute(stk, frozen, opt, None)).finish().await
 		}
 		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
 	}
@@ -242,9 +223,7 @@ async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::Flow
 /// LET statements are context-mutating but within a loop iteration,
 /// they don't persist to the outer context. This handles them correctly.
 async fn execute_body_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	let frozen_ctx = create_planning_context(ctx);
-
-	match try_plan_expr(expr.clone(), &frozen_ctx) {
+	match try_plan_expr(expr.clone(), ctx.ctx()) {
 		Ok(plan) => {
 			// Execute the plan
 			let stream = plan.execute(ctx)?;
@@ -255,7 +234,7 @@ async fn execute_body_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::
 			let (opt, frozen) = get_legacy_context(ctx)
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
 			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
+			stack.enter(|stk| expr.compute(stk, frozen, opt, None)).finish().await
 		}
 		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
 	}

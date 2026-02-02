@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
@@ -17,14 +17,14 @@ use crate::val::{RecordId, Value};
 /// it with the full author record `{ id: author:tobie, name: 'Tobie', ... }`.
 #[derive(Debug, Clone)]
 pub struct Fetch {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	/// The fields to fetch. Each idiom points to a field that may contain
 	/// record IDs to be resolved.
 	pub(crate) fields: Vec<Idiom>,
 }
 
 #[async_trait]
-impl OperatorPlan for Fetch {
+impl ExecOperator for Fetch {
 	fn name(&self) -> &'static str {
 		"Fetch"
 	}
@@ -47,7 +47,7 @@ impl OperatorPlan for Fetch {
 		AccessMode::ReadOnly.combine(self.input.access_mode())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 use crate::val::{Array, Value};
 
 /// LET operator - binds a value to a parameter.
@@ -28,11 +28,11 @@ pub struct LetPlan {
 	/// Parameter name to bind (without $)
 	pub name: String,
 	/// Value to bind - either an ExprPlan for scalars or a query plan
-	pub value: Arc<dyn OperatorPlan>,
+	pub value: Arc<dyn ExecOperator>,
 }
 
 #[async_trait]
-impl OperatorPlan for LetPlan {
+impl ExecOperator for LetPlan {
 	fn name(&self) -> &'static str {
 		"Let"
 	}
@@ -94,7 +94,7 @@ impl OperatorPlan for LetPlan {
 		Ok(input.with_param(self.name.clone(), computed_value))
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.value]
 	}
 }

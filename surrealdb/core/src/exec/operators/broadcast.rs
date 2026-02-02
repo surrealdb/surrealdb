@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use tokio::sync::{RwLock, watch};
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecutionContext, FlowResult, OperatorPlan, ValueBatch,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
 	ValueBatchStream,
 };
 
@@ -32,7 +32,7 @@ use crate::exec::{
 /// it executes once and both consumers read from the shared cache.
 #[derive(Debug, Clone)]
 pub struct BroadcastSource {
-	input: Arc<dyn OperatorPlan>,
+	input: Arc<dyn ExecOperator>,
 	state: Arc<BroadcastState>,
 }
 
@@ -59,7 +59,7 @@ impl std::fmt::Debug for BroadcastState {
 }
 
 impl BroadcastSource {
-	pub fn new(input: Arc<dyn OperatorPlan>) -> Self {
+	pub fn new(input: Arc<dyn ExecOperator>) -> Self {
 		let (tx, _rx) = watch::channel(0);
 		Self {
 			input,
@@ -74,7 +74,7 @@ impl BroadcastSource {
 	}
 
 	async fn run_producer(
-		input: Arc<dyn OperatorPlan>,
+		input: Arc<dyn ExecOperator>,
 		ctx: &ExecutionContext,
 		state: &BroadcastState,
 	) -> Result<(), anyhow::Error> {
@@ -119,7 +119,7 @@ impl BroadcastSource {
 }
 
 #[async_trait]
-impl OperatorPlan for BroadcastSource {
+impl ExecOperator for BroadcastSource {
 	fn name(&self) -> &'static str {
 		"BroadcastSource"
 	}
@@ -151,7 +151,7 @@ impl OperatorPlan for BroadcastSource {
 		))
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 }
@@ -169,7 +169,7 @@ fn make_cursor_stream(
 	changed_rx: watch::Receiver<usize>,
 	needs_spawn: bool,
 	ctx: ExecutionContext,
-	input: Option<Arc<dyn OperatorPlan>>,
+	input: Option<Arc<dyn ExecOperator>>,
 ) -> ValueBatchStream {
 	let cursor_state = CursorState {
 		state: state.clone(),
@@ -288,7 +288,7 @@ mod tests {
 		}
 	}
 
-	impl OperatorPlan for MockPlan {
+	impl ExecOperator for MockPlan {
 		fn name(&self) -> &'static str {
 			"MockPlan"
 		}
@@ -301,7 +301,7 @@ mod tests {
 			AccessMode::ReadOnly
 		}
 
-		fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 			use futures::StreamExt;
 			let batches = (*self.batches).clone();
 			let delay_ms = self.delay_ms;
@@ -325,7 +325,7 @@ mod tests {
 		error_msg: String,
 	}
 
-	impl OperatorPlan for ErrorPlan {
+	impl ExecOperator for ErrorPlan {
 		fn name(&self) -> &'static str {
 			"ErrorPlan"
 		}
@@ -338,7 +338,7 @@ mod tests {
 			AccessMode::ReadOnly
 		}
 
-		fn execute(&self, _ctx: &ExecutionContext) -> Result<ValueBatchStream, Error> {
+		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 			let error_msg = self.error_msg.clone();
 			let stream = futures::stream::once(async move {
 				Err(crate::expr::ControlFlow::Err(anyhow::anyhow!("{}", error_msg)))
@@ -348,12 +348,19 @@ mod tests {
 	}
 
 	async fn create_test_context() -> ExecutionContext {
+		use crate::ctx::Context;
 		use crate::iam::Role;
 		use crate::kvs::{Datastore, LockType, TransactionType};
 
 		// Create a minimal root context for testing
 		let ds = Datastore::new("memory").await.unwrap();
 		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let txn = Arc::new(txn);
+
+		// Create a minimal FrozenContext for the test
+		let mut ctx = Context::background();
+		ctx.set_transaction(txn.clone());
+		let frozen_ctx = Arc::new(ctx);
 
 		let root_ctx = RootContext {
 			datastore: None,
@@ -361,7 +368,11 @@ mod tests {
 			cancellation: CancellationToken::new(),
 			auth: Arc::new(Auth::for_root(Role::Owner)),
 			auth_enabled: false,
-			txn: Arc::new(txn),
+			txn,
+			session: None,
+			capabilities: None,
+			options: None,
+			ctx: frozen_ctx,
 		};
 		ExecutionContext::Root(root_ctx)
 	}

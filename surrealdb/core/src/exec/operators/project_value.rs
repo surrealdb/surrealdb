@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -22,13 +22,13 @@ use crate::expr::ControlFlow;
 #[derive(Debug, Clone)]
 pub struct ProjectValue {
 	/// The input plan to project from
-	pub input: Arc<dyn OperatorPlan>,
+	pub input: Arc<dyn ExecOperator>,
 	/// The expression to evaluate for each record
 	pub expr: Arc<dyn PhysicalExpr>,
 }
 
 #[async_trait]
-impl OperatorPlan for ProjectValue {
+impl ExecOperator for ProjectValue {
 	fn name(&self) -> &'static str {
 		"ProjectValue"
 	}
@@ -47,7 +47,7 @@ impl OperatorPlan for ProjectValue {
 		self.input.access_mode().combine(self.expr.access_mode())
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

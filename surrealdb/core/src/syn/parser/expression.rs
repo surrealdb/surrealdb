@@ -46,7 +46,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a field, see
-	/// [`parse_value`] for parsing loose idents as table
+	/// [`parse_expr_table`] for parsing loose idents as table
 	pub(crate) async fn parse_expr_field(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
-use crate::exec::OperatorPlan;
+use crate::exec::ExecOperator;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
@@ -135,19 +135,21 @@ pub(crate) fn expr_to_physical_expr(
 					name,
 					arguments: phys_args,
 				})),
-				Function::Script(script) => Ok(Arc::new(JsFunctionExec {
-					script,
-					arguments: phys_args,
-				})),
-				Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
-					model,
-					arguments: phys_args,
-				})),
-				Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
-					module,
-					sub,
-					arguments: phys_args,
-				})),
+				Function::Script(script) => {
+					return Err(Error::Unimplemented(
+						"Script functions not yet supported in execution plans".to_string(),
+					));
+				}
+				Function::Model(model) => {
+					return Err(Error::Unimplemented(
+						"Model functions not yet supported in execution plans".to_string(),
+					));
+				}
+				Function::Module(module, sub) => {
+					return Err(Error::Unimplemented(
+						"Module functions not yet supported in execution plans".to_string(),
+					));
+				}
 				Function::Silo {
 					org,
 					pkg,
@@ -399,7 +401,7 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 pub(crate) fn try_plan_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	match expr {
 		// Supported statements
 		Expr::Select(select) => plan_select(*select, ctx),
@@ -445,16 +447,16 @@ pub(crate) fn try_plan_expr(
 			match *info {
 				InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
 					structured,
-				}) as Arc<dyn OperatorPlan>),
+				}) as Arc<dyn ExecOperator>),
 				InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
 					structured,
-				}) as Arc<dyn OperatorPlan>),
+				}) as Arc<dyn ExecOperator>),
 				InfoStatement::Db(structured, version) => {
 					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
 					Ok(Arc::new(DatabaseInfoPlan {
 						structured,
 						version,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::Tb(table, structured, version) => {
 					let table = expr_to_physical_expr(table, ctx)?;
@@ -463,7 +465,7 @@ pub(crate) fn try_plan_expr(
 						table,
 						structured,
 						version,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::User(user, base, structured) => {
 					let user = expr_to_physical_expr(user, ctx)?;
@@ -471,7 +473,7 @@ pub(crate) fn try_plan_expr(
 						user,
 						base,
 						structured,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::Index(index, table, structured) => {
 					let index = expr_to_physical_expr(index, ctx)?;
@@ -480,7 +482,7 @@ pub(crate) fn try_plan_expr(
 						index,
 						table,
 						structured,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 			}
 		}
@@ -488,11 +490,11 @@ pub(crate) fn try_plan_expr(
 			param: stmt.param.clone(),
 			range: stmt.range.clone(),
 			body: stmt.block.clone(),
-		}) as Arc<dyn OperatorPlan>),
+		}) as Arc<dyn ExecOperator>),
 		Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
 			branches: stmt.exprs.clone(),
 			else_body: stmt.close.clone(),
-		}) as Arc<dyn OperatorPlan>),
+		}) as Arc<dyn ExecOperator>),
 		Expr::Block(block) => {
 			// Deferred planning: wrap the block without converting inner expressions.
 			// The SequencePlan will plan and execute each expression at runtime,
@@ -502,7 +504,7 @@ pub(crate) fn try_plan_expr(
 				use crate::exec::physical_expr::Literal as PhysicalLiteral;
 				Ok(Arc::new(ExprPlan {
 					expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
-				}) as Arc<dyn OperatorPlan>)
+				}) as Arc<dyn ExecOperator>)
 			} else if block.0.len() == 1 {
 				// Single statement - plan directly without wrapper
 				try_plan_expr(block.0.into_iter().next().unwrap(), ctx)
@@ -510,7 +512,7 @@ pub(crate) fn try_plan_expr(
 				// Multiple statements - use SequencePlan with deferred planning
 				Ok(Arc::new(SequencePlan {
 					block: *block,
-				}) as Arc<dyn OperatorPlan>)
+				}) as Arc<dyn ExecOperator>)
 			}
 		}
 		Expr::FunctionCall(_) => {
@@ -524,13 +526,13 @@ pub(crate) fn try_plan_expr(
 			}
 			Ok(Arc::new(ExprPlan {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 		Expr::Closure(closure) => Ok(Arc::new(ClosurePlan {
 			args: closure.args.clone(),
 			returns: closure.returns.clone(),
 			body: closure.body.clone(),
-		}) as Arc<dyn OperatorPlan>),
+		}) as Arc<dyn ExecOperator>),
 		Expr::Return(output_stmt) => {
 			// Plan the inner expression
 			let inner = try_plan_expr(output_stmt.what, ctx)?;
@@ -557,7 +559,7 @@ pub(crate) fn try_plan_expr(
 					Arc::new(Fetch {
 						input: inner,
 						fields,
-					}) as Arc<dyn OperatorPlan>
+					}) as Arc<dyn ExecOperator>
 				}
 			} else {
 				inner
@@ -619,7 +621,7 @@ pub(crate) fn try_plan_expr(
 			}
 			Ok(Arc::new(ExprPlan {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Idiom expressions require row context, so they need special handling
@@ -633,7 +635,7 @@ pub(crate) fn try_plan_expr(
 			}
 			Ok(Arc::new(ExprPlan {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Mock expressions generate test data - defer for now
@@ -654,7 +656,7 @@ pub(crate) fn try_plan_expr(
 			}
 			Ok(Arc::new(ExprPlan {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 	}
 }
@@ -674,7 +676,7 @@ pub(crate) fn try_plan_expr(
 fn plan_select(
 	select: crate::expr::statements::SelectStatement,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	let crate::expr::statements::SelectStatement {
 		mut fields,
 		omit,
@@ -727,7 +729,7 @@ fn plan_select(
 		Arc::new(Filter {
 			input: source,
 			predicate,
-		}) as Arc<dyn OperatorPlan>
+		}) as Arc<dyn ExecOperator>
 	} else {
 		source
 	};
@@ -738,7 +740,7 @@ fn plan_select(
 		Arc::new(Split {
 			input: filtered,
 			idioms,
-		}) as Arc<dyn OperatorPlan>
+		}) as Arc<dyn ExecOperator>
 	} else {
 		filtered
 	};
@@ -757,7 +759,7 @@ fn plan_select(
 				input: split,
 				group_by,
 				aggregates,
-			}) as Arc<dyn OperatorPlan>,
+			}) as Arc<dyn ExecOperator>,
 			true,
 		)
 	} else {
@@ -792,7 +794,7 @@ fn plan_select(
 			input: sorted,
 			limit: limit_expr,
 			offset: offset_expr,
-		}) as Arc<dyn OperatorPlan>
+		}) as Arc<dyn ExecOperator>
 	} else {
 		sorted
 	};
@@ -817,7 +819,7 @@ fn plan_select(
 			Arc::new(Timeout {
 				input: projected,
 				timeout: Some(timeout_phys),
-			}) as Arc<dyn OperatorPlan>
+			}) as Arc<dyn ExecOperator>
 		}
 	};
 
@@ -835,9 +837,9 @@ fn plan_select(
 fn plan_projections(
 	fields: &Fields,
 	omit: &[Expr],
-	input: Arc<dyn OperatorPlan>,
+	input: Arc<dyn ExecOperator>,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	match fields {
 		// SELECT VALUE expr - return raw values (OMIT doesn't make sense here)
 		Fields::Value(selector) => {
@@ -850,7 +852,7 @@ fn plan_projections(
 			Ok(Arc::new(ProjectValue {
 				input,
 				expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// SELECT field1, field2, ... or SELECT *
@@ -869,7 +871,7 @@ fn plan_projections(
 						fields: vec![], // No specific fields - pass through
 						omit: omit_fields,
 						include_all: true,
-					}) as Arc<dyn OperatorPlan>);
+					}) as Arc<dyn ExecOperator>);
 				}
 				return Ok(input);
 			}
@@ -921,7 +923,7 @@ fn plan_projections(
 				fields: field_selections,
 				omit: omit_fields,
 				include_all: has_wildcard,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 	}
 }
@@ -982,9 +984,9 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 /// Plan FETCH clause
 fn plan_fetch(
 	fetch: Option<crate::expr::fetch::Fetchs>,
-	input: Arc<dyn OperatorPlan>,
+	input: Arc<dyn ExecOperator>,
 	projection: &mut Fields,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	let Some(fetchs) = fetch else {
 		return Ok(input);
 	};
@@ -1017,7 +1019,7 @@ fn plan_fetch(
 	Ok(Arc::new(Fetch {
 		input,
 		fields,
-	}) as Arc<dyn OperatorPlan>)
+	}) as Arc<dyn ExecOperator>)
 }
 
 /// Plan aggregation fields from SELECT expression and GROUP BY.
@@ -1189,7 +1191,7 @@ fn plan_select_sources(
 	what: Vec<Expr>,
 	version: Option<u64>,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	if what.is_empty() {
 		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
 	}
@@ -1220,7 +1222,7 @@ fn plan_single_source(
 	expr: Expr,
 	version: Option<u64>,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	use crate::val::Value;
 
 	match expr {
@@ -1236,7 +1238,7 @@ fn plan_single_source(
 			Ok(Arc::new(Scan {
 				source: table_expr,
 				version,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Record ID literal: SELECT * FROM users:123
@@ -1251,7 +1253,7 @@ fn plan_single_source(
 			Ok(Arc::new(Scan {
 				source: table_expr,
 				version,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Subquery: SELECT * FROM (SELECT * FROM table)
@@ -1266,7 +1268,7 @@ fn plan_single_source(
 			let phys_expr = expr_to_physical_expr(expr, ctx)?;
 			Ok(Arc::new(SourceExpr {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Parameter: SELECT * FROM $param
@@ -1279,14 +1281,14 @@ fn plan_single_source(
 					Ok(Arc::new(Scan {
 						source: table_expr,
 						version,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
 					// Array, scalar, or unknown → SourceExpr
 					let phys_expr = expr_to_physical_expr(Expr::Param(param), ctx)?;
 					Ok(Arc::new(SourceExpr {
 						expr: phys_expr,
-					}) as Arc<dyn OperatorPlan>)
+					}) as Arc<dyn ExecOperator>)
 				}
 			}
 		}
@@ -1308,7 +1310,7 @@ fn plan_single_source(
 			let phys_expr = expr_to_physical_expr(other, ctx)?;
 			Ok(Arc::new(SourceExpr {
 				expr: phys_expr,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 	}
 }
@@ -1317,7 +1319,7 @@ fn plan_single_source(
 fn convert_let_statement(
 	let_stmt: crate::expr::statements::SetStatement,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	let crate::expr::statements::SetStatement {
 		name,
 		what,
@@ -1325,7 +1327,7 @@ fn convert_let_statement(
 	} = let_stmt;
 
 	// Determine if the expression is a query or scalar
-	let value: Arc<dyn OperatorPlan> = match what {
+	let value: Arc<dyn ExecOperator> = match what {
 		// SELECT produces a stream that gets collected into an array
 		Expr::Select(select) => plan_select(*select, ctx)?,
 
@@ -1374,14 +1376,14 @@ fn convert_let_statement(
 
 			Arc::new(ExprPlan {
 				expr,
-			}) as Arc<dyn OperatorPlan>
+			}) as Arc<dyn ExecOperator>
 		}
 	};
 
 	Ok(Arc::new(LetPlan {
 		name,
 		value,
-	}) as Arc<dyn OperatorPlan>)
+	}) as Arc<dyn ExecOperator>)
 }
 
 /// Plan ORDER BY clause by selecting the appropriate sort operator.
@@ -1392,13 +1394,13 @@ fn convert_let_statement(
 /// - `SortTopK`: when limit is small (heap-based top-k selection)
 /// - `Sort`: default full in-memory sort with parallel sorting
 fn plan_sort(
-	input: Arc<dyn OperatorPlan>,
+	input: Arc<dyn ExecOperator>,
 	order: &crate::expr::order::Ordering,
 	start: &Option<crate::expr::start::Start>,
 	limit: &Option<crate::expr::limit::Limit>,
 	#[allow(unused)] tempfiles: bool,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	use crate::expr::order::Ordering;
 
 	match order {
@@ -1409,7 +1411,7 @@ fn plan_sort(
 			Ok(Arc::new(RandomShuffle {
 				input,
 				limit: effective_limit,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 		Ordering::Order(order_list) => {
 			// Convert order list to OrderByField vec
@@ -1423,7 +1425,7 @@ fn plan_sort(
 						input,
 						order_by,
 						temp_dir: temp_dir.to_path_buf(),
-					}) as Arc<dyn OperatorPlan>);
+					}) as Arc<dyn ExecOperator>);
 				}
 			}
 
@@ -1434,7 +1436,7 @@ fn plan_sort(
 						input,
 						order_by,
 						limit: effective_limit,
-					}) as Arc<dyn OperatorPlan>);
+					}) as Arc<dyn ExecOperator>);
 				}
 			}
 
@@ -1442,7 +1444,7 @@ fn plan_sort(
 			Ok(Arc::new(Sort {
 				input,
 				order_by,
-			}) as Arc<dyn OperatorPlan>)
+			}) as Arc<dyn ExecOperator>)
 		}
 	}
 }
@@ -1725,7 +1727,7 @@ fn convert_recurse_instruction(
 fn plan_lookup(
 	lookup: &crate::expr::lookup::Lookup,
 	ctx: &FrozenContext,
-) -> Result<Arc<dyn OperatorPlan>, Error> {
+) -> Result<Arc<dyn ExecOperator>, Error> {
 	use crate::exec::operators::{Filter, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
 
 	// Determine the source expression (current value's record ID)
@@ -1734,7 +1736,7 @@ fn plan_lookup(
 		Arc::new(crate::exec::physical_expr::Literal(crate::val::Value::None));
 
 	// Create the base scan operator
-	let base_scan: Arc<dyn OperatorPlan> = match &lookup.kind {
+	let base_scan: Arc<dyn ExecOperator> = match &lookup.kind {
 		crate::expr::lookup::LookupKind::Graph(dir) => {
 			// Convert lookup subjects to table names
 			let edge_tables: Vec<_> = lookup
@@ -1786,7 +1788,7 @@ fn plan_lookup(
 	};
 
 	// Apply filter if present
-	let filtered: Arc<dyn OperatorPlan> = if let Some(cond) = &lookup.cond {
+	let filtered: Arc<dyn ExecOperator> = if let Some(cond) = &lookup.cond {
 		let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
 		Arc::new(Filter {
 			input: base_scan,
@@ -1797,7 +1799,7 @@ fn plan_lookup(
 	};
 
 	// Apply limit if present
-	let limited: Arc<dyn OperatorPlan> = if lookup.limit.is_some() || lookup.start.is_some() {
+	let limited: Arc<dyn ExecOperator> = if lookup.limit.is_some() || lookup.start.is_some() {
 		let limit_expr =
 			lookup.limit.as_ref().map(|l| expr_to_physical_expr(l.0.clone(), ctx)).transpose()?;
 		let offset_expr =

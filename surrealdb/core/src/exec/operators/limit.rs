@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
@@ -16,7 +16,7 @@ use crate::expr::ControlFlow;
 /// applies them to the input stream by skipping and limiting values.
 #[derive(Debug, Clone)]
 pub struct Limit {
-	pub(crate) input: Arc<dyn OperatorPlan>,
+	pub(crate) input: Arc<dyn ExecOperator>,
 	/// Maximum number of values to return (LIMIT clause)
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Number of values to skip (START/OFFSET clause)
@@ -24,7 +24,7 @@ pub struct Limit {
 }
 
 #[async_trait]
-impl OperatorPlan for Limit {
+impl ExecOperator for Limit {
 	fn name(&self) -> &'static str {
 		"Limit"
 	}
@@ -57,7 +57,7 @@ impl OperatorPlan for Limit {
 		mode
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

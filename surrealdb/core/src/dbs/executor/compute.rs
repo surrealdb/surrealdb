@@ -171,7 +171,7 @@ impl ComputeExecutor {
 	/// the streaming operator plan, collecting all results into an array.
 	async fn execute_operator_plan(
 		&self,
-		plan: Arc<dyn crate::exec::OperatorPlan>,
+		plan: Arc<dyn crate::exec::ExecOperator>,
 		txn: Arc<Transaction>,
 	) -> anyhow::Result<Value> {
 		use tokio_util::sync::CancellationToken;
@@ -204,6 +204,8 @@ impl ComputeExecutor {
 			capabilities,
 			// Include Options for fallback to legacy compute path
 			options: Some(self.opt.clone()),
+			// Include the FrozenContext for operators that need to call legacy compute methods
+			ctx: self.ctx.clone(),
 		};
 
 		// Check what level of context we need

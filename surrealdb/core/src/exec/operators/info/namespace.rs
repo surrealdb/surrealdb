@@ -14,7 +14,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, UserProvider};
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Object, Value};
@@ -29,7 +29,7 @@ pub struct NamespaceInfoPlan {
 }
 
 #[async_trait]
-impl OperatorPlan for NamespaceInfoPlan {
+impl ExecOperator for NamespaceInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoNamespace"
 	}

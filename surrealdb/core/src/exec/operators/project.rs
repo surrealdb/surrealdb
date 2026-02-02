@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecutionContext, FlowResult,
-	OperatorPlan, PhysicalExpr, ValueBatch, ValueBatchStream,
+	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -33,7 +33,7 @@ pub struct FieldSelection {
 #[derive(Debug, Clone)]
 pub struct Project {
 	/// The input plan to project from
-	pub input: Arc<dyn OperatorPlan>,
+	pub input: Arc<dyn ExecOperator>,
 	/// The fields to select/project
 	pub fields: Vec<FieldSelection>,
 	/// Fields to omit from output (for SELECT * OMIT)
@@ -43,7 +43,7 @@ pub struct Project {
 }
 
 #[async_trait]
-impl OperatorPlan for Project {
+impl ExecOperator for Project {
 	fn name(&self) -> &'static str {
 		"Project"
 	}
@@ -61,7 +61,7 @@ impl OperatorPlan for Project {
 		self.input.access_mode().combine(expr_mode)
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 

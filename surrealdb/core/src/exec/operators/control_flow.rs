@@ -12,7 +12,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
@@ -52,11 +52,11 @@ pub struct ControlFlowPlan {
 	/// The kind of control flow operation
 	pub kind: ControlFlowKind,
 	/// Inner plan for RETURN/THROW (None for BREAK/CONTINUE)
-	pub inner: Option<Arc<dyn OperatorPlan>>,
+	pub inner: Option<Arc<dyn ExecOperator>>,
 }
 
 #[async_trait]
-impl OperatorPlan for ControlFlowPlan {
+impl ExecOperator for ControlFlowPlan {
 	fn name(&self) -> &'static str {
 		"ControlFlow"
 	}
@@ -133,7 +133,7 @@ impl OperatorPlan for ControlFlowPlan {
 		}
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		self.inner.as_ref().map(|p| vec![p]).unwrap_or_default()
 	}
 }

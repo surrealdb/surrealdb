@@ -12,7 +12,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, FlowResult, OperatorPlan, ValueBatch, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::val::Value;
 
 /// SourceExpr operator - evaluates an expression and yields values for iteration.
@@ -29,7 +29,7 @@ pub struct SourceExpr {
 }
 
 #[async_trait]
-impl OperatorPlan for SourceExpr {
+impl ExecOperator for SourceExpr {
 	fn name(&self) -> &'static str {
 		"SourceExpr"
 	}

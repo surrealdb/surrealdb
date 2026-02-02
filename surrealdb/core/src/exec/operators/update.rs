@@ -18,7 +18,7 @@ use crate::exec::permission::{
 	should_check_perms,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecutionContext, FlowResult, OperatorPlan,
+	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::iam::Action;
@@ -42,13 +42,13 @@ pub struct Update {
 	/// The table to update records in
 	pub table: TableName,
 	/// The input plan providing records to update
-	pub input: Arc<dyn OperatorPlan>,
+	pub input: Arc<dyn ExecOperator>,
 	/// The fields to set
 	pub changes: Vec<SetField>,
 }
 
 #[async_trait]
-impl OperatorPlan for Update {
+impl ExecOperator for Update {
 	fn name(&self) -> &'static str {
 		"Update"
 	}
@@ -62,7 +62,7 @@ impl OperatorPlan for Update {
 		AccessMode::ReadWrite
 	}
 
-	fn children(&self) -> Vec<&Arc<dyn OperatorPlan>> {
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
 
@@ -83,6 +83,7 @@ impl OperatorPlan for Update {
 		let params = db_ctx.ns_ctx.root.params.clone();
 		let auth = db_ctx.ns_ctx.root.auth.clone();
 		let auth_enabled = db_ctx.ns_ctx.root.auth_enabled;
+		let frozen_ctx = ctx.ctx().clone();
 
 		// Cache for permission (resolved on first batch)
 		let update_permission: Arc<tokio::sync::Mutex<Option<PhysicalPermission>>> =
@@ -98,6 +99,7 @@ impl OperatorPlan for Update {
 			let params = params.clone();
 			let auth = auth.clone();
 			let update_permission = update_permission.clone();
+			let frozen_ctx = frozen_ctx.clone();
 
 			async move {
 				use crate::expr::ControlFlow;
@@ -169,6 +171,7 @@ impl OperatorPlan for Update {
 								session: None,
 								capabilities: None,
 								options: None,
+								ctx: frozen_ctx.clone(),
 							},
 							ns: ns.clone(),
 						},

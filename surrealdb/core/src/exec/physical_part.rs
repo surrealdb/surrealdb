@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, OperatorPlan, PhysicalExpr};
+use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator, PhysicalExpr};
 use crate::expr::part::DestructurePart;
 use crate::expr::{Dir, Idiom};
 use crate::val::TableName;
@@ -334,7 +334,7 @@ pub struct PhysicalLookup {
 
 	/// The pre-planned operator tree for executing the lookup.
 	/// This includes GraphEdgeScan/ReferenceScan + optional Filter, Sort, Limit, Project.
-	pub plan: Arc<dyn OperatorPlan>,
+	pub plan: Arc<dyn ExecOperator>,
 
 	/// Optional alias for multi-yield expressions
 	pub alias: Option<Idiom>,
