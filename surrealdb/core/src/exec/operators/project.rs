@@ -172,19 +172,32 @@ fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
 			}
 		}
 		Part::All => {
-			// Apply to all elements
-			match value {
-				Value::Object(obj) => {
-					for (_, v) in obj.iter_mut() {
-						omit_nested_field(v, idiom, depth + 1);
+			if depth == idiom.len() - 1 {
+				// Last part - remove all fields from current object
+				match value {
+					Value::Object(obj) => {
+						obj.clear();
 					}
-				}
-				Value::Array(arr) => {
-					for v in arr.iter_mut() {
-						omit_nested_field(v, idiom, depth + 1);
+					Value::Array(arr) => {
+						arr.clear();
 					}
+					_ => {}
 				}
-				_ => {}
+			} else {
+				// Not last part - recurse into all elements
+				match value {
+					Value::Object(obj) => {
+						for (_, v) in obj.iter_mut() {
+							omit_nested_field(v, idiom, depth + 1);
+						}
+					}
+					Value::Array(arr) => {
+						for v in arr.iter_mut() {
+							omit_nested_field(v, idiom, depth + 1);
+						}
+					}
+					_ => {}
+				}
 			}
 		}
 		Part::Value(expr) => {

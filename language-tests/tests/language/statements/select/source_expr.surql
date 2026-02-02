@@ -45,13 +45,25 @@ value = "[{ name: 'John' }, { name: 'Jane' }]"
 [[test.results]]
 value = "[{ id: person:2, name: 'Jane' }]"
 
+# 11: Parameter - array value (LET returns NONE)
+[[test.results]]
+value = "NONE"
+
 # 11: Parameter - array value
 [[test.results]]
 value = "[10, 20, 30]"
 
+# 12: Parameter - array value with filter (LET returns NONE)
+[[test.results]]
+value = "NONE"
+
 # 12: Parameter - array value with filter
 [[test.results]]
 value = "[20, 30]"
+
+# 13: Parameter - table name value (LET returns NONE)
+[[test.results]]
+value = "NONE"
 
 # 13: Parameter - table name value
 [[test.results]]

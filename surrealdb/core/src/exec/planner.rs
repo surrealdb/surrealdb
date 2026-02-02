@@ -807,8 +807,20 @@ fn plan_select(
 
 	// Apply projections (SELECT fields or SELECT VALUE)
 	// Skip if GROUP BY is present (handled by Aggregate operator)
+	// However, still apply OMIT if present since Aggregate doesn't handle it
 	let projected = if skip_projections {
-		fetched
+		// GROUP BY case - skip projections but apply OMIT if needed
+		if !omit.is_empty() {
+			let omit_fields = plan_omit_fields(omit.to_vec(), ctx)?;
+			Arc::new(Project {
+				input: fetched,
+				fields: vec![], // No specific fields - pass through
+				omit: omit_fields,
+				include_all: true,
+			}) as Arc<dyn ExecOperator>
+		} else {
+			fetched
+		}
 	} else {
 		plan_projections(&fields, &omit, fetched, ctx)?
 	};
@@ -876,6 +888,26 @@ fn plan_projections(
 					}) as Arc<dyn ExecOperator>);
 				}
 				return Ok(input);
+			}
+
+			// Check if this is a single bare parameter projection (no alias)
+			// e.g., SELECT $this FROM ... should behave like SELECT VALUE $this FROM ...
+			let is_single_param = field_list.len() == 1
+				&& matches!(
+					field_list.first(),
+					Some(Field::Single(selector))
+						if selector.alias.is_none() && matches!(selector.expr, Expr::Param(_))
+				);
+
+			if is_single_param {
+				// Treat as SELECT VALUE - return raw values without object wrapper
+				if let Some(Field::Single(selector)) = field_list.first() {
+					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
+					return Ok(Arc::new(ProjectValue {
+						input,
+						expr,
+					}) as Arc<dyn ExecOperator>);
+				}
 			}
 
 			// Check for wildcards mixed with specific fields
