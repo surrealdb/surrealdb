@@ -35,16 +35,19 @@ pub struct EventDefinition {
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
 // non-breaking way
 impl EventDefinition {
+	pub(crate) const DEFAULT_RETRY: u16 = 1;
+	pub(crate) const DEFAULT_MAX_DEPTH: u16 = 3;
+
 	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
 	}
 
 	fn default_retry(_revision: u16) -> Result<u16, revision::Error> {
-		Ok(1)
+		Ok(Self::DEFAULT_RETRY)
 	}
 
 	fn default_max_depth(_revision: u16) -> Result<u16, revision::Error> {
-		Ok(3)
+		Ok(Self::DEFAULT_MAX_DEPTH)
 	}
 }
 

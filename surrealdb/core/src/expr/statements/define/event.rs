@@ -85,8 +85,8 @@ impl DefineEventStatement {
 				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 				comment,
 				asynchronous: self.asynchronous,
-				retry: self.retry.unwrap_or(1),
-				max_depth: self.max_depth.unwrap_or(5),
+				retry: self.retry.unwrap_or(EventDefinition::DEFAULT_RETRY),
+				max_depth: self.max_depth.unwrap_or(EventDefinition::DEFAULT_MAX_DEPTH),
 			},
 			None,
 		)
