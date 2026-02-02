@@ -962,6 +962,7 @@ allow_unsafe = true
 
 [pkg.rquickjs-core]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.reblessive]
 allow_unsafe = true
