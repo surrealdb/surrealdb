@@ -622,7 +622,9 @@ impl Context {
 		&self,
 		map: HashMap<Cow<'static, str>, Arc<Value>>,
 	) -> HashMap<Cow<'static, str>, Arc<Value>> {
-		let mut map = if let Some(p) = &self.parent {
+		let mut map = if !self.isolated
+			&& let Some(p) = &self.parent
+		{
 			p.collect_values(map)
 		} else {
 			map
