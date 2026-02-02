@@ -1865,9 +1865,7 @@ fn get_effective_limit_literal(
 // Consolidated Expression Evaluation Support
 // ============================================================================
 
-use crate::exec::expression_registry::{
-	ComputePoint, ExpressionRegistry, resolve_order_by_alias,
-};
+use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
 use crate::exec::operators::{Compute, Projection, SelectProject, SortByKey, SortKey};
 
@@ -1927,7 +1925,8 @@ pub(crate) fn plan_sort_consolidated(
 							match FieldPath::try_from(inner_idiom) {
 								Ok(path) => path,
 								Err(_) => {
-									// Complex idiom (graph traversal, etc.) - register for computation
+									// Complex idiom (graph traversal, etc.) - register for
+									// computation
 									let name = registry.register(
 										&resolved_expr,
 										ComputePoint::BeforeSort,

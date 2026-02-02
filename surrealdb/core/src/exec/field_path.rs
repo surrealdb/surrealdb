@@ -66,14 +66,14 @@ impl TryFrom<&Idiom> for FieldPath {
 				Part::Value(Expr::Literal(Literal::Integer(i))) if *i >= 0 => {
 					parts.push(FieldPathPart::Index(*i as usize))
 				}
-			_ => {
-				return Err(Error::Unimplemented(format!(
-					"FieldPath cannot contain complex parts like graph traversal, where clauses, or method calls. \
+				_ => {
+					return Err(Error::Unimplemented(format!(
+						"FieldPath cannot contain complex parts like graph traversal, where clauses, or method calls. \
 					 Only simple field access (a.b.c) and literal indices ([0], [$]) are supported. \
 					 Got: {:?}",
-					idiom
-				)));
-			}
+						idiom
+					)));
+				}
 			}
 		}
 		Ok(FieldPath(parts))
@@ -225,10 +225,8 @@ mod tests {
 	#[test]
 	fn test_field_path_extract_array_index() {
 		// Create path: items[0]
-		let path = FieldPath(vec![
-			FieldPathPart::Field("items".to_string()),
-			FieldPathPart::Index(0),
-		]);
+		let path =
+			FieldPath(vec![FieldPathPart::Field("items".to_string()), FieldPathPart::Index(0)]);
 
 		let items = Value::Array(vec![Value::from("first"), Value::from("second")].into());
 		let obj = make_obj(vec![("items", items)]);
@@ -241,10 +239,7 @@ mod tests {
 	#[test]
 	fn test_field_path_extract_array_last() {
 		// Create path: items[$]
-		let path = FieldPath(vec![
-			FieldPathPart::Field("items".to_string()),
-			FieldPathPart::Last,
-		]);
+		let path = FieldPath(vec![FieldPathPart::Field("items".to_string()), FieldPathPart::Last]);
 
 		let items = Value::Array(vec![Value::from("first"), Value::from("second")].into());
 		let obj = make_obj(vec![("items", items)]);

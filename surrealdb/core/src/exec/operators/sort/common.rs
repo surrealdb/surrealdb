@@ -3,8 +3,8 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use crate::exec::field_path::FieldPath;
 use crate::exec::PhysicalExpr;
+use crate::exec::field_path::FieldPath;
 use crate::val::Value;
 
 /// Sort direction for ORDER BY
