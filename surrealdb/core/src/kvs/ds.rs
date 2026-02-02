@@ -1387,8 +1387,7 @@ impl Datastore {
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Calculating the current system time
-	/// 4. Cleaning up old changefeed data from all databases
+	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration

@@ -126,6 +126,7 @@ impl Transaction {
 			anyhow::bail!(e);
 		}
 		if self.trigger_async_event.load(Ordering::Relaxed) {
+			// Notify after commit so queued events are visible to workers.
 			self.async_event_trigger.notify_one();
 		}
 		Ok(())
@@ -782,6 +783,7 @@ impl Transaction {
 		self.tr.inner.compact(rng).await
 	}
 
+	/// Mark this transaction to wake the async event processor after commit.
 	pub(crate) fn trigger_async_event(&self) {
 		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}

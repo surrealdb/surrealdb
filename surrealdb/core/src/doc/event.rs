@@ -331,7 +331,7 @@ impl AsyncEventRecord {
 		}
 		// Limit in-flight event processing to avoid oversubscription.
 		let concurrency: usize = num_cpus::get().max(4);
-		// Number of workers:
+		// Cap workers by batch size and reuse one TreeStack per worker.
 		let workers = res.len().min(concurrency);
 		// Store the join handles
 		let mut join_handles = Vec::with_capacity(workers);
@@ -343,6 +343,7 @@ impl AsyncEventRecord {
 			let receiver = receiver.clone();
 			// Spawn a worker
 			let jh = spawn(async move {
+				// Reuse a stack per worker to amortize allocations.
 				let mut stack = TreeStack::new();
 				while let Ok(event_context) = receiver.recv().await {
 					stack
@@ -469,7 +470,7 @@ impl AsyncEventContext {
 		// attempt <= retry.
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
-			// bounded here and no backoff is applied yet (will be implemented in a future version).
+			// bounded here and no backoff is applied.
 			tx.set(eq, ev, None).await?;
 		} else {
 			warn!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
@@ -478,7 +479,7 @@ impl AsyncEventContext {
 		Ok(())
 	}
 
-	/// Execute a queued event using a fresh TreeStack.
+	/// Execute a queued event using the provided stack scope.
 	async fn process_event(
 		stk: &mut Stk,
 		ctx: &FrozenContext,

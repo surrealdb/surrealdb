@@ -254,6 +254,7 @@ fn spawn_task_event_processing(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
+				// Wake early when new async events are committed.
 				_ = trigger.notified() => process_events().await,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => process_events().await

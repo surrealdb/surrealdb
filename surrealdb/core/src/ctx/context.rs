@@ -618,6 +618,8 @@ impl Context {
 		}
 	}
 
+	/// Collect context values into the provided map, walking up parent contexts
+	/// unless this context is isolated.
 	pub(crate) fn collect_values(
 		&self,
 		map: HashMap<Cow<'static, str>, Arc<Value>>,
