@@ -360,6 +360,9 @@ impl AsyncEventRecord {
 		for (k, v) in res {
 			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
 			sender.send(event_context).await?;
+			if let Some(lh) = lh {
+				lh.try_maintain_lease().await?
+			}
 		}
 		sender.close();
 
