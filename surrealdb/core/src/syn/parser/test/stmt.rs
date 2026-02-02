@@ -148,7 +148,6 @@ fn parse_create() {
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			version: Expr::Literal(Literal::None),
 		})),
 	);
 }
@@ -2160,7 +2159,6 @@ fn parse_insert() {
 				},
 			])),
 			output: Some(Output::After),
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
 		})),
@@ -2202,7 +2200,6 @@ fn parse_insert_select() {
 			ignore: true,
 			update: None,
 			output: None,
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
 		})),
@@ -2339,7 +2336,6 @@ fn parse_relate() {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				version: Expr::Literal(Literal::None),
 			})),
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),

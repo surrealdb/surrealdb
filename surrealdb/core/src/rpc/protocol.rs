@@ -77,7 +77,7 @@ pub trait RpcProtocol {
 	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		match session_id {
 			Some(id) => {
-				self.del_session(&id);
+				self.del_session(&id).await;
 				Ok(DbResult::Other(PublicValue::None))
 			}
 			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
@@ -98,8 +98,10 @@ pub trait RpcProtocol {
 	}
 
 	/// Deletes a session
-	fn del_session(&self, id: &Uuid) {
+	async fn del_session(&self, id: &Uuid) {
 		self.session_map().remove(&Some(*id));
+		// Cleanup live queries
+		self.cleanup_lqs(Some(id)).await;
 	}
 
 	/// Lists all non-default sessions
@@ -519,15 +521,11 @@ pub trait RpcProtocol {
 	}
 
 	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		if let Some(session_id) = session_id {
-			self.del_session(&session_id);
-		} else {
-			// Get a write lock on the session
-			let session_lock = self.get_session(&session_id)?;
-			let mut session = session_lock.write().await;
-			// Reset the current session
-			crate::iam::reset::reset(&mut session);
-		}
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
+		// Reset the current session
+		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(session_id.as_ref()).await;
 		// Return nothing on success
@@ -809,7 +807,6 @@ pub trait RpcProtocol {
 			update: None,
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -855,7 +852,6 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -910,7 +906,6 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::None),
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
