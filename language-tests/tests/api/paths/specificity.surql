@@ -13,15 +13,15 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { matched: 'fixed' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { matched: 'fixed' }, headers: {}, status: 200 }"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { matched: 'dynamic' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { matched: 'dynamic' }, headers: {}, status: 200 }"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { matched: 'rest' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { matched: 'rest' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
@@ -31,7 +31,7 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { matched: 'more_specific' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { matched: 'more_specific' }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
