@@ -23,7 +23,7 @@ dmp = "0.2.0"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
-js = { version = "0.9.0", package = "rquickjs" }
+js = { version = "0.11.0", package = "rquickjs" }
 lexicmp = "0.1.0"
 ## Also maintained by @Delskayn
 reblessive = "0.4.2"
