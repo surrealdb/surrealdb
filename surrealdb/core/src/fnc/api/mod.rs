@@ -91,7 +91,14 @@ pub async fn invoke(
 
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
 		req.params = params.try_into()?;
-		process_api_request_with_stack(stk, ctx, opt, api, req).await.map(Into::into)
+		let value: Value = process_api_request_with_stack(stk, ctx, opt, api, req).await?.into();
+		let Value::Object(mut obj) = value else {
+			fail!("ApiResponse converts into an object");
+		};
+
+		// Context is internal state
+		obj.remove("context");
+		Ok(Value::Object(obj))
 	} else {
 		trace!(request_id = %request_id, path = %path, "No API definition found for path");
 		let res = ApiResponse::from_error(ApiError::NotFound.into(), request_id);
