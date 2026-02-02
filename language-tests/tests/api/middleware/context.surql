@@ -16,12 +16,12 @@ value = "NONE"
 
 # 3
 [[test.results]]
-skip-api-request-id = true
-value = "{ body: { message: 'Hello', requestContext: { middleware1: 'set' } }, context: { middleware4: 'read' }, headers: {  }, status: 200 }"
+value = "NONE"
 
 # 4
 [[test.results]]
-value = "NONE"
+skip-api-request-id = true
+value = "{ body: { message: 'Hello', requestContext: { middleware1: 'set' } }, headers: { context: \"{ middleware4: 'read' }\" }, status: 200 }"
 
 # 5
 [[test.results]]
@@ -33,12 +33,12 @@ value = "NONE"
 
 # 7
 [[test.results]]
-skip-api-request-id = true
-value = "{ body: { message: 'Test', requestContext: { initial: 'value', middleware1: 'added' }, responseContext: { handler: 'set', middleware2: 'read' } }, context: { handler: 'set', middleware2: 'read' }, headers: {  }, status: 200 }"
+value = "NONE"
 
 # 8
 [[test.results]]
-value = "NONE"
+skip-api-request-id = true
+value = "{ body: { message: 'Test', requestContext: { initial: 'value', middleware1: 'added' }, responseContext: { handler: 'set', middleware2: 'read' } }, headers: { context: \"{ handler: 'set', middleware2: 'read' }\" }, status: 200 }"
 
 # 9
 [[test.results]]
@@ -58,30 +58,41 @@ value = "NONE"
 
 # 13
 [[test.results]]
+value = "NONE"
+
+# 14
+[[test.results]]
 skip-api-request-id = true
-value = "{ body: { message: 'Chain', requestContext: { step1: 'value1', step2: 'value2', step3: 'value3' }, responseContext: {  } }, context: { step2: 'value2', step3: 'value3' }, headers: {  }, status: 200 }"
+value = "{ body: { message: 'Chain', requestContext: { step1: 'value1', step2: 'value2', step3: 'value3' }, responseContext: {  } }, headers: { context: \"{ step2: 'value2', step3: 'value3' }\" }, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
 
 */
 
-# 0 - Middleware that sets request context
+# 0 
+DEFINE FUNCTION fn::context_to_headers($req: object, $next: function) -> object {
+    LET $res = $next($req);
+    RETURN $res + { headers: $res.headers + { context: $res.context.to_string() } };
+};
+
+# 1 - Middleware that sets request context
 DEFINE FUNCTION fn::set_request_context($req: object, $next: function) -> object {
     LET $req = $req + { context: $req.context + { middleware1: 'set' } };
     RETURN $next($req);
 };
 
-# 1 - Middleware that reads response context and adds to it
+# 2 - Middleware that reads response context and adds to it
 DEFINE FUNCTION fn::read_response_context($req: object, $next: function) -> object {
     LET $res = $next($req);
     RETURN $res + { context: $res.context + { middleware4: 'read' } };
 };
 
-# 2 - Test: Request and response context
+# 3 - Test: Request and response context
 DEFINE API "/context/test"
     FOR get
         MIDDLEWARE
+            fn::context_to_headers(),
             fn::set_request_context(),
             fn::read_response_context()
         THEN {
@@ -99,15 +110,16 @@ DEFINE API "/context/test"
             };
         };
 
-# 2
+# 4
 api::invoke("/context/test");
 
-# 3 - Test: Initial context from request
+# 5 - Test: Initial context from request
 DEFINE FUNCTION fn::add_to_request_context($req: object, $next: function) -> object {
     LET $req = $req + { context: $req.context + { middleware1: 'added' } };
     RETURN $next($req);
 };
 
+# 6
 DEFINE FUNCTION fn::read_response_and_add_to_body($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = $res + { body: $res.body + {
@@ -118,9 +130,11 @@ DEFINE FUNCTION fn::read_response_and_add_to_body($req: object, $next: function)
     RETURN $res;
 };
 
+# 7
 DEFINE API "/context/initial"
     FOR get
         MIDDLEWARE
+            fn::context_to_headers(),
             fn::add_to_request_context(),
             fn::read_response_and_add_to_body()
         THEN {
@@ -136,19 +150,20 @@ DEFINE API "/context/initial"
             };
         };
 
-# 4
+# 8
 api::invoke("/context/initial", {
     context: {
         initial: "value"
     }
 });
 
-# 5 - Test: Context chaining through multiple middleware
+# 9 - Test: Context chaining through multiple middleware
 DEFINE FUNCTION fn::context_step1($req: object, $next: function) -> object {
     LET $req = $req + { context: $req.context + { step1: 'value1' } };
     RETURN $next($req);
 };
 
+# 10
 DEFINE FUNCTION fn::context_step2($req: object, $next: function) -> object {
     LET $req = $req + { context: $req.context + { step2: 'value2' } };
 
@@ -156,6 +171,7 @@ DEFINE FUNCTION fn::context_step2($req: object, $next: function) -> object {
     RETURN $res + { context: $res.context + { step2: 'value2' } };
 };
 
+# 11
 DEFINE FUNCTION fn::context_step3($req: object, $next: function) -> object {
     LET $req = $req + { context: $req.context + { step3: 'value3' } };
 
@@ -163,6 +179,7 @@ DEFINE FUNCTION fn::context_step3($req: object, $next: function) -> object {
     RETURN $res + { context: $res.context + { step3: 'value3' } };
 };
 
+# 12
 DEFINE FUNCTION fn::context_final($req: object, $next: function) -> object {
     LET $res = $next($req);
     LET $res = $res + { body: $res.body + {
@@ -173,9 +190,11 @@ DEFINE FUNCTION fn::context_final($req: object, $next: function) -> object {
     RETURN $res;
 };
 
+# 13
 DEFINE API "/context/chain"
     FOR get
         MIDDLEWARE
+            fn::context_to_headers(),
             fn::context_step1(),
             fn::context_step2(),
             fn::context_step3(),
@@ -189,5 +208,5 @@ DEFINE API "/context/chain"
             };
         };
 
-# 8
+# 14
 api::invoke("/context/chain");

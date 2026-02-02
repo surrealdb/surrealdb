@@ -7,26 +7,26 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { path: '/test' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { path: '/test' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { path: '/api/users' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { path: '/api/users' }, headers: {}, status: 200 }"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
+value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
+value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Not found', context: {  }, headers: {  }, status: 404 }"
+value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

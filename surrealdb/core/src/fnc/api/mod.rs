@@ -101,8 +101,14 @@ pub async fn invoke(
 		Ok(Value::Object(obj))
 	} else {
 		trace!(request_id = %request_id, path = %path, "No API definition found for path");
-		let res = ApiResponse::from_error(ApiError::NotFound.into(), request_id);
-		Ok(res.into())
+		let value: Value = ApiResponse::from_error(ApiError::NotFound.into(), request_id).into();
+		let Value::Object(mut obj) = value else {
+			fail!("ApiResponse converts into an object");
+		};
+
+		// Context is internal state
+		obj.remove("context");
+		Ok(Value::Object(obj))
 	}
 }
 
