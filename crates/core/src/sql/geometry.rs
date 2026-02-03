@@ -1,6 +1,7 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 
 use crate::sql::array::Array;
+use crate::sql::escape::EscapeFloat;
 use crate::sql::fmt::Fmt;
 use crate::sql::value::Value;
 use geo::algorithm::contains::Contains;
@@ -569,7 +570,7 @@ impl fmt::Display for Geometry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Point(v) => {
-				write!(f, "({}, {})", v.x(), v.y())
+				write!(f, "({}, {})", EscapeFloat(v.x()), EscapeFloat(v.y()))
 			}
 			Self::Line(v) => write!(
 				f,
@@ -577,8 +578,8 @@ impl fmt::Display for Geometry {
 				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"[{}, {}]",
-					v.x(),
-					v.y()
+					EscapeFloat(v.x()),
+					EscapeFloat(v.y())
 				))))
 			),
 			Self::Polygon(v) => write!(
@@ -592,8 +593,8 @@ impl fmt::Display for Geometry {
 						Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 							f,
 							"[{}, {}]",
-							v.x(),
-							v.y()
+							EscapeFloat(v.x()),
+							EscapeFloat(v.y())
 						))))
 					)
 				)))
@@ -605,8 +606,8 @@ impl fmt::Display for Geometry {
 					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 						f,
 						"[{}, {}]",
-						v.x(),
-						v.y()
+						EscapeFloat(v.x()),
+						EscapeFloat(v.y())
 					))))
 				)
 			}
@@ -619,8 +620,8 @@ impl fmt::Display for Geometry {
 					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 						f,
 						"[{}, {}]",
-						v.x(),
-						v.y()
+						EscapeFloat(v.x()),
+						EscapeFloat(v.y())
 					))))
 				))))
 			),
@@ -638,7 +639,12 @@ impl fmt::Display for Geometry {
 									"[{}]",
 									Fmt::comma_separated(v.points().map(|v| Fmt::new(
 										v,
-										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+										|v, f| write!(
+											f,
+											"[{}, {}]",
+											EscapeFloat(v.x()),
+											EscapeFloat(v.y())
+										)
 									)))
 								))
 							))

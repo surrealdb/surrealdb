@@ -5,7 +5,10 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
+	sql::{
+		escape::EscapeKwFreeIdent, fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number,
+		Value,
+	},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -21,7 +24,6 @@ use super::{
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Part {
@@ -193,7 +195,9 @@ impl fmt::Display for Part {
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Method(v, a) => {
+				write!(f, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+			}
 			Part::Destructure(v) => {
 				f.write_str(".{")?;
 				if !is_pretty() {
@@ -538,7 +542,6 @@ impl fmt::Display for Recurse {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum RecurseInstruction {
 	Path {

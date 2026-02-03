@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::escape::EscapePath;
 use crate::sql::{Base, Ident, Value};
 
 use revision::revisioned;
@@ -54,7 +55,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0)?;
+		write!(f, " fn::{}", EscapePath(&self.name.0))?;
 		Ok(())
 	}
 }

@@ -1525,7 +1525,7 @@ impl Parser<'_> {
 						}
 						t!("EXCLUDE") => {
 							tmp_tables =
-								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+								Some(TablesConfig::Exclude(self.parse_graphql_table_configs()?))
 						}
 						t!("NONE") => {
 							tmp_tables = Some(TablesConfig::None);

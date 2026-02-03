@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
+use crate::sql::escape::EscapeKwFreeIdent;
 use crate::sql::{
 	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
 };
@@ -72,7 +73,6 @@ pub struct AccessStatementRevoke {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessStatementPurge {
 	pub ac: Ident,
@@ -84,7 +84,6 @@ pub struct AccessStatementPurge {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct AccessGrant {
 	pub id: Ident,                    // Unique grant identifier.
@@ -185,7 +184,6 @@ impl From<AccessGrant> for Object {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Subject {
 	Record(Thing),
@@ -941,9 +939,9 @@ impl Display for AccessStatement {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
-				match stmt.subject {
-					Subject::User(_) => write!(f, " FOR USER {}", stmt.subject.id())?,
-					Subject::Record(_) => write!(f, " FOR RECORD {}", stmt.subject.id())?,
+				match &stmt.subject {
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeKwFreeIdent(&x.0))?,
+					Subject::Record(x) => write!(f, " FOR RECORD {x}")?,
 				}
 				Ok(())
 			}

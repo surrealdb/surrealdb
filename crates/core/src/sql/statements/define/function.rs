@@ -13,7 +13,6 @@ use std::fmt::{self, Display, Write};
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineFunctionStatement {
 	pub name: Ident,

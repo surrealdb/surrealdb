@@ -48,6 +48,10 @@ pub enum IssueKind {
 	NumberKeyOrdering,
 	IdField,
 	SearchIndex,
+	AnalyzeStatement,
+	RecordReferences,
+	LikeOperator,
+	MTreeIndex,
 }
 
 impl IssueKind {
@@ -66,6 +70,10 @@ impl IssueKind {
 			Self::NumberKeyOrdering => "number key ordering",
 			Self::IdField => "id field",
 			Self::SearchIndex => "search index",
+			Self::AnalyzeStatement => "analyze statement",
+			Self::RecordReferences => "record references",
+			Self::LikeOperator => "like operator",
+			Self::MTreeIndex => "mtree index",
 		}
 	}
 }

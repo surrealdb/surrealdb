@@ -61,6 +61,7 @@ arbitrary = [
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
     "uuid/arbitrary",
+    "chrono/arbitrary",
 ]
 allocation-tracking = []
 # Special features

@@ -164,9 +164,9 @@ impl Lexer<'_> {
 									self.scratch.push(char);
 								} else {
 									let error = if !is_backtick {
-										syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, `⟩`, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
+										syntax_error!("Invalid escape character `{}` for identifier, valid characters are `\\`, `⟩`, `/`, `b`, `f`, `n`, `r`, or `t`", x as char, @self.current_span())
 									} else {
-										syntax_error!("Invalid escape character `{x}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", @self.current_span())
+										syntax_error!("Invalid escape character `{}` for identifier, valid characters are `\\`, ```, `/`, `b`, `f`, `n`, `r`, or `t`", x as char,  @self.current_span())
 									};
 									return Err(error);
 								}

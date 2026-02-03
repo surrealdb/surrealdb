@@ -4,7 +4,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	iam::Action,
-	sql::{ident::Ident, value::Value, Permission},
+	sql::{escape::EscapeKwFreeIdent, ident::Ident, value::Value, Permission},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -117,6 +117,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0 .0)
+		write!(f, "${}", EscapeKwFreeIdent(&self.0 .0))
 	}
 }
