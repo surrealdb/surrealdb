@@ -172,6 +172,9 @@ impl PhysicalExpr for BuiltinFunctionExec {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		// Check if function is allowed by capabilities
+		ctx.check_allowed_function(&self.name)?;
+
 		// Look up the function in the registry
 		let registry = ctx.exec_ctx.function_registry();
 		let func = registry.get(&self.name).ok_or_else(|| {

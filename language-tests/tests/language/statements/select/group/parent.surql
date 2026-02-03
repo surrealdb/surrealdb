@@ -6,12 +6,12 @@ value = "'OK'"
 
 [[test.results]]
 error = """
-Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement
+Invalid statement: Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement
 Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to"""
 
 [[test.results]]
 error = """
-Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement
+Invalid statement: Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement
 Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to"""
 
 */

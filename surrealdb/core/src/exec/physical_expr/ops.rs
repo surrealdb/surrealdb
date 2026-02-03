@@ -276,7 +276,9 @@ impl PhysicalExpr for PostfixOp {
 			PostfixOperator::Call(..) => {
 				// Closure calls are handled by ClosureCallExec in the planner
 				// This branch should never be reached
-				unreachable!("PostfixOperator::Call should be converted to ClosureCallExec by the planner")
+				unreachable!(
+					"PostfixOperator::Call should be converted to ClosureCallExec by the planner"
+				)
 			}
 		}
 	}

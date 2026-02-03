@@ -27,8 +27,16 @@ impl PhysicalExpr for ScalarSubquery {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// Execute the subquery plan
-		let mut stream = match self.plan.execute(ctx.exec_ctx) {
+		// Create a derived execution context with the parent value set.
+		// This allows $parent references in the subquery to access the outer document.
+		let subquery_ctx = if let Some(parent_value) = ctx.current_value {
+			ctx.exec_ctx.with_param("parent", parent_value.clone())
+		} else {
+			ctx.exec_ctx.clone()
+		};
+
+		// Execute the subquery plan with the derived context
+		let mut stream = match self.plan.execute(&subquery_ctx) {
 			Ok(s) => s,
 			Err(ControlFlow::Err(e)) => return Err(e),
 			Err(ControlFlow::Return(v)) => return Ok(v),

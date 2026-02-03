@@ -769,6 +769,11 @@ fn plan_select(
 	// Extract VERSION timestamp if present (for time-travel queries)
 	let version = extract_version(version)?;
 
+	// Check if all sources are "value sources" (arrays, primitives) before consuming `what`.
+	// This affects projection behavior: `SELECT $this FROM [1,2,3]` should return raw values,
+	// while `SELECT $this FROM table` should wrap in `{ this: ... }`.
+	let is_value_source = all_value_sources(&what);
+
 	// Build the source plan from `what` (FROM clause)
 	let source = plan_select_sources(what, version, ctx)?;
 
@@ -888,7 +893,7 @@ fn plan_select(
 			limited
 		}
 	} else {
-		plan_projections(&fields, &all_omit, limited, ctx)?
+		plan_projections(&fields, &all_omit, limited, ctx, is_value_source)?
 	};
 
 	// Apply FETCH if present - after projections so it can expand record IDs
@@ -910,6 +915,42 @@ fn plan_select(
 	Ok(timed)
 }
 
+/// Check if a source expression represents a "value source" (array, primitive)
+/// as opposed to a "record source" (table, record ID).
+///
+/// Value sources should use raw value projection for `SELECT $this`,
+/// while record sources should wrap in `{ this: ... }`.
+fn is_value_source_expr(expr: &Expr) -> bool {
+	match expr {
+		// Array literals are value sources - elements are iterated directly
+		Expr::Literal(Literal::Array(_)) => true,
+		// String, number, etc. are value sources
+		Expr::Literal(Literal::String(_))
+		| Expr::Literal(Literal::Integer(_))
+		| Expr::Literal(Literal::Float(_))
+		| Expr::Literal(Literal::Decimal(_))
+		| Expr::Literal(Literal::Bool(_))
+		| Expr::Literal(Literal::None)
+		| Expr::Literal(Literal::Null) => true,
+		// Tables are record sources
+		Expr::Table(_) => false,
+		// Record IDs are record sources
+		Expr::Literal(Literal::RecordId(_)) => false,
+		// Parameters might be anything - conservatively treat as record source
+		// unless we can resolve them at planning time
+		Expr::Param(_) => false,
+		// Subqueries return records
+		Expr::Select(_) => false,
+		// Other expressions - conservatively treat as record source
+		_ => false,
+	}
+}
+
+/// Check if ALL source expressions are value sources.
+fn all_value_sources(sources: &[Expr]) -> bool {
+	!sources.is_empty() && sources.iter().all(is_value_source_expr)
+}
+
 /// Plan projections (SELECT fields or SELECT VALUE)
 ///
 /// This handles:
@@ -918,11 +959,15 @@ fn plan_select(
 /// - `SELECT VALUE expr` - use ProjectValue operator
 /// - `SELECT field1, field2` - use Project operator
 /// - `SELECT field1, *, field2` - mixed wildcards (returns Unimplemented for now)
+///
+/// When `is_value_source` is true (source is array/primitive), single `$this` or `$param`
+/// projections without explicit aliases use ProjectValue (raw values) instead of Project.
 fn plan_projections(
 	fields: &Fields,
 	omit: &[Expr],
 	input: Arc<dyn ExecOperator>,
 	ctx: &FrozenContext,
+	is_value_source: bool,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	match fields {
 		// SELECT VALUE expr - return raw values (OMIT doesn't make sense here)
@@ -961,26 +1006,6 @@ fn plan_projections(
 				}) as Arc<dyn ExecOperator>);
 			}
 
-			// Check if this is a single bare parameter projection (no alias)
-			// e.g., SELECT $this FROM ... should behave like SELECT VALUE $this FROM ...
-			let is_single_param = field_list.len() == 1
-				&& matches!(
-					field_list.first(),
-					Some(Field::Single(selector))
-						if selector.alias.is_none() && matches!(selector.expr, Expr::Param(_))
-				);
-
-			if is_single_param {
-				// Treat as SELECT VALUE - return raw values without object wrapper
-				if let Some(Field::Single(selector)) = field_list.first() {
-					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-					return Ok(Arc::new(ProjectValue {
-						input,
-						expr,
-					}) as Arc<dyn ExecOperator>);
-				}
-			}
-
 			// Check for wildcards mixed with specific fields
 			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
 
@@ -989,6 +1014,25 @@ fn plan_projections(
 				return Err(Error::Unimplemented(
 					"OMIT clause with specific field projections not supported".to_string(),
 				));
+			}
+
+			// Special case: For value sources (arrays, primitives), a single `$this` or `$param`
+			// without an explicit alias should return raw values (like SELECT VALUE).
+			// This matches legacy behavior where `SELECT $this FROM [1,2,3]` returns `[1,2,3]`.
+			if is_value_source && !has_wildcard && field_list.len() == 1 {
+				if let Some(Field::Single(selector)) = field_list.first() {
+					// Check if it's a bare parameter reference without alias
+					if selector.alias.is_none() {
+						if let Expr::Param(_) = &selector.expr {
+							// Use ProjectValue to return raw values
+							let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
+							return Ok(Arc::new(ProjectValue {
+								input,
+								expr,
+							}) as Arc<dyn ExecOperator>);
+						}
+					}
+				}
 			}
 
 			// Build field selections for specific fields (skip wildcards)
@@ -1061,6 +1105,9 @@ fn derive_field_name(expr: &Expr) -> String {
 	match expr {
 		// Simple field reference - extract the raw field name
 		Expr::Idiom(idiom) => idiom_to_field_name(idiom),
+		// Parameter reference - use the parameter name (without $)
+		// e.g., $this -> "this", $parent -> "parent"
+		Expr::Param(param) => param.as_str().to_string(),
 		// Function call - use the function's idiom representation (name without arguments)
 		Expr::FunctionCall(call) => {
 			let idiom: crate::expr::idiom::Idiom = call.receiver.to_idiom().into();

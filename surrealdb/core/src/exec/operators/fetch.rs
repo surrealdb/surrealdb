@@ -52,6 +52,13 @@ impl ExecOperator for Fetch {
 		vec![&self.input]
 	}
 
+	fn is_scalar(&self) -> bool {
+		// Fetch preserves the scalar nature of its input.
+		// If the input is a scalar expression (e.g., RETURN $var FETCH field),
+		// the result should also be treated as scalar.
+		self.input.is_scalar()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let fields = self.fields.clone();
@@ -255,6 +262,7 @@ pub(crate) async fn fetch_record(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::exec::physical_expr::Literal;
 
 	#[test]
 	fn test_fetch_name() {
@@ -265,9 +273,8 @@ mod tests {
 
 		// Create a minimal scan for testing
 		let scan = Arc::new(Scan {
-			source: "test".to_string(),
-			fields: None,
-			condition: None,
+			source: Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
+			version: None,
 		});
 
 		let fetch = Fetch {

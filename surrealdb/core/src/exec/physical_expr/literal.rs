@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -114,6 +115,15 @@ impl PhysicalExpr for Param {
 				return Ok(ctx.current_value.cloned().unwrap_or(Value::None));
 			}
 			_ => {}
+		}
+
+		// Check protected/session parameters ($auth, $access, $token, $session)
+		// These are stored in the FrozenContext and are not user-modifiable
+		if PROTECTED_PARAM_NAMES.contains(&self.0.as_str()) {
+			if let Some(value) = ctx.exec_ctx.ctx().value(&self.0) {
+				return Ok(value.clone());
+			}
+			return Ok(Value::None);
 		}
 
 		// Check block-local parameters (they shadow global params)

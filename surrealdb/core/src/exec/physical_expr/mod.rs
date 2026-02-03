@@ -160,6 +160,20 @@ impl<'a> EvalContext<'a> {
 		Ok(())
 	}
 
+	/// Check if a function is allowed by capabilities.
+	///
+	/// Returns an error if the function is not allowed.
+	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
+		use crate::err::Error;
+
+		if let Some(caps) = self.capabilities() {
+			if !caps.allows_function_name(name) {
+				return Err(Error::FunctionNotAllowed(name.to_string()).into());
+			}
+		}
+		Ok(())
+	}
+
 	/// Get a clone of the capabilities as an Arc.
 	///
 	/// Returns a default capabilities if none are available.

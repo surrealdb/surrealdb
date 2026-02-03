@@ -35,11 +35,14 @@ pub struct UserInfoPlan {
 
 impl UserInfoPlan {
 	/// Determine the required context level based on the base parameter.
+	///
+	/// When base is None, we return Root as the minimum required context since
+	/// the actual base will be determined at execution time using `Options::selected_base()`.
 	fn context_level_for_base(&self) -> ContextLevel {
 		match self.base {
-			Some(Base::Root) => ContextLevel::Root,
+			Some(Base::Root) | None => ContextLevel::Root,
 			Some(Base::Ns) => ContextLevel::Namespace,
-			Some(Base::Db) | None => ContextLevel::Database,
+			Some(Base::Db) => ContextLevel::Database,
 		}
 	}
 }
