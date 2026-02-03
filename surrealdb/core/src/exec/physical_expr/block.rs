@@ -220,41 +220,41 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								}
 							}
 						}
-					Err(Error::Unimplemented(_)) => {
-						// Fallback to legacy compute path
-						let (opt, frozen) =
-							get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
-						// Create a CursorDoc from the current value for $this resolution
-						let doc = current_value_for_legacy
-							.as_ref()
-							.map(|v| CursorDoc::new(None, None, v.clone()));
-						let mut stack = TreeStack::new();
-						match stack
-							.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
-							.finish()
-							.await
-						{
-							Ok(v) => v,
-							Err(crate::expr::ControlFlow::Return(v)) => {
-								// RETURN statement - propagate as ReturnValue error
-								return Err(ReturnValue(v).into());
-							}
-							Err(crate::expr::ControlFlow::Break) => {
-								// BREAK statement - propagate as BreakControlFlow error
-								return Err(BreakControlFlow.into());
-							}
-							Err(crate::expr::ControlFlow::Continue) => {
-								// CONTINUE statement - propagate as ContinueControlFlow error
-								return Err(ContinueControlFlow.into());
-							}
-							Err(crate::expr::ControlFlow::Err(e)) => {
-								return Err(e);
+						Err(Error::Unimplemented(_)) => {
+							// Fallback to legacy compute path
+							let (opt, frozen) =
+								get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
+							// Create a CursorDoc from the current value for $this resolution
+							let doc = current_value_for_legacy
+								.as_ref()
+								.map(|v| CursorDoc::new(None, None, v.clone()));
+							let mut stack = TreeStack::new();
+							match stack
+								.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
+								.finish()
+								.await
+							{
+								Ok(v) => v,
+								Err(crate::expr::ControlFlow::Return(v)) => {
+									// RETURN statement - propagate as ReturnValue error
+									return Err(ReturnValue(v).into());
+								}
+								Err(crate::expr::ControlFlow::Break) => {
+									// BREAK statement - propagate as BreakControlFlow error
+									return Err(BreakControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Continue) => {
+									// CONTINUE statement - propagate as ContinueControlFlow error
+									return Err(ContinueControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Err(e)) => {
+									return Err(e);
+								}
 							}
 						}
-					}
-					Err(e) => {
-						return Err(anyhow::anyhow!("Failed to plan LET expression: {}", e));
-					}
+						Err(e) => {
+							return Err(anyhow::anyhow!("Failed to plan LET expression: {}", e));
+						}
 					};
 
 					// Apply type coercion if specified
@@ -310,41 +310,41 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								}
 							}
 						}
-					Err(Error::Unimplemented(_)) => {
-						// Fallback to legacy compute path
-						let (opt, frozen) =
-							get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
-						// Create a CursorDoc from the current value for $this resolution
-						let doc = current_value_for_legacy
-							.as_ref()
-							.map(|v| CursorDoc::new(None, None, v.clone()));
-						let mut stack = TreeStack::new();
-						match stack
-							.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
-							.finish()
-							.await
-						{
-							Ok(v) => v,
-							Err(crate::expr::ControlFlow::Return(v)) => {
-								// RETURN statement - propagate as ReturnValue error
-								return Err(ReturnValue(v).into());
-							}
-							Err(crate::expr::ControlFlow::Break) => {
-								// BREAK statement - propagate as BreakControlFlow error
-								return Err(BreakControlFlow.into());
-							}
-							Err(crate::expr::ControlFlow::Continue) => {
-								// CONTINUE statement - propagate as ContinueControlFlow error
-								return Err(ContinueControlFlow.into());
-							}
-							Err(crate::expr::ControlFlow::Err(e)) => {
-								return Err(e);
+						Err(Error::Unimplemented(_)) => {
+							// Fallback to legacy compute path
+							let (opt, frozen) =
+								get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
+							// Create a CursorDoc from the current value for $this resolution
+							let doc = current_value_for_legacy
+								.as_ref()
+								.map(|v| CursorDoc::new(None, None, v.clone()));
+							let mut stack = TreeStack::new();
+							match stack
+								.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
+								.finish()
+								.await
+							{
+								Ok(v) => v,
+								Err(crate::expr::ControlFlow::Return(v)) => {
+									// RETURN statement - propagate as ReturnValue error
+									return Err(ReturnValue(v).into());
+								}
+								Err(crate::expr::ControlFlow::Break) => {
+									// BREAK statement - propagate as BreakControlFlow error
+									return Err(BreakControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Continue) => {
+									// CONTINUE statement - propagate as ContinueControlFlow error
+									return Err(ContinueControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Err(e)) => {
+									return Err(e);
+								}
 							}
 						}
-					}
-					Err(e) => {
-						return Err(anyhow::anyhow!("Failed to plan block expression: {}", e));
-					}
+						Err(e) => {
+							return Err(anyhow::anyhow!("Failed to plan block expression: {}", e));
+						}
 					};
 				}
 			}

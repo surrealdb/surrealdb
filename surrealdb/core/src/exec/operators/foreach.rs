@@ -206,11 +206,12 @@ async fn execute_foreach(
 		// Check timeout (TODO: needs proper timeout integration with ExecutionContext)
 
 		// Create a new context with the loop variable bound
-		let loop_ctx = ctx.with_param(param_name.clone(), v.clone());
+		// This is the base context for this iteration - LET statements will build on this
+		let mut current_ctx = ctx.with_param(param_name.clone(), v.clone());
 
 		// Execute each statement in the body
 		for expr in body.0.iter() {
-			let result = execute_body_expr(expr, &loop_ctx, &param_name, &v).await;
+			let result = execute_body_expr(expr, &mut current_ctx, &param_name, &v).await;
 
 			// Handle control flow signals
 			match result {
@@ -277,11 +278,13 @@ async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::Flow
 
 /// Execute a body expression with the loop variable in context.
 ///
-/// LET statements are context-mutating but within a loop iteration,
-/// they don't persist to the outer context. This handles them correctly.
+/// LET statements are context-mutating - when they execute successfully via
+/// the streaming engine, the context is updated so subsequent statements can
+/// access the new parameter. When falling back to legacy compute, the LET
+/// binding is handled internally by the legacy executor.
 async fn execute_body_expr(
 	expr: &Expr,
-	ctx: &ExecutionContext,
+	ctx: &mut ExecutionContext,
 	param_name: &str,
 	param_value: &Value,
 ) -> crate::expr::FlowResult<Value> {
@@ -290,9 +293,19 @@ async fn execute_body_expr(
 
 	match try_plan_expr(expr.clone(), &frozen_ctx) {
 		Ok(plan) => {
-			// Execute the plan
-			let stream = plan.execute(ctx)?;
-			collect_single_value(stream).await
+			// Handle context-mutating operators (like LET)
+			if plan.mutates_context() {
+				// Get the output context - this also executes the plan
+				*ctx = plan
+					.output_context(ctx)
+					.await
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
+				Ok(Value::None)
+			} else {
+				// Execute the plan normally
+				let stream = plan.execute(ctx)?;
+				collect_single_value(stream).await
+			}
 		}
 		Err(Error::Unimplemented(_)) => {
 			// Fallback to legacy compute path with the loop variable

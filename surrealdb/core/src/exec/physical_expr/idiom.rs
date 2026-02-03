@@ -130,13 +130,20 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// Handle simple identifiers without current_value - treat as string literal
-		// This supports patterns like `INFO FOR USER test` where `test` is a name
+		// When there's no current_value:
+		// - Simple identifiers return NONE (undefined variable)
+		// - Complex idioms are an error (they need a document context)
+		//
+		// Note: Patterns like `INFO FOR USER test` where `test` should be a name
+		// are handled at the planner level by converting simple identifiers to
+		// string literals before creating the physical expression.
 		let current = match ctx.current_value {
 			Some(v) => v,
 			None => {
-				if let Some(name) = self.simple_identifier_name() {
-					return Ok(Value::String(name.to_string()));
+				if self.is_simple_identifier() {
+					// Simple identifier without context evaluates to NONE
+					// This matches legacy SurrealQL behavior for undefined variables
+					return Ok(Value::None);
 				}
 				return Err(anyhow::anyhow!("Idiom evaluation requires current value"));
 			}
@@ -169,8 +176,9 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	fn references_current_value(&self) -> bool {
-		// Simple identifiers (single Field part) can be used without current_value
-		// as they will be treated as string literals in that case
+		// Simple identifiers (single Field part) can be evaluated without current_value
+		// - they return NONE (undefined variable)
+		// Complex idioms require current_value to provide the base object for field access
 		!self.is_simple_identifier()
 	}
 

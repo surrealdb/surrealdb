@@ -19,6 +19,34 @@ use crate::expr::statements::IfelseStatement;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
 
+/// Convert an expression to a physical expression, treating simple identifiers as string literals.
+///
+/// This is used for expressions like `INFO FOR USER test` where `test` is a name
+/// that should be treated as a string literal, not an undefined variable.
+///
+/// For simple identifiers (idioms with a single Field part), returns a string literal.
+/// For all other expressions, uses the normal conversion.
+fn expr_to_physical_expr_as_name(
+	expr: Expr,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+	use crate::exec::physical_expr::Literal as PhysicalLiteral;
+	use crate::expr::part::Part;
+
+	// Check if this is a simple identifier (idiom with single Field part)
+	if let Expr::Idiom(ref idiom) = expr {
+		if idiom.0.len() == 1 {
+			if let Part::Field(name) = &idiom.0[0] {
+				// Convert simple identifier to string literal
+				return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
+			}
+		}
+	}
+
+	// Otherwise use normal conversion
+	expr_to_physical_expr(expr, ctx)
+}
+
 pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
@@ -508,7 +536,8 @@ pub(crate) fn try_plan_expr(
 					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::Tb(table, structured, version) => {
-					let table = expr_to_physical_expr(table, ctx)?;
+					// Table names are identifiers that should be treated as strings
+					let table = expr_to_physical_expr_as_name(table, ctx)?;
 					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
 					Ok(Arc::new(TableInfoPlan {
 						table,
@@ -517,7 +546,8 @@ pub(crate) fn try_plan_expr(
 					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::User(user, base, structured) => {
-					let user = expr_to_physical_expr(user, ctx)?;
+					// User names are identifiers that should be treated as strings
+					let user = expr_to_physical_expr_as_name(user, ctx)?;
 					Ok(Arc::new(UserInfoPlan {
 						user,
 						base,
@@ -525,8 +555,9 @@ pub(crate) fn try_plan_expr(
 					}) as Arc<dyn ExecOperator>)
 				}
 				InfoStatement::Index(index, table, structured) => {
-					let index = expr_to_physical_expr(index, ctx)?;
-					let table = expr_to_physical_expr(table, ctx)?;
+					// Index and table names are identifiers that should be treated as strings
+					let index = expr_to_physical_expr_as_name(index, ctx)?;
+					let table = expr_to_physical_expr_as_name(table, ctx)?;
 					Ok(Arc::new(IndexInfoPlan {
 						index,
 						table,
