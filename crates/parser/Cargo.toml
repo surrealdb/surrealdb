@@ -15,10 +15,14 @@ categories.workspace = true
 [dependencies]
 common.workspace = true
 ast.workspace = true
+token.workspace = true
 
 bitflags.workspace = true
 reblessive.workspace = true
-logos = { version = "0.15.1", path = "../../../logos" }
+logos = { version = "0.16" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+ast = { workspace = true, features = ["visualize"] }

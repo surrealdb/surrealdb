@@ -1,7 +1,6 @@
-use std::io::Read;
+use std::io::{Read, stdout};
 
 use ast::Query;
-use common::source_error::Renderer;
 
 fn read_input() -> String {
 	if let Some(arg) = std::env::args().nth(1) {
@@ -14,15 +13,10 @@ fn read_input() -> String {
 fn main() {
 	let input = read_input();
 
-	match surrealdb_parser::parse::Parser::enter_parse::<Query>(
-		input.as_bytes(),
-		Default::default(),
-	) {
-		Ok(_) => {
-			todo!()
+	match surrealdb_parser::parse::Parser::enter_parse::<Query>(&input, Default::default()) {
+		Ok((node, ast)) => {
+			println!("{}", std::fmt::from_fn(|fmt| { ast::vis::visualize_ast(node, &ast, fmt) }))
 		}
-		Err(e) => {
-			println!("{}", Renderer::styled().render(&*e))
-		}
+		Err(e) => e.render_char_buffer().write_styled(&mut stdout().lock()).unwrap(),
 	}
 }

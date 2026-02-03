@@ -1,12 +1,12 @@
 use std::mem::MaybeUninit;
 
 use common::span::Span;
-use logos::{Lexer, Logos};
+use logos::Lexer;
 
-use super::base::Joined;
-use super::{BaseTokenKind, LexError};
-use crate::lex::Token;
+use token::Token;
+use token::{BaseTokenKind, Joined, LexError};
 
+#[derive(Debug)]
 pub struct PeekableLexer<'source, const SIZE: usize> {
 	lexer: Lexer<'source, BaseTokenKind>,
 	peek: [MaybeUninit<Result<Token, LexError>>; SIZE],
@@ -40,6 +40,7 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		}
 	}
 
+	#[inline]
 	fn lex_token(&mut self) -> Option<Result<Token, LexError>> {
 		self.lexer.extras = Joined::Joined;
 		self.lexer.next().map(|res| {
@@ -85,11 +86,12 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 				self.write = idx as u8;
 			}
 			Some(unsafe {
-				self.peek[((self.read + OFFSET) & (SIZE as u8) - 1) as usize].assume_init()
+				self.peek[((self.read + OFFSET) & ((SIZE as u8) - 1)) as usize].assume_init()
 			})
 		}
 	}
 
+	#[inline]
 	pub fn peek_span(&mut self) -> Span {
 		if self.read != self.write {
 			match unsafe { self.peek.get_unchecked(self.read as usize).assume_init_ref() } {
@@ -102,7 +104,7 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 				Err(e) => e.span(),
 			}
 		} else {
-			Span::new(self.lexer.slice().len() as u32, self.lexer.slice().len() as u32)
+			self.eof_span()
 		}
 	}
 
@@ -111,63 +113,37 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		if self.read == self.write {
 			return self.lex_token();
 		}
-		let res = unsafe { self.peek[self.write as usize].assume_init() };
-		self.write = (self.write + 1) & (SIZE as u8) - 1;
+		let res = unsafe { self.peek[self.read as usize].assume_init() };
+		self.read = (self.read + 1) & ((SIZE as u8) - 1);
 		Some(res)
 	}
 
+	#[inline]
 	pub fn is_empty(&self) -> bool {
 		self.read == self.write
 	}
 
+	#[inline]
 	pub fn lexer(&mut self) -> &mut Lexer<'source, BaseTokenKind> {
 		&mut self.lexer
 	}
 
+	#[inline]
 	pub fn pop_peek(&mut self) {
 		debug_assert_ne!(self.read, self.write);
-		self.write = (self.write + 1) % SIZE as u8
+		self.read = (self.read + 1) & ((SIZE as u8) - 1)
 	}
 
-	/// Slice the already lexed characters from the source.
-	///
-	/// # Panic
-	/// Will panic if the span is outside the range of already lexed characters or the span
-	/// boundaries do not align with character boundaries.
-	pub fn slice(&self, span: Span) -> &'source str {
-		let remaining = self.lexer.remainder().len();
-		let source = self.lexer.source();
-		let used = source.len() - remaining;
-		let lexed_source = &source[..used];
+	#[inline]
+	pub fn source(&self) -> &'source str {
+		self.lexer.source()
+	}
 
-		let slice = lexed_source
-			.get((span.start as usize)..(span.end as usize))
-			.expect("Tried to use a span from beyond the parsers parsed tokens");
-
-		// ensure byte boundaries are correct.
-		if slice.is_empty() {
-			return "";
+	pub fn eof_span(&self) -> Span {
+		let offset = self.lexer.source().len() as u32;
+		Span {
+			start: offset - 1,
+			end: offset - 1,
 		}
-
-		// If the character starts with bits 10 then it is a continuation byte and not a valid
-		// character boundry.
-		assert!(
-			slice[0] & 0b1100_0000 != 0b1000_000,
-			"tried to slice a string outside of a character boundry."
-		);
-
-		// If the character is the last character it is a valid utf8 boundry as the lexed_source
-		// slice is guarnteed to be valid utf8 string, otherwise we need to check if the next
-		// character is starting a byte boundry.
-		assert!(
-			lexed_source.len() == span.end as usize
-				|| lexed_source[span.end as usize] & 0b1100_0000 != 0b1000_000,
-			"tried to slice a string outside of a character boundry."
-		);
-
-		// Safety:
-		// We checked boundry preconditions and since the lexed_source slice must be valid utf-8
-		// this is valid utf8
-		unsafe { str::from_utf8_unchecked(slice) }
 	}
 }

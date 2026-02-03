@@ -1,24 +1,29 @@
-mod common;
-mod expr;
-mod top_level_expr;
-
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 
-use ::common::{
-	TypedError,
-	source_error::{AnnotationKind, Group, Level, Snippet, SourceDiagnostic},
-	span::Span,
-};
 use ast::{Ast, Node, NodeId};
 use bitflags::bitflags;
+use common::TypedError;
+use common::{
+	source_error::{AnnotationKind, Diagnostic, Level, Snippet},
+	span::Span,
+};
 use logos::{Lexer, Logos};
 use reblessive::{Stack, Stk};
 
-use crate::lex::{BaseTokenKind, LexError, PeekableLexer, Token};
+use crate::peekable::PeekableLexer;
+use token::{BaseTokenKind, LexError, Token};
 
-pub type ParseError = TypedError<SourceDiagnostic>;
-pub type ParseResult<T> = Result<T, ParseError>;
+mod basic;
+mod error;
+mod expr;
+pub mod prime;
+mod top_level_expr;
+mod unescape;
+mod utils;
+
+pub use error::{ParseError, ParseResult};
 
 /// A trait for types which can be individually parsed.
 pub trait Parse: Sized {
@@ -98,20 +103,30 @@ bitflags! {
 		/// Is the parser in a cancelable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
-		const LOOP = 1 << 0;
+		const LOOP = 1 << 1;
+		/// Is the parser speculativily parsing.
+		const SPECULATING = 1 << 2;
 	}
 }
 
 pub struct Parser<'source, 'ast> {
 	lex: PeekableLexer<'source, 4>,
+	last_span: Span,
 	ast: &'ast mut Ast,
-	features: ParserSettings,
+	settings: ParserSettings,
 	state: ParserState,
+	unescape_buffer: String,
 }
 
 impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Parse a parsable type.
-	pub fn enter_parse<P: Parse + 'static>(source: &[u8], config: Config) -> ParseResult<(P, Ast)> {
+	pub fn enter_parse<P>(
+		source: &str,
+		config: Config,
+	) -> Result<(NodeId<P>, Ast), TypedError<Diagnostic<'static>>>
+	where
+		P: Parse + Node,
+	{
 		let mut ast = Ast::empty();
 		let mut stack = Stack::new();
 		let node = Self::enter_parse_reuse(source, &mut stack, &mut ast, config)?;
@@ -119,12 +134,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	/// Parse a parsable type allowing reusing of resources like an existing stack and ast.
-	pub fn enter_parse_reuse<P: Parse + Sized + 'static>(
-		source: &[u8],
+	pub fn enter_parse_reuse<P>(
+		source: &str,
 		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
-	) -> ParseResult<P> {
+	) -> Result<NodeId<P>, TypedError<Diagnostic<'static>>>
+	where
+		P: Parse + Node,
+	{
 		ast.clear();
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
@@ -152,23 +170,31 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 		let mut parser = Parser {
 			lex,
+			last_span: Span::empty(),
 			ast,
-			features,
+			settings: features,
 			state: ParserState::empty(),
+			unescape_buffer: String::new(),
 		};
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
 		// loops because we can maintain it's savety guarentees within the parser.
-		let mut runner = stack.enter(|_| parser.parse());
+		let mut runner = stack.enter(|_| parser.parse_push());
 
 		loop {
 			if let Some(x) = runner.step() {
-				return x;
+				return x.map_err(|e| {
+					e.to_diagnostic()
+						.expect("Parser internal error made it outside of a speculative context")
+				});
 			}
 
 			if runner.depth() > config.depth_limit {
 				std::mem::drop(runner);
-				return Err(parser.error("Parser hit maximum configured recursion depth"));
+				return Err(parser
+					.error("Parser hit maximum configured recursion depth")
+					.to_diagnostic()
+					.unwrap());
 			}
 		}
 	}
@@ -181,6 +207,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	///
 	/// This function can be used for cases where the right branch cannot be determined from the
 	/// n'th next token.
+	///
+	/// To avoid the cost of constructing large complicated error messages which will be discarded
+	/// on recovery this function makes all `with_error` closures return `ParseError::speculative`
+	/// which is much cheaper to construct.
+	///
+	/// However this also means that as soon as the speculative branch has turned to be
+	/// non-speculative the user should make sure to exit the closure so as to generate real
+	/// errors.
 	///
 	/// # Usage
 	/// This function is very powerfull but also has the drawbacks.
@@ -200,7 +234,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		F: AsyncFnOnce(&mut Parser) -> ParseResult<Option<T>>,
 	{
 		let backup = self.lex.clone();
-		match cb(self).await {
+		let old_state = self.state;
+		self.state |= ParserState::SPECULATING;
+		let res = cb(self).await;
+		self.state = old_state;
+		match res {
 			Ok(Some(x)) => Ok(Some(x)),
 			Ok(None) => {
 				self.lex = backup;
@@ -208,9 +246,24 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			}
 			Err(e) => {
 				self.lex = backup;
-				Err(e)
+				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					Ok(None)
+				} else {
+					Err(e)
+				}
 			}
 		}
+	}
+
+	// Returns ParseError::recover if the parser is in partial mode and the next token is either
+	// invalid, followed by eof, or eof itself.
+	pub fn recover_eof(&mut self) -> ParseResult<()> {
+		if self.settings.contains(ParserSettings::PARTIAL) {
+			if self.lex.peek::<0>().is_none() {
+				return Err(ParseError::recover_error());
+			}
+		}
+		Ok(())
 	}
 
 	/// Modifies the parser state within the given closure, reseting the parser state to the old
@@ -232,7 +285,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		match self.lex.peek::<0>() {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => Ok(None),
-			Some(Err(e)) => Err(Self::lex_error(e)),
+			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -241,8 +294,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn peek_expect(&mut self, expected: &str) -> ParseResult<Token> {
 		match self.lex.peek::<0>() {
 			Some(Ok(x)) => Ok(x),
-			None => Err(self.error(format_args!("Unexpected end of query, expected {expected}"))),
-			Some(Err(e)) => Err(Self::lex_error(e)),
+			None => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					Err(ParseError::recover_error())
+				} else {
+					Err(self.error(format!("Unexpected end of query, expected {expected}")))
+				}
+			}
+			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -251,7 +310,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		match self.lex.peek::<1>() {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => Ok(None),
-			Some(Err(e)) => Err(Self::lex_error(e)),
+			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -260,16 +319,19 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		match self.lex.peek::<2>() {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => Ok(None),
-			Some(Err(e)) => Err(Self::lex_error(e)),
+			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
 	/// Consumes the next token in the lexer and returns it.
 	pub fn next(&mut self) -> ParseResult<Option<Token>> {
 		match self.lex.next() {
-			Some(Ok(x)) => Ok(Some(x)),
+			Some(Ok(x)) => {
+				self.last_span = x.span;
+				Ok(Some(x))
+			}
 			None => Ok(None),
-			Some(Err(e)) => Err(Self::lex_error(e)),
+			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -279,7 +341,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		if let Some(x) = self.next()? {
 			Ok(x)
 		} else {
-			Err(self.error(format_args!("Unexpected end of query, expected {expected}")))
+			if self.settings.contains(ParserSettings::PARTIAL) {
+				Err(ParseError::recover_error())
+			} else {
+				Err(self.error(format!("Unexpected end of query, expected {expected}")))
+			}
 		}
 	}
 
@@ -289,6 +355,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		if let Some(token) = peek {
 			if token.token == kind {
 				self.lex.pop_peek();
+				self.last_span = token.span;
 				return Ok(Some(token));
 			}
 		}
@@ -305,7 +372,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			return Err(self.unexpected(kind.as_str()));
 		}
 		self.lex.pop_peek();
+		self.last_span = token.span;
 		Ok(token)
+	}
+
+	/// Returns if we reached the end of file of the source
+	pub fn eof(&self) -> bool {
+		self.lex.is_empty()
 	}
 
 	/// Returns the error marking the next token in the parser to be an unexpected token.
@@ -313,14 +386,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn unexpected(&mut self, expected: &str) -> ParseError {
 		match self.peek() {
 			Err(e) => e,
-			Ok(Some(token)) => self.error(format_args!(
+			Ok(Some(token)) => self.error(format!(
 				"Unexpected token `{}`, expected `{}`",
 				self.slice(token.span),
 				expected
 			)),
-			Ok(None) => {
-				self.error(format_args!("Unexpected end of query, expected `{}`", expected))
-			}
+			Ok(None) => self.error(format!("Unexpected end of query, expected `{}`", expected)),
 		}
 	}
 
@@ -341,14 +412,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			None => format!("Unexpected token end of query, expected `{}`", expected),
 		};
 
-		Level::Error
-			.title(message)
-			.element(
-				Snippet::base().annotate(
-					AnnotationKind::Primary.span(self.peek_span()).label(label.to_string()),
-				),
-			)
-			.into()
+		let span = self.peek_span();
+		self.with_error(|this| {
+			Level::Error
+				.title(message)
+				.snippet(
+					this.snippet()
+						.annotate(AnnotationKind::Primary.span(span).label(label.to_string())),
+				)
+				.to_diagnostic()
+		})
 	}
 
 	/// Access the lexer within the parser.
@@ -400,9 +473,20 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(self.push(p))
 	}
 
+	pub async fn enter<R, F>(&mut self, cb: F) -> R
+	where
+		F: AsyncFnOnce(&mut Self) -> R,
+	{
+		Stk::enter_run(|_| cb(self)).await
+	}
+
 	/// Returns sub string of full source that corresponds to the given span.
 	pub fn slice(&self, span: Span) -> &'source str {
-		self.lex.slice(span)
+		&self.lex.source()[(span.start as usize)..=(span.end as usize)]
+	}
+
+	pub fn snippet(&self) -> Snippet<'source> {
+		Snippet::source(self.lex.source())
 	}
 
 	/// A tiny function, handing the current span to a callback.
@@ -411,36 +495,45 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	#[cold]
 	pub fn with_error<F>(&mut self, cb: F) -> ParseError
 	where
-		F: FnOnce(&mut Self, Span) -> Group,
+		F: FnOnce(&mut Self) -> Diagnostic<'source>,
 	{
-		let span = self.peek_span();
-		cb(self, span).into()
+		if self.state.contains(ParserState::SPECULATING) {
+			ParseError::speculate_error()
+		} else {
+			ParseError::diagnostic(cb(self).to_owned())
+		}
 	}
 
 	/// Returns an error with the given message with a snippet pointing to the next token.
 	#[cold]
-	pub fn error<T: Display>(&mut self, msg: T) -> ParseError {
-		Level::Error
-			.title(msg.to_string())
-			.element(Snippet::base().annotate(AnnotationKind::Primary.span(self.peek_span())))
-			.into()
+	pub fn error<T>(&mut self, msg: T) -> ParseError
+	where
+		Cow<'source, str>: From<T>,
+	{
+		let span = self.peek_span();
+		self.with_error(|this| {
+			Level::Error
+				.title(msg)
+				.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
+				.to_diagnostic()
+		})
 	}
 
 	#[cold]
-	fn lex_error(e: LexError) -> ParseError {
+	fn lex_error(&mut self, e: LexError) -> ParseError {
 		match e {
-			LexError::UnexpectedEof(span) => Level::Error
-				.title("Unexpected end of query while lexing a token")
-				.element(Snippet::base().annotate(AnnotationKind::Primary.span(span)))
-				.into(),
-			LexError::InvalidUtf8(span) => Level::Error
-				.title("Found invalid utf-8 character code")
-				.element(Snippet::base().annotate(AnnotationKind::Primary.span(span)))
-				.into(),
-			LexError::InvalidToken(span) => Level::Error
-				.title("Invalid token")
-				.element(Snippet::base().annotate(AnnotationKind::Primary.span(span)))
-				.into(),
+			LexError::UnexpectedEof(span) => self.with_error(|this| {
+				Level::Error
+					.title("Unexpected end of query while lexing a token")
+					.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
+					.to_diagnostic()
+			}),
+			LexError::InvalidToken(span) => self.with_error(|this| {
+				Level::Error
+					.title("Invalid token")
+					.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
+					.to_diagnostic()
+			}),
 		}
 	}
 
@@ -453,21 +546,22 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	) -> ParseResult<()> {
 		let next = self.next_expect(delimiter.as_str())?;
 		if next.token != delimiter {
-			return Err(self.with_error(|this, span| {
+			let span = self.peek_span();
+			return Err(self.with_error(|this| {
 				Level::Error
 					.title(format!(
 						"Unexpected token `{}`, expected closing delimiter `{}`",
 						this.slice(span),
 						delimiter
 					))
-					.element(
-						Snippet::base().annotate(AnnotationKind::Primary.span(span)).annotate(
+					.snippet(
+						this.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
 							AnnotationKind::Context
 								.span(open_span)
 								.label("expected this delimiter to close"),
 						),
 					)
-					.into()
+					.to_diagnostic()
 			}));
 		}
 		Ok(())
@@ -476,6 +570,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Returns the span for the next token in the lexer.
 	pub fn peek_span(&mut self) -> Span {
 		self.lex.peek_span()
+	}
+
+	/// Returns the span covering all eaten tokens since and including the given span.
+	pub fn span_since(&self, span: Span) -> Span {
+		span.extend(self.last_span)
 	}
 
 	/// Returns the span of that points to the end of the source.
