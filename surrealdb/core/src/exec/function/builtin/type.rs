@@ -1,7 +1,17 @@
 //! Type conversion and checking functions
 
-use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use std::pin::Pin;
+
+use anyhow::Result;
+
+use crate::exec::ContextLevel;
+use crate::exec::function::{FunctionRegistry, ProjectionFunction, ScalarFunction, Signature};
+use crate::exec::physical_expr::EvalContext;
+use crate::expr::Kind;
+use crate::expr::idiom::Idiom;
+use crate::fnc::args::FromArgs;
+use crate::val::Value;
+use crate::{define_pure_function, register_functions, syn};
 
 // Type conversion functions
 define_pure_function!(TypeArray, "type::array", (value: Any) -> Any, crate::fnc::r#type::array);
@@ -51,6 +61,104 @@ define_pure_function!(TypeIsSet, "type::is_set", (value: Any) -> Bool, crate::fn
 define_pure_function!(TypeIsString, "type::is_string", (value: Any) -> Bool, crate::fnc::r#type::is::string);
 define_pure_function!(TypeIsUuid, "type::is_uuid", (value: Any) -> Bool, crate::fnc::r#type::is::uuid);
 
+// =========================================================================
+// type::field - Get a field value by string path (Projection Function)
+// =========================================================================
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TypeField;
+
+impl ProjectionFunction for TypeField {
+	fn name(&self) -> &'static str {
+		"type::field"
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("path", Kind::String).returns(Kind::Any)
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		ContextLevel::Database
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<(Idiom, Value)>>> + Send + 'a>> {
+		Box::pin(async move {
+			// Extract the string path argument
+			let (path,): (String,) = FromArgs::from_args("type::field", args)?;
+
+			// Parse the string as an Idiom
+			let idiom: Idiom = syn::idiom(&path)
+				.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
+				.into();
+
+			// Get the field value from the current document
+			let value = if let Some(current) = ctx.current_value {
+				current.pick(&idiom.0)
+			} else {
+				Value::None
+			};
+
+			Ok(vec![(idiom, value)])
+		})
+	}
+}
+
+// =========================================================================
+// type::fields - Get multiple field values by string paths (Projection Function)
+// =========================================================================
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TypeFields;
+
+impl ProjectionFunction for TypeFields {
+	fn name(&self) -> &'static str {
+		"type::fields"
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("paths", Kind::Array(Box::new(Kind::String), None)).returns(Kind::Any)
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		ContextLevel::Database
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<(Idiom, Value)>>> + Send + 'a>> {
+		Box::pin(async move {
+			// Extract the array of string paths
+			let (paths,): (Vec<String>,) = FromArgs::from_args("type::fields", args)?;
+
+			let mut results = Vec::with_capacity(paths.len());
+
+			for path in paths {
+				// Parse each string as an Idiom
+				let idiom: Idiom = syn::idiom(&path)
+					.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
+					.into();
+
+				// Get the field value from the current document
+				let value = if let Some(current) = ctx.current_value {
+					current.pick(&idiom.0)
+				} else {
+					Value::None
+				};
+
+				results.push((idiom, value));
+			}
+
+			Ok(results)
+		})
+	}
+}
+
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
@@ -99,4 +207,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TypeTable,
 		TypeUuid,
 	);
+	// Register projection functions (these produce field bindings, not single values)
+	registry.register_projection(TypeField);
+	registry.register_projection(TypeFields);
 }

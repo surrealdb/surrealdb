@@ -21,13 +21,16 @@ mod object;
 mod parse;
 mod rand;
 mod record;
+mod schema;
 mod search;
+mod sequence;
 mod session;
 mod set;
 mod sleep;
 mod string;
 mod time;
 mod r#type;
+mod value;
 mod vector;
 
 use super::FunctionRegistry;
@@ -52,13 +55,16 @@ pub fn register_all(registry: &mut FunctionRegistry) {
 	parse::register(registry);
 	rand::register(registry);
 	record::register(registry);
+	schema::register(registry);
 	search::register(registry);
+	sequence::register(registry);
 	session::register(registry);
 	set::register(registry);
 	sleep::register(registry);
 	string::register(registry);
 	time::register(registry);
 	r#type::register(registry);
+	value::register(registry);
 	vector::register(registry);
 
 	// Aggregate functions

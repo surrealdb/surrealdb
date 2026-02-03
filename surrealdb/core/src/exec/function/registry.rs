@@ -1,15 +1,16 @@
-//! Function registry for storing and looking up scalar and aggregate functions.
+//! Function registry for storing and looking up scalar, aggregate, and projection functions.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{AggregateFunction, ScalarFunction, builtin};
+use super::{AggregateFunction, ProjectionFunction, ScalarFunction, builtin};
 
 /// Registry of functions available during query execution.
 ///
-/// The registry maps function names to their implementations for both
-/// scalar functions (operate on individual values) and aggregate functions
-/// (operate over groups of values).
+/// The registry maps function names to their implementations for:
+/// - Scalar functions (operate on individual values, return single value)
+/// - Aggregate functions (operate over groups of values)
+/// - Projection functions (produce field bindings for output objects)
 ///
 /// It is typically created once at startup with all built-in functions
 /// and then shared across execution contexts.
@@ -19,6 +20,8 @@ pub struct FunctionRegistry {
 	functions: HashMap<&'static str, Arc<dyn ScalarFunction>>,
 	/// Aggregate functions (e.g., count, math::sum, math::mean)
 	aggregates: HashMap<&'static str, Arc<dyn AggregateFunction>>,
+	/// Projection functions (e.g., type::field, type::fields)
+	projections: HashMap<&'static str, Arc<dyn ProjectionFunction>>,
 }
 
 impl FunctionRegistry {
@@ -27,6 +30,7 @@ impl FunctionRegistry {
 		Self {
 			functions: HashMap::new(),
 			aggregates: HashMap::new(),
+			projections: HashMap::new(),
 		}
 	}
 
@@ -123,6 +127,44 @@ impl FunctionRegistry {
 	}
 
 	// =========================================================================
+	// Projection function methods
+	// =========================================================================
+
+	/// Register a projection function in the registry.
+	pub fn register_projection(&mut self, func: impl ProjectionFunction + 'static) {
+		let name = func.name();
+		self.projections.insert(name, Arc::new(func));
+	}
+
+	/// Register a projection function wrapped in an Arc.
+	pub fn register_projection_arc(&mut self, func: Arc<dyn ProjectionFunction>) {
+		let name = func.name();
+		self.projections.insert(name, func);
+	}
+
+	/// Look up a projection function by name.
+	pub fn get_projection(&self, name: &str) -> Option<&Arc<dyn ProjectionFunction>> {
+		self.projections.get(name)
+	}
+
+	/// Check if a function is registered as a projection function.
+	pub fn is_projection(&self, name: &str) -> bool {
+		self.projections.contains_key(name)
+	}
+
+	/// Get the number of registered projection functions.
+	pub fn projection_len(&self) -> usize {
+		self.projections.len()
+	}
+
+	/// Iterate over all registered projection functions.
+	pub fn iter_projections(
+		&self,
+	) -> impl Iterator<Item = (&'static str, &Arc<dyn ProjectionFunction>)> {
+		self.projections.iter().map(|(k, v)| (*k, v))
+	}
+
+	// =========================================================================
 	// Combined methods
 	// =========================================================================
 
@@ -204,5 +246,37 @@ mod tests {
 
 		// Can create an accumulator
 		let _accumulator = mean.create_accumulator();
+	}
+
+	#[test]
+	fn test_projection_functions() {
+		let registry = FunctionRegistry::with_builtins();
+
+		// Check projection functions are registered
+		assert!(registry.is_projection("type::field"));
+		assert!(registry.is_projection("type::fields"));
+
+		// Scalar functions should not be projection functions
+		assert!(!registry.is_projection("math::abs"));
+		assert!(!registry.is_projection("string::len"));
+		assert!(!registry.is_projection("type::string"));
+
+		// Aggregate functions should not be projection functions
+		assert!(!registry.is_projection("count"));
+		assert!(!registry.is_projection("math::sum"));
+
+		// Should have exactly 2 projection functions
+		assert_eq!(registry.projection_len(), 2);
+	}
+
+	#[test]
+	fn test_projection_lookup() {
+		let registry = FunctionRegistry::with_builtins();
+
+		let field = registry.get_projection("type::field").expect("type::field should exist");
+		assert_eq!(field.name(), "type::field");
+
+		let fields = registry.get_projection("type::fields").expect("type::fields should exist");
+		assert_eq!(fields.name(), "type::fields");
 	}
 }

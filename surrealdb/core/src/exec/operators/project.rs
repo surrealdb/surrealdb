@@ -31,6 +31,9 @@ pub struct FieldSelection {
 	pub output_path: Vec<String>,
 	/// The expression to evaluate for this field's value
 	pub expr: Arc<dyn PhysicalExpr>,
+	/// Whether the output_path came from an explicit alias.
+	/// When true, projection functions should use output_path instead of dynamic field names.
+	pub has_explicit_alias: bool,
 }
 
 impl FieldSelection {
@@ -49,6 +52,23 @@ impl FieldSelection {
 		Self {
 			output_path,
 			expr,
+			has_explicit_alias: false,
+		}
+	}
+
+	/// Create a new field selection with an explicit alias.
+	/// Used when the user specified an alias in the query (e.g., `SELECT expr AS alias`).
+	/// For projection functions, the alias takes precedence over dynamic field names.
+	pub fn with_alias(output_name: String, expr: Arc<dyn PhysicalExpr>) -> Self {
+		let output_path = if output_name.contains('.') && !output_name.contains(['[', '(', ' ']) {
+			output_name.split('.').map(|s| s.to_string()).collect()
+		} else {
+			vec![output_name]
+		};
+		Self {
+			output_path,
+			expr,
+			has_explicit_alias: true,
 		}
 	}
 
@@ -135,16 +155,8 @@ impl ExecOperator for Project {
 								let mut obj = original.clone();
 								// Add/override with explicit field selections
 								for field in &fields {
-									let field_value =
-										field.expr.evaluate(eval_ctx.clone()).await.map_err(
-											|e| {
-												ControlFlow::Err(anyhow::anyhow!(
-													"Failed to evaluate field expression: {}",
-													e
-												))
-											},
-										)?;
-									set_nested_value(&mut obj, &field.output_path, field_value);
+									evaluate_and_set_field(&mut obj, field, eval_ctx.clone())
+										.await?;
 								}
 								Value::Object(obj)
 							}
@@ -155,21 +167,12 @@ impl ExecOperator for Project {
 									Value::Object(mut obj) => {
 										// Add/override with explicit field selections
 										for field in &fields {
-											let field_value = field
-												.expr
-												.evaluate(eval_ctx.clone())
-												.await
-												.map_err(|e| {
-													ControlFlow::Err(anyhow::anyhow!(
-														"Failed to evaluate field expression: {}",
-														e
-													))
-												})?;
-											set_nested_value(
+											evaluate_and_set_field(
 												&mut obj,
-												&field.output_path,
-												field_value,
-											);
+												field,
+												eval_ctx.clone(),
+											)
+											.await?;
 										}
 										Value::Object(obj)
 									}
@@ -185,16 +188,8 @@ impl ExecOperator for Project {
 									// If there are explicit fields, we need to create an object
 									let mut obj = Object::default();
 									for field in &fields {
-										let field_value =
-											field.expr.evaluate(eval_ctx.clone()).await.map_err(
-												|e| {
-													ControlFlow::Err(anyhow::anyhow!(
-														"Failed to evaluate field expression: {}",
-														e
-													))
-												},
-											)?;
-										set_nested_value(&mut obj, &field.output_path, field_value);
+										evaluate_and_set_field(&mut obj, field, eval_ctx.clone())
+											.await?;
 									}
 									Value::Object(obj)
 								}
@@ -204,14 +199,7 @@ impl ExecOperator for Project {
 						// Not include_all - build object from explicit fields only
 						let mut obj = Object::default();
 						for field in &fields {
-							let field_value =
-								field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
-									ControlFlow::Err(anyhow::anyhow!(
-										"Failed to evaluate field expression: {}",
-										e
-									))
-								})?;
-							set_nested_value(&mut obj, &field.output_path, field_value);
+							evaluate_and_set_field(&mut obj, field, eval_ctx.clone()).await?;
 						}
 						Value::Object(obj)
 					};
@@ -231,6 +219,85 @@ impl ExecOperator for Project {
 		});
 
 		Ok(Box::pin(projected))
+	}
+}
+
+/// Evaluate a field expression and set the resulting value(s) on the output object.
+///
+/// For regular expressions, evaluates the expression and sets the result at the output_path.
+/// For projection functions:
+/// - If has_explicit_alias is true, use the alias (output_path) as the field name
+/// - Otherwise, use the dynamic field names from the function result
+async fn evaluate_and_set_field(
+	obj: &mut Object,
+	field: &FieldSelection,
+	eval_ctx: EvalContext<'_>,
+) -> Result<(), crate::expr::ControlFlow> {
+	// Check if this is a projection function
+	if field.expr.is_projection_function() {
+		// Evaluate as projection function to get field bindings
+		match field.expr.evaluate_projection(eval_ctx.clone()).await {
+			Ok(Some(bindings)) => {
+				if field.has_explicit_alias {
+					// User provided an alias - use it as the field name
+					// For multiple bindings, collect values into an array
+					if bindings.len() == 1 {
+						let (_, value) = bindings.into_iter().next().unwrap();
+						set_nested_value(obj, &field.output_path, value);
+					} else {
+						// Multiple bindings with alias - collect as array
+						let values: Vec<Value> = bindings.into_iter().map(|(_, v)| v).collect();
+						set_nested_value(obj, &field.output_path, Value::Array(values.into()));
+					}
+				} else {
+					// No alias - use the dynamic field names from the function
+					for (idiom, value) in bindings {
+						// Convert idiom to path components
+						let path: Vec<String> = idiom
+							.0
+							.iter()
+							.filter_map(|part| {
+								if let crate::expr::part::Part::Field(name) = part {
+									Some(name.to_string())
+								} else {
+									None
+								}
+							})
+							.collect();
+
+						if !path.is_empty() {
+							set_nested_value(obj, &path, value);
+						}
+					}
+				}
+				Ok(())
+			}
+			Ok(None) => {
+				// Not actually a projection function (shouldn't happen), fall back to regular eval
+				let field_value = field.expr.evaluate(eval_ctx).await.map_err(|e| {
+					crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						"Failed to evaluate field expression: {}",
+						e
+					))
+				})?;
+				set_nested_value(obj, &field.output_path, field_value);
+				Ok(())
+			}
+			Err(e) => Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+				"Failed to evaluate projection function: {}",
+				e
+			))),
+		}
+	} else {
+		// Regular expression - evaluate and set at output_path
+		let field_value = field.expr.evaluate(eval_ctx).await.map_err(|e| {
+			crate::expr::ControlFlow::Err(anyhow::anyhow!(
+				"Failed to evaluate field expression: {}",
+				e
+			))
+		})?;
+		set_nested_value(obj, &field.output_path, field_value);
+		Ok(())
 	}
 }
 

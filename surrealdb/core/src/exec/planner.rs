@@ -26,8 +26,8 @@ pub(crate) fn expr_to_physical_expr(
 	use crate::exec::physical_expr::{
 		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureExec, IfElseExpr,
 		JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec, ObjectLiteral, Param,
-		PostfixOp, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
-		UserDefinedFunctionExec,
+		PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral, SiloModuleExec,
+		SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -138,11 +138,28 @@ pub(crate) fn expr_to_physical_expr(
 							name
 						)));
 					}
-					Ok(Arc::new(BuiltinFunctionExec {
-						name,
-						arguments: phys_args,
-						func_required_context: crate::exec::ContextLevel::Root,
-					}))
+
+					// Check if this is a projection function (type::field, type::fields)
+					let registry = crate::exec::function::FunctionRegistry::with_builtins();
+					if registry.is_projection(&name) {
+						// Get the projection function's required context
+						let func_ctx = registry
+							.get_projection(&name)
+							.map(|f| f.required_context())
+							.unwrap_or(crate::exec::ContextLevel::Database);
+						Ok(Arc::new(ProjectionFunctionExec {
+							name,
+							arguments: phys_args,
+							func_required_context: func_ctx,
+						}))
+					} else {
+						// Regular scalar function
+						Ok(Arc::new(BuiltinFunctionExec {
+							name,
+							arguments: phys_args,
+							func_required_context: crate::exec::ContextLevel::Root,
+						}))
+					}
 				}
 				Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
 					name,
@@ -960,19 +977,21 @@ fn plan_projections(
 
 			for field in field_list {
 				if let Field::Single(selector) = field {
-					// Determine the output name
-					let output_name = if let Some(alias) = &selector.alias {
-						// Use alias if provided (extract raw name from single-part idiom)
-						idiom_to_field_name(alias)
-					} else {
-						// Derive name from expression
-						derive_field_name(&selector.expr)
-					};
-
 					// Convert expression to physical
 					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 
-					field_selections.push(FieldSelection::new(output_name, expr));
+					// Determine the output name and whether it's an explicit alias
+					let field_selection = if let Some(alias) = &selector.alias {
+						// User provided explicit alias - use it
+						let output_name = idiom_to_field_name(alias);
+						FieldSelection::with_alias(output_name, expr)
+					} else {
+						// No alias - derive name from expression
+						let output_name = derive_field_name(&selector.expr);
+						FieldSelection::new(output_name, expr)
+					};
+
+					field_selections.push(field_selection);
 				}
 				// Skip Field::All - handled by include_all flag
 			}

@@ -3,7 +3,16 @@
 //! Note: We use Kind::Any for array types since Kind::Array requires parameters.
 //! The actual type checking is handled by the FromArgs trait.
 
-use crate::exec::function::FunctionRegistry;
+use std::pin::Pin;
+
+use anyhow::Result;
+use reblessive::tree::TreeStack;
+
+use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::physical_expr::EvalContext;
+use crate::expr::Kind;
+use crate::fnc::args::FromArgs;
+use crate::val::Value;
 use crate::{define_pure_function, register_functions};
 
 // Single array argument functions
@@ -63,6 +72,90 @@ define_pure_function!(ArraySwap, "array::swap", (array: Any, i: Int, j: Int) -> 
 define_pure_function!(ArraySortAsc, "array::sort::asc", (array: Any) -> Any, crate::fnc::array::sort::asc);
 define_pure_function!(ArraySortDesc, "array::sort::desc", (array: Any) -> Any, crate::fnc::array::sort::desc);
 
+// =========================================================================
+// Closure-based array functions (require async execution with TreeStack)
+// =========================================================================
+
+/// Helper macro for creating closure-based array functions
+macro_rules! define_array_closure_function {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> Signature {
+				Signature::new()
+					$(.arg(stringify!($arg), Kind::$kind))+
+					.returns(Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a EvalContext<'_>,
+				args: Vec<Value>,
+			) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+				Box::pin(async move {
+					let args = FromArgs::from_args($func_name, args)?;
+					let frozen = ctx.exec_ctx.ctx();
+					let opt = ctx.exec_ctx.options();
+					// Note: CursorDoc is not available in the streaming executor context
+					let doc = None;
+					let mut stack = TreeStack::new();
+					stack
+						.enter(|stk| async move {
+							$impl_path((stk, frozen, opt, doc), args).await
+						})
+						.finish()
+						.await
+				})
+			}
+		}
+	};
+}
+
+// array::all - Check if all elements match a condition
+define_array_closure_function!(ArrayAll, "array::all", crate::fnc::array::all, array: Any, check: Any => Any);
+
+// array::any - Check if any element matches a condition
+define_array_closure_function!(ArrayAny, "array::any", crate::fnc::array::any, array: Any, check: Any => Any);
+
+// array::filter - Filter elements by closure/value
+define_array_closure_function!(ArrayFilter, "array::filter", crate::fnc::array::filter, array: Any, check: Any => Any);
+
+// array::filter_index - Get indices of matching elements
+define_array_closure_function!(ArrayFilterIndex, "array::filter_index", crate::fnc::array::filter_index, array: Any, check: Any => Any);
+
+// array::find - Find first matching element
+define_array_closure_function!(ArrayFind, "array::find", crate::fnc::array::find, array: Any, check: Any => Any);
+
+// array::find_index - Find index of first matching element
+define_array_closure_function!(ArrayFindIndex, "array::find_index", crate::fnc::array::find_index, array: Any, check: Any => Any);
+
+// array::fold - Fold with accumulator and closure
+define_array_closure_function!(ArrayFold, "array::fold", crate::fnc::array::fold, array: Any, init: Any, mapper: Any => Any);
+
+// array::map - Transform elements with closure
+define_array_closure_function!(ArrayMap, "array::map", crate::fnc::array::map, array: Any, mapper: Any => Any);
+
+// array::reduce - Reduce array with closure
+define_array_closure_function!(ArrayReduce, "array::reduce", crate::fnc::array::reduce, array: Any, mapper: Any => Any);
+
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
@@ -116,4 +209,15 @@ pub fn register(registry: &mut FunctionRegistry) {
 		ArrayUnion,
 		ArrayWindows,
 	);
+
+	// Register closure-based functions
+	registry.register(ArrayAll);
+	registry.register(ArrayAny);
+	registry.register(ArrayFilter);
+	registry.register(ArrayFilterIndex);
+	registry.register(ArrayFind);
+	registry.register(ArrayFindIndex);
+	registry.register(ArrayFold);
+	registry.register(ArrayMap);
+	registry.register(ArrayReduce);
 }

@@ -1,4 +1,4 @@
-//! Record functions
+//! Value functions
 
 use std::pin::Pin;
 
@@ -10,30 +10,25 @@ use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
-use crate::{define_pure_function, register_functions};
-
-define_pure_function!(RecordId, "record::id", (record: Any) -> Any, crate::fnc::record::id);
-define_pure_function!(RecordTb, "record::tb", (record: Any) -> String, crate::fnc::record::tb);
-define_pure_function!(RecordTable, "record::table", (record: Any) -> String, crate::fnc::record::tb);
 
 // =========================================================================
-// record::exists - Check if a record exists in the database
+// value::diff - Compute JSON patch diff between two values
 // =========================================================================
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RecordExists;
+pub struct ValueDiff;
 
-impl ScalarFunction for RecordExists {
+impl ScalarFunction for ValueDiff {
 	fn name(&self) -> &'static str {
-		"record::exists"
+		"value::diff"
 	}
 
 	fn signature(&self) -> Signature {
-		Signature::new().arg("record", Kind::Any).returns(Kind::Bool)
+		Signature::new().arg("val1", Kind::Any).arg("val2", Kind::Any).returns(Kind::Any)
 	}
 
 	fn is_pure(&self) -> bool {
-		false
+		true
 	}
 
 	fn is_async(&self) -> bool {
@@ -46,40 +41,70 @@ impl ScalarFunction for RecordExists {
 
 	fn invoke_async<'a>(
 		&'a self,
-		ctx: &'a EvalContext<'_>,
+		_ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
 	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
 		Box::pin(async move {
-			let args = FromArgs::from_args("record::exists", args)?;
-			let frozen = ctx.exec_ctx.ctx();
-			let opt = ctx.exec_ctx.options();
-			// Note: CursorDoc is not available in the streaming executor context
-			let doc = None;
-			let mut stack = TreeStack::new();
-			stack
-				.enter(|stk| async move {
-					crate::fnc::record::exists((stk, frozen, opt, doc), args).await
-				})
-				.finish()
-				.await
+			let args = FromArgs::from_args("value::diff", args)?;
+			crate::fnc::value::diff(args).await
 		})
 	}
 }
 
 // =========================================================================
-// record::is_edge - Check if a record is an edge
+// value::patch - Apply JSON patch to a value
 // =========================================================================
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct RecordIsEdge;
+pub struct ValuePatch;
 
-impl ScalarFunction for RecordIsEdge {
+impl ScalarFunction for ValuePatch {
 	fn name(&self) -> &'static str {
-		"record::is_edge"
+		"value::patch"
 	}
 
 	fn signature(&self) -> Signature {
-		Signature::new().arg("record", Kind::Any).returns(Kind::Bool)
+		Signature::new().arg("value", Kind::Any).arg("patch", Kind::Any).returns(Kind::Any)
+	}
+
+	fn is_pure(&self) -> bool {
+		true
+	}
+
+	fn is_async(&self) -> bool {
+		true
+	}
+
+	fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
+		Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		_ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+		Box::pin(async move {
+			let args = FromArgs::from_args("value::patch", args)?;
+			crate::fnc::value::patch(args).await
+		})
+	}
+}
+
+// =========================================================================
+// value::chain - Chain a value through a closure
+// =========================================================================
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ValueChain;
+
+impl ScalarFunction for ValueChain {
+	fn name(&self) -> &'static str {
+		"value::chain"
+	}
+
+	fn signature(&self) -> Signature {
+		Signature::new().arg("value", Kind::Any).arg("closure", Kind::Any).returns(Kind::Any)
 	}
 
 	fn is_pure(&self) -> bool {
@@ -100,7 +125,7 @@ impl ScalarFunction for RecordIsEdge {
 		args: Vec<Value>,
 	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
 		Box::pin(async move {
-			let args = FromArgs::from_args("record::is_edge", args)?;
+			let args = FromArgs::from_args("value::chain", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
 			// Note: CursorDoc is not available in the streaming executor context
@@ -108,7 +133,7 @@ impl ScalarFunction for RecordIsEdge {
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move {
-					crate::fnc::record::is::edge((stk, frozen, opt, doc), args).await
+					crate::fnc::value::chain((stk, frozen, opt, doc), args).await
 				})
 				.finish()
 				.await
@@ -117,7 +142,7 @@ impl ScalarFunction for RecordIsEdge {
 }
 
 pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, RecordId, RecordTb, RecordTable);
-	registry.register(RecordExists);
-	registry.register(RecordIsEdge);
+	registry.register(ValueDiff);
+	registry.register(ValuePatch);
+	registry.register(ValueChain);
 }

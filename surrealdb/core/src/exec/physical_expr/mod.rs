@@ -8,6 +8,7 @@ use surrealdb_types::ToSql;
 use crate::dbs::Capabilities;
 use crate::exec::context::{Parameters, SessionInfo};
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
+use crate::expr::idiom::Idiom;
 use crate::iam::Auth;
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -196,6 +197,28 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 	/// - If an expression contains a mutation subquery, it must return `ReadWrite`
 	/// - Example: `(UPSERT person)` in a SELECT must propagate `ReadWrite` upward
 	fn access_mode(&self) -> AccessMode;
+
+	/// Whether this is a projection function expression.
+	///
+	/// Projection functions (like `type::field` and `type::fields`) produce field
+	/// bindings rather than single values, affecting how projections build output objects.
+	fn is_projection_function(&self) -> bool {
+		false
+	}
+
+	/// Evaluate this expression as a projection function, returning field bindings.
+	///
+	/// Only meaningful for expressions where `is_projection_function()` returns true.
+	/// Returns a list of (Idiom, Value) pairs that become fields in the output object.
+	///
+	/// The default implementation returns None, indicating this is not a projection function.
+	async fn evaluate_projection(
+		&self,
+		ctx: EvalContext<'_>,
+	) -> anyhow::Result<Option<Vec<(Idiom, Value)>>> {
+		let _ = ctx; // silence unused warning
+		Ok(None)
+	}
 }
 
 // Submodules
@@ -215,8 +238,8 @@ pub(crate) use block::{BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow,
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{
-	BuiltinFunctionExec, ClosureExec, JsFunctionExec, ModelFunctionExec, SiloModuleExec,
-	SurrealismModuleExec, UserDefinedFunctionExec,
+	BuiltinFunctionExec, ClosureExec, JsFunctionExec, ModelFunctionExec, ProjectionFunctionExec,
+	SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};

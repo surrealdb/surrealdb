@@ -5,6 +5,7 @@
 //! - Context-aware scalar functions (need execution context)
 //! - Async scalar functions (HTTP, crypto, etc.)
 //! - Aggregate functions (operate over groups of values)
+//! - Projection functions (produce field bindings for output objects)
 //!
 //! Functions are registered in a `FunctionRegistry` which can be accessed
 //! through the execution context.
@@ -12,6 +13,7 @@
 mod aggregate;
 mod builtin;
 mod macros;
+mod projection;
 mod registry;
 mod signature;
 
@@ -19,6 +21,7 @@ use std::fmt::Debug;
 
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
+pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
 pub use signature::{ArgSpec, Signature};
 
@@ -61,14 +64,6 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// Async functions perform I/O or other blocking operations.
 	fn is_async(&self) -> bool {
 		false
-	}
-
-	/// The minimum context level required to execute this function.
-	///
-	/// Functions that access database state (analyzers, tables, etc.)
-	/// should return `ContextLevel::Database`.
-	fn required_context(&self) -> crate::exec::ContextLevel {
-		crate::exec::ContextLevel::Root
 	}
 
 	/// Synchronous invocation for pure functions.
