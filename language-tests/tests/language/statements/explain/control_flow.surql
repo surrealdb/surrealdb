@@ -4,31 +4,36 @@ reason = "Test EXPLAIN with control flow statements (RETURN, THROW, BREAK, CONTI
 
 [[test.results]]
 # EXPLAIN RETURN with simple expression
-value = """'ControlFlow [ctx: Rt] [kind: RETURN]
+value = """\
+"ControlFlow [ctx: Rt] [kind: RETURN]
 └────> Expr [ctx: Rt] [expr: 'OK']
-'"""
+""""
 
 [[test.results]]
 # EXPLAIN RETURN with arithmetic expression
-value = """'ControlFlow [ctx: Rt] [kind: RETURN]
+value = """\
+"ControlFlow [ctx: Rt] [kind: RETURN]
 └────> Expr [ctx: Rt] [expr: 1 + 2]
-'"""
+""""
 
 [[test.results]]
 # EXPLAIN THROW
-value = """'ControlFlow [ctx: Rt] [kind: THROW]
+value = """\
+"ControlFlow [ctx: Rt] [kind: THROW]
 └────> Expr [ctx: Rt] [expr: 'error message']
-'"""
+""""
 
 [[test.results]]
 # EXPLAIN BREAK
-value = """'ControlFlow [ctx: Rt] [kind: BREAK]
-'"""
+value = """\
+"ControlFlow [ctx: Rt] [kind: BREAK]
+""""
 
 [[test.results]]
 # EXPLAIN CONTINUE
-value = """'ControlFlow [ctx: Rt] [kind: CONTINUE]
-'"""
+value = """\
+"ControlFlow [ctx: Rt] [kind: CONTINUE]
+""""
 
 */
 

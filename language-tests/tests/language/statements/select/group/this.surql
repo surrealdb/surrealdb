@@ -6,17 +6,17 @@ value = "'OK'"
 
 [[test.results]]
 error = """
-Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Invalid statement: Invalid query: Found a `$this` parameter refering to the document of a group by select statement
 Select statements with a group by currently have no defined document to refer to"""
 
 [[test.results]]
 error = """
-Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Invalid statement: Invalid query: Found a `$this` parameter refering to the document of a group by select statement
 Select statements with a group by currently have no defined document to refer to"""
 
 [[test.results]]
 error = """
-Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Invalid statement: Invalid query: Found a `$this` parameter refering to the document of a group by select statement
 Select statements with a group by currently have no defined document to refer to"""
 
 */

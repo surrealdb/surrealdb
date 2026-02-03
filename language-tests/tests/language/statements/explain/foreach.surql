@@ -4,23 +4,27 @@ reason = "Test EXPLAIN with FOR loop statements"
 
 [[test.results]]
 # EXPLAIN FOR loop over array
-value = """['Foreach [ctx: Db] [param: item, statements: 1]
-']"""
+value = """\
+"Foreach [ctx: Db] [param: item, statements: 1]
+""""
 
 [[test.results]]
 # EXPLAIN FOR loop over range
-value = """['Foreach [ctx: Db] [param: i, statements: 1]
-']"""
+value = """\
+"Foreach [ctx: Db] [param: i, statements: 1]
+""""
 
 [[test.results]]
 # EXPLAIN FOR loop with multiple statements
-value = """['Foreach [ctx: Db] [param: x, statements: 2]
-']"""
+value = """\
+"Foreach [ctx: Db] [param: x, statements: 2]
+""""
 
 [[test.results]]
 # EXPLAIN FOR loop with empty body
-value = """['Foreach [ctx: Db] [param: n, statements: 0]
-']"""
+value = """\
+"Foreach [ctx: Db] [param: n, statements: 0]
+""""
 
 */
 

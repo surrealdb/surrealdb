@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
+use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
@@ -94,18 +95,25 @@ async fn execute_index_info(
 	let index_value = index_expr.evaluate(eval_ctx.clone()).await?;
 	let table_value = table_expr.evaluate(eval_ctx).await?;
 
-	let _index = index_value.coerce_to::<String>()?;
-	let _table = TableName::new(table_value.coerce_to::<String>()?);
+	let index = index_value.coerce_to::<String>()?;
+	let table = TableName::new(table_value.coerce_to::<String>()?);
 
-	// Note: The index builder status is only available in certain execution
-	// contexts (via FrozenContext::get_index_builder()). The streaming executor's
-	// ExecutionContext doesn't currently have access to the index builder.
-	//
-	// The original implementation returns an empty object when the index builder
-	// is not available, so we do the same here.
-	//
-	// TODO: If index building status is needed in the streaming executor,
-	// we would need to add index_builder access to ExecutionContext.
+	// Get the index builder from the frozen context
+	let frozen_ctx = ctx.ctx();
+	if let Some(ib) = frozen_ctx.get_index_builder() {
+		// Get namespace and database IDs
+		let (ns, db) = frozen_ctx.expect_ns_db_ids(opt).await?;
+		// Get the transaction
+		let txn = ctx.txn();
+		// Obtain the index definition
+		let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
+		// Get the building status
+		let status = ib.get_status(ns, db, &ix).await;
+		let mut out = Object::default();
+		out.insert("building".to_string(), status.into());
+		return Ok(out.into());
+	}
 
+	// Fallback: return empty object if index builder not available
 	Ok(Object::default().into())
 }

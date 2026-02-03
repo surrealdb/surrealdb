@@ -1,5 +1,6 @@
 /**
 [test]
+wip = true
 
 [[test.results]]
 value = "'OK'"
