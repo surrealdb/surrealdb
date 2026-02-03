@@ -274,7 +274,9 @@ impl PhysicalExpr for PostfixOp {
 				Err(anyhow::anyhow!("Method calls not yet supported in physical expressions"))
 			}
 			PostfixOperator::Call(..) => {
-				Err(anyhow::anyhow!("Function calls not yet supported in physical expressions"))
+				// Closure calls are handled by ClosureCallExec in the planner
+				// This branch should never be reached
+				unreachable!("PostfixOperator::Call should be converted to ClosureCallExec by the planner")
 			}
 		}
 	}

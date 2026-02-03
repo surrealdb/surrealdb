@@ -238,8 +238,8 @@ pub(crate) use block::{BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow,
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{
-	BuiltinFunctionExec, ClosureExec, JsFunctionExec, ModelFunctionExec, ProjectionFunctionExec,
-	SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
+	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
+	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};

@@ -24,10 +24,10 @@ pub(crate) fn expr_to_physical_expr(
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureExec, IfElseExpr,
-		JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec, ObjectLiteral, Param,
-		PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral, SiloModuleExec,
-		SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
+		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
+		ClosureExec, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec,
+		ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral,
+		SiloModuleExec, SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -103,11 +103,30 @@ pub(crate) fn expr_to_physical_expr(
 			op,
 			expr,
 		} => {
-			let inner = expr_to_physical_expr(*expr, ctx)?;
-			Ok(Arc::new(PostfixOp {
-				op,
-				expr: inner,
-			}))
+			use crate::expr::operator::PostfixOperator;
+
+			match op {
+				PostfixOperator::Call(args) => {
+					// Closure call - convert target and arguments to physical expressions
+					let target = expr_to_physical_expr(*expr, ctx)?;
+					let mut phys_args = Vec::with_capacity(args.len());
+					for arg in args {
+						phys_args.push(expr_to_physical_expr(arg, ctx)?);
+					}
+					Ok(Arc::new(ClosureCallExec {
+						target,
+						arguments: phys_args,
+					}))
+				}
+				_ => {
+					// Other postfix operators (Range, RangeSkip, MethodCall)
+					let inner = expr_to_physical_expr(*expr, ctx)?;
+					Ok(Arc::new(PostfixOp {
+						op,
+						expr: inner,
+					}))
+				}
+			}
 		}
 		Expr::Table(table_name) => {
 			// Table name as a string value

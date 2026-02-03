@@ -605,6 +605,164 @@ impl ToSql for ClosureExec {
 }
 
 // =============================================================================
+// ClosureCallExec - for invoking closures stored in parameters
+// =============================================================================
+
+/// Closure call expression - $closure(args...)
+///
+/// Invokes a closure value with the provided arguments. The target expression
+/// must evaluate to a `Value::Closure`.
+#[derive(Debug, Clone)]
+pub struct ClosureCallExec {
+	/// The expression that evaluates to a closure value
+	pub(crate) target: Arc<dyn PhysicalExpr>,
+	/// The argument expressions to pass to the closure
+	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+}
+
+#[async_trait]
+impl PhysicalExpr for ClosureCallExec {
+	fn name(&self) -> &'static str {
+		"ClosureCall"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// The closure body may require any context level, so be conservative
+		// and take the max of target and arguments
+		let target_ctx = self.target.required_context();
+		let args_ctx = args_required_context(&self.arguments);
+		target_ctx.max(args_ctx)
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use crate::val::Closure;
+
+		// 1. Evaluate the target expression to get the closure
+		let target_value = self.target.evaluate(ctx.clone()).await?;
+
+		let closure = match target_value {
+			Value::Closure(c) => c,
+			other => {
+				return Err(Error::InvalidFunction {
+					name: "ANONYMOUS".to_string(),
+					message: format!("'{}' is not a function", other.kind_of()),
+				}
+				.into());
+			}
+		};
+
+		// 2. Evaluate all argument expressions
+		let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// 3. Invoke the closure based on its type
+		match closure.as_ref() {
+			Closure::Expr {
+				args: arg_spec,
+				returns,
+				body,
+				captures,
+			} => {
+				// Create isolated execution context with captured variables
+				let mut isolated_ctx = ctx.exec_ctx.clone();
+				for (name, value) in captures.clone().into_iter() {
+					isolated_ctx = isolated_ctx.with_param(name, value);
+				}
+
+				// Check for missing required arguments
+				if arg_spec.len() > evaluated_args.len() {
+					if let Some((param, kind)) =
+						arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
+					{
+						return Err(Error::InvalidArguments {
+							name: "ANONYMOUS".to_string(),
+							message: format!(
+								"Expected a value of type '{}' for argument {}",
+								kind.to_sql(),
+								param.to_sql()
+							),
+						}
+						.into());
+					}
+				}
+
+				// Bind arguments to parameter names with type coercion
+				let mut local_params: HashMap<String, Value> = HashMap::new();
+				for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args.into_iter()) {
+					let coerced =
+						arg_value.coerce_to_kind(kind).map_err(|_| Error::InvalidArguments {
+							name: "ANONYMOUS".to_string(),
+							message: format!(
+								"Expected a value of type '{}' for argument {}",
+								kind.to_sql(),
+								param.to_sql()
+							),
+						})?;
+					local_params.insert(param.clone().into_string(), coerced);
+				}
+
+				// Add parameters to the execution context
+				for (name, value) in &local_params {
+					isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
+				}
+
+				// Execute the closure body
+				let block_expr = BlockPhysicalExpr {
+					block: crate::expr::Block(vec![body.clone()]),
+				};
+				let eval_ctx = EvalContext {
+					exec_ctx: &isolated_ctx,
+					current_value: ctx.current_value,
+					local_params: Some(&local_params),
+				};
+
+				let result = match block_expr.evaluate(eval_ctx).await {
+					Ok(v) => v,
+					Err(e) => {
+						// Handle RETURN control flow - extract the returned value
+						if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
+							return_value.0.clone()
+						} else if e.is::<BreakControlFlow>() || e.is::<ContinueControlFlow>() {
+							// BREAK/CONTINUE inside a closure (outside of loop) is an error
+							return Err(anyhow::Error::new(Error::InvalidControlFlow));
+						} else {
+							return Err(e);
+						}
+					}
+				};
+
+				// Coerce return value to declared type if specified
+				validate_return("ANONYMOUS", returns.as_ref(), result)
+			}
+			Closure::Builtin(_) => {
+				// Builtin closures are not yet supported in the streaming executor
+				// They require the legacy compute path with Stk
+				Err(anyhow::anyhow!(
+					"Builtin closures are not yet supported in the streaming executor"
+				))
+			}
+		}
+	}
+
+	fn references_current_value(&self) -> bool {
+		self.target.references_current_value() || args_reference_current_value(&self.arguments)
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Closures can potentially do anything, so be conservative
+		AccessMode::ReadWrite
+			.combine(self.target.access_mode())
+			.combine(args_access_mode(&self.arguments))
+	}
+}
+
+impl ToSql for ClosureCallExec {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.target.fmt_sql(f, fmt);
+		f.push_str("(...)");
+	}
+}
+
+// =============================================================================
 // ProjectionFunctionExec - for type::field, type::fields
 // =============================================================================
 
