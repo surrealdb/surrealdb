@@ -58,14 +58,63 @@ impl Iterator for ForeachIter {
 	}
 }
 
-/// Get the Options and FrozenContext for legacy compute fallback.
-fn get_legacy_context(
+/// Create a FrozenContext for planning that includes the loop variable.
+///
+/// This creates a child context from the ExecutionContext's FrozenContext,
+/// which inherits sequences and other context fields, and adds the loop variable.
+fn create_loop_planning_context(
 	exec_ctx: &ExecutionContext,
-) -> Result<(&crate::dbs::Options, &FrozenContext), Error> {
+	param_name: &str,
+	param_value: &Value,
+) -> FrozenContext {
+	// Create a child context that inherits sequences and other context fields
+	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+
+	// Add all current params from execution context
+	for (name, value) in exec_ctx.params().iter() {
+		ctx.add_value(name.clone(), value.clone());
+	}
+
+	// Add the loop variable
+	ctx.add_value(param_name.to_string(), Arc::new(param_value.clone()));
+
+	ctx.freeze()
+}
+
+/// Get the Options and create a FrozenContext for legacy compute fallback.
+///
+/// This creates a child context that includes the loop variable for proper
+/// evaluation in the legacy compute path.
+fn get_legacy_context_with_param<'a>(
+	exec_ctx: &'a ExecutionContext,
+	param_name: &str,
+	param_value: &Value,
+) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
 	let options = exec_ctx
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-	Ok((options, exec_ctx.ctx()))
+
+	// Create a child context with the loop variable
+	let frozen = create_loop_planning_context(exec_ctx, param_name, param_value);
+
+	Ok((options, frozen))
+}
+
+/// Get the Options and FrozenContext for legacy compute fallback (without loop variable).
+fn get_legacy_context(
+	exec_ctx: &ExecutionContext,
+) -> Result<(&crate::dbs::Options, FrozenContext), Error> {
+	let options = exec_ctx
+		.options()
+		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
+
+	// Create a child context that inherits sequences and other context fields
+	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+	for (name, value) in exec_ctx.params().iter() {
+		ctx.add_value(name.clone(), value.clone());
+	}
+
+	Ok((options, ctx.freeze()))
 }
 
 #[async_trait]
@@ -157,11 +206,11 @@ async fn execute_foreach(
 		// Check timeout (TODO: needs proper timeout integration with ExecutionContext)
 
 		// Create a new context with the loop variable bound
-		let loop_ctx = ctx.with_param(param_name.clone(), v);
+		let loop_ctx = ctx.with_param(param_name.clone(), v.clone());
 
 		// Execute each statement in the body
 		for expr in body.0.iter() {
-			let result = execute_body_expr(expr, &loop_ctx).await;
+			let result = execute_body_expr(expr, &loop_ctx, &param_name, &v).await;
 
 			// Handle control flow signals
 			match result {
@@ -199,8 +248,16 @@ async fn execute_foreach(
 ///
 /// Tries to plan the expression with the streaming engine first,
 /// falling back to legacy compute if unimplemented.
+/// This is used for the range expression before the loop starts.
 async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	match try_plan_expr(expr.clone(), ctx.ctx()) {
+	// Create a planning context that inherits sequences and other fields
+	let mut planning_ctx = crate::ctx::Context::new(ctx.ctx());
+	for (name, value) in ctx.params().iter() {
+		planning_ctx.add_value(name.clone(), value.clone());
+	}
+	let frozen_ctx = planning_ctx.freeze();
+
+	match try_plan_expr(expr.clone(), &frozen_ctx) {
 		Ok(plan) => {
 			// Execute the plan and collect the result
 			let stream = plan.execute(ctx)?;
@@ -212,37 +269,46 @@ async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::Flow
 			let (opt, frozen) = get_legacy_context(ctx)
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
 			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, frozen, opt, None)).finish().await
+			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
 		}
 		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
 	}
 }
 
-/// Execute a body expression, handling LET statements specially.
+/// Execute a body expression with the loop variable in context.
 ///
 /// LET statements are context-mutating but within a loop iteration,
 /// they don't persist to the outer context. This handles them correctly.
-async fn execute_body_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	match try_plan_expr(expr.clone(), ctx.ctx()) {
+async fn execute_body_expr(
+	expr: &Expr,
+	ctx: &ExecutionContext,
+	param_name: &str,
+	param_value: &Value,
+) -> crate::expr::FlowResult<Value> {
+	// Create a planning context that includes the loop variable
+	let frozen_ctx = create_loop_planning_context(ctx, param_name, param_value);
+
+	match try_plan_expr(expr.clone(), &frozen_ctx) {
 		Ok(plan) => {
 			// Execute the plan
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
 		}
 		Err(Error::Unimplemented(_)) => {
-			// Fallback to legacy compute path
-			let (opt, frozen) = get_legacy_context(ctx)
+			// Fallback to legacy compute path with the loop variable
+			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
 			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, frozen, opt, None)).finish().await
+			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
 		}
 		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
 	}
 }
 
-/// Collect a single value from a stream.
+/// Collect values from a stream into a single value.
 ///
-/// For scalar expressions, this returns the single value.
+/// For scalar expressions (single value), returns that value.
+/// For query expressions (multiple values), returns an array.
 /// Propagates control flow signals appropriately.
 async fn collect_single_value(stream: ValueBatchStream) -> crate::expr::FlowResult<Value> {
 	let mut values = Vec::new();
@@ -255,8 +321,17 @@ async fn collect_single_value(stream: ValueBatchStream) -> crate::expr::FlowResu
 		}
 	}
 
-	// Return the single value, or NONE if empty
-	Ok(values.into_iter().next().unwrap_or(Value::None))
+	// Return the value appropriately:
+	// - Empty: NONE
+	// - Single value: that value
+	// - Multiple values: wrap in array (for query results like SELECT)
+	if values.is_empty() {
+		Ok(Value::None)
+	} else if values.len() == 1 {
+		Ok(values.into_iter().next().unwrap())
+	} else {
+		Ok(Value::Array(crate::val::Array(values)))
+	}
 }
 
 impl ToSql for ForeachPlan {

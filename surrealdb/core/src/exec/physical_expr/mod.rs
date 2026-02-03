@@ -211,7 +211,7 @@ mod recurse;
 mod subquery;
 
 // Re-export all expression types for external use
-pub(crate) use block::BlockPhysicalExpr;
+pub(crate) use block::{BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow, ReturnValue};
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{

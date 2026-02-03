@@ -7,10 +7,12 @@ use futures::StreamExt;
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
+use crate::err::Error;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
+use crate::exec::physical_expr::ReturnValue;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -211,16 +213,24 @@ impl ScanExecutor {
 		// Get table name for permission lookup
 		let table_name = scan_target.table_name();
 
-		// Resolve SELECT permission
-		let select_permission = if check_perms {
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
-				.await
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
+		// Check table existence and resolve SELECT permission
+		let table_def = txn
+			.get_tb_by_name(&ns.name, &db.name, &table_name)
+			.await
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
 
-			let catalog_perm = match table_def {
+		// For SELECT queries, the table must exist (unless it's schemaless and we allow creation)
+		// Check if the table is defined; if not, return TbNotFound error
+		if table_def.is_none() {
+			return Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+				name: table_name.clone(),
+			})));
+		}
+
+		let select_permission = if check_perms {
+			let catalog_perm = match &table_def {
 				Some(def) => def.permissions.select.clone(),
-				None => Permission::None, // Schemaless: deny for record users
+				None => Permission::None, // Should not reach here after above check
 			};
 
 			convert_permission_to_physical(&catalog_perm).map_err(|e| {
@@ -595,9 +605,21 @@ async fn compute_fields_for_value(
 	for cf in &state.computed_fields {
 		// Evaluate with the current value as context
 		let row_ctx = eval_ctx.with_value(value);
-		let computed_value = cf.expr.evaluate(row_ctx).await.map_err(|e| {
-			ControlFlow::Err(anyhow::anyhow!("Failed to compute field '{}': {}", cf.field_name, e))
-		})?;
+		let computed_value = match cf.expr.evaluate(row_ctx).await {
+			Ok(v) => v,
+			Err(e) => {
+				// Check if this is a RETURN control flow - extract the value
+				if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
+					return_value.0.clone()
+				} else {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"Failed to compute field '{}': {}",
+						cf.field_name,
+						e
+					)));
+				}
+			}
+		};
 
 		// Apply type coercion if specified
 		let final_value = if let Some(kind) = &cf.kind {

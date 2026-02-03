@@ -45,15 +45,14 @@ pub struct SequencePlan {
 
 /// Create a FrozenContext for planning that includes the current parameters.
 ///
-/// This creates a minimal context with the transaction and parameters needed
-/// for expression planning during block evaluation.
+/// This creates a child context from the ExecutionContext's FrozenContext,
+/// which inherits sequences and other context fields needed for expression
+/// planning during block evaluation.
 fn create_planning_context(exec_ctx: &ExecutionContext) -> FrozenContext {
-	let mut ctx = crate::ctx::Context::background();
+	// Create a child context that inherits sequences and other context fields
+	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
 
-	// Set the transaction
-	ctx.set_transaction(exec_ctx.txn().clone());
-
-	// Add all current params from execution context
+	// Add all current params from execution context (may shadow parent values)
 	for (name, value) in exec_ctx.params().iter() {
 		ctx.add_value(name.clone(), value.clone());
 	}
@@ -214,31 +213,66 @@ async fn execute_block_with_context(
 			Err(Error::Unimplemented(_)) => {
 				// Fallback to legacy compute path
 				let (opt, frozen) = get_legacy_context(&current_ctx, &mut legacy_ctx)?;
-				let mut stack = TreeStack::new();
-				result =
-					match stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await {
+
+				// Handle LET statements specially - only compute the value expression
+				if let crate::expr::Expr::Let(set_stmt) = expr {
+					let mut stack = TreeStack::new();
+					let value = match stack
+						.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, None))
+						.finish()
+						.await
+					{
+						Ok(v) => v,
+						Err(crate::expr::ControlFlow::Return(v)) => {
+							// RETURN in LET value - return immediately
+							return Ok((v, current_ctx));
+						}
+						Err(crate::expr::ControlFlow::Break) => {
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Continue) => {
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Err(e)) => {
+							return Err(Error::Thrown(e.to_string()));
+						}
+					};
+
+					// Update context with the new variable
+					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
+					// Update the legacy context too
+					if let Some(ref mut ctx) = legacy_ctx {
+						let mut new_ctx = crate::ctx::Context::new(ctx);
+						new_ctx.add_value(set_stmt.name.clone(), std::sync::Arc::new(value));
+						*ctx = new_ctx.freeze();
+					}
+					result = Value::None;
+				} else {
+					// For other expressions, compute the whole expression
+					let mut stack = TreeStack::new();
+					result = match stack
+						.enter(|stk| expr.compute(stk, &frozen, opt, None))
+						.finish()
+						.await
+					{
 						Ok(v) => v,
 						Err(crate::expr::ControlFlow::Return(v)) => {
 							// RETURN statement - return immediately from sequence
 							return Ok((v, current_ctx));
 						}
-						Err(e) => {
-							return Err(Error::Thrown(format!("Legacy compute failed: {:?}", e)));
+						Err(crate::expr::ControlFlow::Break) => {
+							// BREAK outside of loop context is an error
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Continue) => {
+							// CONTINUE outside of loop context is an error
+							return Err(Error::InvalidControlFlow);
+						}
+						Err(crate::expr::ControlFlow::Err(e)) => {
+							// Propagate the actual error
+							return Err(Error::Thrown(e.to_string()));
 						}
 					};
-
-				// If this was a LET statement, we need to update the context
-				if let crate::expr::Expr::Let(set_stmt) = expr {
-					// For LET, evaluate the value and add to context
-					current_ctx = current_ctx.with_param(set_stmt.name.clone(), result.clone());
-					// Update the legacy context too
-					if let Some(ref mut ctx) = legacy_ctx {
-						let mut new_ctx = crate::ctx::Context::new(ctx);
-						new_ctx
-							.add_value(set_stmt.name.clone(), std::sync::Arc::new(result.clone()));
-						*ctx = new_ctx.freeze();
-					}
-					result = Value::None;
 				}
 			}
 			Err(e) => return Err(e),
@@ -251,7 +285,9 @@ async fn execute_block_with_context(
 /// Get the Options and FrozenContext for legacy compute fallback.
 ///
 /// This returns a reference to Options from the ExecutionContext and creates
-/// or reuses a FrozenContext for the legacy compute path.
+/// or reuses a FrozenContext for the legacy compute path. The FrozenContext
+/// is created as a child of the ExecutionContext's context to inherit
+/// sequences and other context fields.
 fn get_legacy_context<'a>(
 	exec_ctx: &'a ExecutionContext,
 	cached_ctx: &mut Option<FrozenContext>,
@@ -265,9 +301,8 @@ fn get_legacy_context<'a>(
 	let frozen = if let Some(ctx) = cached_ctx.take() {
 		ctx
 	} else {
-		// Create a new context with the transaction and parameters
-		let mut ctx = crate::ctx::Context::background();
-		ctx.set_transaction(exec_ctx.txn().clone());
+		// Create a child context that inherits sequences and other context fields
+		let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
 		for (name, value) in exec_ctx.params().iter() {
 			ctx.add_value(name.clone(), value.clone());
 		}

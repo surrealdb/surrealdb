@@ -46,9 +46,25 @@ impl IdiomExpr {
 	}
 
 	/// Check if all parts are simple (can be evaluated synchronously).
-
 	pub fn is_simple(&self) -> bool {
 		self.parts.iter().all(|p| p.is_simple())
+	}
+
+	/// Check if this is a simple identifier (single Field part with no complex parts).
+	/// When used without a current value context, simple identifiers can be
+	/// treated as string literals (e.g., `INFO FOR USER test` where `test` is a name).
+	pub fn is_simple_identifier(&self) -> bool {
+		self.parts.len() == 1 && matches!(&self.parts[0], PhysicalPart::Field(_))
+	}
+
+	/// Get the simple identifier name if this is a simple identifier.
+	pub fn simple_identifier_name(&self) -> Option<&str> {
+		if self.parts.len() == 1 {
+			if let PhysicalPart::Field(name) = &self.parts[0] {
+				return Some(name.as_str());
+			}
+		}
+		None
 	}
 }
 
@@ -114,9 +130,17 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		let current = ctx
-			.current_value
-			.ok_or_else(|| anyhow::anyhow!("Idiom evaluation requires current value"))?;
+		// Handle simple identifiers without current_value - treat as string literal
+		// This supports patterns like `INFO FOR USER test` where `test` is a name
+		let current = match ctx.current_value {
+			Some(v) => v,
+			None => {
+				if let Some(name) = self.simple_identifier_name() {
+					return Ok(Value::String(name.to_string()));
+				}
+				return Err(anyhow::anyhow!("Idiom evaluation requires current value"));
+			}
+		};
 
 		// Start with the current value and apply each part in sequence
 		let mut value = current.clone();
@@ -145,7 +169,9 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	fn references_current_value(&self) -> bool {
-		true
+		// Simple identifiers (single Field part) can be used without current_value
+		// as they will be treated as string literals in that case
+		!self.is_simple_identifier()
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -405,19 +431,71 @@ async fn evaluate_where(
 }
 
 /// Method call evaluation.
+///
+/// Methods are syntactic sugar for function calls. For example:
+/// - `"hello".len()` → `string::len("hello")`
+/// - `[1, 2, 3].len()` → `array::len([1, 2, 3])`
+///
+/// The method name is mapped to a function name based on the value type.
 async fn evaluate_method(
-	_value: &Value,
+	value: &Value,
 	name: &str,
-	_args: &[Arc<dyn PhysicalExpr>],
-	_ctx: EvalContext<'_>,
+	args: &[Arc<dyn PhysicalExpr>],
+	ctx: EvalContext<'_>,
 ) -> anyhow::Result<Value> {
-	// TODO: Implement method calls
-	// This requires access to the function registry and proper execution context
-	// For now, return an error
-	Err(anyhow::anyhow!(
-		"Method call '{}' not yet supported in physical expressions - requires function registry",
-		name
-	))
+	// Determine the type-specific function namespace based on the value type
+	let namespace = match value {
+		Value::String(_) => "string",
+		Value::Array(_) | Value::Set(_) => "array",
+		Value::Object(_) => "object",
+		Value::Bytes(_) => "bytes",
+		Value::Duration(_) => "duration",
+		Value::Datetime(_) => "time",
+		Value::Number(_) => "math",
+		Value::Geometry(_) => "geo",
+		Value::RecordId(_) => "record",
+		Value::File(_) => "file",
+		_ => {
+			// Try common namespaces for generic methods
+			return Err(anyhow::anyhow!(
+				"Method '{}' cannot be called on value of type '{}'",
+				name,
+				value.kind_of()
+			));
+		}
+	};
+
+	// Build the full function name
+	let func_name = format!("{}::{}", namespace, name);
+
+	// Build the arguments: receiver value first, then method arguments
+	let mut func_args = Vec::with_capacity(1 + args.len());
+	func_args.push(value.clone());
+	for arg_expr in args {
+		let arg_value = arg_expr.evaluate(ctx.clone()).await?;
+		func_args.push(arg_value);
+	}
+
+	// Get the function registry and invoke the function
+	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+
+	if let Some(func) = registry.get(&func_name) {
+		// Try sync invocation first for pure functions
+		if func.is_pure() {
+			func.invoke(func_args)
+		} else {
+			// Use async invocation for context-aware functions
+			func.invoke_async(&ctx, func_args).await
+		}
+	} else {
+		// Try without namespace (some methods might be value-generic)
+		Err(anyhow::anyhow!(
+			"Unknown method '{}' on type '{}' (tried function '{}')",
+			name,
+			value.kind_of(),
+			func_name
+		))
+	}
 }
 
 /// Destructure evaluation - extract fields into a new object.

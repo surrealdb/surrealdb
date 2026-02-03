@@ -25,6 +25,52 @@ use crate::exec::planner::expr_to_physical_expr;
 use crate::expr::{Block, Expr};
 use crate::val::Value;
 
+/// Error type for RETURN control flow in physical expressions.
+///
+/// Since `PhysicalExpr::evaluate` returns `anyhow::Result<Value>`, we use this
+/// custom error type to propagate RETURN statements through the physical
+/// expression layer. Callers can downcast to check for RETURN control flow.
+#[derive(Debug)]
+pub struct ReturnValue(pub Value);
+
+impl std::fmt::Display for ReturnValue {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "RETURN {:?}", self.0)
+	}
+}
+
+impl std::error::Error for ReturnValue {}
+
+/// Error type for BREAK control flow in physical expressions.
+///
+/// Used to propagate BREAK statements through the physical expression layer.
+/// The FOR loop handler will catch this and exit the loop.
+#[derive(Debug)]
+pub struct BreakControlFlow;
+
+impl std::fmt::Display for BreakControlFlow {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "BREAK")
+	}
+}
+
+impl std::error::Error for BreakControlFlow {}
+
+/// Error type for CONTINUE control flow in physical expressions.
+///
+/// Used to propagate CONTINUE statements through the physical expression layer.
+/// The FOR loop handler will catch this and skip to the next iteration.
+#[derive(Debug)]
+pub struct ContinueControlFlow;
+
+impl std::fmt::Display for ContinueControlFlow {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "CONTINUE")
+	}
+}
+
+impl std::error::Error for ContinueControlFlow {}
+
 /// Block expression with deferred planning.
 ///
 /// Stores the original block containing `Expr` values and converts them to
@@ -46,18 +92,17 @@ pub struct BlockPhysicalExpr {
 
 /// Create a FrozenContext for planning that includes the current parameters.
 ///
-/// This creates a minimal context with the transaction and parameters needed
-/// for expression planning during block evaluation.
+/// This creates a child context from the ExecutionContext's FrozenContext,
+/// which inherits sequences and other context fields needed for expression
+/// planning during block evaluation.
 fn create_planning_context(
 	exec_ctx: &crate::exec::ExecutionContext,
 	local_params: &HashMap<String, Value>,
 ) -> FrozenContext {
-	let mut ctx = crate::ctx::Context::background();
+	// Create a child context that inherits sequences and other context fields
+	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
 
-	// Set the transaction
-	ctx.set_transaction(exec_ctx.txn().clone());
-
-	// Add all current params from execution context
+	// Add all current params from execution context (may shadow parent values)
 	for (name, value) in exec_ctx.params().iter() {
 		ctx.add_value(name.clone(), value.clone());
 	}
@@ -73,7 +118,9 @@ fn create_planning_context(
 /// Get the Options and FrozenContext for legacy compute fallback.
 ///
 /// This returns a reference to Options from the ExecutionContext and creates
-/// or reuses a FrozenContext for the legacy compute path.
+/// or reuses a FrozenContext for the legacy compute path. The FrozenContext
+/// is created as a child of the ExecutionContext's context to inherit
+/// sequences and other context fields.
 fn get_legacy_context<'a>(
 	exec_ctx: &'a crate::exec::ExecutionContext,
 	cached_ctx: &mut Option<FrozenContext>,
@@ -87,9 +134,8 @@ fn get_legacy_context<'a>(
 	let frozen = if let Some(ctx) = cached_ctx.take() {
 		ctx
 	} else {
-		// Create a new context with the transaction and parameters
-		let mut ctx = crate::ctx::Context::background();
-		ctx.set_transaction(exec_ctx.txn().clone());
+		// Create a child context that inherits sequences and other context fields
+		let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
 		for (name, value) in exec_ctx.params().iter() {
 			ctx.add_value(name.clone(), value.clone());
 		}
@@ -158,7 +204,17 @@ impl PhysicalExpr for BlockPhysicalExpr {
 									Some(&local_params)
 								},
 							};
-							phys_expr.evaluate(eval_ctx).await?
+							// Check for RETURN control flow and propagate it
+							match phys_expr.evaluate(eval_ctx).await {
+								Ok(v) => v,
+								Err(e) => {
+									// Check if this is a RETURN control flow - propagate it
+									if e.is::<ReturnValue>() {
+										return Err(e);
+									}
+									return Err(e);
+								}
+							}
 						}
 						Err(Error::Unimplemented(_)) => {
 							// Fallback to legacy compute path
@@ -171,9 +227,20 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								.await
 							{
 								Ok(v) => v,
-								Err(crate::expr::ControlFlow::Return(v)) => v,
-								Err(e) => {
-									return Err(anyhow::anyhow!("Legacy compute failed: {:?}", e));
+								Err(crate::expr::ControlFlow::Return(v)) => {
+									// RETURN statement - propagate as ReturnValue error
+									return Err(ReturnValue(v).into());
+								}
+								Err(crate::expr::ControlFlow::Break) => {
+									// BREAK statement - propagate as BreakControlFlow error
+									return Err(BreakControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Continue) => {
+									// CONTINUE statement - propagate as ContinueControlFlow error
+									return Err(ContinueControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Err(e)) => {
+									return Err(e);
 								}
 							}
 						}
@@ -223,7 +290,17 @@ impl PhysicalExpr for BlockPhysicalExpr {
 									Some(&local_params)
 								},
 							};
-							phys_expr.evaluate(eval_ctx).await?
+							// Check for RETURN control flow and propagate it
+							match phys_expr.evaluate(eval_ctx).await {
+								Ok(v) => v,
+								Err(e) => {
+									// Check if this is a RETURN control flow - propagate it
+									if e.is::<ReturnValue>() {
+										return Err(e);
+									}
+									return Err(e);
+								}
+							}
 						}
 						Err(Error::Unimplemented(_)) => {
 							// Fallback to legacy compute path
@@ -237,11 +314,19 @@ impl PhysicalExpr for BlockPhysicalExpr {
 							{
 								Ok(v) => v,
 								Err(crate::expr::ControlFlow::Return(v)) => {
-									// RETURN statement - return immediately from block
-									return Ok(v);
+									// RETURN statement - propagate as ReturnValue error
+									return Err(ReturnValue(v).into());
 								}
-								Err(e) => {
-									return Err(anyhow::anyhow!("Legacy compute failed: {:?}", e));
+								Err(crate::expr::ControlFlow::Break) => {
+									// BREAK statement - propagate as BreakControlFlow error
+									return Err(BreakControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Continue) => {
+									// CONTINUE statement - propagate as ContinueControlFlow error
+									return Err(ContinueControlFlow.into());
+								}
+								Err(crate::expr::ControlFlow::Err(e)) => {
+									return Err(e);
 								}
 							}
 						}

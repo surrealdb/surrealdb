@@ -87,6 +87,11 @@ impl ExecOperator for ControlFlowPlan {
 				let kind = self.kind;
 				let ctx = ctx.clone();
 
+				// Check if inner plan is scalar (like `RETURN 1 + 2`) vs query (like `RETURN SELECT
+				// ...`) Query results should stay wrapped in array; scalar results can be
+				// unwrapped
+				let inner_is_scalar = inner.is_scalar();
+
 				// Return a stream that executes the inner plan and produces the control flow signal
 				Ok(Box::pin(futures::stream::once(async move {
 					// Execute inner plan and collect values
@@ -112,11 +117,19 @@ impl ExecOperator for ControlFlowPlan {
 					}
 
 					// Get the result value
-					let value = if values.len() == 1 {
-						values.into_iter().next().unwrap()
-					} else if values.is_empty() {
-						Value::None
+					// For scalar expressions (like `RETURN 1 + 2`), unwrap single values
+					// For query expressions (like `RETURN SELECT ...`), keep array wrapping
+					let value = if inner_is_scalar {
+						// Scalar: unwrap single value, use NONE for empty
+						if values.len() == 1 {
+							values.into_iter().next().unwrap()
+						} else if values.is_empty() {
+							Value::None
+						} else {
+							Value::Array(crate::val::Array(values))
+						}
 					} else {
+						// Query: always wrap in array (matches SELECT behavior)
 						Value::Array(crate::val::Array(values))
 					};
 

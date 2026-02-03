@@ -68,6 +68,11 @@ impl ExecOperator for ExplainPlan {
 			})
 		})))
 	}
+
+	fn is_scalar(&self) -> bool {
+		// EXPLAIN returns a single scalar value (text or JSON)
+		true
+	}
 }
 
 /// Format an execution plan node as a text tree

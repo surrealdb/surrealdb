@@ -129,10 +129,21 @@ pub(crate) fn expr_to_physical_expr(
 
 			// Dispatch to appropriate PhysicalExpr type based on function variant
 			match receiver {
-				Function::Normal(name) => Ok(Arc::new(BuiltinFunctionExec {
-					name,
-					arguments: phys_args,
-				})),
+				Function::Normal(name) => {
+					// Some functions need database context that the streaming executor
+					// doesn't properly provide yet - fall back to legacy compute for these
+					if name.starts_with("search::") || name.starts_with("api::") {
+						return Err(Error::Unimplemented(format!(
+							"Function '{}' not yet supported in streaming executor",
+							name
+						)));
+					}
+					Ok(Arc::new(BuiltinFunctionExec {
+						name,
+						arguments: phys_args,
+						func_required_context: crate::exec::ContextLevel::Root,
+					}))
+				}
 				Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
 					name,
 					arguments: phys_args,
@@ -751,6 +762,9 @@ fn plan_select(
 	let (grouped, skip_projections) = if let Some(groups) = group {
 		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
 
+		// Validate: $this and $parent are invalid in GROUP BY context
+		check_forbidden_group_by_params(&fields)?;
+
 		// Build aggregate fields and group-by expressions from the SELECT expression
 		// This also expands GROUP BY aliases to their actual expressions
 		let (aggregates, group_by_exprs) =
@@ -815,10 +829,6 @@ fn plan_select(
 		sorted
 	};
 
-	// Apply FETCH if present
-	// Fetch adds to the projections list.
-	let fetched = plan_fetch(fetch, limited, &mut fields)?;
-
 	// Combine user-specified OMIT with sort-only computed fields
 	let mut all_omit = omit.to_vec();
 	for field_name in sort_only_omits {
@@ -833,25 +843,29 @@ fn plan_select(
 		if !all_omit.is_empty() {
 			let omit_fields = plan_omit_fields(all_omit, ctx)?;
 			Arc::new(Project {
-				input: fetched,
+				input: limited,
 				fields: vec![], // No specific fields - pass through
 				omit: omit_fields,
 				include_all: true,
 			}) as Arc<dyn ExecOperator>
 		} else {
-			fetched
+			limited
 		}
 	} else {
-		plan_projections(&fields, &all_omit, fetched, ctx)?
+		plan_projections(&fields, &all_omit, limited, ctx)?
 	};
+
+	// Apply FETCH if present - after projections so it can expand record IDs
+	// in computed fields like graph traversals
+	let fetched = plan_fetch(fetch, projected, &mut fields)?;
 
 	// Apply TIMEOUT if present (timeout is always Expr but may be Literal::None)
 	let timed = match timeout {
-		Expr::Literal(Literal::None) => projected,
+		Expr::Literal(Literal::None) => fetched,
 		timeout_expr => {
 			let timeout_phys = expr_to_physical_expr(timeout_expr, ctx)?;
 			Arc::new(Timeout {
-				input: projected,
+				input: fetched,
 				timeout: Some(timeout_phys),
 			}) as Arc<dyn ExecOperator>
 		}
@@ -1026,10 +1040,23 @@ fn derive_field_name(expr: &Expr) -> String {
 ///
 /// This mirrors the legacy behavior where the idiom is simplified (removing
 /// Destructure, All, Where, etc.) before deriving the field name.
+///
+/// For graph traversal aliases like `->(bought AS purchases)`, the alias is used.
 fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	use surrealdb_types::ToSql;
 
 	use crate::expr::part::Part;
+
+	// Check for graph traversal alias first
+	// For expressions like `->(bought AS purchases)`, use the alias as the field name
+	for part in idiom.0.iter() {
+		if let Part::Lookup(lookup) = part {
+			if let Some(alias) = &lookup.alias {
+				// Recursively extract field name from alias
+				return idiom_to_field_name(alias);
+			}
+		}
+	}
 
 	// Simplify the idiom first - this removes Destructure, All, Where, etc.
 	// and keeps only Field, Start, and Lookup parts
@@ -1540,6 +1567,119 @@ fn extract_version(version_expr: Expr) -> Result<Option<u64>, Error> {
 		_ => Err(Error::Unimplemented(
 			"VERSION clause only supports literal datetime values in execution plans".to_string(),
 		)),
+	}
+}
+
+/// Check if an expression contains `$this` or `$parent` parameters.
+/// These are invalid in GROUP BY context since there's no single document to reference.
+fn check_forbidden_group_by_params(fields: &Fields) -> Result<(), Error> {
+	match fields {
+		Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
+		Fields::Select(field_list) => {
+			for field in field_list {
+				match field {
+					Field::All => {}
+					Field::Single(selector) => {
+						check_expr_for_forbidden_params(&selector.expr)?;
+					}
+				}
+			}
+			Ok(())
+		}
+	}
+}
+
+/// Recursively check an expression for `$this` or `$parent` parameters.
+fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
+	match expr {
+		Expr::Param(param) => {
+			let name = param.as_str();
+			if name == "this" || name == "self" {
+				return Err(Error::InvalidStatement(
+					"Invalid query: Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
+				));
+			}
+			if name == "parent" {
+				return Err(Error::InvalidStatement(
+					"Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
+				));
+			}
+			Ok(())
+		}
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => {
+			check_expr_for_forbidden_params(left)?;
+			check_expr_for_forbidden_params(right)
+		}
+		Expr::Prefix {
+			expr,
+			..
+		} => check_expr_for_forbidden_params(expr),
+		Expr::Postfix {
+			expr,
+			..
+		} => check_expr_for_forbidden_params(expr),
+		Expr::FunctionCall(fc) => {
+			for arg in &fc.arguments {
+				check_expr_for_forbidden_params(arg)?;
+			}
+			Ok(())
+		}
+		Expr::Literal(Literal::Array(elements)) => {
+			for elem in elements {
+				check_expr_for_forbidden_params(elem)?;
+			}
+			Ok(())
+		}
+		Expr::Literal(Literal::Object(entries)) => {
+			for entry in entries {
+				check_expr_for_forbidden_params(&entry.value)?;
+			}
+			Ok(())
+		}
+		Expr::Select(select) => {
+			// Check fields in subqueries
+			match &select.fields {
+				Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
+				Fields::Select(field_list) => {
+					for field in field_list {
+						if let Field::Single(selector) = field {
+							check_expr_for_forbidden_params(&selector.expr)?;
+						}
+					}
+					Ok(())
+				}
+			}
+		}
+		Expr::Block(block) => {
+			for stmt in &block.0 {
+				check_expr_for_forbidden_params(stmt)?;
+			}
+			Ok(())
+		}
+		Expr::IfElse(ifelse) => {
+			for (cond, body) in &ifelse.exprs {
+				check_expr_for_forbidden_params(cond)?;
+				check_expr_for_forbidden_params(body)?;
+			}
+			if let Some(close) = &ifelse.close {
+				check_expr_for_forbidden_params(close)?;
+			}
+			Ok(())
+		}
+		Expr::Closure(closure) => check_expr_for_forbidden_params(&closure.body),
+		// These don't contain nested expressions with params
+		Expr::Literal(_)
+		| Expr::Constant(_)
+		| Expr::Table(_)
+		| Expr::Idiom(_)
+		| Expr::Break
+		| Expr::Continue => Ok(()),
+		// Other expressions that might contain nested params
+		_ => Ok(()),
 	}
 }
 

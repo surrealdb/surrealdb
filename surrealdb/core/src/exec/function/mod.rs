@@ -63,6 +63,14 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		false
 	}
 
+	/// The minimum context level required to execute this function.
+	///
+	/// Functions that access database state (analyzers, tables, etc.)
+	/// should return `ContextLevel::Database`.
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		crate::exec::ContextLevel::Root
+	}
+
 	/// Synchronous invocation for pure functions.
 	///
 	/// This is the primary entry point for pure scalar functions.

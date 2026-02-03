@@ -20,6 +20,7 @@ mod object;
 mod parse;
 mod rand;
 mod record;
+mod search;
 mod session;
 mod set;
 mod sleep;
@@ -49,6 +50,7 @@ pub fn register_all(registry: &mut FunctionRegistry) {
 	parse::register(registry);
 	rand::register(registry);
 	record::register(registry);
+	search::register(registry);
 	session::register(registry);
 	set::register(registry);
 	sleep::register(registry);

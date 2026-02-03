@@ -17,7 +17,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
 use crate::err::Error;
-use crate::exec::physical_expr::block::BlockPhysicalExpr;
+use crate::exec::physical_expr::block::{
+	BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow, ReturnValue,
+};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{AccessMode, CombineAccessModes, ExecutionContext};
@@ -152,6 +154,8 @@ fn args_required_context(args: &[Arc<dyn PhysicalExpr>]) -> crate::exec::Context
 pub struct BuiltinFunctionExec {
 	pub(crate) name: String,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// The required context level for this function (looked up at planning time).
+	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
 
 #[async_trait]
@@ -161,8 +165,10 @@ impl PhysicalExpr for BuiltinFunctionExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Built-in functions only need whatever context their arguments need
-		args_required_context(&self.arguments)
+		// Built-in functions need either their declared context level or
+		// whatever context their arguments need, whichever is higher
+		let args_ctx = args_required_context(&self.arguments);
+		args_ctx.max(self.func_required_context)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
@@ -289,7 +295,20 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			current_value: ctx.current_value,
 			local_params: Some(&local_params),
 		};
-		let result = block_expr.evaluate(eval_ctx).await?;
+		let result = match block_expr.evaluate(eval_ctx).await {
+			Ok(v) => v,
+			Err(e) => {
+				// Check if this is a RETURN control flow - extract the value
+				if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
+					return_value.0.clone()
+				} else if e.is::<BreakControlFlow>() || e.is::<ContinueControlFlow>() {
+					// BREAK/CONTINUE inside a function (outside of loop) is an error
+					return Err(anyhow::Error::new(Error::InvalidControlFlow));
+				} else {
+					return Err(e);
+				}
+			}
+		};
 
 		// 10. Validate and coerce return type
 		validate_return(&func_name, func_def.returns.as_ref(), result)
@@ -549,13 +568,21 @@ impl PhysicalExpr for ClosureExec {
 		crate::exec::ContextLevel::Root
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// Closures evaluate to a Value::Closure
-		// This is similar to how the old executor handles it
-		// TODO: Need to capture parameters from context
-		Err(anyhow::anyhow!(
-			"Closure evaluation not yet fully implemented - need parameter capture from context"
-		))
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use crate::dbs::ParameterCapturePass;
+		use crate::val::Closure;
+
+		// Capture parameters from the context that are referenced in the closure body
+		let frozen_ctx = &ctx.exec_ctx.root().ctx;
+		let captures = ParameterCapturePass::capture(frozen_ctx, &self.closure.body);
+
+		// Create a Value::Closure with the captured variables
+		Ok(Value::Closure(Box::new(Closure::Expr {
+			args: self.closure.args.clone(),
+			returns: self.closure.returns.clone(),
+			body: self.closure.body.clone(),
+			captures,
+		})))
 	}
 
 	fn references_current_value(&self) -> bool {

@@ -173,7 +173,7 @@ impl ComputeExecutor {
 		&self,
 		plan: Arc<dyn crate::exec::ExecOperator>,
 		txn: Arc<Transaction>,
-	) -> anyhow::Result<Value> {
+	) -> FlowResult<Value> {
 		use tokio_util::sync::CancellationToken;
 
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
@@ -243,14 +243,17 @@ impl ComputeExecutor {
 		let stream = match plan.execute(&exec_ctx) {
 			Ok(s) => s,
 			Err(crate::expr::ControlFlow::Return(v)) => {
-				// Early return - return the value directly
-				return Ok(v);
+				// RETURN - propagate as control flow signal
+				return Err(ControlFlow::Return(v));
 			}
-			Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
-				return Err(anyhow::anyhow!(Error::InvalidControlFlow));
+			Err(crate::expr::ControlFlow::Break) => {
+				return Err(ControlFlow::Break);
+			}
+			Err(crate::expr::ControlFlow::Continue) => {
+				return Err(ControlFlow::Continue);
 			}
 			Err(crate::expr::ControlFlow::Err(e)) => {
-				return Err(e);
+				return Err(ControlFlow::Err(e));
 			}
 		};
 
@@ -263,13 +266,17 @@ impl ComputeExecutor {
 					results.extend(batch.values);
 				}
 				Err(crate::expr::ControlFlow::Err(e)) => {
-					return Err(e);
+					return Err(ControlFlow::Err(e));
 				}
 				Err(crate::expr::ControlFlow::Return(v)) => {
-					return Ok(v);
+					// RETURN - propagate as control flow signal
+					return Err(ControlFlow::Return(v));
 				}
-				Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
-					return Err(anyhow::anyhow!(Error::InvalidControlFlow));
+				Err(crate::expr::ControlFlow::Break) => {
+					return Err(ControlFlow::Break);
+				}
+				Err(crate::expr::ControlFlow::Continue) => {
+					return Err(ControlFlow::Continue);
 				}
 			}
 		}
@@ -491,10 +498,8 @@ impl ComputeExecutor {
 
 						self.check_slow_log(start, &e);
 
-						match exec_result {
-							Ok(value) => Ok(value),
-							Err(e) => Err(ControlFlow::Err(e)),
-						}
+						// exec_result is now FlowResult<Value>, propagate directly
+						exec_result
 					}
 					Err(Error::Unimplemented(_)) => {
 						// Fallback to existing compute path
