@@ -896,18 +896,19 @@ fn plan_projections(
 				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 			if is_select_all {
-				// SELECT * - pass through without projection
-				// But apply OMIT if present using Project operator
-				if !omit.is_empty() {
-					let omit_fields = plan_omit_fields(omit.to_vec(), ctx)?;
-					return Ok(Arc::new(Project {
-						input,
-						fields: vec![], // No specific fields - pass through
-						omit: omit_fields,
-						include_all: true,
-					}) as Arc<dyn ExecOperator>);
-				}
-				return Ok(input);
+				// SELECT * - use Project operator to handle RecordId dereferencing
+				// and apply OMIT if present
+				let omit_fields = if !omit.is_empty() {
+					plan_omit_fields(omit.to_vec(), ctx)?
+				} else {
+					vec![]
+				};
+				return Ok(Arc::new(Project {
+					input,
+					fields: vec![], // No specific fields - pass through
+					omit: omit_fields,
+					include_all: true,
+				}) as Arc<dyn ExecOperator>);
 			}
 
 			// Check if this is a single bare parameter projection (no alias)
@@ -2032,26 +2033,24 @@ pub(crate) fn plan_projections_consolidated(
 				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 			if is_select_all {
-				// SELECT * - pass through, apply OMIT if present
-				if !omit.is_empty() {
-					let omit_names: Vec<String> = omit
-						.iter()
-						.filter_map(|e| {
-							if let Expr::Idiom(idiom) = e {
-								Some(idiom_to_field_name(idiom))
-							} else {
-								None
-							}
-						})
-						.collect();
-					let projections: Vec<Projection> = std::iter::once(Projection::All)
-						.chain(omit_names.into_iter().map(Projection::Omit))
-						.collect();
-					return Ok(
-						Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>
-					);
-				}
-				return Ok(input);
+				// SELECT * - use SelectProject to handle RecordId dereferencing
+				// and apply OMIT if present
+				let omit_names: Vec<String> = omit
+					.iter()
+					.filter_map(|e| {
+						if let Expr::Idiom(idiom) = e {
+							Some(idiom_to_field_name(idiom))
+						} else {
+							None
+						}
+					})
+					.collect();
+				let projections: Vec<Projection> = std::iter::once(Projection::All)
+					.chain(omit_names.into_iter().map(Projection::Omit))
+					.collect();
+				return Ok(
+					Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>
+				);
 			}
 
 			// Build projections

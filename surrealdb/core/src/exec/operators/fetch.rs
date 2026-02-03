@@ -118,6 +118,11 @@ fn fetch_field_recursive<'a>(
 				match value {
 					Value::Object(obj) => {
 						if let Some(field_value) = obj.get_mut(field_name.as_str()) {
+							// If this field is a RecordId and we have more path to traverse,
+							// we need to fetch it first so we can navigate into it
+							if matches!(field_value, Value::RecordId(_)) && !remaining.is_empty() {
+								fetch_value_if_record(ctx, field_value).await?;
+							}
 							// Continue traversing into this field
 							fetch_field_recursive(ctx, field_value, path, depth + 1).await?;
 						}
@@ -127,6 +132,12 @@ fn fetch_field_recursive<'a>(
 						for item in arr.iter_mut() {
 							fetch_field_recursive(ctx, item, path, depth).await?;
 						}
+					}
+					Value::RecordId(_) => {
+						// The current value is a RecordId - fetch it first, then navigate
+						fetch_value_if_record(ctx, value).await?;
+						// Now try again with the fetched value
+						fetch_field_recursive(ctx, value, path, depth).await?;
 					}
 					_ => {}
 				}
@@ -212,7 +223,10 @@ async fn fetch_value_if_record(
 }
 
 /// Fetch a single record by its ID.
-async fn fetch_record(ctx: &ExecutionContext, rid: &RecordId) -> crate::expr::FlowResult<Value> {
+pub(crate) async fn fetch_record(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+) -> crate::expr::FlowResult<Value> {
 	// Get the database context
 	let db_ctx = ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
 

@@ -228,53 +228,9 @@ mod tests {
 	use super::*;
 	use crate::val::{Array, Number, Object};
 
-	// =========================================================================
-	// Simple Field Access Tests
-	// =========================================================================
-
-	#[test]
-	fn test_evaluate_field_on_object() {
-		use crate::exec::physical_expr::idiom::evaluate_field;
-
-		let obj = Value::Object(Object::from_iter([
-			("name".to_string(), Value::String("Alice".to_string())),
-			("age".to_string(), Value::Number(Number::Int(30))),
-		]));
-
-		let result = evaluate_field(&obj, "name").unwrap();
-		assert_eq!(result, Value::String("Alice".to_string()));
-
-		let result = evaluate_field(&obj, "age").unwrap();
-		assert_eq!(result, Value::Number(Number::Int(30)));
-
-		let result = evaluate_field(&obj, "missing").unwrap();
-		assert_eq!(result, Value::None);
-	}
-
-	#[test]
-	fn test_evaluate_field_on_array() {
-		use crate::exec::physical_expr::idiom::evaluate_field;
-
-		let arr = Value::Array(Array::from(vec![
-			Value::Object(Object::from_iter([(
-				"name".to_string(),
-				Value::String("Alice".to_string()),
-			)])),
-			Value::Object(Object::from_iter([(
-				"name".to_string(),
-				Value::String("Bob".to_string()),
-			)])),
-		]));
-
-		let result = evaluate_field(&arr, "name").unwrap();
-		assert_eq!(
-			result,
-			Value::Array(Array::from(vec![
-				Value::String("Alice".to_string()),
-				Value::String("Bob".to_string()),
-			]))
-		);
-	}
+	// Note: Field access tests (test_evaluate_field_on_object, test_evaluate_field_on_array)
+	// were removed because evaluate_field is async and requires an EvalContext.
+	// This functionality is covered by language tests in tests/language/statements/select/*.surql
 
 	// =========================================================================
 	// Index Access Tests
@@ -317,18 +273,9 @@ mod tests {
 	// Array Operation Tests
 	// =========================================================================
 
-	#[test]
-	fn test_evaluate_all() {
-		use crate::exec::physical_expr::idiom::evaluate_all;
-
-		let arr = Value::Array(Array::from(vec![
-			Value::Number(Number::Int(1)),
-			Value::Number(Number::Int(2)),
-		]));
-
-		let result = evaluate_all(&arr).unwrap();
-		assert_eq!(result, arr);
-	}
+	// Note: test_evaluate_all was removed because evaluate_all is now async
+	// and requires an EvalContext for RecordId fetching. This functionality
+	// is covered by language tests in tests/language/statements/select/*.surql
 
 	#[test]
 	fn test_evaluate_flatten() {

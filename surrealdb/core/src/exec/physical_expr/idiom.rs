@@ -173,7 +173,7 @@ async fn evaluate_part(
 			evaluate_index(value, &index)
 		}
 
-		PhysicalPart::All => evaluate_all(value),
+		PhysicalPart::All => evaluate_all(value, ctx).await,
 
 		PhysicalPart::Flatten => evaluate_flatten(value),
 
@@ -292,13 +292,48 @@ pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Val
 	}
 }
 
-/// All elements - `[*]`.
-pub(crate) fn evaluate_all(value: &Value) -> anyhow::Result<Value> {
+/// All elements - `[*]` or `.*`.
+///
+/// When applied to a RecordId (e.g., `record.*`), fetches the record and returns it as an object.
+/// When applied to an array of RecordIds (e.g., from `->edge->target.*`), fetches each record.
+pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 	match value {
-		Value::Array(arr) => Ok(Value::Array(arr.clone())),
+		Value::Array(arr) => {
+			// Check if the array contains RecordIds that need fetching
+			// This handles `->edge->target.*` where the lookup returns an array of RecordIds
+			let has_record_ids = arr.iter().any(|v| matches!(v, Value::RecordId(_)));
+			if has_record_ids {
+				let mut results = Vec::with_capacity(arr.len());
+				for item in arr.iter() {
+					let fetched = Box::pin(evaluate_all(item, ctx.clone())).await?;
+					results.push(fetched);
+				}
+				Ok(Value::Array(results.into()))
+			} else {
+				Ok(Value::Array(arr.clone()))
+			}
+		}
 		Value::Object(obj) => {
 			// Return all values from the object as an array
 			Ok(Value::Array(obj.values().cloned().collect::<Vec<_>>().into()))
+		}
+		Value::RecordId(rid) => {
+			// Fetch the record and return the full object
+			// This handles `record.*` syntax
+			let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
+			let txn = ctx.exec_ctx.txn();
+			let record = txn
+				.get_record(
+					db_ctx.ns_ctx.ns.namespace_id,
+					db_ctx.db.database_id,
+					&rid.table,
+					&rid.key,
+					None,
+				)
+				.await
+				.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
+
+			Ok(record.data.as_ref().clone())
 		}
 		// For other types, return as single-element array
 		other => Ok(Value::Array(vec![other.clone()].into())),

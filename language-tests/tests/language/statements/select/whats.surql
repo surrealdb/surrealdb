@@ -43,7 +43,7 @@ value = "[{ id: person:1, name: 'John' }, { id: person:2, name: 'Jane' }]"
 
 # 10
 [[test.results]]
-value = "[[person:2]]"
+value = "[{ id: person:2, name: 'Jane' }]"
 
 # 11
 [[test.results]]
@@ -71,13 +71,15 @@ value = "[{ id: person:1}]"
 
 # 17
 [[test.results]]
-value = "[{ this: 2 }, { this: 3 }]"
+value = "[2, 3]"
 
 # 18
+[[test.results]]
+value = "['bob']"
 
 # 19
 [[test.results]]
-value = "[{ this: 'bob' }]"
+value = "[]"
 
 # 20
 [[test.results]]
@@ -85,13 +87,9 @@ value = "[]"
 
 # 21
 [[test.results]]
-value = "[]"
-
-# 22
-[[test.results]]
 value = "NONE"
 
-# 23
+# 22
 [[test.results]]
 value = "NONE"
 */

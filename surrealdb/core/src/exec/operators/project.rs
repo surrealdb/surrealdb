@@ -14,13 +14,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use super::fetch::fetch_record;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
-use crate::val::{Object, Value};
+use crate::val::{Object, RecordId, Value};
 
 /// Field selection specification.
 #[derive(Debug, Clone)]
@@ -80,8 +81,13 @@ impl ExecOperator for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Project is a pure transformation operator - inherits child requirements
-		self.input.required_context()
+		// When include_all is true, we may need to dereference RecordIds,
+		// which requires database access
+		if self.include_all {
+			ContextLevel::Database.max(self.input.required_context())
+		} else {
+			self.input.required_context()
+		}
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -121,31 +127,94 @@ impl ExecOperator for Project {
 
 					// Build the projected object
 					// If include_all is true, start with the original object's fields
-					let mut obj = if include_all {
+					// If the value is a RecordId, dereference it to get the full record
+					// If the value is a scalar (not Object/RecordId), pass through as-is
+					let mut output_value = if include_all {
 						match &value {
-							Value::Object(original) => original.clone(),
-							_ => Object::default(),
+							Value::Object(original) => {
+								let mut obj = original.clone();
+								// Add/override with explicit field selections
+								for field in &fields {
+									let field_value =
+										field.expr.evaluate(eval_ctx.clone()).await.map_err(
+											|e| {
+												ControlFlow::Err(anyhow::anyhow!(
+													"Failed to evaluate field expression: {}",
+													e
+												))
+											},
+										)?;
+									set_nested_value(&mut obj, &field.output_path, field_value);
+								}
+								Value::Object(obj)
+							}
+							Value::RecordId(rid) => {
+								// Dereference RecordId to full record
+								let fetched = fetch_record(&ctx, rid).await?;
+								match fetched {
+									Value::Object(mut obj) => {
+										// Add/override with explicit field selections
+										for field in &fields {
+											let field_value = field
+												.expr
+												.evaluate(eval_ctx.clone())
+												.await
+												.map_err(|e| {
+													ControlFlow::Err(anyhow::anyhow!(
+														"Failed to evaluate field expression: {}",
+														e
+													))
+												})?;
+											set_nested_value(
+												&mut obj,
+												&field.output_path,
+												field_value,
+											);
+										}
+										Value::Object(obj)
+									}
+									other => other, // Pass through None or other values
+								}
+							}
+							// For scalars (integers, strings, etc.), pass through as-is
+							// unless there are explicit fields to add
+							other => {
+								if fields.is_empty() {
+									other.clone()
+								} else {
+									// If there are explicit fields, we need to create an object
+									let mut obj = Object::default();
+									for field in &fields {
+										let field_value =
+											field.expr.evaluate(eval_ctx.clone()).await.map_err(
+												|e| {
+													ControlFlow::Err(anyhow::anyhow!(
+														"Failed to evaluate field expression: {}",
+														e
+													))
+												},
+											)?;
+										set_nested_value(&mut obj, &field.output_path, field_value);
+									}
+									Value::Object(obj)
+								}
+							}
 						}
 					} else {
-						Object::default()
+						// Not include_all - build object from explicit fields only
+						let mut obj = Object::default();
+						for field in &fields {
+							let field_value =
+								field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
+									ControlFlow::Err(anyhow::anyhow!(
+										"Failed to evaluate field expression: {}",
+										e
+									))
+								})?;
+							set_nested_value(&mut obj, &field.output_path, field_value);
+						}
+						Value::Object(obj)
 					};
-
-					// Add/override with explicit field selections
-					for field in &fields {
-						// Evaluate the field expression
-						let field_value =
-							field.expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!(
-									"Failed to evaluate field expression: {}",
-									e
-								))
-							})?;
-						// Use nested setting to properly construct nested objects
-						// e.g., path ["tags", "id"] creates { tags: { id: value } }
-						set_nested_value(&mut obj, &field.output_path, field_value);
-					}
-
-					let mut output_value = Value::Object(obj);
 
 					// Apply omit fields if present
 					for field in &omit {
@@ -382,8 +451,14 @@ impl ExecOperator for SelectProject {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// SelectProject doesn't evaluate expressions - inherits child requirements
-		self.input.required_context()
+		// When projections include All, we may need to dereference RecordIds,
+		// which requires database access
+		let has_all = self.projections.iter().any(|p| matches!(p, Projection::All));
+		if has_all {
+			ContextLevel::Database.max(self.input.required_context())
+		} else {
+			self.input.required_context()
+		}
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -398,22 +473,26 @@ impl ExecOperator for SelectProject {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let projections = self.projections.clone();
+		let ctx = ctx.clone();
 
 		// Create a stream that applies projections
-		let projected = input_stream.map(move |batch_result| {
+		let projected = input_stream.then(move |batch_result| {
 			let projections = projections.clone();
+			let ctx = ctx.clone();
 
-			let batch = batch_result?;
-			let mut projected_values = Vec::with_capacity(batch.values.len());
+			async move {
+				let batch = batch_result?;
+				let mut projected_values = Vec::with_capacity(batch.values.len());
 
-			for value in batch.values {
-				let projected = apply_projections(&value, &projections);
-				projected_values.push(projected);
+				for value in batch.values {
+					let projected = apply_projections(&value, &projections, &ctx).await?;
+					projected_values.push(projected);
+				}
+
+				Ok(ValueBatch {
+					values: projected_values,
+				})
 			}
-
-			Ok(ValueBatch {
-				values: projected_values,
-			})
 		});
 
 		Ok(Box::pin(projected))
@@ -421,12 +500,35 @@ impl ExecOperator for SelectProject {
 }
 
 /// Apply projections to a single value.
-fn apply_projections(value: &Value, projections: &[Projection]) -> Value {
+async fn apply_projections(
+	value: &Value,
+	projections: &[Projection],
+	ctx: &ExecutionContext,
+) -> Result<Value, crate::expr::ControlFlow> {
+	// Determine if we have an All projection
+	let has_all = projections.iter().any(|p| matches!(p, Projection::All));
+
+	// Get the input object, dereferencing RecordId if needed for SELECT *
 	let input_obj = match value {
-		Value::Object(obj) => obj,
-		_ => return value.clone(),
+		Value::Object(obj) => obj.clone(),
+		Value::RecordId(rid) if has_all => {
+			// Dereference RecordId to full record for SELECT *
+			match fetch_record(ctx, rid).await? {
+				Value::Object(obj) => obj,
+				Value::None => return Ok(Value::None),
+				other => return Ok(other),
+			}
+		}
+		_ => return Ok(value.clone()),
 	};
 
+	Ok(apply_projections_to_object(&input_obj, projections))
+}
+
+/// Apply projections to an already-resolved object (sync version).
+/// This is the core projection logic used by both the async apply_projections
+/// and by tests.
+fn apply_projections_to_object(input_obj: &Object, projections: &[Projection]) -> Value {
 	// Determine if we have an All projection
 	let has_all = projections.iter().any(|p| matches!(p, Projection::All));
 
@@ -493,16 +595,15 @@ mod tests {
 			("b".to_string(), Value::from(2)),
 			("c".to_string(), Value::from(3)),
 		]);
-		let value = Value::Object(obj);
 
 		let projections =
 			vec![Projection::Include("a".to_string()), Projection::Include("c".to_string())];
 
-		let result = apply_projections(&value, &projections);
-		if let Value::Object(obj) = result {
-			assert!(obj.contains_key("a"));
-			assert!(!obj.contains_key("b"));
-			assert!(obj.contains_key("c"));
+		let result = apply_projections_to_object(&obj, &projections);
+		if let Value::Object(result_obj) = result {
+			assert!(result_obj.contains_key("a"));
+			assert!(!result_obj.contains_key("b"));
+			assert!(result_obj.contains_key("c"));
 		} else {
 			panic!("Expected Object");
 		}
@@ -511,18 +612,17 @@ mod tests {
 	#[test]
 	fn test_apply_projections_rename() {
 		let obj = Object::from(vec![("old_name".to_string(), Value::from(42))]);
-		let value = Value::Object(obj);
 
 		let projections = vec![Projection::Rename {
 			from: "old_name".to_string(),
 			to: "new_name".to_string(),
 		}];
 
-		let result = apply_projections(&value, &projections);
-		if let Value::Object(obj) = result {
-			assert!(!obj.contains_key("old_name"));
-			assert!(obj.contains_key("new_name"));
-			assert_eq!(obj.get("new_name"), Some(&Value::from(42)));
+		let result = apply_projections_to_object(&obj, &projections);
+		if let Value::Object(result_obj) = result {
+			assert!(!result_obj.contains_key("old_name"));
+			assert!(result_obj.contains_key("new_name"));
+			assert_eq!(result_obj.get("new_name"), Some(&Value::from(42)));
 		} else {
 			panic!("Expected Object");
 		}
@@ -535,15 +635,14 @@ mod tests {
 			("b".to_string(), Value::from(2)),
 			("c".to_string(), Value::from(3)),
 		]);
-		let value = Value::Object(obj);
 
 		let projections = vec![Projection::All, Projection::Omit("b".to_string())];
 
-		let result = apply_projections(&value, &projections);
-		if let Value::Object(obj) = result {
-			assert!(obj.contains_key("a"));
-			assert!(!obj.contains_key("b"));
-			assert!(obj.contains_key("c"));
+		let result = apply_projections_to_object(&obj, &projections);
+		if let Value::Object(result_obj) = result {
+			assert!(result_obj.contains_key("a"));
+			assert!(!result_obj.contains_key("b"));
+			assert!(result_obj.contains_key("c"));
 		} else {
 			panic!("Expected Object");
 		}
