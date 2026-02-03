@@ -392,7 +392,7 @@ impl ScanExecutor {
 			// KV stream mode
 			let txn = Arc::clone(self.ctx.txn());
 			let kv_stream =
-				txn.stream_keys_vals(beg..end, self.version, None, ScanDirection::Forward);
+				txn.stream_keys_vals(beg..end.clone(), self.version, None, ScanDirection::Forward);
 			futures::pin_mut!(kv_stream);
 
 			while let Some(result) = kv_stream.next().await {
@@ -403,7 +403,14 @@ impl ScanExecutor {
 
 				// Check permission and add to batch
 				if self.check_and_add_to_batch(value).await? {
-					// Batch is full, return it
+					// Batch is full - update beg to continue from after this key
+					// Append 0x00 to get a key strictly after the current one
+					let mut next_beg = key.to_vec();
+					next_beg.push(0x00);
+					self.mode = ScanMode::KvStream {
+						beg: next_beg.into(),
+						end,
+					};
 					return self.flush_batch().await.map(Some);
 				}
 			}

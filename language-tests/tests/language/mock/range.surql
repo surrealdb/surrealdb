@@ -1,9 +1,4 @@
 /**
-[env]
-# Creating 1000 mock records can take a few seconds
-timeout = 10000
-context-timeout = 10000
-
 [test]
 
 [[test.results]]

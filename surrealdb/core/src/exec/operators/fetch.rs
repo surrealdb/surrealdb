@@ -205,7 +205,7 @@ fn fetch_field_recursive<'a>(
 }
 
 /// If the value is a RecordId, fetch it and replace the value.
-/// If it's an array of RecordIds, fetch each one.
+/// If it's an array of RecordIds, fetch each one using batch fetching.
 async fn fetch_value_if_record(
 	ctx: &ExecutionContext,
 	value: &mut Value,
@@ -216,13 +216,8 @@ async fn fetch_value_if_record(
 			*value = fetched;
 		}
 		Value::Array(arr) => {
-			// Fetch each RecordId in the array
-			for item in arr.iter_mut() {
-				if let Value::RecordId(rid) = item {
-					let fetched = fetch_record(ctx, rid).await?;
-					*item = fetched;
-				}
-			}
+			// Use batch fetch for arrays - more efficient for larger arrays
+			batch_fetch_in_place(ctx, arr.as_mut_slice()).await?;
 		}
 		_ => {}
 	}
@@ -257,6 +252,98 @@ pub(crate) async fn fetch_record(
 		Ok(None) => Ok(Value::None),
 		Err(e) => Err(crate::expr::ControlFlow::Err(e.into())),
 	}
+}
+
+/// Batch fetch multiple records by their IDs concurrently.
+///
+/// This function fetches multiple records in parallel using `try_join_all`,
+/// which is more efficient than sequential fetching for larger batches.
+/// The transaction cache will deduplicate repeated IDs automatically.
+///
+/// # Arguments
+///
+/// * `ctx` - The execution context containing the transaction
+/// * `rids` - A slice of RecordIds to fetch
+///
+/// # Returns
+///
+/// A vector of Values in the same order as the input RecordIds.
+/// Missing records are returned as `Value::None`.
+pub(crate) async fn batch_fetch_records(
+	ctx: &ExecutionContext,
+	rids: &[RecordId],
+) -> crate::expr::FlowResult<Vec<Value>> {
+	if rids.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// For small batches, sequential fetch may be more efficient
+	// due to lower overhead. Threshold chosen empirically.
+	const PARALLEL_THRESHOLD: usize = 4;
+
+	if rids.len() < PARALLEL_THRESHOLD {
+		// Sequential fetch for small batches
+		let mut results = Vec::with_capacity(rids.len());
+		for rid in rids {
+			results.push(fetch_record(ctx, rid).await?);
+		}
+		return Ok(results);
+	}
+
+	// Parallel fetch for larger batches
+	let futures: Vec<_> = rids.iter().map(|rid| fetch_record(ctx, rid)).collect();
+
+	futures::future::try_join_all(futures).await
+}
+
+/// Batch fetch records and replace RecordIds in an array in place.
+///
+/// This is a convenience function that modifies an array of values,
+/// replacing any RecordIds with their fetched record data.
+///
+/// # Arguments
+///
+/// * `ctx` - The execution context containing the transaction
+/// * `values` - A mutable slice of Values to process
+///
+/// # Note
+///
+/// This function collects all RecordIds first, fetches them in batch,
+/// then replaces them in the original array. Non-RecordId values are
+/// left unchanged.
+pub(crate) async fn batch_fetch_in_place(
+	ctx: &ExecutionContext,
+	values: &mut [Value],
+) -> crate::expr::FlowResult<()> {
+	// Collect indices and RecordIds to fetch
+	let to_fetch: Vec<(usize, RecordId)> = values
+		.iter()
+		.enumerate()
+		.filter_map(|(i, v)| {
+			if let Value::RecordId(rid) = v {
+				Some((i, rid.clone()))
+			} else {
+				None
+			}
+		})
+		.collect();
+
+	if to_fetch.is_empty() {
+		return Ok(());
+	}
+
+	// Extract just the RecordIds for batch fetching
+	let rids: Vec<RecordId> = to_fetch.iter().map(|(_, rid)| rid.clone()).collect();
+
+	// Batch fetch all records
+	let fetched = batch_fetch_records(ctx, &rids).await?;
+
+	// Replace RecordIds with fetched values
+	for ((idx, _), fetched_value) in to_fetch.into_iter().zip(fetched) {
+		values[idx] = fetched_value;
+	}
+
+	Ok(())
 }
 
 #[cfg(test)]

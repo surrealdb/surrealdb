@@ -1711,14 +1711,14 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 		Expr::Param(param) => {
 			let name = param.as_str();
 			if name == "this" || name == "self" {
-				return Err(Error::InvalidStatement(
-					"Invalid query: Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
-				));
+				return Err(Error::Query {
+					message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
+				});
 			}
 			if name == "parent" {
-				return Err(Error::InvalidStatement(
-					"Invalid query: Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
-				));
+				return Err(Error::Query {
+					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
+				});
 			}
 			Ok(())
 		}
@@ -2588,6 +2588,10 @@ fn convert_recurse_instruction(
 	}
 }
 
+/// Special parameter name for passing the lookup source at execution time.
+/// This parameter is bound by `evaluate_lookup_for_rid` before executing the plan.
+pub(crate) const LOOKUP_SOURCE_PARAM: &str = "__lookup_source__";
+
 /// Plan a Lookup operation, creating the operator tree.
 fn plan_lookup(
 	lookup: &crate::expr::lookup::Lookup,
@@ -2595,10 +2599,19 @@ fn plan_lookup(
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	use crate::exec::operators::{Filter, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
 
-	// Determine the source expression (current value's record ID)
-	// For now, use a literal placeholder - the actual source binding happens at eval time
+	// The source expression reads from a special parameter that will be bound at execution time.
+	// When evaluate_lookup_for_rid executes this plan, it creates an ExecutionContext with
+	// __lookup_source__ set to the actual RecordId.
 	let source_expr: Arc<dyn crate::exec::PhysicalExpr> =
-		Arc::new(crate::exec::physical_expr::Literal(crate::val::Value::None));
+		Arc::new(crate::exec::physical_expr::Param(LOOKUP_SOURCE_PARAM.into()));
+
+	// Determine the output mode based on whether we have projection (expr field)
+	// If there's a SELECT * or field list, we need to fetch full records
+	let output_mode = if lookup.expr.is_some() {
+		GraphScanOutput::FullEdge
+	} else {
+		GraphScanOutput::TargetId
+	};
 
 	// Create the base scan operator
 	let base_scan: Arc<dyn ExecOperator> = match &lookup.kind {
@@ -2623,7 +2636,7 @@ fn plan_lookup(
 				source: source_expr,
 				direction: LookupDirection::from(dir),
 				edge_tables,
-				output_mode: GraphScanOutput::TargetId,
+				output_mode,
 			})
 		}
 		crate::expr::lookup::LookupKind::Reference => {
@@ -2663,6 +2676,28 @@ fn plan_lookup(
 		base_scan
 	};
 
+	// Apply split if SPLIT is present
+	let split: Arc<dyn ExecOperator> = if let Some(splits) = &lookup.split {
+		Arc::new(crate::exec::operators::Split {
+			input: filtered,
+			idioms: splits.0.iter().map(|s| s.0.clone()).collect(),
+		})
+	} else {
+		filtered
+	};
+
+	// Apply sort if ORDER BY is present
+	let sorted: Arc<dyn ExecOperator> =
+		if let Some(crate::expr::order::Ordering::Order(order_list)) = &lookup.order {
+			let order_by = convert_order_list(order_list, ctx)?;
+			Arc::new(crate::exec::operators::Sort {
+				input: split,
+				order_by,
+			})
+		} else {
+			split
+		};
+
 	// Apply limit if present
 	let limited: Arc<dyn ExecOperator> = if lookup.limit.is_some() || lookup.start.is_some() {
 		let limit_expr =
@@ -2670,15 +2705,17 @@ fn plan_lookup(
 		let offset_expr =
 			lookup.start.as_ref().map(|s| expr_to_physical_expr(s.0.clone(), ctx)).transpose()?;
 		Arc::new(Limit {
-			input: filtered,
+			input: sorted,
 			limit: limit_expr,
 			offset: offset_expr,
 		})
 	} else {
-		filtered
+		sorted
 	};
 
-	// TODO: Add Sort, Split, Aggregate, and Project as needed
+	// TODO: Add Group and Project operators when needed
+	// GROUP BY requires the Aggregate operator which is complex to set up
+	// Projection would require the Project operator for field selection
 
 	Ok(limited)
 }

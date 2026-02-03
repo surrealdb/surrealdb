@@ -136,9 +136,14 @@ impl PhysicalExpr for BinaryOp {
 				})))
 			}
 
-			// Match operators require full-text search context
+			// Match operators require full-text search index context.
+			// When evaluated without index context (e.g., in computed fields or expressions),
+			// MATCHES returns false. The index planner pushes MATCHES to index scans where
+			// the QueryExecutor handles proper full-text search evaluation.
 			BinaryOperator::Matches(_) => {
-				Err(anyhow::anyhow!("MATCHES operator not yet supported in physical expressions"))
+				// Without index executor context, MATCHES returns false
+				// This is consistent with the legacy compute path's ExecutorOption::None case
+				Ok(Value::Bool(false))
 			}
 
 			// Nearest neighbor requires vector index context

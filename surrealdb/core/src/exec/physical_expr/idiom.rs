@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -5,12 +6,15 @@ use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::TableProvider;
+use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::exec::physical_expr::recurse::value_hash;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::physical_part::{
-	LookupDirection, PhysicalDestructurePart, PhysicalLookup, PhysicalPart,
+	PhysicalDestructurePart, PhysicalLookup, PhysicalPart, PhysicalRecurse,
+	PhysicalRecurseInstruction,
 };
 use crate::exec::{AccessMode, CombineAccessModes};
-use crate::expr::{Dir, Idiom};
+use crate::expr::Idiom;
 use crate::idx::planner::ScanDirection;
 use crate::val::{RecordId, Value};
 
@@ -330,6 +334,9 @@ pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Val
 ///
 /// When applied to a RecordId (e.g., `record.*`), fetches the record and returns it as an object.
 /// When applied to an array of RecordIds (e.g., from `->edge->target.*`), fetches each record.
+///
+/// This function also evaluates computed fields on fetched records, ensuring that
+/// recursive computed fields are properly resolved.
 pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 	match value {
 		Value::Array(arr) => {
@@ -352,26 +359,107 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow:
 			Ok(Value::Array(obj.values().cloned().collect::<Vec<_>>().into()))
 		}
 		Value::RecordId(rid) => {
-			// Fetch the record and return the full object
+			// Fetch the record and return the full object with computed fields evaluated
 			// This handles `record.*` syntax
-			let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
-			let txn = ctx.exec_ctx.txn();
-			let record = txn
-				.get_record(
-					db_ctx.ns_ctx.ns.namespace_id,
-					db_ctx.db.database_id,
-					&rid.table,
-					&rid.key,
-					None,
-				)
-				.await
-				.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
-
-			Ok(record.data.as_ref().clone())
+			fetch_record_with_computed_fields(rid, ctx).await
 		}
 		// For other types, return as single-element array
 		other => Ok(Value::Array(vec![other.clone()].into())),
 	}
+}
+
+/// Fetch a record and evaluate any computed fields on it.
+///
+/// This is necessary for computed fields that reference other computed fields
+/// to work correctly (e.g., `DEFINE FIELD subproducts ON product COMPUTED ->contains->product.*`).
+async fn fetch_record_with_computed_fields(
+	rid: &RecordId,
+	ctx: EvalContext<'_>,
+) -> anyhow::Result<Value> {
+	use reblessive::TreeStack;
+
+	use crate::catalog::providers::TableProvider;
+
+	let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
+	let txn = ctx.exec_ctx.txn();
+
+	// Fetch the raw record from storage
+	let record = txn
+		.get_record(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+			None,
+		)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
+
+	let mut result = record.data.as_ref().clone();
+
+	// Get the table's field definitions to check for computed fields
+	let fields = txn
+		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, &rid.table, None)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to get field definitions: {}", e))?;
+
+	// Check if any fields have computed values
+	let has_computed = fields.iter().any(|fd| fd.computed.is_some());
+
+	if has_computed {
+		// We need to evaluate computed fields using the legacy compute path
+		// Get the Options from the context (if available)
+		let root = ctx.exec_ctx.root();
+		if let Some(ref opt) = root.options {
+			let frozen = &root.ctx;
+			let rid_arc = std::sync::Arc::new(rid.clone());
+			let fields_clone = fields.clone();
+
+			// Use TreeStack for stack management during recursive computation
+			let mut stack = TreeStack::new();
+			result = stack
+				.enter(|stk| async move {
+					let mut doc_value = result;
+					for fd in fields_clone.iter() {
+						if let Some(computed) = &fd.computed {
+							// Evaluate the computed expression using the legacy compute method
+							// The document context is the current result value
+							let doc = crate::doc::CursorDoc::new(
+								Some(rid_arc.clone()),
+								None,
+								doc_value.clone(),
+							);
+							match computed.compute(stk, frozen, opt, Some(&doc)).await {
+								Ok(val) => {
+									// Coerce to the field's type if specified
+									let coerced_val = if let Some(kind) = fd.field_kind.as_ref() {
+										val.clone().coerce_to_kind(kind).unwrap_or(val)
+									} else {
+										val
+									};
+									doc_value.put(&fd.name, coerced_val);
+								}
+								Err(crate::expr::ControlFlow::Return(val)) => {
+									doc_value.put(&fd.name, val);
+								}
+								Err(_) => {
+									// If computation fails, leave the field as-is or set to None
+									doc_value.put(&fd.name, Value::None);
+								}
+							}
+						}
+					}
+					doc_value
+				})
+				.finish()
+				.await;
+		}
+	}
+
+	// Ensure the record has its ID
+	result.def(rid);
+
+	Ok(result)
 }
 
 /// Flatten nested arrays.
@@ -640,8 +728,62 @@ async fn evaluate_lookup(
 	}
 }
 
-/// Perform graph edge scan for a specific RecordId.
+/// Perform graph/reference lookup for a specific RecordId by executing the pre-planned operator
+/// tree.
+///
+/// This function:
+/// 1. Creates an ExecutionContext with the source RecordId bound to a special parameter
+/// 2. Executes the lookup plan (which may include GraphEdgeScan/ReferenceScan + Filter + Sort +
+///    Limit)
+/// 3. Collects and returns the results
 async fn evaluate_lookup_for_rid(
+	rid: &RecordId,
+	lookup: &PhysicalLookup,
+	ctx: EvalContext<'_>,
+) -> anyhow::Result<Value> {
+	use crate::exec::planner::LOOKUP_SOURCE_PARAM;
+
+	// Create a new execution context with the source RecordId bound to the special parameter.
+	// This allows the plan's source expression (Param("__lookup_source__")) to access the RecordId.
+	let bound_ctx = ctx.exec_ctx.with_param(LOOKUP_SOURCE_PARAM, Value::RecordId(rid.clone()));
+
+	// Execute the lookup plan
+	let stream = lookup.plan.execute(&bound_ctx).map_err(|e| match e {
+		crate::expr::ControlFlow::Err(e) => e,
+		crate::expr::ControlFlow::Return(v) => {
+			anyhow::anyhow!("Unexpected return in lookup: {:?}", v)
+		}
+		crate::expr::ControlFlow::Break => anyhow::anyhow!("Unexpected break in lookup"),
+		crate::expr::ControlFlow::Continue => anyhow::anyhow!("Unexpected continue in lookup"),
+	})?;
+
+	// Collect all results into an array
+	let mut results = Vec::new();
+	futures::pin_mut!(stream);
+
+	while let Some(batch_result) = stream.next().await {
+		let batch = batch_result.map_err(|e| match e {
+			crate::expr::ControlFlow::Err(e) => e,
+			crate::expr::ControlFlow::Return(v) => {
+				anyhow::anyhow!("Unexpected return in lookup: {:?}", v)
+			}
+			crate::expr::ControlFlow::Break => anyhow::anyhow!("Unexpected break in lookup"),
+			crate::expr::ControlFlow::Continue => anyhow::anyhow!("Unexpected continue in lookup"),
+		})?;
+		results.extend(batch.values);
+	}
+
+	Ok(Value::Array(results.into()))
+}
+
+/// Perform reference lookup (<~) for a specific RecordId.
+///
+/// Reference lookups find all records that reference the given record ID
+/// through a specific field. This is the inverse of a record link.
+///
+/// Example: `person:alice<~post.author` finds all posts where the author field
+/// references person:alice.
+async fn evaluate_reference_lookup(
 	rid: &RecordId,
 	lookup: &PhysicalLookup,
 	ctx: EvalContext<'_>,
@@ -652,40 +794,53 @@ async fn evaluate_lookup_for_rid(
 	let ns = &db_ctx.ns_ctx.ns;
 	let db = &db_ctx.db;
 
-	// Determine directions to scan
-	let directions: Vec<Dir> = match lookup.direction {
-		LookupDirection::Out => vec![Dir::Out],
-		LookupDirection::In => vec![Dir::In],
-		LookupDirection::Both => vec![Dir::Out, Dir::In],
-		LookupDirection::Reference => {
-			// Reference lookups use a different scan pattern
-			return Err(anyhow::anyhow!(
-				"Reference lookups (<~) not yet implemented in streaming engine"
-			));
-		}
-	};
-
 	let mut results = Vec::new();
 
-	// Scan edges for each direction
-	for dir in &directions {
-		if lookup.edge_tables.is_empty() {
-			// Scan all edges in this direction
-			let beg = crate::key::graph::egprefix(
+	// For reference lookups, edge_tables contains the referencing tables
+	// If empty, we'd need to scan all tables (not supported for now)
+	if lookup.edge_tables.is_empty() {
+		// Scan all references to this record
+		let beg = crate::key::r#ref::prefix(ns.namespace_id, db.database_id, &rid.table, &rid.key)
+			.map_err(|e| anyhow::anyhow!("Failed to create prefix: {}", e))?;
+
+		let end = crate::key::r#ref::suffix(ns.namespace_id, db.database_id, &rid.table, &rid.key)
+			.map_err(|e| anyhow::anyhow!("Failed to create suffix: {}", e))?;
+
+		let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
+		futures::pin_mut!(kv_stream);
+
+		while let Some(result) = kv_stream.next().await {
+			let key = result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
+
+			// Decode the reference key to get the referencing record ID
+			let decoded = crate::key::r#ref::Ref::decode_key(&key)
+				.map_err(|e| anyhow::anyhow!("Failed to decode ref key: {}", e))?;
+
+			// The referencing record ID (ft = foreign table, fk = foreign key)
+			let referencing_rid = RecordId {
+				table: decoded.ft.into_owned(),
+				key: decoded.fk.into_owned(),
+			};
+			results.push(Value::RecordId(referencing_rid));
+		}
+	} else {
+		// Scan references from specific tables
+		for ref_table in &lookup.edge_tables {
+			let beg = crate::key::r#ref::ftprefix(
 				ns.namespace_id,
 				db.database_id,
 				&rid.table,
 				&rid.key,
-				dir,
+				ref_table.as_str(),
 			)
 			.map_err(|e| anyhow::anyhow!("Failed to create prefix: {}", e))?;
 
-			let end = crate::key::graph::egsuffix(
+			let end = crate::key::r#ref::ftsuffix(
 				ns.namespace_id,
 				db.database_id,
 				&rid.table,
 				&rid.key,
-				dir,
+				ref_table.as_str(),
 			)
 			.map_err(|e| anyhow::anyhow!("Failed to create suffix: {}", e))?;
 
@@ -693,59 +848,18 @@ async fn evaluate_lookup_for_rid(
 			futures::pin_mut!(kv_stream);
 
 			while let Some(result) = kv_stream.next().await {
-				let key =
-					result.map_err(|e| anyhow::anyhow!("Failed to scan graph edge: {}", e))?;
+				let key = result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
 
-				// Decode the graph key to get the target RecordId
-				let decoded = crate::key::graph::Graph::decode_key(&key)
-					.map_err(|e| anyhow::anyhow!("Failed to decode graph key: {}", e))?;
+				// Decode the reference key to get the referencing record ID
+				let decoded = crate::key::r#ref::Ref::decode_key(&key)
+					.map_err(|e| anyhow::anyhow!("Failed to decode ref key: {}", e))?;
 
-				let target_rid = RecordId {
+				// The referencing record ID
+				let referencing_rid = RecordId {
 					table: decoded.ft.into_owned(),
 					key: decoded.fk.into_owned(),
 				};
-				results.push(Value::RecordId(target_rid));
-			}
-		} else {
-			// Scan specific edge tables
-			for edge_table in &lookup.edge_tables {
-				let beg = crate::key::graph::ftprefix(
-					ns.namespace_id,
-					db.database_id,
-					&rid.table,
-					&rid.key,
-					dir,
-					edge_table,
-				)
-				.map_err(|e| anyhow::anyhow!("Failed to create prefix: {}", e))?;
-
-				let end = crate::key::graph::ftsuffix(
-					ns.namespace_id,
-					db.database_id,
-					&rid.table,
-					&rid.key,
-					dir,
-					edge_table,
-				)
-				.map_err(|e| anyhow::anyhow!("Failed to create suffix: {}", e))?;
-
-				let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
-				futures::pin_mut!(kv_stream);
-
-				while let Some(result) = kv_stream.next().await {
-					let key =
-						result.map_err(|e| anyhow::anyhow!("Failed to scan graph edge: {}", e))?;
-
-					// Decode the graph key to get the target RecordId
-					let decoded = crate::key::graph::Graph::decode_key(&key)
-						.map_err(|e| anyhow::anyhow!("Failed to decode graph key: {}", e))?;
-
-					let target_rid = RecordId {
-						table: decoded.ft.into_owned(),
-						key: decoded.fk.into_owned(),
-					};
-					results.push(Value::RecordId(target_rid));
-				}
+				results.push(Value::RecordId(referencing_rid));
 			}
 		}
 	}
@@ -754,15 +868,373 @@ async fn evaluate_lookup_for_rid(
 }
 
 /// Recurse evaluation - bounded/unbounded recursion.
-async fn evaluate_recurse(
-	value: &Value,
-	recurse: &crate::exec::physical_part::PhysicalRecurse,
+///
+/// Implements recursive graph traversal with various collection strategies:
+/// - Default: Follow path until bounds or dead end, return final value
+/// - Collect: Gather all unique nodes encountered during traversal
+/// - Path: Return all paths as arrays of arrays
+/// - Shortest: Find shortest path to a target node (BFS)
+///
+/// Note: This function uses `Box::pin` to handle the recursive nature of
+/// path evaluation (evaluate_part -> evaluate_recurse -> evaluate_physical_path).
+fn evaluate_recurse<'a>(
+	value: &'a Value,
+	recurse: &'a PhysicalRecurse,
+	ctx: EvalContext<'a>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Value>> + Send + 'a>> {
+	Box::pin(async move {
+		// Get the system recursion limit
+		let system_limit = *IDIOM_RECURSION_LIMIT as u32;
+		let max_depth = recurse.max_depth.unwrap_or(system_limit).min(system_limit);
+
+		match &recurse.instruction {
+			PhysicalRecurseInstruction::Default => {
+				evaluate_recurse_default(value, &recurse.path, recurse.min_depth, max_depth, ctx)
+					.await
+			}
+			PhysicalRecurseInstruction::Collect => {
+				evaluate_recurse_collect(
+					value,
+					&recurse.path,
+					recurse.min_depth,
+					max_depth,
+					recurse.inclusive,
+					ctx,
+				)
+				.await
+			}
+			PhysicalRecurseInstruction::Path => {
+				evaluate_recurse_path(
+					value,
+					&recurse.path,
+					recurse.min_depth,
+					max_depth,
+					recurse.inclusive,
+					ctx,
+				)
+				.await
+			}
+			PhysicalRecurseInstruction::Shortest {
+				target,
+			} => {
+				let target_value = target.evaluate(ctx.clone()).await?;
+				evaluate_recurse_shortest(
+					value,
+					&target_value,
+					&recurse.path,
+					recurse.min_depth,
+					max_depth,
+					recurse.inclusive,
+					ctx,
+				)
+				.await
+			}
+		}
+	})
+}
+
+/// Evaluate a path of PhysicalParts against a value.
+///
+/// This helper function traverses a sequence of parts, applying each one
+/// in order to the current value. Used by recursion and can be reused
+/// for other path evaluation needs.
+///
+/// Note: This function uses `Box::pin` internally to handle the recursive
+/// nature of path evaluation (evaluate_part -> evaluate_recurse -> evaluate_physical_path).
+pub(crate) fn evaluate_physical_path<'a>(
+	value: &'a Value,
+	path: &'a [PhysicalPart],
+	ctx: EvalContext<'a>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Value>> + Send + 'a>> {
+	Box::pin(async move {
+		let mut current = value.clone();
+		for (i, part) in path.iter().enumerate() {
+			current = Box::pin(evaluate_part(&current, part, ctx.clone())).await?;
+
+			// After a Lookup, flatten if the NEXT part is also a Lookup or Where
+			// This matches SurrealDB semantics for consecutive lookups
+			if matches!(part, PhysicalPart::Lookup(_)) {
+				if let Some(next_part) = path.get(i + 1) {
+					if matches!(next_part, PhysicalPart::Lookup(_) | PhysicalPart::Where(_)) {
+						current = current.flatten();
+					}
+				}
+			}
+		}
+		Ok(current)
+	})
+}
+
+/// Check if a value is "final" (terminates recursion).
+///
+/// A value is final if it's None, Null, or an empty/all-none array.
+fn is_final(value: &Value) -> bool {
+	match value {
+		Value::None | Value::Null => true,
+		Value::Array(arr) => {
+			arr.is_empty() || arr.iter().all(|v| matches!(v, Value::None | Value::Null))
+		}
+		_ => false,
+	}
+}
+
+/// Clean iteration result by filtering out final values from arrays.
+fn clean_iteration(value: Value) -> Value {
+	if let Value::Array(arr) = value {
+		let filtered: Vec<Value> = arr.into_iter().filter(|v| !is_final(v)).collect();
+		Value::Array(filtered.into()).flatten()
+	} else {
+		value
+	}
+}
+
+/// Default recursion: keep following the path until bounds or dead end.
+///
+/// Returns the final value after traversing the path up to max_depth times,
+/// or None if min_depth is not reached before termination.
+async fn evaluate_recurse_default(
+	start: &Value,
+	path: &[PhysicalPart],
+	min_depth: u32,
+	max_depth: u32,
 	ctx: EvalContext<'_>,
 ) -> anyhow::Result<Value> {
-	// TODO: Implement recursion
-	// This requires iterating until bounds are reached or termination condition
-	let _ = (value, recurse, ctx);
-	Err(anyhow::anyhow!(
-		"Recursion evaluation not yet implemented - requires iterative execution with bounds"
-	))
+	let mut current = start.clone();
+	let mut depth = 0u32;
+
+	while depth < max_depth {
+		// Evaluate the path on the current value
+		let value_ctx = ctx.with_value(&current);
+		let next = evaluate_physical_path(&current, path, value_ctx).await?;
+
+		depth += 1;
+
+		// Clean up dead ends from array results
+		let next = clean_iteration(next);
+
+		// Check termination conditions
+		if is_final(&next) || next == current {
+			// Reached a dead end or cycle
+			return if depth >= min_depth {
+				Ok(current)
+			} else {
+				Ok(Value::None)
+			};
+		}
+
+		current = next;
+	}
+
+	// Reached max depth
+	if depth >= min_depth {
+		Ok(current)
+	} else {
+		Ok(Value::None)
+	}
+}
+
+/// Collect recursion: gather all unique nodes encountered during BFS traversal.
+///
+/// Uses breadth-first search to collect all reachable nodes, respecting
+/// depth bounds and avoiding cycles via hash-based deduplication.
+async fn evaluate_recurse_collect(
+	start: &Value,
+	path: &[PhysicalPart],
+	min_depth: u32,
+	max_depth: u32,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> anyhow::Result<Value> {
+	let mut collected = Vec::new();
+	let mut seen: HashSet<u64> = HashSet::new();
+	let mut frontier = vec![start.clone()];
+
+	// Include starting node if inclusive
+	if inclusive {
+		collected.push(start.clone());
+		seen.insert(value_hash(start));
+	}
+
+	let mut depth = 0u32;
+
+	while depth < max_depth && !frontier.is_empty() {
+		let mut next_frontier = Vec::new();
+
+		for value in frontier {
+			let value_ctx = ctx.with_value(&value);
+			let result = evaluate_physical_path(&value, path, value_ctx).await?;
+
+			// Process result (may be single value or array)
+			let values = match result {
+				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::None | Value::Null => continue,
+				other => vec![other],
+			};
+
+			for v in values {
+				if is_final(&v) {
+					continue;
+				}
+
+				let hash = value_hash(&v);
+				if !seen.contains(&hash) {
+					seen.insert(hash);
+					// Only collect if we've reached minimum depth
+					if depth + 1 >= min_depth {
+						collected.push(v.clone());
+					}
+					next_frontier.push(v);
+				}
+			}
+		}
+
+		frontier = next_frontier;
+		depth += 1;
+	}
+
+	Ok(Value::Array(collected.into()))
+}
+
+/// Path recursion: return all paths as arrays of arrays.
+///
+/// Tracks all possible paths through the graph, returning each complete
+/// path as an array. Paths terminate at dead ends or max depth.
+async fn evaluate_recurse_path(
+	start: &Value,
+	path: &[PhysicalPart],
+	min_depth: u32,
+	max_depth: u32,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> anyhow::Result<Value> {
+	let mut completed_paths: Vec<Value> = Vec::new();
+	let mut active_paths: Vec<Vec<Value>> = if inclusive {
+		vec![vec![start.clone()]]
+	} else {
+		vec![vec![]]
+	};
+
+	let mut depth = 0u32;
+
+	while depth < max_depth && !active_paths.is_empty() {
+		let mut next_paths = Vec::new();
+
+		for current_path in active_paths {
+			let current_value = current_path.last().unwrap_or(start);
+			let value_ctx = ctx.with_value(current_value);
+			let result = evaluate_physical_path(current_value, path, value_ctx).await?;
+
+			let values = match result {
+				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::None | Value::Null => {
+					// Dead end - path is complete if min depth reached
+					if depth >= min_depth && !current_path.is_empty() {
+						completed_paths.push(Value::Array(current_path.into()));
+					}
+					continue;
+				}
+				other => vec![other],
+			};
+
+			if values.is_empty() || values.iter().all(|v| is_final(v)) {
+				// Dead end
+				if depth >= min_depth && !current_path.is_empty() {
+					completed_paths.push(Value::Array(current_path.into()));
+				}
+			} else {
+				// Extend path with each new value
+				for v in values {
+					if is_final(&v) {
+						continue;
+					}
+					let mut new_path = current_path.clone();
+					new_path.push(v);
+					next_paths.push(new_path);
+				}
+			}
+		}
+
+		active_paths = next_paths;
+		depth += 1;
+	}
+
+	// Add remaining active paths that reached max depth
+	for path in active_paths {
+		if !path.is_empty() && depth >= min_depth {
+			completed_paths.push(Value::Array(path.into()));
+		}
+	}
+
+	Ok(Value::Array(completed_paths.into()))
+}
+
+/// Shortest path recursion: find the shortest path to a target node using BFS.
+///
+/// Returns the first (shortest) path found to the target, or None if the
+/// target is not reachable within max_depth.
+async fn evaluate_recurse_shortest(
+	start: &Value,
+	target: &Value,
+	path: &[PhysicalPart],
+	min_depth: u32,
+	max_depth: u32,
+	inclusive: bool,
+	ctx: EvalContext<'_>,
+) -> anyhow::Result<Value> {
+	let mut seen: HashSet<u64> = HashSet::new();
+
+	// BFS with path tracking
+	let initial_path = if inclusive {
+		vec![start.clone()]
+	} else {
+		vec![]
+	};
+	let mut queue: VecDeque<(Value, Vec<Value>)> = VecDeque::new();
+	queue.push_back((start.clone(), initial_path));
+	seen.insert(value_hash(start));
+
+	let mut depth = 0u32;
+
+	while depth < max_depth && !queue.is_empty() {
+		let level_size = queue.len();
+
+		for _ in 0..level_size {
+			let (current, current_path) = queue.pop_front().unwrap();
+
+			let value_ctx = ctx.with_value(&current);
+			let result = evaluate_physical_path(&current, path, value_ctx).await?;
+
+			let values = match result {
+				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::None | Value::Null => continue,
+				other => vec![other],
+			};
+
+			for v in values {
+				if is_final(&v) {
+					continue;
+				}
+
+				// Check if we found the target (only if min_depth reached)
+				if depth + 1 >= min_depth && &v == target {
+					let mut final_path = current_path.clone();
+					final_path.push(v);
+					return Ok(Value::Array(final_path.into()));
+				}
+
+				let hash = value_hash(&v);
+				if !seen.contains(&hash) {
+					seen.insert(hash);
+					let mut new_path = current_path.clone();
+					new_path.push(v.clone());
+					queue.push_back((v, new_path));
+				}
+			}
+		}
+
+		depth += 1;
+	}
+
+	// Target not found
+	Ok(Value::None)
 }

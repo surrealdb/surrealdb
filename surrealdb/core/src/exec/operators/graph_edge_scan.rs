@@ -259,12 +259,14 @@ async fn decode_graph_key(
 	match output_mode {
 		GraphScanOutput::TargetId => Ok(Value::RecordId(target_rid)),
 		GraphScanOutput::EdgeId => {
-			// The edge record ID uses the source table (which is stored in the key)
-			// and the source key. However, this is the graph key structure, not the edge record.
-			// For edges, we need to construct the edge ID from the source/target relationship.
-			// The actual edge record ID would be something like `knows:123`.
-			// This is more complex - for now, return the target ID.
-			// TODO: Properly extract edge record IDs from graph metadata
+			// When scanning from a node table (e.g., person:alice->knows), the foreign
+			// record in the graph key IS the edge record (e.g., knows:xxx).
+			// When scanning from an edge table (e.g., knows:xxx->person), the foreign
+			// record is the target node.
+			//
+			// In SurrealDB's graph model, `->edge_table` returns edge records, and
+			// `->edge_table->node_table` performs a two-hop traversal through the edge.
+			// So EdgeId and TargetId return the same value for a single-hop scan.
 			Ok(Value::RecordId(target_rid))
 		}
 		GraphScanOutput::FullEdge => {

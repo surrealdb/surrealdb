@@ -336,11 +336,88 @@ impl ToSql for RecurseExpr {
 	}
 }
 
-/// Helper function to create a hash for value deduplication.
+/// Helper function to create a hash for value deduplication in graph traversal.
+///
+/// This function is optimized for the common case of RecordId values, which are
+/// the primary target for cycle detection in graph traversal. For other value types,
+/// it uses efficient hashing based on the value's structure.
+///
+/// # Performance
+///
+/// - RecordId: O(1) using native Hash implementation
+/// - Simple types (String, Number, Bool, etc.): O(n) where n is the value size
+/// - Complex types (Array, Object): Falls back to debug representation (slower)
 pub(crate) fn value_hash(value: &Value) -> u64 {
 	use std::hash::{Hash, Hasher};
 	let mut hasher = std::collections::hash_map::DefaultHasher::new();
-	// Use the display representation as a proxy for equality
-	format!("{:?}", value).hash(&mut hasher);
+
+	match value {
+		// RecordId is the primary case for cycle detection in graph traversal
+		// Uses the native Hash implementation which is efficient
+		Value::RecordId(rid) => {
+			// Discriminant for type distinction
+			0u8.hash(&mut hasher);
+			rid.hash(&mut hasher);
+		}
+
+		// Simple scalar types - efficient direct hashing
+		Value::None => {
+			1u8.hash(&mut hasher);
+		}
+		Value::Null => {
+			2u8.hash(&mut hasher);
+		}
+		Value::Bool(b) => {
+			3u8.hash(&mut hasher);
+			b.hash(&mut hasher);
+		}
+		Value::String(s) => {
+			4u8.hash(&mut hasher);
+			s.hash(&mut hasher);
+		}
+		Value::Number(n) => {
+			5u8.hash(&mut hasher);
+			// Number doesn't implement Hash, use string representation
+			n.to_string().hash(&mut hasher);
+		}
+		Value::Uuid(u) => {
+			6u8.hash(&mut hasher);
+			u.0.hash(&mut hasher);
+		}
+
+		// For complex types, use a simpler but still reasonably efficient approach
+		// These are less common in cycle detection scenarios
+		Value::Array(arr) => {
+			7u8.hash(&mut hasher);
+			arr.len().hash(&mut hasher);
+			// Hash first few elements for efficiency
+			for (i, v) in arr.iter().enumerate() {
+				if i >= 8 {
+					break;
+				}
+				value_hash(v).hash(&mut hasher);
+			}
+		}
+		Value::Object(obj) => {
+			8u8.hash(&mut hasher);
+			obj.len().hash(&mut hasher);
+			// Hash first few key-value pairs
+			for (i, (k, v)) in obj.iter().enumerate() {
+				if i >= 8 {
+					break;
+				}
+				k.hash(&mut hasher);
+				value_hash(v).hash(&mut hasher);
+			}
+		}
+
+		// For all other types, fall back to debug representation
+		// This is slower but handles all edge cases correctly
+		_ => {
+			255u8.hash(&mut hasher);
+			format!("{:?}", value).hash(&mut hasher);
+		}
+	}
+
 	hasher.finish()
 }

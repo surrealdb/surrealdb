@@ -192,6 +192,7 @@ impl ExecOperator for ReferenceScan {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::val::RecordIdKey;
 
 	#[test]
 	fn test_reference_scan_attrs() {
