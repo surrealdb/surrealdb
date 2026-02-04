@@ -12,7 +12,7 @@ use crate::expr::part::Part;
 use crate::expr::{Expr, Idiom, Literal};
 use crate::val::{Set, Value};
 
-/// A part of a field path that can be extracted without execution.
+/// A part of a field path that can be navigated without execution.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FieldPathPart {
 	/// Field access: `.name`
@@ -23,6 +23,8 @@ pub enum FieldPathPart {
 	First,
 	/// Last element: `[$]` or `$last`
 	Last,
+	/// Graph traversal key: `->table` or `<-table`
+	Lookup(String),
 }
 
 /// A path for pure field extraction, with no execution required.
@@ -57,6 +59,8 @@ impl TryFrom<&Idiom> for FieldPath {
 	type Error = Error;
 
 	fn try_from(idiom: &Idiom) -> Result<Self, Self::Error> {
+		use surrealdb_types::ToSql;
+
 		let mut parts = Vec::with_capacity(idiom.len());
 		for part in idiom.iter() {
 			match part {
@@ -66,10 +70,16 @@ impl TryFrom<&Idiom> for FieldPath {
 				Part::Value(Expr::Literal(Literal::Integer(i))) if *i >= 0 => {
 					parts.push(FieldPathPart::Index(*i as usize))
 				}
+				Part::Lookup(lookup) => {
+					// Graph traversal key like "->table" - convert to string representation
+					parts.push(FieldPathPart::Lookup(lookup.to_sql()))
+				}
+				// Skip parts that don't affect output path structure
+				Part::Destructure(_) | Part::Start(_) => {}
 				_ => {
 					return Err(Error::Unimplemented(format!(
-						"FieldPath cannot contain complex parts like graph traversal, where clauses, or method calls. \
-					 Only simple field access (a.b.c) and literal indices ([0], [$]) are supported. \
+						"FieldPath cannot contain complex parts like where clauses or method calls. \
+					 Only simple field access (a.b.c), literal indices ([0], [$]), and graph traversals are supported. \
 					 Got: {:?}",
 						idiom
 					)));
@@ -102,8 +112,8 @@ impl FieldPath {
 		let mut current = value.clone();
 		for part in &self.0 {
 			current = match (&current, part) {
-				// Field access on object
-				(Value::Object(obj), FieldPathPart::Field(name)) => {
+				// Field/Lookup access on object
+				(Value::Object(obj), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
 					obj.get(name).cloned().unwrap_or(Value::None)
 				}
 				// Index access on array
@@ -130,25 +140,29 @@ impl FieldPath {
 				(Value::Set(set), FieldPathPart::Last) => {
 					set.last().cloned().unwrap_or(Value::None)
 				}
-				// Field access on array applies to each element
-				(Value::Array(arr), FieldPathPart::Field(name)) => Value::Array(
-					arr.iter()
-						.map(|v| match v {
-							Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-							_ => Value::None,
-						})
-						.collect::<Vec<_>>()
-						.into(),
-				),
-				// Field access on set applies to each element
-				(Value::Set(set), FieldPathPart::Field(name)) => Value::Set(Set::from(
-					set.iter()
-						.map(|v| match v {
-							Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
-							_ => Value::None,
-						})
-						.collect::<Vec<_>>(),
-				)),
+				// Field/Lookup access on array applies to each element
+				(Value::Array(arr), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
+					Value::Array(
+						arr.iter()
+							.map(|v| match v {
+								Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+								_ => Value::None,
+							})
+							.collect::<Vec<_>>()
+							.into(),
+					)
+				}
+				// Field/Lookup access on set applies to each element
+				(Value::Set(set), FieldPathPart::Field(name) | FieldPathPart::Lookup(name)) => {
+					Value::Set(Set::from(
+						set.iter()
+							.map(|v| match v {
+								Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+								_ => Value::None,
+							})
+							.collect::<Vec<_>>(),
+					))
+				}
 				// Any other combination returns None
 				_ => Value::None,
 			};
@@ -166,6 +180,8 @@ impl fmt::Display for FieldPath {
 				FieldPathPart::Index(idx) => write!(f, "[{}]", idx)?,
 				FieldPathPart::First => write!(f, "[0]")?,
 				FieldPathPart::Last => write!(f, "[$]")?,
+				FieldPathPart::Lookup(key) if i == 0 => write!(f, "{}", key)?,
+				FieldPathPart::Lookup(key) => write!(f, ".{}", key)?,
 			}
 		}
 		Ok(())

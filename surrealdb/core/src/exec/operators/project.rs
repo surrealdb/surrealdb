@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::fetch::fetch_record;
+use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -26,9 +27,9 @@ use crate::val::{Object, RecordId, Value};
 /// Field selection specification.
 #[derive(Debug, Clone)]
 pub struct FieldSelection {
-	/// The output path for this field (e.g., ["tags", "id"] for "tags.id")
-	/// This allows proper nested object construction.
-	pub output_path: Vec<String>,
+	/// The output path for this field - determines where the value goes in the result.
+	/// Uses FieldPath for proper nested object construction and array iteration.
+	pub output_path: FieldPath,
 	/// The expression to evaluate for this field's value
 	pub expr: Arc<dyn PhysicalExpr>,
 	/// Whether the output_path came from an explicit alias.
@@ -42,12 +43,12 @@ impl FieldSelection {
 	/// it will be split into path components for nested object construction.
 	pub fn new(output_name: String, expr: Arc<dyn PhysicalExpr>) -> Self {
 		// Parse the output name into path components
-		// For simple dot-separated paths like "tags.id", split into ["tags", "id"]
-		// For complex names with special chars, keep as single element
+		// For simple dot-separated paths like "tags.id", split into Field parts
+		// For complex names with special chars, keep as single Field
 		let output_path = if output_name.contains('.') && !output_name.contains(['[', '(', ' ']) {
-			output_name.split('.').map(|s| s.to_string()).collect()
+			FieldPath(output_name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect())
 		} else {
-			vec![output_name]
+			FieldPath::field(output_name)
 		};
 		Self {
 			output_path,
@@ -61,9 +62,9 @@ impl FieldSelection {
 	/// For projection functions, the alias takes precedence over dynamic field names.
 	pub fn with_alias(output_name: String, expr: Arc<dyn PhysicalExpr>) -> Self {
 		let output_path = if output_name.contains('.') && !output_name.contains(['[', '(', ' ']) {
-			output_name.split('.').map(|s| s.to_string()).collect()
+			FieldPath(output_name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect())
 		} else {
-			vec![output_name]
+			FieldPath::field(output_name)
 		};
 		Self {
 			output_path,
@@ -72,9 +73,19 @@ impl FieldSelection {
 		}
 	}
 
+	/// Create a new field selection from a FieldPath directly.
+	/// Used for graph traversals without aliases where the path represents nested structure.
+	pub fn from_field_path(output_path: FieldPath, expr: Arc<dyn PhysicalExpr>) -> Self {
+		Self {
+			output_path,
+			expr,
+			has_explicit_alias: false,
+		}
+	}
+
 	/// Get the display name for this field (for debugging/attrs).
 	pub fn display_name(&self) -> String {
-		self.output_path.join(".")
+		self.output_path.to_string()
 	}
 }
 
@@ -241,32 +252,31 @@ async fn evaluate_and_set_field(
 				if field.has_explicit_alias {
 					// User provided an alias - use it as the field name
 					// For multiple bindings, collect values into an array
-					if bindings.len() == 1 {
-						let (_, value) = bindings.into_iter().next().unwrap();
-						set_nested_value(obj, &field.output_path, value);
+					let value = if bindings.len() == 1 {
+						bindings.into_iter().next().unwrap().1
 					} else {
 						// Multiple bindings with alias - collect as array
-						let values: Vec<Value> = bindings.into_iter().map(|(_, v)| v).collect();
-						set_nested_value(obj, &field.output_path, Value::Array(values.into()));
+						Value::Array(
+							bindings.into_iter().map(|(_, v)| v).collect::<Vec<_>>().into(),
+						)
+					};
+					let mut target = Value::Object(std::mem::take(obj));
+					target.set_at_field_path(&field.output_path, value);
+					if let Value::Object(new_obj) = target {
+						*obj = new_obj;
 					}
 				} else {
 					// No alias - use the dynamic field names from the function
 					for (idiom, value) in bindings {
-						// Convert idiom to path components
-						let path: Vec<String> = idiom
-							.0
-							.iter()
-							.filter_map(|part| {
-								if let crate::expr::part::Part::Field(name) = part {
-									Some(name.to_string())
-								} else {
-									None
+						// Convert idiom to FieldPath
+						if let Ok(path) = FieldPath::try_from(&idiom) {
+							if !path.is_empty() {
+								let mut target = Value::Object(std::mem::take(obj));
+								target.set_at_field_path(&path, value);
+								if let Value::Object(new_obj) = target {
+									*obj = new_obj;
 								}
-							})
-							.collect();
-
-						if !path.is_empty() {
-							set_nested_value(obj, &path, value);
+							}
 						}
 					}
 				}
@@ -280,7 +290,11 @@ async fn evaluate_and_set_field(
 						e
 					))
 				})?;
-				set_nested_value(obj, &field.output_path, field_value);
+				let mut target = Value::Object(std::mem::take(obj));
+				target.set_at_field_path(&field.output_path, field_value);
+				if let Value::Object(new_obj) = target {
+					*obj = new_obj;
+				}
 				Ok(())
 			}
 			Err(e) => Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
@@ -296,46 +310,12 @@ async fn evaluate_and_set_field(
 				e
 			))
 		})?;
-		set_nested_value(obj, &field.output_path, field_value);
+		let mut target = Value::Object(std::mem::take(obj));
+		target.set_at_field_path(&field.output_path, field_value);
+		if let Value::Object(new_obj) = target {
+			*obj = new_obj;
+		}
 		Ok(())
-	}
-}
-
-/// Set a value at a nested path in an object.
-///
-/// For a path like ["tags", "id"], this creates or updates:
-/// `{ tags: { id: value } }`
-///
-/// If intermediate paths already exist as objects, they are updated.
-/// If they exist as non-objects, they are replaced with objects.
-fn set_nested_value(obj: &mut Object, path: &[String], value: Value) {
-	if path.is_empty() {
-		return;
-	}
-
-	if path.len() == 1 {
-		// Simple case: just insert at this level
-		obj.insert(path[0].clone(), value);
-		return;
-	}
-
-	// Need to traverse/create nested structure
-	let key = &path[0];
-	let rest = &path[1..];
-
-	// Get or create the nested object
-	let nested = obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
-
-	match nested {
-		Value::Object(nested_obj) => {
-			set_nested_value(nested_obj, rest, value);
-		}
-		_ => {
-			// Replace non-object with new object containing the nested path
-			let mut new_obj = Object::default();
-			set_nested_value(&mut new_obj, rest, value);
-			*nested = Value::Object(new_obj);
-		}
 	}
 }
 

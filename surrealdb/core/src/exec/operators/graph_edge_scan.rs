@@ -136,10 +136,11 @@ impl ExecOperator for GraphEdgeScan {
 			}
 
 			// Determine the directions to scan
+			// Note: For Both, we scan In first then Out to match legacy executor behavior
 			let directions: Vec<Dir> = match direction {
 				LookupDirection::Out => vec![Dir::Out],
 				LookupDirection::In => vec![Dir::In],
-				LookupDirection::Both => vec![Dir::Out, Dir::In],
+				LookupDirection::Both => vec![Dir::In, Dir::Out],
 				LookupDirection::Reference => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
 						"Reference lookups should use ReferenceScan, not GraphEdgeScan"

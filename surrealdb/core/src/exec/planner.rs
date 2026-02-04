@@ -4,6 +4,7 @@ use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::ExecOperator;
+use crate::exec::field_path::{FieldPath, FieldPathPart};
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
@@ -1080,9 +1081,19 @@ fn plan_projections(
 						let output_name = idiom_to_field_name(alias);
 						FieldSelection::with_alias(output_name, expr)
 					} else {
-						// No alias - derive name from expression
-						let output_name = derive_field_name(&selector.expr);
-						FieldSelection::new(output_name, expr)
+						// No alias - derive output path from expression
+						// For idioms with graph traversals, this creates nested output
+						match &selector.expr {
+							Expr::Idiom(idiom) => {
+								let output_path = idiom_to_field_path(idiom);
+								FieldSelection::from_field_path(output_path, expr)
+							}
+							_ => {
+								// Non-idiom expressions use flat field name
+								let output_name = derive_field_name(&selector.expr);
+								FieldSelection::new(output_name, expr)
+							}
+						}
 					};
 
 					field_selections.push(field_selection);
@@ -1186,6 +1197,75 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	}
 	// For complex idioms, use the SQL representation of the simplified idiom
 	simplified.to_sql()
+}
+
+/// Extract a field path from an idiom for nested output construction.
+///
+/// For graph traversals without aliases, this returns a path that splits by Lookup parts
+/// to create nested output structure. For example, `->reports_to->person` becomes
+/// Returns a `FieldPath` for the given idiom.
+///
+/// For idioms with aliases or without Lookup parts, returns a simple field path.
+/// For idioms with unaliased graph traversals like `->reports_to->person`,
+/// returns a FieldPath with Lookup parts for proper nested output.
+fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPath {
+	use surrealdb_types::ToSql;
+
+	use crate::expr::part::Part;
+
+	// Check for graph traversal alias first - if any Lookup has an alias, use flat output
+	for part in idiom.0.iter() {
+		if let Part::Lookup(lookup) = part {
+			if lookup.alias.is_some() {
+				// Has explicit alias - use flat output (single field name)
+				return FieldPath::field(idiom_to_field_name(idiom));
+			}
+		}
+	}
+
+	// Check if this idiom contains any Lookup parts (graph traversals)
+	let has_lookups = idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
+
+	if !has_lookups {
+		// No graph traversals - use standard field name (which handles dot-separated paths)
+		let name = idiom_to_field_name(idiom);
+		if name.contains('.') && !name.contains(['[', '(', ' ']) {
+			return FieldPath(
+				name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect(),
+			);
+		}
+		return FieldPath::field(name);
+	}
+
+	// Has Lookup parts without aliases - split into nested path
+	// Each Lookup part becomes a FieldPathPart::Lookup, fields become FieldPathPart::Field
+	let mut parts = Vec::new();
+
+	for part in idiom.0.iter() {
+		match part {
+			Part::Lookup(lookup) => {
+				// Add the lookup as its own path component
+				// Use to_sql() to get the full representation including any subquery clauses
+				// (ORDER BY, WHERE, GROUP BY, LIMIT, etc.)
+				let lookup_key = lookup.to_sql();
+				parts.push(FieldPathPart::Lookup(lookup_key));
+			}
+			Part::Field(name) => {
+				// Regular field - add as Field part
+				parts.push(FieldPathPart::Field(name.to_string()));
+			}
+			// Skip other parts (Destructure, All, Where, etc.) for path construction
+			// These affect evaluation but not the output field structure
+			_ => {}
+		}
+	}
+
+	// If no path was built (shouldn't happen), fall back to flat name
+	if parts.is_empty() {
+		return FieldPath::field(idiom.to_sql());
+	}
+
+	FieldPath(parts)
 }
 
 /// Plan FETCH clause
@@ -2123,7 +2203,6 @@ fn get_effective_limit_literal(
 // ============================================================================
 
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
-use crate::exec::field_path::FieldPath;
 use crate::exec::operators::{Compute, Projection, SelectProject, SortByKey, SortKey};
 
 /// Plan ORDER BY with consolidated expression evaluation.
@@ -2147,6 +2226,7 @@ pub(crate) fn plan_sort_consolidated(
 	ctx: &FrozenContext,
 ) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
 	use crate::expr::order::Ordering;
+	use crate::expr::part::Part;
 
 	match order {
 		Ordering::Random => {
@@ -2178,19 +2258,34 @@ pub(crate) fn plan_sort_consolidated(
 					// ORDER BY references a SELECT alias - use the underlying expression
 					match &resolved_expr {
 						Expr::Idiom(inner_idiom) => {
-							// Try to convert to FieldPath
-							match FieldPath::try_from(inner_idiom) {
-								Ok(path) => path,
-								Err(_) => {
-									// Complex idiom (graph traversal, etc.) - register for
-									// computation
-									let name = registry.register(
-										&resolved_expr,
-										ComputePoint::BeforeSort,
-										Some(alias.clone()),
-										ctx,
-									)?;
-									FieldPath::field(name)
+							// Check if this idiom has graph traversals (Lookups)
+							// Graph traversals require evaluation - can't extract directly
+							let has_lookups =
+								inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
+
+							if has_lookups {
+								// Graph traversal - must compute before sorting
+								let name = registry.register(
+									&resolved_expr,
+									ComputePoint::BeforeSort,
+									Some(alias.clone()),
+									ctx,
+								)?;
+								FieldPath::field(name)
+							} else {
+								// Simple field access - try to convert to FieldPath
+								match FieldPath::try_from(inner_idiom) {
+									Ok(path) => path,
+									Err(_) => {
+										// Complex idiom - register for computation
+										let name = registry.register(
+											&resolved_expr,
+											ComputePoint::BeforeSort,
+											Some(alias.clone()),
+											ctx,
+										)?;
+										FieldPath::field(name)
+									}
 								}
 							}
 						}
