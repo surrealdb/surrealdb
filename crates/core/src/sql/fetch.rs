@@ -15,7 +15,10 @@ use std::ops::Deref;
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Fetchs(pub Vec<Fetch>);
+pub struct Fetchs(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Fetch>,
+);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -46,7 +49,6 @@ impl InfoStructure for Fetchs {
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Fetch(
 	#[revision(end = 2, convert_fn = "convert_fetch_idiom")] pub Idiom,

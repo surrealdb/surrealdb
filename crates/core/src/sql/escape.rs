@@ -129,7 +129,7 @@ impl fmt::Display for EscapeKey<'_> {
 			|| s == "Infinity"
 		{
 			write!(f, "\"")?;
-			EscapeWriter::escape(&mut *f, '`', self.0)?;
+			EscapeWriter::escape(&mut *f, '"', self.0)?;
 			write!(f, "\"")
 		} else {
 			f.write_str(s)
@@ -153,6 +153,36 @@ impl fmt::Display for EscapeRidKey<'_> {
 			write!(f, "`")
 		} else {
 			f.write_str(s)
+		}
+	}
+}
+
+pub struct EscapePath<'a>(pub &'a str);
+impl fmt::Display for EscapePath<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		for (idx, s) in self.0.split("::").enumerate() {
+			if idx != 0 {
+				f.write_str("::")?;
+			}
+			write!(f, "{}", EscapeKwFreeIdent(s))?
+		}
+		Ok(())
+	}
+}
+
+pub struct EscapeFloat(pub f64);
+impl fmt::Display for EscapeFloat {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if self.0.is_nan() {
+			write!(f, "NaN")
+		} else if self.0.is_infinite() {
+			if self.0 < 0.0 {
+				write!(f, "-Infinity")
+			} else {
+				write!(f, "Infinity")
+			}
+		} else {
+			write!(f, "{}f", self.0)
 		}
 	}
 }

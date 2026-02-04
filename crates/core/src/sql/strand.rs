@@ -34,8 +34,6 @@ impl Strand {
 	/// # Safety
 	/// Caller must ensure that string handed as an argument does not contain any null bytes.
 	pub unsafe fn new_unchecked(s: String) -> Strand {
-		// Check in debug mode if the variants
-		debug_assert!(!s.contains('\0'));
 		Strand(s)
 	}
 }
