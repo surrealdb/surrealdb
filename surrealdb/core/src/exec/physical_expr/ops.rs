@@ -137,16 +137,20 @@ impl PhysicalExpr for BinaryOp {
 			}
 
 			// Match operators require full-text search index context.
-			// When evaluated without index context (e.g., in computed fields or expressions),
-			// MATCHES returns false. The index planner pushes MATCHES to index scans where
-			// the QueryExecutor handles proper full-text search evaluation.
+			// When evaluated after a FullTextScan, the records have already been verified
+			// to match the query, so we return true. This allows the Filter operator to
+			// pass through records that were matched by the full-text index.
+			//
+			// Note: If MATCHES appears in a WHERE clause without a full-text index,
+			// the query should be rejected at planning time (currently falls back to
+			// the old executor which has proper index support).
 			BinaryOperator::Matches(_) => {
-				// Without index executor context, MATCHES returns false
-				// This is consistent with the legacy compute path's ExecutorOption::None case
-				Ok(Value::Bool(false))
+				// Records reaching this point via FullTextScan are already matches
+				Ok(Value::Bool(true))
 			}
 
 			// Nearest neighbor requires vector index context
+			// TODO(stu): IMPLEMENT
 			BinaryOperator::NearestNeighbor(_) => {
 				Err(anyhow::anyhow!("KNN operator not yet supported in physical expressions"))
 			}

@@ -155,7 +155,7 @@ use crate::exec::operators::{
 use crate::expr::field::{Field, Fields};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
+use crate::expr::{BinaryOperator, Cond, Expr, Function, FunctionCall, Idiom, Literal};
 
 // ============================================================================
 // Planner Struct
@@ -1126,6 +1126,75 @@ pub(crate) fn try_plan_expr(
 	Planner::new(ctx).plan(expr)
 }
 
+/// Check if an expression contains KNN (vector search) operators.
+///
+/// KNN operators require special index infrastructure to evaluate. The streaming
+/// executor doesn't support KNN yet, so we need to fall back to the old execution path.
+/// Note: MATCHES (full-text search) is now supported via FullTextScan operator.
+fn contains_knn_operator(expr: &Expr) -> bool {
+	match expr {
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			// Check for KNN operators only (MATCHES is now supported)
+			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
+				return true;
+			}
+			// Recursively check children
+			contains_knn_operator(left) || contains_knn_operator(right)
+		}
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => contains_knn_operator(inner),
+		// For other expression types, no KNN operators
+		_ => false,
+	}
+}
+
+/// Check if an expression contains MATCHES operators that cannot be indexed.
+///
+/// MATCHES operators can be indexed via FullTextScan when they're at the top level
+/// or combined with AND. However, when MATCHES is inside an OR branch, the index
+/// analyzer cannot use an index for it, so we would need to evaluate MATCHES at
+/// runtime - which the streaming executor doesn't support.
+///
+/// Returns true if MATCHES appears within an OR subtree.
+fn contains_non_indexable_matches(expr: &Expr) -> bool {
+	contains_matches_in_or(expr, false)
+}
+
+/// Helper function to track if we're inside an OR branch while looking for MATCHES.
+fn contains_matches_in_or(expr: &Expr, inside_or: bool) -> bool {
+	match expr {
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			// If we're inside an OR and find MATCHES, that's non-indexable
+			if inside_or && matches!(op, BinaryOperator::Matches(_)) {
+				return true;
+			}
+
+			// For OR, mark that we're inside an OR branch
+			let new_inside_or = inside_or || matches!(op, BinaryOperator::Or);
+
+			// Recursively check children
+			contains_matches_in_or(left, new_inside_or)
+				|| contains_matches_in_or(right, new_inside_or)
+		}
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => contains_matches_in_or(inner, inside_or),
+		// For other expression types, no MATCHES operators
+		_ => false,
+	}
+}
+
 /// Plan a SELECT statement
 ///
 /// The operator pipeline is built in this order:
@@ -1175,11 +1244,25 @@ fn plan_select(
 		));
 	}
 
-	// WITH clause (index hints)
-	if with.is_some() {
-		return Err(Error::Unimplemented(
-			"SELECT ... WITH not yet supported in execution plans".to_string(),
-		));
+	// Check for KNN operators in WHERE clause - these require index executor
+	// context that the streaming pipeline doesn't yet support. Fall back to old path.
+	// Note: MATCHES (full-text search) is now supported via FullTextScan operator.
+	if let Some(ref c) = cond {
+		if contains_knn_operator(&c.0) {
+			return Err(Error::Unimplemented(
+				"WHERE clause with KNN operators not yet supported in streaming executor"
+					.to_string(),
+			));
+		}
+		// Check for MATCHES operators within OR conditions - these cannot be indexed
+		// because the index analyzer doesn't support OR across different index types.
+		// The streaming executor can't evaluate MATCHES at runtime, so fall back.
+		if contains_non_indexable_matches(&c.0) {
+			return Err(Error::Unimplemented(
+				"WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+					.to_string(),
+			));
+		}
 	}
 
 	// Extract VERSION timestamp if present (for time-travel queries)
@@ -1191,7 +1274,9 @@ fn plan_select(
 	let is_value_source = all_value_sources(&what);
 
 	// Build the source plan from `what` (FROM clause)
-	let source = plan_select_sources(what, version, ctx)?;
+	// Pass cond, order, and with for index selection in Scan operator
+	let source =
+		plan_select_sources(what, version, cond.as_ref(), order.as_ref(), with.as_ref(), ctx)?;
 
 	// Build pipeline configuration
 	let config = SelectPipelineConfig {
@@ -2306,9 +2391,13 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 /// Plan the FROM sources - handles multiple targets with Union
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
+/// The `cond`, `order`, and `with` parameters are passed to Scan for index selection.
 fn plan_select_sources(
 	what: Vec<Expr>,
 	version: Option<u64>,
+	cond: Option<&Cond>,
+	order: Option<&crate::expr::order::Ordering>,
+	with: Option<&crate::expr::with::With>,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	if what.is_empty() {
@@ -2318,7 +2407,7 @@ fn plan_select_sources(
 	// Convert each source to a plan
 	let mut source_plans = Vec::with_capacity(what.len());
 	for expr in what {
-		let plan = plan_single_source(expr, version, ctx)?;
+		let plan = plan_single_source(expr, version, cond, order, with, ctx)?;
 		source_plans.push(plan);
 	}
 
@@ -2335,11 +2424,15 @@ fn plan_select_sources(
 /// Plan a single FROM source (table or record ID)
 ///
 /// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
+/// The `cond`, `order`, and `with` parameters are passed to Scan for index selection.
 /// Scan handles KV store sources: table names, record IDs (point or range).
 /// SourceExpr handles value sources: arrays, scalars, computed expressions.
 fn plan_single_source(
 	expr: Expr,
 	version: Option<u64>,
+	cond: Option<&Cond>,
+	order: Option<&crate::expr::order::Ordering>,
+	with: Option<&crate::expr::with::With>,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	use crate::val::Value;
@@ -2357,11 +2450,15 @@ fn plan_single_source(
 			Ok(Arc::new(Scan {
 				source: table_expr,
 				version,
+				cond: cond.cloned(),
+				order: order.cloned(),
+				with: with.cloned(),
 			}) as Arc<dyn ExecOperator>)
 		}
 
 		// Record ID literal: SELECT * FROM users:123
 		// Scan handles record IDs internally via ScanTarget::RecordId
+		// No index selection needed for point lookups
 		Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
 			// Convert the record ID literal to an expression that Scan can evaluate
 			// Scan will handle point lookups and range scans internally
@@ -2372,6 +2469,9 @@ fn plan_single_source(
 			Ok(Arc::new(Scan {
 				source: table_expr,
 				version,
+				cond: None, // No index selection for record IDs
+				order: None,
+				with: None,
 			}) as Arc<dyn ExecOperator>)
 		}
 
@@ -2394,16 +2494,30 @@ fn plan_single_source(
 		// Inspect the parameter value to determine if it's a KV source or value source
 		Expr::Param(param) => {
 			match ctx.value(param.as_str()) {
-				Some(Value::Table(_)) | Some(Value::RecordId(_)) => {
-					// KV store source → Scan
+				Some(Value::Table(_)) => {
+					// Table source → Scan with index selection
 					let table_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
 					Ok(Arc::new(Scan {
 						source: table_expr,
 						version,
+						cond: cond.cloned(),
+						order: order.cloned(),
+						with: with.cloned(),
+					}) as Arc<dyn ExecOperator>)
+				}
+				Some(Value::RecordId(_)) => {
+					// Record ID source → Scan without index selection
+					let table_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
+					Ok(Arc::new(Scan {
+						source: table_expr,
+						version,
+						cond: None,
+						order: None,
+						with: None,
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
-					// Array, scalar, or unknown → SourceExpr
+					// Array, scalar, subquery, etc. → SourceExpr
 					let phys_expr = expr_to_physical_expr(Expr::Param(param), ctx)?;
 					Ok(Arc::new(SourceExpr {
 						expr: phys_expr,

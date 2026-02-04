@@ -52,6 +52,14 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// Analyze WHERE conditions
 		if let Some(cond) = cond {
+			// First, collect all simple conditions (idiom op value)
+			let mut conditions = Vec::new();
+			self.collect_conditions(&cond.0, &mut conditions);
+
+			// Try to build compound index access for multi-column indexes
+			self.analyze_compound_conditions(&conditions, &mut candidates);
+
+			// Also analyze for single-column matches and special operators
 			self.analyze_condition(&cond.0, &mut candidates);
 		}
 
@@ -65,7 +73,174 @@ impl<'a> IndexAnalyzer<'a> {
 			candidates.retain(|c| names.contains(&c.index_ref.name));
 		}
 
+		// Deduplicate candidates - prefer compound over simple
+		self.deduplicate_candidates(&mut candidates);
+
 		candidates
+	}
+
+	/// Collect all simple conditions from an AND tree.
+	fn collect_conditions(&self, expr: &Expr, conditions: &mut Vec<SimpleCondition>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				match op {
+					BinaryOperator::And => {
+						// Recurse into AND branches
+						self.collect_conditions(left, conditions);
+						self.collect_conditions(right, conditions);
+					}
+					BinaryOperator::Or => {
+						// Don't collect from OR branches
+					}
+					_ => {
+						// Try to extract a simple condition
+						if let Some(cond) = self.extract_simple_condition(left, op, right) {
+							conditions.push(cond);
+						}
+					}
+				}
+			}
+			Expr::Prefix {
+				expr: inner,
+				..
+			} => {
+				self.collect_conditions(inner, conditions);
+			}
+			_ => {}
+		}
+	}
+
+	/// Extract a simple condition (idiom op value) from a binary expression.
+	fn extract_simple_condition(
+		&self,
+		left: &Expr,
+		op: &BinaryOperator,
+		right: &Expr,
+	) -> Option<SimpleCondition> {
+		let (idiom, value, position) = match (left, right) {
+			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
+				if let Some(value) = literal_to_value(lit) {
+					(idiom.clone(), value, IdiomPosition::Left)
+				} else {
+					return None;
+				}
+			}
+			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
+				if let Some(value) = literal_to_value(lit) {
+					(idiom.clone(), value, IdiomPosition::Right)
+				} else {
+					return None;
+				}
+			}
+			_ => return None,
+		};
+
+		Some(SimpleCondition {
+			idiom,
+			op: op.clone(),
+			value,
+			position,
+		})
+	}
+
+	/// Analyze conditions to find compound index opportunities.
+	fn analyze_compound_conditions(
+		&self,
+		conditions: &[SimpleCondition],
+		candidates: &mut Vec<IndexCandidate>,
+	) {
+		// For each index, check if multiple columns are covered by conditions
+		for (idx, ix_def) in self.indexes.iter().enumerate() {
+			if ix_def.prepare_remove {
+				continue;
+			}
+
+			// Only Idx and Uniq support compound access
+			if !matches!(ix_def.index, Index::Idx | Index::Uniq) {
+				continue;
+			}
+
+			// Need at least 2 columns for compound access
+			if ix_def.cols.len() < 2 {
+				continue;
+			}
+
+			// Try to match conditions to index columns in order
+			let mut prefix_values = Vec::new();
+			let mut range_condition: Option<(BinaryOperator, Value)> = None;
+			let mut all_equality = true;
+
+			for col in &ix_def.cols {
+				// Find a condition that matches this column
+				let matching_cond = conditions.iter().find(|c| idiom_matches(&c.idiom, col));
+
+				match matching_cond {
+					Some(cond) => {
+						// Check if this is an equality condition
+						let is_equality =
+							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
+
+						if all_equality && is_equality {
+							// Add to prefix
+							prefix_values.push(cond.value.clone());
+						} else if all_equality {
+							// First non-equality - becomes range condition
+							all_equality = false;
+							range_condition = Some((cond.op.clone(), cond.value.clone()));
+							// Stop - can't use columns after a range
+							break;
+						} else {
+							// Already have a range condition, stop
+							break;
+						}
+					}
+					None => {
+						// No condition for this column - stop looking
+						break;
+					}
+				}
+			}
+
+			// Create compound candidate if we have at least 2 matched columns,
+			// or 1 prefix + 1 range condition
+			let matched_count = prefix_values.len()
+				+ if range_condition.is_some() {
+					1
+				} else {
+					0
+				};
+			if matched_count >= 2 || (prefix_values.len() >= 1 && range_condition.is_some()) {
+				let access = BTreeAccess::Compound {
+					prefix: prefix_values,
+					range: range_condition,
+				};
+
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				let candidate = IndexCandidate {
+					index_ref,
+					access,
+					matched_exprs: HashSet::new(),
+					covers_order: false,
+				};
+				candidates.push(candidate);
+			}
+		}
+	}
+
+	/// Remove duplicate candidates, preferring compound over simple.
+	fn deduplicate_candidates(&self, candidates: &mut Vec<IndexCandidate>) {
+		// Sort by index and score (higher score first)
+		candidates.sort_by(|a, b| match a.index_ref.idx.cmp(&b.index_ref.idx) {
+			std::cmp::Ordering::Equal => b.score().cmp(&a.score()),
+			other => other,
+		});
+
+		// Keep only the best candidate per index
+		candidates.dedup_by(|a, b| a.index_ref.idx == b.index_ref.idx);
 	}
 
 	/// Analyze a single expression for index opportunities.
@@ -535,6 +710,16 @@ enum IdiomPosition {
 	Left,
 	/// Idiom is on the right: `value = field`
 	Right,
+}
+
+/// A simple condition extracted from the WHERE clause.
+#[derive(Debug, Clone)]
+struct SimpleCondition {
+	idiom: Idiom,
+	op: BinaryOperator,
+	value: Value,
+	#[allow(dead_code)]
+	position: IdiomPosition,
 }
 
 /// Check if an idiom matches an index column.

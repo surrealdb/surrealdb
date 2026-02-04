@@ -297,46 +297,99 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Compound index access - for now, treat as range
-				(BTreeAccess::Compound { prefix, range }, _) => {
-					// TODO: Implement proper compound index iteration
-					// For now, fall back to a simple range scan
-					let (from, to) = if let Some((op, val)) = range {
+				// Compound index access
+				(BTreeAccess::Compound { prefix, range }, is_unique) => {
+					use crate::key::index::Index;
+					use crate::val::Array;
+
+					// Build the full compound key array from prefix values
+					let mut key_values: Vec<Value> = prefix.clone();
+
+					// Determine scan boundaries based on range operator
+					let (beg, end) = if let Some((op, val)) = range {
+						// Add range value to the key for complete compound key
+						key_values.push(val.clone());
+						let key_array = Array::from(key_values.clone());
+
 						match op {
-							crate::expr::BinaryOperator::MoreThan => (Some(RangeBound::exclusive(val.clone())), None),
-							crate::expr::BinaryOperator::MoreThanEqual => (Some(RangeBound::inclusive(val.clone())), None),
-							crate::expr::BinaryOperator::LessThan => (None, Some(RangeBound::exclusive(val.clone()))),
-							crate::expr::BinaryOperator::LessThanEqual => (None, Some(RangeBound::inclusive(val.clone()))),
-							_ => (None, None),
+							// Equality on the compound key
+							crate::expr::BinaryOperator::Equal | crate::expr::BinaryOperator::ExactEqual => {
+								// For equality, scan the exact compound key range
+								let beg = Index::prefix_ids_composite_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let end = Index::prefix_ids_composite_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
+							// Greater than: start after the compound key, end at prefix boundary
+							crate::expr::BinaryOperator::MoreThan => {
+								let beg = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let prefix_array = Array::from(prefix.clone());
+								let end = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
+							// Greater than or equal: start at the compound key, end at prefix boundary
+							crate::expr::BinaryOperator::MoreThanEqual => {
+								let beg = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let prefix_array = Array::from(prefix.clone());
+								let end = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
+							// Less than: start at prefix boundary, end before the compound key
+							crate::expr::BinaryOperator::LessThan => {
+								let prefix_array = Array::from(prefix.clone());
+								let beg = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let end = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
+							// Less than or equal: start at prefix boundary, end at compound key end
+							crate::expr::BinaryOperator::LessThanEqual => {
+								let prefix_array = Array::from(prefix.clone());
+								let beg = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let end = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &key_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
+							// Other operators - scan full prefix range
+							_ => {
+								let prefix_array = Array::from(prefix.clone());
+								let beg = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								let end = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+								(beg, end)
+							}
 						}
 					} else {
-						(None, None)
+						// No range - just scan the prefix
+						let prefix_array = Array::from(prefix.clone());
+						let beg = Index::prefix_ids_beg(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+						let end = Index::prefix_ids_end(ns.namespace_id, db.database_id, &ix.table_name, ix.index_id, &prefix_array)
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create key: {e}")))?;
+						(beg, end)
 					};
 
-					let mut iter = IndexRangeIterator::new(
-						ns.namespace_id,
-						db.database_id,
-						ix,
-						from.as_ref(),
-						to.as_ref(),
-					)
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create iterator: {e}")))?;
+					// Scan the key range
+					let res = txn.scan(beg..end, u32::MAX, None).await
+						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan index: {e}")))?;
 
-					loop {
-						let rids = iter.next_batch(&txn).await
-							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to iterate index: {e}")))?;
+					for (_, val) in res {
+						let rid: RecordId = revision::from_slice(&val)
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode record id: {e}")))?;
 
-						if rids.is_empty() {
-							break;
-						}
-
-						for rid in rids {
-							if let Some(value) = fetch_and_filter_record(&ctx, &txn, ns.namespace_id, db.database_id, &rid, &select_permission, check_perms).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
+						if let Some(value) = fetch_and_filter_record(&ctx, &txn, ns.namespace_id, db.database_id, &rid, &select_permission, check_perms).await? {
+							batch.push(value);
+							if batch.len() >= BATCH_SIZE {
+								yield ValueBatch { values: std::mem::take(&mut batch) };
+								batch.reserve(BATCH_SIZE);
 							}
 						}
 					}

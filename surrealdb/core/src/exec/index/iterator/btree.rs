@@ -276,21 +276,28 @@ impl UniqueRangeIterator {
 			return Ok(Vec::new());
 		}
 
-		// Update begin key for next batch
+		// Store original beg key to check exclusive boundary
+		let original_beg = self.beg.clone();
+
+		// Update begin key for next batch - increment to move past scanned records
 		if let Some((key, _)) = res.last() {
 			self.beg = key.clone();
+			self.beg.push(0x00);
 		}
 
 		// Decode record IDs
 		let mut records = Vec::with_capacity(res.len());
 		for (key, val) in res {
-			// Skip begin if exclusive
-			if !self.beg_inclusive && key == self.beg {
+			// Skip boundary key if exclusive
+			if !self.beg_inclusive && key == original_beg {
 				continue;
 			}
 			let rid: RecordId = revision::from_slice(&val)?;
 			records.push(rid);
 		}
+
+		// Mark that we've handled the begin boundary
+		self.beg_inclusive = true;
 
 		Ok(records)
 	}

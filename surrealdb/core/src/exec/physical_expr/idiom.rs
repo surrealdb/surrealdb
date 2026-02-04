@@ -291,7 +291,7 @@ pub(crate) async fn evaluate_field(
 	}
 }
 
-/// Index access on arrays, sets, and objects.
+/// Index access on arrays, sets, objects, and record IDs.
 pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Value> {
 	match (value, index) {
 		// Array with numeric index
@@ -324,6 +324,51 @@ pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Val
 		(Value::Object(obj), Value::Number(n)) => {
 			let key = n.to_string();
 			Ok(obj.get(&key).cloned().unwrap_or(Value::None))
+		}
+		// RecordId with numeric index - access the key as an array
+		// This handles patterns like `id[1]` where `id` is a RecordId with array key
+		(Value::RecordId(rid), Value::Number(n)) => {
+			use crate::val::record_id::RecordIdKey;
+			// The key might be an array (e.g., [3, o:1]) or a single value
+			match &rid.key {
+				RecordIdKey::Array(arr) => {
+					let idx = n.to_usize();
+					Ok(arr.get(idx).cloned().unwrap_or(Value::None))
+				}
+				// For non-array keys, index 0 returns the key value, others return None
+				RecordIdKey::Number(num) => {
+					if n.to_usize() == 0 {
+						Ok(Value::from(*num))
+					} else {
+						Ok(Value::None)
+					}
+				}
+				RecordIdKey::String(s) => {
+					if n.to_usize() == 0 {
+						Ok(Value::from(s.clone()))
+					} else {
+						Ok(Value::None)
+					}
+				}
+				RecordIdKey::Uuid(u) => {
+					if n.to_usize() == 0 {
+						Ok(Value::from(*u))
+					} else {
+						Ok(Value::None)
+					}
+				}
+				RecordIdKey::Object(o) => {
+					if n.to_usize() == 0 {
+						Ok(Value::from(o.clone()))
+					} else {
+						Ok(Value::None)
+					}
+				}
+				RecordIdKey::Range(_) => {
+					// Ranges don't support indexing
+					Ok(Value::None)
+				}
+			}
 		}
 		_ => Ok(Value::None),
 	}

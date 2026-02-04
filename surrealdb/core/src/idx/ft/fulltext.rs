@@ -83,7 +83,7 @@ impl DocLengthAndCount {
 }
 
 /// Represents the terms in a search query and their associated document sets
-pub(in crate::idx) struct QueryTerms {
+pub(crate) struct QueryTerms {
 	/// The tokenized query terms
 	#[allow(dead_code)]
 	tokens: Tokens,
@@ -96,7 +96,7 @@ pub(in crate::idx) struct QueryTerms {
 }
 
 impl QueryTerms {
-	pub(in crate::idx) fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.tokens.list().is_empty()
 	}
 
@@ -376,7 +376,7 @@ impl FullTextIndex {
 	/// This method tokenizes the query string and retrieves the document sets
 	/// for each term. It returns a QueryTerms object containing the tokens and
 	/// their associated document sets.
-	pub(in crate::idx) async fn extract_querying_terms(
+	pub(crate) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -563,7 +563,7 @@ impl FullTextIndex {
 	///
 	/// This method creates an iterator over the documents that match all query
 	/// terms. It returns None if any term has no matching documents.
-	pub(in crate::idx) fn new_hits_iterator(
+	pub(crate) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
 		bo: BooleanOperator,

@@ -362,6 +362,9 @@ mod tests {
 		let scan = Arc::new(Scan {
 			source: Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
 			version: None,
+			cond: None,
+			order: None,
+			with: None,
 		});
 
 		let fetch = Fetch {
