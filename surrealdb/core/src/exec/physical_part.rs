@@ -62,7 +62,6 @@ pub enum PhysicalPart {
 
 impl PhysicalPart {
 	/// Returns true if this part can be evaluated synchronously without I/O.
-
 	pub fn is_simple(&self) -> bool {
 		matches!(
 			self,
@@ -76,7 +75,6 @@ impl PhysicalPart {
 	}
 
 	/// Returns true if this part requires database access (Lookup, Recurse).
-
 	pub fn requires_database(&self) -> bool {
 		matches!(self, PhysicalPart::Lookup(_) | PhysicalPart::Recurse(_))
 	}
@@ -223,7 +221,6 @@ pub enum PhysicalDestructurePart {
 
 impl PhysicalDestructurePart {
 	/// Returns the field name for this destructure part.
-
 	pub fn field_name(&self) -> &str {
 		match self {
 			PhysicalDestructurePart::All(f) => f,
@@ -500,7 +497,6 @@ impl ToSql for PhysicalRecurse {
 /// Converts a logical `DestructurePart` to a physical `PhysicalDestructurePart`.
 ///
 /// This is a shallow conversion - aliased paths need to be converted separately.
-
 pub fn convert_destructure_part(part: &DestructurePart) -> PhysicalDestructurePart {
 	match part {
 		DestructurePart::All(field) => PhysicalDestructurePart::All(field.clone()),

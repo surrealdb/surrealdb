@@ -9,7 +9,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
-use crate::expr::ControlFlow;
+use crate::expr::Base;
+use crate::iam::{Action, ResourceKind};
 use crate::val::{Duration, Value};
 
 /// Sleep operator - pauses execution for a specified duration.
@@ -48,14 +49,7 @@ impl ExecOperator for SleepPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			// Check permissions - SLEEP requires root-level edit access
-			// This mirrors the check in SleepStatement::compute
-			let root = ctx.root();
-			if root.auth_enabled && !root.auth.is_root() {
-				return Err(ControlFlow::Err(anyhow::anyhow!(
-					"SLEEP statement requires root access"
-				)));
-			}
+			ctx.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
 
 			// Perform the sleep, respecting any query timeout
 			// The timeout operator wrapping this plan will handle timeout enforcement

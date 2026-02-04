@@ -55,7 +55,6 @@ pub(crate) mod permission;
 pub(crate) mod physical_expr;
 pub(crate) mod physical_part;
 pub(crate) mod planner;
-pub(crate) mod statement;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
@@ -135,7 +134,6 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// True for USE, LET, BEGIN, COMMIT, CANCEL operators.
 	/// When true, the executor will call `output_context()` after execution
 	/// to get the modified context for downstream statements.
-
 	fn mutates_context(&self) -> bool {
 		false
 	}
@@ -145,7 +143,6 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
-
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		Ok(input.clone())
 	}
@@ -160,11 +157,6 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// A `SELECT` with a mutation subquery (e.g., `SELECT *, (UPSERT person) FROM person`)
 	/// must return `ReadWrite` even though it's syntactically a SELECT.
 	fn access_mode(&self) -> AccessMode;
-
-	/// Convenience method: returns true if this plan is read-only.
-	fn is_read_only(&self) -> bool {
-		self.access_mode() == AccessMode::ReadOnly
-	}
 
 	/// Returns true if this plan represents a scalar expression.
 	///

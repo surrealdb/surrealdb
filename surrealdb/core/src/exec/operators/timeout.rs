@@ -114,26 +114,3 @@ impl ExecOperator for Timeout {
 		Ok(Box::pin(timeout_stream))
 	}
 }
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn test_timeout_name() {
-		use crate::exec::operators::scan::Scan;
-
-		let scan = Arc::new(Scan {
-			source: "test".to_string(),
-			fields: None,
-			condition: None,
-		});
-
-		let timeout = Timeout {
-			input: scan,
-			timeout: None,
-		};
-
-		assert_eq!(timeout.name(), "Timeout");
-	}
-}

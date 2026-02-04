@@ -23,7 +23,8 @@ use crate::ctx::FrozenContext;
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
-use crate::iam::{Action, Auth};
+use crate::expr::Base;
+use crate::iam::{Action, Auth, ResourceKind};
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Datetime, Value};
 
@@ -519,6 +520,15 @@ impl ExecutionContext {
 	/// executor encounters unimplemented expressions.
 	pub fn options(&self) -> Option<&Options> {
 		self.root().options.as_ref()
+	}
+
+	/// Check if the current auth is allowed to perform an action on a given resource
+	pub fn is_allowed(&self, action: Action, res: ResourceKind, base: &Base) -> anyhow::Result<()> {
+		if let Some(options) = self.options() {
+			options.is_allowed(action, res, base)
+		} else {
+			Ok(())
+		}
 	}
 
 	/// Get the underlying FrozenContext.

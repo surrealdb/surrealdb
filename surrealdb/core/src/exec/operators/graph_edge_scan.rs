@@ -23,8 +23,7 @@ use crate::val::{RecordId, TableName, Value};
 const BATCH_SIZE: usize = 1000;
 
 /// What kind of output the GraphEdgeScan should produce.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphScanOutput {
 	/// Return the edge record IDs (e.g., `knows:1`)
 	EdgeId,

@@ -114,6 +114,7 @@ args = [
     "--benches",
     "--bins",
     "--fix",
+    "--allow-dirty",
     "--",
     "-D",
     "warnings",

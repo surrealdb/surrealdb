@@ -212,14 +212,14 @@ pub(crate) fn expr_to_physical_expr(
 					name,
 					arguments: phys_args,
 				})),
-				Function::Script(script) => Err(Error::Unimplemented(
-					"Script functions not yet supported in execution plans".to_string(),
+				Function::Script(_script) => Err(Error::Unimplemented(
+					"TODO(stu): Script functions not yet supported in execution plans".to_string(),
 				)),
-				Function::Model(model) => Err(Error::Unimplemented(
-					"Model functions not yet supported in execution plans".to_string(),
+				Function::Model(_model) => Err(Error::Unimplemented(
+					"TODO(stu): Model functions not yet supported in execution plans".to_string(),
 				)),
-				Function::Module(module, sub) => Err(Error::Unimplemented(
-					"Module functions not yet supported in execution plans".to_string(),
+				Function::Module(_module, _sub) => Err(Error::Unimplemented(
+					"TODO(stu): Module functions not yet supported in execution plans".to_string(),
 				)),
 				Function::Silo {
 					org,
@@ -812,7 +812,7 @@ fn plan_select(
 		order,
 		limit,
 		start,
-		omit.clone(),
+		omit,
 		is_value_source,
 		tempfiles,
 		ctx,

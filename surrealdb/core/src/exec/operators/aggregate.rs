@@ -208,7 +208,6 @@ impl ExecOperator for Aggregate {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
-		let group_by = self.group_by.clone();
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
 		let ctx = ctx.clone();

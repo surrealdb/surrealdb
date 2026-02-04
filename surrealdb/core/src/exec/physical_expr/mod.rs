@@ -34,25 +34,6 @@ pub struct EvalContext<'a> {
 impl<'a> EvalContext<'a> {
 	/// Convert from ExecutionContext enum for expression evaluation.
 	///
-	/// This extracts the appropriate fields based on the context level:
-	/// - Root: params only, no ns/db/txn
-	/// - Namespace: params, ns, txn
-	/// - Database: params, ns, db, txn
-	// pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
-	// 	match exec_ctx {
-	// 		ExecutionContext::Root(r) => Self::scalar(&r.params, None, None, None),
-	// 		ExecutionContext::Namespace(n) => {
-	// 			Self::scalar(&n.root.params, Some(&n.ns), None, Some(&n.txn))
-	// 		}
-	// 		ExecutionContext::Database(d) => Self::scalar(
-	// 			&d.ns_ctx.root.params,
-	// 			Some(&d.ns_ctx.ns),
-	// 			Some(&d.db),
-	// 			Some(&d.ns_ctx.txn),
-	// 		),
-	// 	}
-	// }
-
 	/// For session-level scalar evaluation (USE, LIMIT, etc.)
 	pub(crate) fn from_exec_ctx(exec_ctx: &'a ExecutionContext) -> Self {
 		Self {
@@ -252,8 +233,8 @@ pub(crate) use block::{BlockPhysicalExpr, ReturnValue};
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{
-	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
-	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
+	BuiltinFunctionExec, ClosureCallExec, ClosureExec, ProjectionFunctionExec, SiloModuleExec,
+	UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};
