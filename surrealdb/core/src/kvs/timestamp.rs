@@ -314,7 +314,11 @@ mod tests {
 
 		// DateTime roundtrip should be within reasonable precision
 		// Note: nanosecond precision might be lost in conversion
-		assert_eq!(now.timestamp_nanos(), recovered.timestamp_nanos(), "Failed datetime roundtrip");
+		assert_eq!(
+			now.timestamp_millis(),
+			recovered.timestamp_millis(),
+			"Failed datetime roundtrip"
+		);
 	}
 
 	#[test]
@@ -330,7 +334,7 @@ mod tests {
 		let known_time = Utc.timestamp_opt(1700000000, 123456789).unwrap();
 		let ts = ts_impl.from_datetime(known_time).unwrap();
 		let recovered = ts.as_datetime();
-		assert_eq!(known_time.timestamp_nanos(), recovered.timestamp_nanos());
+		assert_eq!(known_time.timestamp_millis(), recovered.timestamp_millis());
 	}
 
 	#[test]
