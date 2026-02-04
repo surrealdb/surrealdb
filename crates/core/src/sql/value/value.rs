@@ -2963,12 +2963,13 @@ impl Value {
 		)
 	}
 
-	pub(crate) fn has_left_none(&self) -> bool {
+	pub(crate) fn has_left_none_or_null(&self) -> bool {
 		match self {
 			Value::None => true,
+			Value::Null => true,
 			Value::Range(x) => {
 				if let Bound::Included(x) | Bound::Excluded(x) = &x.beg {
-					x.has_left_none()
+					x.has_left_none_or_null()
 				} else {
 					false
 				}
@@ -2979,14 +2980,14 @@ impl Value {
 					..
 				} = &**x
 				{
-					l.has_left_none()
+					l.has_left_none_or_null()
 				} else {
 					false
 				}
 			}
 			Value::Idiom(x) => {
 				if let Some(Part::Start(x)) = x.0.first() {
-					x.has_left_none()
+					x.has_left_none_or_null()
 				} else {
 					false
 				}

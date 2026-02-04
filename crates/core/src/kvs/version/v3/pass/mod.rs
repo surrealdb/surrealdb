@@ -1631,7 +1631,7 @@ impl Visitor for MigratorPass<'_> {
 					}) = v.0.first()
 					{
 						// Avoid conflict between the value NONE with the `Output::None`.
-						if expr.has_left_none() {
+						if expr.has_left_none_or_null() {
 							self.w.write_char('(')?;
 							self.visit_value(expr)?;
 							self.w.write_char(')')?;
@@ -2478,7 +2478,9 @@ impl Visitor for MigratorPass<'_> {
 
 				if let Some(i) = idiom {
 					self.w.write_str("(")?;
-					self.visit_idiom(i)?;
+					for p in i.0.iter() {
+						self.visit_part(p)?;
+					}
 					self.w.write_str(")")?;
 				}
 			}
@@ -2675,7 +2677,24 @@ impl Visitor for MigratorPass<'_> {
 				)?;
 				if let Some(alias) = alias {
 					self.w.write_str(" AS ")?;
-					self.visit_idiom(alias)?;
+					for (idx, p) in alias.0.iter().enumerate() {
+						match p {
+							Part::Field(ident) => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								write!(self.w, "{ident}")?;
+							}
+							Part::All | Part::Last | Part::Index(_) => self.visit_part(p)?,
+							x => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								let part = x.to_string();
+								write!(self.w, "{}", EscapeKwFreeIdent(&part))?;
+							}
+						}
+					}
 				}
 			}
 		}

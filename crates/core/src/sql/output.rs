@@ -35,7 +35,7 @@ impl Display for Output {
 					}) = v.0.first()
 					{
 						// Avoid conflict between the value NONE with the `Output::None`.
-						if expr.has_left_none() {
+						if expr.has_left_none_or_null() {
 							write!(f, "({})", expr)?;
 							if let Some(a) = alias {
 								write!(f, " AS {}", a)?;

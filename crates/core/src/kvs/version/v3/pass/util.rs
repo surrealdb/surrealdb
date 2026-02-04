@@ -74,7 +74,8 @@ pub fn v3_function_name(name: &str) -> &str {
 		"rand::uuid::v4" => "`rand`::uuid::v4",
 		"rand::uuid::v7" => "`rand`::uuid::v7",
 		"rand::uuid" => "`rand`::uuid",
-
+		"value::diff" => "`value`::diff",
+		"value::patch" => "`value`::patch",
 		x => x,
 	}
 }
