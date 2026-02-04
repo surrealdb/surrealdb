@@ -387,7 +387,7 @@ impl Expr {
 				Ok(Value::Array(Array(record_ids)))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,
-			Expr::Constant(constant) => constant.compute().map_err(ControlFlow::Err),
+			Expr::Constant(constant) => constant.compute(),
 			Expr::Prefix {
 				op,
 				expr,

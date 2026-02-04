@@ -749,9 +749,7 @@ pub(crate) fn expr_to_physical_expr(
 		}
 		Expr::Constant(constant) => {
 			// Convert constant to its computed value
-			let value = constant
-				.compute()
-				.map_err(|e| Error::Unimplemented(format!("Failed to compute constant: {}", e)))?;
+			let value = constant.compute();
 			Ok(Arc::new(PhysicalLiteral(value)))
 		}
 		Expr::Prefix {
