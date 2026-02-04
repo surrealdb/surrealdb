@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::catalog::{Permission, TableDefinition};
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::{DatabaseContext, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::iam::Action;
@@ -30,16 +31,14 @@ pub enum PhysicalPermission {
 /// Convert a catalog Permission to a PhysicalPermission for execution.
 pub fn convert_permission_to_physical(
 	permission: &Permission,
+	ctx: &FrozenContext,
 ) -> Result<PhysicalPermission, Error> {
 	match permission {
 		Permission::None => Ok(PhysicalPermission::Deny),
 		Permission::Full => Ok(PhysicalPermission::Allow),
 		Permission::Specific(expr) => {
 			// Convert Expr to PhysicalExpr using the planner's conversion
-			// TODO: This should ideally happen at planning time, not execution time
-			let plan_ctx = Arc::new(crate::ctx::Context::background());
-			let physical_expr =
-				crate::exec::planner::expr_to_physical_expr(expr.clone(), &plan_ctx)?;
+			let physical_expr = crate::exec::planner::expr_to_physical_expr(expr.clone(), ctx)?;
 			Ok(PhysicalPermission::Conditional(physical_expr))
 		}
 	}

@@ -53,9 +53,9 @@ pub(crate) fn expr_to_physical_expr(
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
 		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
-		ClosureExec, IfElseExpr, Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp,
-		ProjectionFunctionExec, ScalarSubquery, SetLiteral, SiloModuleExec, UnaryOp,
-		UserDefinedFunctionExec,
+		ClosureExec, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec,
+		ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral,
+		SiloModuleExec, SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -212,15 +212,19 @@ pub(crate) fn expr_to_physical_expr(
 					name,
 					arguments: phys_args,
 				})),
-				Function::Script(_script) => Err(Error::Unimplemented(
-					"TODO(stu): Script functions not yet supported in execution plans".to_string(),
-				)),
-				Function::Model(_model) => Err(Error::Unimplemented(
-					"TODO(stu): Model functions not yet supported in execution plans".to_string(),
-				)),
-				Function::Module(_module, _sub) => Err(Error::Unimplemented(
-					"TODO(stu): Module functions not yet supported in execution plans".to_string(),
-				)),
+				Function::Script(script) => Ok(Arc::new(JsFunctionExec {
+					script,
+					arguments: phys_args,
+				})),
+				Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
+					model,
+					arguments: phys_args,
+				})),
+				Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
+					module,
+					sub,
+					arguments: phys_args,
+				})),
 				Function::Silo {
 					org,
 					pkg,
@@ -2025,18 +2029,6 @@ fn plan_single_source(
 				}
 			}
 		}
-
-		// Idiom that might be a table or record reference
-		// TODO: I think Idiom can just be treated as a SourceExpr
-		// Expr::Idiom(idiom) => {
-		// 	// Simple idiom (just a name) is a table reference
-		// 	// Convert to a table scan using the idiom as a physical expression
-		// 	let table_expr = expr_to_physical_expr(Expr::Idiom(idiom.clone()))?;
-		// 	Ok(Arc::new(Scan {
-		// 		source: table_expr,
-		// 		version,
-		// 	}) as Arc<dyn OperatorPlan>)
-		// }
 
 		// Other expressions (strings, objects, etc.) → SourceExpr
 		other => {

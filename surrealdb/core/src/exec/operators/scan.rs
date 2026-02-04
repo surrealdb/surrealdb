@@ -233,7 +233,7 @@ impl ScanExecutor {
 				None => Permission::None, // Should not reach here after above check
 			};
 
-			convert_permission_to_physical(&catalog_perm).map_err(|e| {
+			convert_permission_to_physical(&catalog_perm, ctx.ctx()).map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}"))
 			})?
 		} else {
@@ -539,10 +539,7 @@ async fn build_field_state(
 	let mut computed_fields = Vec::new();
 	for fd in field_defs.iter() {
 		if let Some(ref expr) = fd.computed {
-			// Create a background context for planning computed field expressions
-			// TODO: This should ideally happen at planning time, not execution time
-			let plan_ctx = std::sync::Arc::new(crate::ctx::Context::background());
-			let physical_expr = expr_to_physical_expr(expr.clone(), &plan_ctx).map_err(|e| {
+			let physical_expr = expr_to_physical_expr(expr.clone(), ctx.ctx()).map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!(
 					"Computed field '{}' has unsupported expression: {}",
 					fd.name.to_raw_string(),
@@ -563,8 +560,8 @@ async fn build_field_state(
 	if check_perms {
 		for fd in field_defs.iter() {
 			let field_name = fd.name.to_raw_string();
-			let physical_perm =
-				convert_permission_to_physical(&fd.select_permission).map_err(|e| {
+			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
+				.map_err(|e| {
 					ControlFlow::Err(anyhow::anyhow!("Failed to convert field permission: {}", e))
 				})?;
 			field_permissions.insert(field_name, physical_perm);

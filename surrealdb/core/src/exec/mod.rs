@@ -59,9 +59,7 @@ pub(crate) mod planner;
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 // Re-export context types
-pub(crate) use context::{
-	ContextLevel, DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
-};
+pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
 // Re-export function types (allow unused for now - these are public API)
 #[allow(unused_imports)]
 pub(crate) use function::{FunctionRegistry, ScalarFunction, Signature};

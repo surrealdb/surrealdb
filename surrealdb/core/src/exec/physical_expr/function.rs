@@ -357,9 +357,48 @@ impl PhysicalExpr for JsFunctionExec {
 		crate::exec::ContextLevel::Database
 	}
 
+	#[cfg(feature = "scripting")]
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use reblessive::TreeStack;
+
+		use crate::doc::CursorDoc;
+		use crate::fnc::script;
+
+		// Get the frozen context and options
+		let frozen_ctx = ctx.exec_ctx.ctx().clone();
+		let opt = ctx
+			.exec_ctx
+			.options()
+			.ok_or_else(|| anyhow::anyhow!("Script functions require Options context"))?
+			.clone();
+
+		// Check if scripting is allowed
+		frozen_ctx.check_allowed_scripting()?;
+
+		// Evaluate all arguments
+		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// Build CursorDoc from current value
+		let doc = ctx.current_value.map(|v| CursorDoc::new(None, None, v.clone()));
+
+		// Execute the script within a TreeStack context
+		// This is required because JavaScript can call back into SurrealDB functions
+		// via surrealdb.functions.* which need TreeStack for recursive computation
+		let mut stack = TreeStack::new();
+		stack
+			.enter(|_stk| async {
+				script::run(&frozen_ctx, &opt, doc.as_ref(), &self.script.0, args).await
+			})
+			.finish()
+			.await
+	}
+
+	#[cfg(not(feature = "scripting"))]
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// Script functions require the scripting feature and full context
-		Err(anyhow::anyhow!("Script functions are not yet supported in the streaming executor"))
+		Err(Error::InvalidScript {
+			message: String::from("Embedded functions are not enabled."),
+		}
+		.into())
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -400,12 +439,188 @@ impl PhysicalExpr for ModelFunctionExec {
 		crate::exec::ContextLevel::Database
 	}
 
+	#[cfg(feature = "ml")]
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use surrealml_core::errors::error::SurrealError;
+		use surrealml_core::execution::compute::ModelComputation;
+		use surrealml_core::ndarray as mlNdarray;
+		use surrealml_core::storage::surml_file::SurMlFile;
+
+		use crate::expr::model::get_model_path;
+		use crate::iam::Action;
+		use crate::val::Number;
+
+		const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
+
+		// Get the full name of this model
+		let name = format!("ml::{}", self.model.name);
+
+		// Check if this function is allowed
+		ctx.check_allowed_function(&name)?;
+
+		// Get the database context for model lookup
+		let db_ctx = ctx
+			.exec_ctx
+			.database()
+			.map_err(|_| anyhow::anyhow!("Model function '{}' requires database context", name))?;
+
+		// Get namespace and database IDs
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let db_id = db_ctx.db.database_id;
+
+		// Get the model definition
+		let val = ctx
+			.txn()
+			.get_db_model(ns_id, db_id, &self.model.name, &self.model.version)
+			.await?
+			.ok_or_else(|| Error::MlNotFound {
+				name: format!("{}<{}>", self.model.name, self.model.version),
+			})?;
+
+		// Calculate the model path using namespace and database names
+		let ns_name = db_ctx.ns_name();
+		let db_name = db_ctx.db_name();
+		let path =
+			get_model_path(ns_name, db_name, &self.model.name, &self.model.version, &val.hash);
+
+		// Check permissions
+		if ctx.exec_ctx.should_check_perms(Action::View)? {
+			check_permission(&val.permissions, &self.model.name, &ctx).await?;
+		}
+
+		// Evaluate arguments
+		let mut args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// Validate argument count
+		if args.len() != 1 {
+			return Err(Error::InvalidArguments {
+				name: format!("ml::{}<{}>", self.model.name, self.model.version),
+				message: ARGUMENTS.into(),
+			}
+			.into());
+		}
+
+		// Take the first and only argument
+		let argument = args.pop().expect("single argument validated above");
+
+		match argument {
+			// Perform buffered compute (with normalizers)
+			Value::Object(v) => {
+				let mut args = v
+					.into_iter()
+					.map(|(k, v)| {
+						v.coerce_to::<f64>().map(|f| (k, f as f32)).map_err(|_| {
+							Error::InvalidArguments {
+								name: format!("ml::{}<{}>", self.model.name, self.model.version),
+								message: ARGUMENTS.into(),
+							}
+						})
+					})
+					.collect::<Result<std::collections::HashMap<String, f32>, _>>()?;
+
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+
+				// Run the compute in a blocking task
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Failed to load model: {}", err.message)
+					})?;
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Model computation failed: {}", err.message)
+					})
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))??;
+
+				// Convert the output to a value
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
+			}
+			// Perform raw compute (number input)
+			Value::Number(v) => {
+				let args: f32 =
+					Value::Number(v).coerce_to::<f64>().map_err(|_| Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.model.name, self.model.version),
+						message: ARGUMENTS.into(),
+					})? as f32;
+
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+
+				// Convert the argument to a tensor
+				let tensor = mlNdarray::arr1::<f32>(&[args]).into_dyn();
+
+				// Run the compute in a blocking task
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Failed to load model: {}", err.message)
+					})?;
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Model computation failed: {}", err.message)
+					})
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))??;
+
+				// Convert the output to a value
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
+			}
+			// Perform raw compute (array input)
+			Value::Array(v) => {
+				let args = v
+					.into_iter()
+					.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
+					.collect::<Result<Vec<f32>, _>>()
+					.map_err(|_| Error::InvalidArguments {
+						name: format!("ml::{}<{}>", self.model.name, self.model.version),
+						message: ARGUMENTS.into(),
+					})?;
+
+				// Get the model file as bytes
+				let bytes = crate::obs::get(&path).await?;
+
+				// Convert the argument to a tensor
+				let tensor = mlNdarray::arr1::<f32>(&args).into_dyn();
+
+				// Run the compute in a blocking task
+				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
+					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Failed to load model: {}", err.message)
+					})?;
+					let compute_unit = ModelComputation {
+						surml_file: &mut file,
+					};
+					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
+						anyhow::anyhow!("Model computation failed: {}", err.message)
+					})
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("ML task failed: {e}"))??;
+
+				// Convert the output to a value
+				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
+			}
+			// Invalid argument type
+			_ => Err(Error::InvalidArguments {
+				name: format!("ml::{}<{}>", self.model.name, self.model.version),
+				message: ARGUMENTS.into(),
+			}
+			.into()),
+		}
+	}
+
+	#[cfg(not(feature = "ml"))]
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
-		// Model functions require the ML runtime
-		Err(anyhow::anyhow!(
-			"Model function 'ml::{}' is not yet supported in the streaming executor",
-			self.model.name
-		))
+		Err(Error::InvalidModel {
+			message: String::from("Machine learning computation is not enabled."),
+		}
+		.into())
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -448,13 +663,107 @@ impl PhysicalExpr for SurrealismModuleExec {
 		crate::exec::ContextLevel::Database
 	}
 
+	#[cfg(feature = "surrealism")]
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+		use reblessive::TreeStack;
+
+		use crate::doc::CursorDoc;
+		use crate::expr::module::ModuleExecutable;
+
+		// Build module and function names
+		let mod_name = format!("mod::{}", self.module);
+		let fnc_name = match &self.sub {
+			Some(sub) => format!("{}::{}", mod_name, sub),
+			None => mod_name.clone(),
+		};
+
+		// Check if this function is allowed
+		ctx.check_allowed_function(&fnc_name)?;
+
+		// Get the database context for module lookup
+		let db_ctx = ctx.exec_ctx.database().map_err(|_| {
+			anyhow::anyhow!("Module function '{}' requires database context", fnc_name)
+		})?;
+
+		// Get namespace and database IDs
+		let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+		let db_id = db_ctx.db.database_id;
+
+		// Get the module definition
+		let val = ctx.txn().get_db_module(ns_id, db_id, &mod_name).await?;
+
+		// Check permissions
+		check_permission(&val.permissions, &mod_name, &ctx).await?;
+
+		// Get the executable and signature
+		let executable: ModuleExecutable = val.executable.clone().into();
+		let frozen_ctx = ctx.exec_ctx.ctx();
+		let signature =
+			executable.signature(frozen_ctx, &ns_id, &db_id, self.sub.as_deref()).await?;
+
+		// Evaluate all arguments
+		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// Validate argument count against signature
+		if args.len() != signature.args.len() {
+			return Err(Error::InvalidArguments {
+				name: fnc_name,
+				message: format!(
+					"The function expects {} arguments, but {} were provided.",
+					signature.args.len(),
+					args.len()
+				),
+			}
+			.into());
+		}
+
+		// Validate and coerce arguments to their expected types
+		let mut coerced_args = Vec::with_capacity(args.len());
+		for (arg, kind) in args.into_iter().zip(signature.args.iter()) {
+			let coerced = arg.coerce_to_kind(kind).map_err(|e| Error::InvalidArguments {
+				name: fnc_name.clone(),
+				message: format!("Failed to coerce argument: {e}"),
+			})?;
+			coerced_args.push(coerced);
+		}
+
+		// Get the Options for the module execution
+		let opt = ctx
+			.exec_ctx
+			.options()
+			.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?;
+
+		// Build CursorDoc from current value
+		let doc = ctx.current_value.map(|v| CursorDoc::new(None, None, v.clone()));
+
+		// Run the module using the legacy stack-based execution
+		let mut stack = TreeStack::new();
+		let result = stack
+			.enter(|stk| {
+				executable.run(
+					stk,
+					frozen_ctx,
+					opt,
+					doc.as_ref(),
+					coerced_args,
+					self.sub.as_deref(),
+				)
+			})
+			.finish()
+			.await?;
+
+		// Validate return value if signature specifies a return type
+		validate_return(&fnc_name, signature.returns.as_ref(), result)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
 		let name = match &self.sub {
 			Some(s) => format!("mod::{}::{}", self.module, s),
 			None => format!("mod::{}", self.module),
 		};
 		Err(anyhow::anyhow!(
-			"Module function '{}' is not yet supported in the streaming executor",
+			"Module function '{}' requires the 'surrealism' feature to be enabled",
 			name
 		))
 	}

@@ -223,7 +223,6 @@ mod conditional;
 mod function;
 mod idiom;
 mod literal;
-mod lookup;
 mod ops;
 mod recurse;
 mod subquery;
@@ -233,8 +232,8 @@ pub(crate) use block::{BlockPhysicalExpr, ReturnValue};
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{
-	BuiltinFunctionExec, ClosureCallExec, ClosureExec, ProjectionFunctionExec, SiloModuleExec,
-	UserDefinedFunctionExec,
+	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
+	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, Param};

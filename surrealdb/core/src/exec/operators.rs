@@ -1,8 +1,6 @@
 mod aggregate;
 mod compute;
 mod control_flow;
-mod create;
-mod delete;
 mod explain;
 mod expr;
 mod fetch;
@@ -24,7 +22,6 @@ mod source_expr;
 mod split;
 mod timeout;
 mod union;
-mod update;
 
 pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
