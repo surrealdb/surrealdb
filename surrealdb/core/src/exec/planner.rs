@@ -1,3 +1,139 @@
+//! Query Planner for the Streaming Executor
+//!
+//! This module converts SurrealQL AST expressions (`Expr`) into physical execution
+//! plans (`Arc<dyn ExecOperator>`). The planner is a critical component of the
+//! streaming query executor, determining how queries are executed.
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+//! │   SurrealQL  │     │   Planner    │     │  Execution   │
+//! │     AST      │ ──► │   (this)     │ ──► │    Plan      │
+//! │    (Expr)    │     │              │     │ (ExecOperator) │
+//! └──────────────┘     └──────────────┘     └──────────────┘
+//! ```
+//!
+//! # Usage
+//!
+//! The main entry point is the [`Planner`] struct:
+//!
+//! ```ignore
+//! use surrealdb_core::exec::planner::Planner;
+//!
+//! let planner = Planner::new(&ctx);
+//! let plan = planner.plan(expr)?;
+//! ```
+//!
+//! For backwards compatibility, [`try_plan_expr`] delegates to `Planner::plan()`.
+//!
+//! # SELECT Pipeline
+//!
+//! SELECT statements are planned into a standard operator pipeline:
+//!
+//! ```text
+//! Scan/Union (FROM)
+//!     │
+//!     ▼
+//! Filter (WHERE)
+//!     │
+//!     ▼
+//! Split (SPLIT BY)
+//!     │
+//!     ▼
+//! Aggregate (GROUP BY)
+//!     │
+//!     ▼
+//! Sort (ORDER BY)
+//!     │
+//!     ▼
+//! Limit (LIMIT/START)
+//!     │
+//!     ▼
+//! Fetch (FETCH)
+//!     │
+//!     ▼
+//! Project (SELECT fields)
+//!     │
+//!     ▼
+//! Timeout (TIMEOUT)
+//! ```
+//!
+//! # Unimplemented Features
+//!
+//! The following features return `Error::Unimplemented` and are tracked for future work:
+//!
+//! ## DML Subqueries (in expression context)
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `CREATE` | CREATE subqueries in expressions |
+//! | `UPDATE` | UPDATE subqueries in expressions |
+//! | `UPSERT` | UPSERT subqueries in expressions |
+//! | `DELETE` | DELETE subqueries in expressions |
+//! | `INSERT` | INSERT subqueries in expressions |
+//! | `RELATE` | RELATE subqueries in expressions |
+//!
+//! ## DDL Statements (in expression context)
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `DEFINE` | Schema definition statements |
+//! | `REMOVE` | Schema removal statements |
+//! | `REBUILD` | Index rebuild statements |
+//! | `ALTER` | Schema alteration statements |
+//!
+//! ## SELECT Clauses
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `SELECT ... ONLY` | Unwrap single results |
+//! | `SELECT ... EXPLAIN` | Query plan output |
+//! | `SELECT ... WITH` | Index hints |
+//! | `SELECT * GROUP BY` | Wildcard with GROUP BY |
+//! | `OMIT + SELECT VALUE` | OMIT clause with SELECT VALUE |
+//! | `OMIT + fields` | OMIT clause without wildcard |
+//!
+//! ## Control Flow (in expression context)
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `BREAK` | Loop break (valid in FOR loops) |
+//! | `CONTINUE` | Loop continue (valid in FOR loops) |
+//! | `RETURN` | Function return |
+//! | `FOR` loops | Iteration (as expression) |
+//!
+//! ## Data Types
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | Array record keys | `table:[1,2,3]` syntax |
+//! | Object record keys | `table:{a:1}` syntax |
+//! | Nested range keys | Range within range |
+//! | Set literals | In USE statements |
+//! | Mock expressions | Test data generation |
+//!
+//! ## Functions
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `search::*` | Full-text search functions |
+//! | `api::*` | External API functions |
+//! | Nested aggregates | `SUM(COUNT(...))` patterns |
+//!
+//! ## Other
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | Non-idiom FETCH | FETCH with non-field expressions |
+//! | Non-idiom OMIT | OMIT with non-field expressions |
+//! | Dynamic VERSION | VERSION clause with non-literal |
+//! | Row context errors | Expressions requiring FROM clause |
+//!
+//! # Future Improvements (TODOs)
+//!
+//! - `SortTopKByKey`: Optimized top-k sorting with pre-computed fields
+
 use std::sync::Arc;
 
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -5,6 +141,7 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::function::FunctionRegistry;
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
@@ -19,6 +156,506 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
+
+// ============================================================================
+// Planner Struct
+// ============================================================================
+
+/// Query planner that converts logical expressions to physical execution plans.
+///
+/// The `Planner` holds shared resources (context, function registry) to avoid
+/// passing them through every function call. This improves code clarity and
+/// reduces parameter lists throughout the planning process.
+///
+/// # Usage
+///
+/// ```ignore
+/// let planner = Planner::new(&ctx);
+/// let plan = planner.plan(expr)?;
+/// ```
+///
+/// # Architecture
+///
+/// The planner converts SurrealQL AST nodes (`Expr`) into physical execution
+/// plans (`Arc<dyn ExecOperator>`). The conversion process:
+///
+/// 1. **Top-level statements** (SELECT, LET, INFO, etc.) become operator trees
+/// 2. **Expressions** (literals, function calls, idioms) become `PhysicalExpr`
+/// 3. **SELECT pipelines** follow: Source → Filter → Split → Aggregate → Sort → Limit → Project
+///
+/// # Limitations
+///
+/// The following features are not yet implemented in the streaming executor:
+///
+/// ## DML Subqueries
+/// - CREATE, UPDATE, UPSERT, DELETE, INSERT, RELATE subqueries
+///
+/// ## SELECT Clauses
+/// - `SELECT ... ONLY` (unwrap single results)
+/// - `SELECT ... EXPLAIN` (query plan output)
+/// - `SELECT ... WITH` (index hints)
+/// - `SELECT *` with GROUP BY
+///
+/// ## Control Flow (in expression context)
+/// - BREAK, CONTINUE, RETURN statements
+/// - FOR loops
+///
+/// ## DDL Statements (in expression context)
+/// - DEFINE, REMOVE, REBUILD, ALTER statements
+///
+/// ## Data Types
+/// - Array and object record keys
+/// - Set literals in USE statements
+/// - Mock expressions
+///
+/// ## Functions
+/// - `search::*` and `api::*` function families
+/// - Nested aggregate functions
+pub struct Planner<'ctx> {
+	/// The frozen context containing query parameters, capabilities, and session info.
+	ctx: &'ctx FrozenContext,
+	/// Cached reference to the function registry for aggregate/projection detection.
+	function_registry: &'ctx FunctionRegistry,
+}
+
+impl<'ctx> Planner<'ctx> {
+	/// Create a new planner with the given context.
+	///
+	/// The function registry is cached from the context for efficient lookups
+	/// during aggregate function detection.
+	pub fn new(ctx: &'ctx FrozenContext) -> Self {
+		Self {
+			ctx,
+			function_registry: ctx.function_registry(),
+		}
+	}
+
+	/// Get the underlying frozen context.
+	#[inline]
+	pub fn ctx(&self) -> &'ctx FrozenContext {
+		self.ctx
+	}
+
+	/// Get the function registry.
+	#[inline]
+	pub fn function_registry(&self) -> &'ctx FunctionRegistry {
+		self.function_registry
+	}
+
+	/// Plan an expression, converting it to an executable operator tree.
+	///
+	/// This is the main entry point for the planner. It handles all top-level
+	/// statement types (SELECT, LET, INFO, etc.) and converts them to physical
+	/// execution plans.
+	///
+	/// # Errors
+	///
+	/// Returns `Error::Unimplemented` for statements not yet supported in the
+	/// streaming executor.
+	pub fn plan(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Delegate to the internal planning logic
+		self.plan_expr(expr)
+	}
+
+	/// Convert an expression to a physical expression.
+	///
+	/// Physical expressions are evaluated at runtime to produce values.
+	/// This is used for expressions within operators (e.g., WHERE predicates,
+	/// SELECT field expressions, ORDER BY expressions).
+	pub fn physical_expr(&self, expr: Expr) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		expr_to_physical_expr(expr, self.ctx)
+	}
+
+	/// Convert an expression to a physical expression, treating simple identifiers as strings.
+	///
+	/// This is used for expressions like `INFO FOR USER test` where `test` is a name
+	/// that should be treated as a string literal, not an undefined variable.
+	pub fn physical_expr_as_name(
+		&self,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		expr_to_physical_expr_as_name(expr, self.ctx)
+	}
+
+	/// Internal method to plan an expression.
+	fn plan_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
+		match expr {
+			// Supported statements
+			Expr::Select(select) => self.plan_select(*select),
+			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
+
+			// DML statements - not yet supported
+			Expr::Create(_) => Err(Error::Unimplemented(
+				"CREATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Update(_) => Err(Error::Unimplemented(
+				"UPDATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Upsert(_) => Err(Error::Unimplemented(
+				"UPSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Delete(_) => Err(Error::Unimplemented(
+				"DELETE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Insert(_) => Err(Error::Unimplemented(
+				"INSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Relate(_) => Err(Error::Unimplemented(
+				"RELATE statements not yet supported in execution plans".to_string(),
+			)),
+
+			// DDL statements - not yet supported
+			Expr::Define(_) => Err(Error::Unimplemented(
+				"DEFINE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Remove(_) => Err(Error::Unimplemented(
+				"REMOVE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Rebuild(_) => Err(Error::Unimplemented(
+				"REBUILD statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Alter(_) => Err(Error::Unimplemented(
+				"ALTER statements not yet supported in execution plans".to_string(),
+			)),
+
+			// INFO statements
+			Expr::Info(info) => {
+				use crate::expr::statements::info::InfoStatement;
+				match *info {
+					InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
+						structured,
+					}) as Arc<dyn ExecOperator>),
+					InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
+						structured,
+					}) as Arc<dyn ExecOperator>),
+					InfoStatement::Db(structured, version) => {
+						let version = version.map(|v| self.physical_expr(v)).transpose()?;
+						Ok(Arc::new(DatabaseInfoPlan {
+							structured,
+							version,
+						}) as Arc<dyn ExecOperator>)
+					}
+					InfoStatement::Tb(table, structured, version) => {
+						// Table names are identifiers that should be treated as strings
+						let table = self.physical_expr_as_name(table)?;
+						let version = version.map(|v| self.physical_expr(v)).transpose()?;
+						Ok(Arc::new(TableInfoPlan {
+							table,
+							structured,
+							version,
+						}) as Arc<dyn ExecOperator>)
+					}
+					InfoStatement::User(user, base, structured) => {
+						// User names are identifiers that should be treated as strings
+						let user = self.physical_expr_as_name(user)?;
+						Ok(Arc::new(UserInfoPlan {
+							user,
+							base,
+							structured,
+						}) as Arc<dyn ExecOperator>)
+					}
+					InfoStatement::Index(index, table, structured) => {
+						// Index and table names are identifiers that should be treated as strings
+						let index = self.physical_expr_as_name(index)?;
+						let table = self.physical_expr_as_name(table)?;
+						Ok(Arc::new(IndexInfoPlan {
+							index,
+							table,
+							structured,
+						}) as Arc<dyn ExecOperator>)
+					}
+				}
+			}
+			Expr::Foreach(stmt) => Ok(Arc::new(ForeachPlan {
+				param: stmt.param.clone(),
+				range: stmt.range.clone(),
+				body: stmt.block.clone(),
+			}) as Arc<dyn ExecOperator>),
+			Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
+				branches: stmt.exprs.clone(),
+				else_body: stmt.close.clone(),
+			}) as Arc<dyn ExecOperator>),
+			Expr::Block(block) => {
+				// Deferred planning: wrap the block without converting inner expressions.
+				// The SequencePlan will plan and execute each expression at runtime,
+				// allowing LET bindings to inform subsequent expression planning.
+				if block.0.is_empty() {
+					// Empty block returns NONE immediately
+					use crate::exec::physical_expr::Literal as PhysicalLiteral;
+					Ok(Arc::new(ExprPlan {
+						expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
+					}) as Arc<dyn ExecOperator>)
+				} else if block.0.len() == 1 {
+					// Single statement - plan directly without wrapper
+					self.plan_expr(block.0.into_iter().next().unwrap())
+				} else {
+					// Multiple statements - use SequencePlan with deferred planning
+					Ok(Arc::new(SequencePlan {
+						block: *block,
+					}) as Arc<dyn ExecOperator>)
+				}
+			}
+			Expr::FunctionCall(_) => {
+				// Function calls are value expressions - convert to physical expression
+				let phys_expr = self.physical_expr(expr)?;
+				// Validate that the expression doesn't require row context
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Function call references row context but no table specified".to_string(),
+					));
+				}
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
+			Expr::Closure(_) => {
+				let closure_expr = self.physical_expr(expr)?;
+
+				Ok(Arc::new(ExprPlan {
+					expr: closure_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
+			Expr::Return(output_stmt) => {
+				// Plan the inner expression
+				let inner = self.plan_expr(output_stmt.what)?;
+
+				// Wrap with Fetch operator if FETCH clause is present
+				let inner = if let Some(fetchs) = output_stmt.fetch {
+					// Extract idioms from fetch expressions
+					// FETCH expressions are typically Expr::Idiom(idiom)
+					let fields: Vec<_> = fetchs
+						.iter()
+						.filter_map(|f| {
+							if let Expr::Idiom(idiom) = &f.0 {
+								Some(idiom.clone())
+							} else {
+								// Non-idiom fetch expressions are not supported in the new planner
+								None
+							}
+						})
+						.collect();
+					if fields.is_empty() {
+						// No idiom fields to fetch, pass through
+						inner
+					} else {
+						Arc::new(Fetch {
+							input: inner,
+							fields,
+						}) as Arc<dyn ExecOperator>
+					}
+				} else {
+					inner
+				};
+
+				Ok(Arc::new(ControlFlowPlan {
+					kind: ControlFlowKind::Return,
+					inner: Some(inner),
+				}))
+			}
+			Expr::Throw(expr) => {
+				let inner = self.plan_expr(*expr)?;
+				Ok(Arc::new(ControlFlowPlan {
+					kind: ControlFlowKind::Throw,
+					inner: Some(inner),
+				}))
+			}
+			Expr::Break => Ok(Arc::new(ControlFlowPlan {
+				kind: ControlFlowKind::Break,
+				inner: None,
+			})),
+			Expr::Continue => Ok(Arc::new(ControlFlowPlan {
+				kind: ControlFlowKind::Continue,
+				inner: None,
+			})),
+			Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
+				duration: sleep_stmt.duration,
+			})),
+			Expr::Explain {
+				format,
+				statement,
+			} => {
+				// Plan the inner statement
+				let inner_plan = self.plan_expr(*statement)?;
+				// Wrap it in an ExplainPlan operator
+				Ok(Arc::new(ExplainPlan {
+					plan: inner_plan,
+					format,
+				}))
+			}
+
+			// Value expressions - evaluate in scalar context and return result
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::Table(_) => {
+				let phys_expr = self.physical_expr(expr)?;
+				// Validate that the expression doesn't require row context
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Expression references row context but no table specified".to_string(),
+					));
+				}
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
+
+			// Idiom expressions require row context, so they need special handling
+			Expr::Idiom(_) => {
+				let phys_expr = self.physical_expr(expr)?;
+				// Idioms always reference current_value, so this will be an error for top-level
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Field expressions require a FROM clause to provide row context"
+							.to_string(),
+					));
+				}
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
+
+			// Mock expressions generate test data - defer for now
+			Expr::Mock(_) => Err(Error::Unimplemented(
+				"Mock expressions not yet supported in execution plans".to_string(),
+			)),
+
+			// Postfix expressions (ranges, method calls)
+			Expr::Postfix {
+				..
+			} => {
+				let phys_expr = self.physical_expr(expr)?;
+				// Validate that the expression doesn't require row context
+				if phys_expr.references_current_value() {
+					return Err(Error::Unimplemented(
+						"Postfix expression references row context but no table specified"
+							.to_string(),
+					));
+				}
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
+		}
+	}
+
+	// ========================================================================
+	// SELECT Statement Planning
+	// ========================================================================
+
+	/// Plan a SELECT statement into an operator tree.
+	///
+	/// The operator pipeline is built in this order:
+	/// 1. Scan/Union (source from FROM clause)
+	/// 2. Filter (WHERE)
+	/// 3. Split (SPLIT BY)
+	/// 4. Aggregate (GROUP BY)
+	/// 5. Sort (ORDER BY)
+	/// 6. Limit (LIMIT/START)
+	/// 7. Fetch (FETCH)
+	/// 8. Project (SELECT fields) or ProjectValue (SELECT VALUE)
+	/// 9. Timeout (TIMEOUT)
+	fn plan_select(
+		&self,
+		select: crate::expr::statements::SelectStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Delegate to free function during migration
+		plan_select(select, self.ctx)
+	}
+
+	// ========================================================================
+	// LET Statement Planning
+	// ========================================================================
+
+	/// Convert a LET statement to an execution plan.
+	fn convert_let_statement(
+		&self,
+		let_stmt: crate::expr::statements::SetStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Delegate to free function during migration
+		convert_let_statement(let_stmt, self.ctx)
+	}
+}
+
+// ============================================================================
+// Select Pipeline Configuration
+// ============================================================================
+
+/// Configuration for the SELECT pipeline.
+///
+/// This struct bundles together all the optional clauses from a SELECT statement
+/// that affect the pipeline: WHERE, SPLIT BY, GROUP BY, ORDER BY, LIMIT, START,
+/// and OMIT. Using a struct reduces the parameter count for `plan_select_pipeline`
+/// from 12 parameters to 4 (source, fields, config, ctx).
+///
+/// # Example
+///
+/// ```ignore
+/// let config = SelectPipelineConfig {
+///     cond: select.cond,
+///     split: select.split,
+///     group: select.group,
+///     order: select.order,
+///     limit: select.limit,
+///     start: select.start,
+///     omit: select.omit,
+///     is_value_source: all_value_sources(&select.what),
+///     tempfiles: select.tempfiles,
+/// };
+/// let plan = plan_select_pipeline(source, Some(fields), config, ctx)?;
+/// ```
+#[derive(Debug, Default)]
+pub(crate) struct SelectPipelineConfig {
+	/// WHERE clause predicate
+	pub cond: Option<crate::expr::cond::Cond>,
+	/// SPLIT BY clause fields
+	pub split: Option<crate::expr::split::Splits>,
+	/// GROUP BY clause fields
+	pub group: Option<crate::expr::group::Groups>,
+	/// ORDER BY clause fields
+	pub order: Option<crate::expr::order::Ordering>,
+	/// LIMIT clause expression
+	pub limit: Option<crate::expr::limit::Limit>,
+	/// START clause expression (offset)
+	pub start: Option<crate::expr::start::Start>,
+	/// OMIT clause fields
+	pub omit: Vec<Expr>,
+	/// Whether the source is a value (array, primitive) vs record (table, record ID).
+	/// This affects projection behavior for `$this` references.
+	pub is_value_source: bool,
+	/// Whether to use disk-based sorting (TEMPFILES hint)
+	pub tempfiles: bool,
+}
+
+impl SelectPipelineConfig {
+	/// Create a new config from a SELECT statement.
+	pub fn from_select(
+		select: &crate::expr::statements::SelectStatement,
+		is_value_source: bool,
+	) -> Self {
+		Self {
+			cond: select.cond.clone(),
+			split: select.split.clone(),
+			group: select.group.clone(),
+			order: select.order.clone(),
+			limit: select.limit.clone(),
+			start: select.start.clone(),
+			omit: select.omit.clone(),
+			is_value_source,
+			tempfiles: select.tempfiles,
+		}
+	}
+}
+
+// ============================================================================
+// Legacy Free Functions (for backwards compatibility during migration)
+// ============================================================================
 
 /// Convert an expression to a physical expression, treating simple identifiers as string literals.
 ///
@@ -473,272 +1110,20 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 	}
 }
 
+/// Plan an expression into an executable operator tree.
+///
+/// This is the main entry point for the planner. It delegates to `Planner::plan()`
+/// which handles all top-level statement types.
+///
+/// # Errors
+///
+/// Returns `Error::Unimplemented` for statements not yet supported in the
+/// streaming executor.
 pub(crate) fn try_plan_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	match expr {
-		// Supported statements
-		Expr::Select(select) => plan_select(*select, ctx),
-		Expr::Let(let_stmt) => convert_let_statement(*let_stmt, ctx),
-
-		// DML statements - not yet supported
-		Expr::Create(_) => Err(Error::Unimplemented(
-			"CREATE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Update(_) => Err(Error::Unimplemented(
-			"UPDATE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Upsert(_) => Err(Error::Unimplemented(
-			"UPSERT statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Delete(_) => Err(Error::Unimplemented(
-			"DELETE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Insert(_) => Err(Error::Unimplemented(
-			"INSERT statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Relate(_) => Err(Error::Unimplemented(
-			"RELATE statements not yet supported in execution plans".to_string(),
-		)),
-
-		// DDL statements - not yet supported
-		Expr::Define(_) => Err(Error::Unimplemented(
-			"DEFINE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Remove(_) => Err(Error::Unimplemented(
-			"REMOVE statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Rebuild(_) => Err(Error::Unimplemented(
-			"REBUILD statements not yet supported in execution plans".to_string(),
-		)),
-		Expr::Alter(_) => Err(Error::Unimplemented(
-			"ALTER statements not yet supported in execution plans".to_string(),
-		)),
-
-		// INFO statements
-		Expr::Info(info) => {
-			use crate::expr::statements::info::InfoStatement;
-			match *info {
-				InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
-					structured,
-				}) as Arc<dyn ExecOperator>),
-				InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
-					structured,
-				}) as Arc<dyn ExecOperator>),
-				InfoStatement::Db(structured, version) => {
-					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
-					Ok(Arc::new(DatabaseInfoPlan {
-						structured,
-						version,
-					}) as Arc<dyn ExecOperator>)
-				}
-				InfoStatement::Tb(table, structured, version) => {
-					// Table names are identifiers that should be treated as strings
-					let table = expr_to_physical_expr_as_name(table, ctx)?;
-					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
-					Ok(Arc::new(TableInfoPlan {
-						table,
-						structured,
-						version,
-					}) as Arc<dyn ExecOperator>)
-				}
-				InfoStatement::User(user, base, structured) => {
-					// User names are identifiers that should be treated as strings
-					let user = expr_to_physical_expr_as_name(user, ctx)?;
-					Ok(Arc::new(UserInfoPlan {
-						user,
-						base,
-						structured,
-					}) as Arc<dyn ExecOperator>)
-				}
-				InfoStatement::Index(index, table, structured) => {
-					// Index and table names are identifiers that should be treated as strings
-					let index = expr_to_physical_expr_as_name(index, ctx)?;
-					let table = expr_to_physical_expr_as_name(table, ctx)?;
-					Ok(Arc::new(IndexInfoPlan {
-						index,
-						table,
-						structured,
-					}) as Arc<dyn ExecOperator>)
-				}
-			}
-		}
-		Expr::Foreach(stmt) => Ok(Arc::new(ForeachPlan {
-			param: stmt.param.clone(),
-			range: stmt.range.clone(),
-			body: stmt.block.clone(),
-		}) as Arc<dyn ExecOperator>),
-		Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
-			branches: stmt.exprs.clone(),
-			else_body: stmt.close.clone(),
-		}) as Arc<dyn ExecOperator>),
-		Expr::Block(block) => {
-			// Deferred planning: wrap the block without converting inner expressions.
-			// The SequencePlan will plan and execute each expression at runtime,
-			// allowing LET bindings to inform subsequent expression planning.
-			if block.0.is_empty() {
-				// Empty block returns NONE immediately
-				use crate::exec::physical_expr::Literal as PhysicalLiteral;
-				Ok(Arc::new(ExprPlan {
-					expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
-				}) as Arc<dyn ExecOperator>)
-			} else if block.0.len() == 1 {
-				// Single statement - plan directly without wrapper
-				try_plan_expr(block.0.into_iter().next().unwrap(), ctx)
-			} else {
-				// Multiple statements - use SequencePlan with deferred planning
-				Ok(Arc::new(SequencePlan {
-					block: *block,
-				}) as Arc<dyn ExecOperator>)
-			}
-		}
-		Expr::FunctionCall(_) => {
-			// Function calls are value expressions - convert to physical expression
-			let phys_expr = expr_to_physical_expr(expr, ctx)?;
-			// Validate that the expression doesn't require row context
-			if phys_expr.references_current_value() {
-				return Err(Error::Unimplemented(
-					"Function call references row context but no table specified".to_string(),
-				));
-			}
-			Ok(Arc::new(ExprPlan {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-		Expr::Closure(_) => {
-			let closure_expr = expr_to_physical_expr(expr, ctx)?;
-
-			Ok(Arc::new(ExprPlan {
-				expr: closure_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-		Expr::Return(output_stmt) => {
-			// Plan the inner expression
-			let inner = try_plan_expr(output_stmt.what, ctx)?;
-
-			// Wrap with Fetch operator if FETCH clause is present
-			let inner = if let Some(fetchs) = output_stmt.fetch {
-				// Extract idioms from fetch expressions
-				// FETCH expressions are typically Expr::Idiom(idiom)
-				let fields: Vec<_> = fetchs
-					.iter()
-					.filter_map(|f| {
-						if let Expr::Idiom(idiom) = &f.0 {
-							Some(idiom.clone())
-						} else {
-							// Non-idiom fetch expressions are not supported in the new planner
-							None
-						}
-					})
-					.collect();
-				if fields.is_empty() {
-					// No idiom fields to fetch, pass through
-					inner
-				} else {
-					Arc::new(Fetch {
-						input: inner,
-						fields,
-					}) as Arc<dyn ExecOperator>
-				}
-			} else {
-				inner
-			};
-
-			Ok(Arc::new(ControlFlowPlan {
-				kind: ControlFlowKind::Return,
-				inner: Some(inner),
-			}))
-		}
-		Expr::Throw(expr) => {
-			let inner = try_plan_expr(*expr, ctx)?;
-			Ok(Arc::new(ControlFlowPlan {
-				kind: ControlFlowKind::Throw,
-				inner: Some(inner),
-			}))
-		}
-		Expr::Break => Ok(Arc::new(ControlFlowPlan {
-			kind: ControlFlowKind::Break,
-			inner: None,
-		})),
-		Expr::Continue => Ok(Arc::new(ControlFlowPlan {
-			kind: ControlFlowKind::Continue,
-			inner: None,
-		})),
-		Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
-			duration: sleep_stmt.duration,
-		})),
-		Expr::Explain {
-			format,
-			statement,
-		} => {
-			// Plan the inner statement
-			let inner_plan = try_plan_expr(*statement, ctx)?;
-			// Wrap it in an ExplainPlan operator
-			Ok(Arc::new(ExplainPlan {
-				plan: inner_plan,
-				format,
-			}))
-		}
-
-		// Value expressions - evaluate in scalar context and return result
-		Expr::Literal(_)
-		| Expr::Param(_)
-		| Expr::Constant(_)
-		| Expr::Prefix {
-			..
-		}
-		| Expr::Binary {
-			..
-		}
-		| Expr::Table(_) => {
-			let phys_expr = expr_to_physical_expr(expr, ctx)?;
-			// Validate that the expression doesn't require row context
-			if phys_expr.references_current_value() {
-				return Err(Error::Unimplemented(
-					"Expression references row context but no table specified".to_string(),
-				));
-			}
-			Ok(Arc::new(ExprPlan {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Idiom expressions require row context, so they need special handling
-		Expr::Idiom(_) => {
-			let phys_expr = expr_to_physical_expr(expr, ctx)?;
-			// Idioms always reference current_value, so this will be an error for top-level
-			if phys_expr.references_current_value() {
-				return Err(Error::Unimplemented(
-					"Field expressions require a FROM clause to provide row context".to_string(),
-				));
-			}
-			Ok(Arc::new(ExprPlan {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Mock expressions generate test data - defer for now
-		Expr::Mock(_) => Err(Error::Unimplemented(
-			"Mock expressions not yet supported in execution plans".to_string(),
-		)),
-
-		// Postfix expressions (ranges, method calls)
-		Expr::Postfix {
-			..
-		} => {
-			let phys_expr = expr_to_physical_expr(expr, ctx)?;
-			// Validate that the expression doesn't require row context
-			if phys_expr.references_current_value() {
-				return Err(Error::Unimplemented(
-					"Postfix expression references row context but no table specified".to_string(),
-				));
-			}
-			Ok(Arc::new(ExprPlan {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-	}
+	Planner::new(ctx).plan(expr)
 }
 
 /// Plan a SELECT statement
@@ -808,10 +1193,8 @@ fn plan_select(
 	// Build the source plan from `what` (FROM clause)
 	let source = plan_select_sources(what, version, ctx)?;
 
-	// Apply the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
-	let projected = plan_select_pipeline(
-		source,
-		Some(fields.clone()),
+	// Build pipeline configuration
+	let config = SelectPipelineConfig {
 		cond,
 		split,
 		group,
@@ -821,8 +1204,10 @@ fn plan_select(
 		omit,
 		is_value_source,
 		tempfiles,
-		ctx,
-	)?;
+	};
+
+	// Apply the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
+	let projected = plan_select_pipeline(source, Some(fields.clone()), config, ctx)?;
 
 	// Apply FETCH if present - after projections so it can expand record IDs
 	// in computed fields like graph traversals
@@ -846,36 +1231,33 @@ fn plan_select(
 /// Plan the SELECT pipeline after the source is determined.
 ///
 /// This applies the standard query pipeline: Filter -> Split -> Aggregate -> Sort -> Limit ->
-/// Project Used by both `plan_select` and `plan_lookup` to share the common operator chain.
+/// Project. Used by both `plan_select` and `plan_lookup` to share the common operator chain.
 ///
-/// Parameters:
+/// # Parameters
+///
 /// - `source`: The already-planned source operator (Scan, GraphEdgeScan, Union, etc.)
 /// - `fields`: Optional fields for projection. If None, passes through all fields.
-/// - `cond`: Optional WHERE clause
-/// - `split`: Optional SPLIT BY clause
-/// - `group`: Optional GROUP BY clause
-/// - `order`: Optional ORDER BY clause
-/// - `limit`: Optional LIMIT clause
-/// - `start`: Optional START clause
-/// - `omit`: Fields to omit from output
-/// - `is_value_source`: Whether source is a value (affects projection behavior)
-/// - `tempfiles`: Whether to use disk-based sorting
+/// - `config`: Pipeline configuration (WHERE, SPLIT, GROUP, ORDER, LIMIT, START, OMIT, etc.)
 /// - `ctx`: The frozen context
-#[allow(clippy::too_many_arguments)]
 fn plan_select_pipeline(
 	source: Arc<dyn ExecOperator>,
 	fields: Option<Fields>,
-	cond: Option<crate::expr::cond::Cond>,
-	split: Option<crate::expr::split::Splits>,
-	group: Option<crate::expr::group::Groups>,
-	order: Option<crate::expr::order::Ordering>,
-	limit: Option<crate::expr::limit::Limit>,
-	start: Option<crate::expr::start::Start>,
-	omit: Vec<Expr>,
-	is_value_source: bool,
-	tempfiles: bool,
+	config: SelectPipelineConfig,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
+	// Destructure config for easier access
+	let SelectPipelineConfig {
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		omit,
+		is_value_source,
+		tempfiles,
+	} = config;
+
 	// Apply WHERE clause if present
 	let filtered = if let Some(cond) = cond {
 		let predicate = expr_to_physical_expr(cond.0, ctx)?;
@@ -2802,20 +3184,18 @@ fn plan_lookup(
 	if needs_full_pipeline {
 		// Use the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
 		// This enables full support for subquery clauses like GROUP BY
-		plan_select_pipeline(
-			base_scan,
-			lookup.expr.clone(),
-			lookup.cond.clone(),
-			lookup.split.clone(),
-			lookup.group.clone(),
-			lookup.order.clone(),
-			lookup.limit.clone(),
-			lookup.start.clone(),
-			vec![], // No OMIT for lookups
-			false,  // Lookups are not value sources
-			false,  // No TEMPFILES for lookups
-			ctx,
-		)
+		let config = SelectPipelineConfig {
+			cond: lookup.cond.clone(),
+			split: lookup.split.clone(),
+			group: lookup.group.clone(),
+			order: lookup.order.clone(),
+			limit: lookup.limit.clone(),
+			start: lookup.start.clone(),
+			omit: vec![],           // No OMIT for lookups
+			is_value_source: false, // Lookups are not value sources
+			tempfiles: false,       // No TEMPFILES for lookups
+		};
+		plan_select_pipeline(base_scan, lookup.expr.clone(), config, ctx)
 	} else {
 		// Simple lookup without projection - apply filter/split/sort/limit manually
 		// This preserves the original behavior of returning target IDs or filtered edges
