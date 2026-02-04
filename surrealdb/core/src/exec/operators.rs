@@ -1,8 +1,5 @@
 mod aggregate;
-mod broadcast;
-mod closure;
 mod compute;
-mod context_mutating;
 mod control_flow;
 mod create;
 mod delete;
@@ -14,6 +11,7 @@ mod foreach;
 mod graph_edge_scan;
 mod ifelse;
 mod info;
+mod let_plan;
 mod limit;
 mod project;
 mod project_value;
@@ -31,9 +29,7 @@ mod update;
 pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
-pub use closure::ClosurePlan;
 pub use compute::Compute;
-pub use context_mutating::LetPlan;
 pub use control_flow::{ControlFlowKind, ControlFlowPlan};
 pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
@@ -45,6 +41,7 @@ pub use ifelse::IfElsePlan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
+pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;

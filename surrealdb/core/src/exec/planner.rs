@@ -8,7 +8,7 @@ use crate::exec::field_path::{FieldPath, FieldPathPart};
 #[cfg(storage)]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateExprInfo, AggregateField, ClosurePlan, ControlFlowKind, ControlFlowPlan,
+	Aggregate, AggregateExprInfo, AggregateField, ControlFlowKind, ControlFlowPlan,
 	DatabaseInfoPlan, ExplainPlan, ExprPlan, ExtractedAggregate, Fetch, FieldSelection, Filter,
 	ForeachPlan, IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField,
 	Project, ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort,
@@ -187,7 +187,7 @@ pub(crate) fn expr_to_physical_expr(
 					}
 
 					// Check if this is a projection function (type::field, type::fields)
-					let registry = crate::exec::function::FunctionRegistry::with_builtins();
+					let registry = ctx.function_registry();
 					if registry.is_projection(&name) {
 						// Get the projection function's required context
 						let func_ctx = registry
@@ -602,11 +602,13 @@ pub(crate) fn try_plan_expr(
 				expr: phys_expr,
 			}) as Arc<dyn ExecOperator>)
 		}
-		Expr::Closure(closure) => Ok(Arc::new(ClosurePlan {
-			args: closure.args.clone(),
-			returns: closure.returns.clone(),
-			body: closure.body.clone(),
-		}) as Arc<dyn ExecOperator>),
+		Expr::Closure(_) => {
+			let closure_expr = expr_to_physical_expr(expr, ctx)?;
+
+			Ok(Arc::new(ExprPlan {
+				expr: closure_expr,
+			}) as Arc<dyn ExecOperator>)
+		}
 		Expr::Return(output_stmt) => {
 			// Plan the inner expression
 			let inner = try_plan_expr(output_stmt.what, ctx)?;
@@ -1360,8 +1362,8 @@ fn plan_aggregation_with_group_exprs(
 ) -> Result<(Vec<AggregateField>, Vec<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
 	use surrealdb_types::ToSql;
 
-	// Use the global built-in function registry
-	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+	// Get the function registry from the context
+	let registry = ctx.function_registry();
 
 	// Build a map of alias -> expression from the SELECT fields
 	// This allows us to expand GROUP BY aliases to actual expressions

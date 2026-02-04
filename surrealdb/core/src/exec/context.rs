@@ -13,7 +13,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -27,14 +27,6 @@ use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{Datetime, Value};
-
-/// Global function registry containing all built-in functions.
-///
-/// This is initialized once and shared across all execution contexts.
-fn builtin_registry() -> &'static Arc<FunctionRegistry> {
-	static BUILTIN_REGISTRY: OnceLock<Arc<FunctionRegistry>> = OnceLock::new();
-	BUILTIN_REGISTRY.get_or_init(|| Arc::new(FunctionRegistry::with_builtins()))
-}
 
 /// Parameters passed to queries (e.g., `$param` values).
 pub(crate) type Parameters = HashMap<Cow<'static, str>, Arc<Value>>;
@@ -492,11 +484,11 @@ impl ExecutionContext {
 
 	/// Get the function registry.
 	///
-	/// Returns the global function registry containing all built-in functions.
-	/// In the future, this could be extended to support per-context function
-	/// registries for sandboxing or custom function sets.
+	/// Returns the function registry from the underlying context.
+	/// This allows different contexts to have different registries,
+	/// enabling custom function registration (e.g., enterprise-only functions).
 	pub fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		builtin_registry()
+		self.root().ctx.function_registry()
 	}
 
 	/// Get the session information (if available).

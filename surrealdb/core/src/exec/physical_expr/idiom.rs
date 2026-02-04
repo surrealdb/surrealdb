@@ -571,8 +571,8 @@ async fn evaluate_method(
 		func_args.push(arg_value);
 	}
 
-	// Get the function registry and invoke the function
-	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+	// Get the function registry from the execution context
+	let registry = ctx.exec_ctx.function_registry();
 
 	if let Some(func) = registry.get(&func_name) {
 		// Try sync invocation first for pure functions

@@ -225,7 +225,13 @@ impl ExecOperator for Aggregate {
 					for extracted in &info.aggregates {
 						let mut args = Vec::with_capacity(extracted.extra_args.len());
 						for extra_arg in &extracted.extra_args {
-							let value = extra_arg.evaluate(eval_ctx_for_args.clone()).await.unwrap_or(Value::None);
+							let value = match extra_arg.evaluate(eval_ctx_for_args.clone()).await {
+								Ok(v) => v,
+								Err(e) => {
+									tracing::debug!(error = %e, "Extra arg evaluation failed, using None");
+									Value::None
+								}
+							};
 							args.push(value);
 						}
 						field_args.push(args);
@@ -265,15 +271,14 @@ impl ExecOperator for Aggregate {
 							for (agg_idx, extracted) in info.aggregates.iter().enumerate() {
 								match extracted.argument_expr.evaluate(eval_ctx.clone()).await {
 									Ok(arg_value) => {
-										if let Some(acc) = state.accumulators[i].get_mut(agg_idx) {
-											// Update the accumulator with the argument value
-											if let Err(_e) = acc.update(arg_value) {
-												// On error, continue (value is effectively skipped)
-											}
+										if let Some(acc) = state.accumulators[i].get_mut(agg_idx)
+											&& let Err(e) = acc.update(arg_value)
+										{
+											tracing::debug!(error = %e, "Accumulator update failed, skipping value");
 										}
 									}
-									Err(_) => {
-										// On error, skip this value for this aggregate
+									Err(e) => {
+										tracing::debug!(error = %e, "Aggregate argument evaluation failed, skipping value");
 									}
 								}
 							}
@@ -284,8 +289,8 @@ impl ExecOperator for Aggregate {
 									Ok(field_value) => {
 										state.first_values[i] = field_value;
 									}
-									Err(_) => {
-										// On error, leave as None
+									Err(e) => {
+										tracing::debug!(error = %e, "Fallback expression evaluation failed");
 									}
 								}
 							}
@@ -295,7 +300,7 @@ impl ExecOperator for Aggregate {
 			}
 
 			// Now compute final results for each group
-			let mut results = Vec::new();
+			let mut results = Vec::with_capacity(groups.len());
 			for (group_key, state) in groups {
 				let result = compute_group_result_async(
 					&group_key,
@@ -363,10 +368,41 @@ async fn compute_group_key_async(
 ) -> GroupKey {
 	let mut key = Vec::with_capacity(group_by_exprs.len());
 	for expr in group_by_exprs {
-		let value = expr.evaluate(eval_ctx.clone()).await.unwrap_or(Value::None);
+		let value = match expr.evaluate(eval_ctx.clone()).await {
+			Ok(v) => v,
+			Err(e) => {
+				tracing::debug!(error = %e, "Group key expression evaluation failed, using None");
+				Value::None
+			}
+		};
 		key.push(value);
 	}
 	key
+}
+
+/// Compute the value for a single aggregate field.
+///
+/// This handles three cases:
+/// 1. Group-by key: return the key value from the group key vector
+/// 2. Aggregate expression: finalize accumulators and optionally evaluate post-expression
+/// 3. Non-aggregate field: return the first value seen
+async fn compute_single_field_value(
+	agg: &AggregateField,
+	group_key: &GroupKey,
+	accumulators: &[Box<dyn Accumulator>],
+	first_value: Value,
+	ctx: &ExecutionContext,
+) -> Value {
+	if let Some(idx) = agg.group_key_index {
+		// For group-by keys, use the key value directly by index
+		group_key.get(idx).cloned().unwrap_or(Value::None)
+	} else if let Some(info) = &agg.aggregate_expr_info {
+		// Compute the aggregate value(s)
+		compute_aggregate_field_value(info, accumulators, ctx).await
+	} else {
+		// Return first value for non-aggregate fields
+		first_value
+	}
 }
 
 /// Compute the result value for a single group, with support for multiple aggregates per field.
@@ -384,38 +420,21 @@ async fn compute_group_result_async(
 	// If there's exactly one aggregate with an empty name, return the raw value
 	if aggregates.len() == 1 && aggregates[0].is_empty_name() {
 		let agg = &aggregates[0];
-		return if let Some(idx) = agg.group_key_index {
-			// For group-by keys, use the key value directly by index
-			group_key.get(idx).cloned().unwrap_or(Value::None)
-		} else if let Some(info) = &agg.aggregate_expr_info {
-			// Compute the aggregate value(s)
-			compute_aggregate_field_value(info, &state.accumulators[0], ctx).await
-		} else {
-			// Return first value
-			state.first_values.into_iter().next().unwrap_or(Value::None)
-		};
+		let first_value = state.first_values.into_iter().next().unwrap_or(Value::None);
+		let accumulators = state.accumulators.into_iter().next().unwrap_or_default();
+		return compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await;
 	}
 
 	// Normal case: return an object with field names
 	let mut result = Object::default();
 
-	let mut accumulators_iter = state.accumulators.into_iter();
-	let mut first_values = state.first_values.into_iter();
+	// Zip aggregates with their corresponding accumulators and first values
+	let field_data = aggregates.iter().zip(state.accumulators).zip(state.first_values);
 
-	for agg in aggregates.iter() {
-		let field_accumulators = accumulators_iter.next().unwrap_or_default();
-		let first_value = first_values.next().unwrap_or(Value::None);
+	for ((agg, accumulators), first_value) in field_data {
+		let field_value =
+			compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await;
 
-		let field_value = if let Some(idx) = agg.group_key_index {
-			// For group-by keys, use the key value directly by index
-			group_key.get(idx).cloned().unwrap_or(Value::None)
-		} else if let Some(info) = &agg.aggregate_expr_info {
-			// Compute the aggregate value(s)
-			compute_aggregate_field_value(info, &field_accumulators, ctx).await
-		} else {
-			// Return first value for non-aggregate fields
-			first_value
-		};
 		// Use nested setting to properly construct nested objects
 		// e.g., path ["address", "city"] creates { address: { city: value } }
 		set_nested_value(&mut result, &agg.output_path, field_value);
@@ -476,7 +495,13 @@ async fn compute_aggregate_field_value(
 	// Finalize all accumulators and build the aggregate document
 	let mut agg_doc = Object::default();
 	for (idx, acc) in accumulators.iter().enumerate() {
-		let value = acc.finalize().unwrap_or(Value::Null);
+		let value = match acc.finalize() {
+			Ok(v) => v,
+			Err(e) => {
+				debug!(error = %e, idx, "Accumulator finalize failed, using Null");
+				Value::Null
+			}
+		};
 		agg_doc.insert(aggregate_field_name(idx), value);
 	}
 
@@ -484,7 +509,13 @@ async fn compute_aggregate_field_value(
 	if let Some(post_expr) = &info.post_expr {
 		let doc_value = Value::Object(agg_doc);
 		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&doc_value);
-		post_expr.evaluate(eval_ctx).await.unwrap_or(Value::Null)
+		match post_expr.evaluate(eval_ctx).await {
+			Ok(v) => v,
+			Err(e) => {
+				debug!(error = %e, "Post-expression evaluation failed, using Null");
+				Value::Null
+			}
+		}
 	} else {
 		// No post-expression means direct single aggregate - return first value
 		agg_doc.0.into_values().next().unwrap_or(Value::Null)

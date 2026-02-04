@@ -3,34 +3,19 @@
 reason = "Test EXPLAIN with closure expressions"
 
 [[test.results]]
-# EXPLAIN basic closure
-value = """\
-"Closure [ctx: Rt] [args: 1]
-""""
+value = ''''Expr [ctx: Rt] [expr: |$x: any| { $x * 2 }]\n''''
 
 [[test.results]]
-# EXPLAIN closure with typed argument
-value = """\
-"Closure [ctx: Rt] [args: 1]
-""""
+value = ''''Expr [ctx: Rt] [expr: |$x: int| { $x * 2 }]\n''''
 
 [[test.results]]
-# EXPLAIN closure with return type
-value = """\
-"Closure [ctx: Rt] [args: 1, has_return_type: true]
-""""
+value = ''''Expr [ctx: Rt] [expr: |$x: int| -> int { $x * 2 }]\n''''
 
 [[test.results]]
-# EXPLAIN closure with multiple arguments
-value = """\
-"Closure [ctx: Rt] [args: 2, has_return_type: true]
-""""
+value = ''''Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int { $a + $b }]\n''''
 
 [[test.results]]
-# EXPLAIN closure with no arguments
-value = """\
-"Closure [ctx: Rt] [args: 0]
-""""
+value = ''''Expr [ctx: Rt] [expr: || { 42 }]\n''''
 
 */
 
