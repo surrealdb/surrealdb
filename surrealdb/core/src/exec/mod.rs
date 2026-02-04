@@ -50,6 +50,7 @@ pub(crate) mod context;
 pub(crate) mod expression_registry;
 pub(crate) mod field_path;
 pub(crate) mod function;
+pub(crate) mod index;
 pub(crate) mod operators;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;

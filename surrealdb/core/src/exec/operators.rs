@@ -6,9 +6,12 @@ mod expr;
 mod fetch;
 mod filter;
 mod foreach;
+mod fulltext_scan;
 mod graph_edge_scan;
 mod ifelse;
+mod index_scan;
 mod info;
+mod knn_scan;
 mod let_plan;
 mod limit;
 mod project;
@@ -33,11 +36,14 @@ pub use expr::ExprPlan;
 pub use fetch::Fetch;
 pub use filter::Filter;
 pub use foreach::ForeachPlan;
+pub use fulltext_scan::FullTextScan;
 pub use graph_edge_scan::{GraphEdgeScan, GraphScanOutput};
 pub use ifelse::IfElsePlan;
+pub use index_scan::IndexScan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
+pub use knn_scan::KnnScan;
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
