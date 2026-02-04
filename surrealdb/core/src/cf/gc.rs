@@ -50,7 +50,7 @@ pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 
 			let ts = tx.timestamp().await?;
 			// Get current datetime from storage engine
-			let current_time = ts.to_datetime();
+			let current_time = ts.as_datetime();
 			// Calculate the changefeed watermark cutoff time
 			let watermark_time = current_time - cf_expiry;
 			// Garbage collect all entries older than the watermark
@@ -80,9 +80,9 @@ pub async fn gc_range(
 	ts_impl: &TimeStampImpl,
 ) -> Result<()> {
 	// Fetch the earliest timestamp from the storage engine
-	let beg_ts = ts_impl.from_versionstamp(0)?.to_ts_bytes();
+	let beg_ts = ts_impl.from_versionstamp(0)?.as_ts_bytes();
 	// Fetch the watermark timestamp from the storage engine
-	let end_ts = ts_impl.from_datetime(dt)?.to_ts_bytes();
+	let end_ts = ts_impl.from_datetime(dt)?.as_ts_bytes();
 	// Create the changefeed range key prefix
 	let beg = change::prefix_ts(ns, db, &beg_ts).encode_key()?;
 	let end = change::prefix_ts(ns, db, &end_ts).encode_key()?;
@@ -92,10 +92,6 @@ pub async fn gc_range(
 		beg.sprint(),
 		end.sprint()
 	);
-	for (k, _) in tx.getr((beg.clone())..(end.clone()), None).await? {
-		crate::key::change::Cf::decode_key(&k).unwrap();
-	}
-
 	// Delete the entire range in grouped batches
 	tx.delr(beg..end).await?;
 	// Ok all good

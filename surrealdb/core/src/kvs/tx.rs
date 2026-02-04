@@ -724,7 +724,7 @@ impl Transaction {
 			return Ok(());
 		}
 		// Get the current transaction timestamp
-		let ts = self.timestamp().await?.to_ts_bytes();
+		let ts = self.timestamp().await?.as_ts_bytes();
 		// Convert the timestamp bytes to a slice
 		let ts = ts.as_slice();
 		// Collect all changefeed write operations as futures

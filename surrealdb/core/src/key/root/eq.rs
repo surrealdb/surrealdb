@@ -75,7 +75,7 @@ mod tests {
 	#[test]
 	fn key() {
 		let ts_impl = TimeStampImpl::Default;
-		let ts = ts_impl.from_versionstamp(1).unwrap().to_ts_bytes();
+		let ts = ts_impl.from_versionstamp(1).unwrap().as_ts_bytes();
 		let id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let tb = TableName::from("testtb");
 		let ev = "testev";

@@ -621,7 +621,7 @@ pub struct TiKVStamp(tikv::Timestamp);
 
 impl TiKVStamp {
 	/// Convert the timestamp to a version
-	pub(crate) fn to_versionstamp(&self) -> u128 {
+	pub(crate) fn as_versionstamp(&self) -> u128 {
 		self.0.version() as u128
 	}
 	/// Create a timestamp from a version
@@ -629,7 +629,7 @@ impl TiKVStamp {
 		Ok(Self(tikv::Timestamp::from_version(version as u64)))
 	}
 	/// Convert the timestamp to a datetime
-	pub(crate) fn to_datetime(&self) -> DateTime<Utc> {
+	pub(crate) fn as_datetime(&self) -> DateTime<Utc> {
 		DateTime::from_timestamp_nanos(self.0.physical)
 	}
 	/// Create a timestamp from a datetime
@@ -640,7 +640,7 @@ impl TiKVStamp {
 		}))
 	}
 	/// Convert the timestamp to a byte array
-	pub(crate) fn to_ts_bytes(&self) -> Vec<u8> {
+	pub(crate) fn as_ts_bytes(&self) -> Vec<u8> {
 		self.0.version().to_be_bytes().to_vec()
 	}
 	/// Create a timestamp from a byte array
