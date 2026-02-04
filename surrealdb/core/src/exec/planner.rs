@@ -809,124 +809,21 @@ fn plan_select(
 	// Build the source plan from `what` (FROM clause)
 	let source = plan_select_sources(what, version, ctx)?;
 
-	// Apply WHERE clause if present (before grouping)
-	let filtered = if let Some(cond) = cond {
-		let predicate = expr_to_physical_expr(cond.0, ctx)?;
-		Arc::new(Filter {
-			input: source,
-			predicate,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		source
-	};
-
-	// Apply SPLIT BY if present (before filtering)
-	let split = if let Some(splits) = split {
-		let idioms: Vec<_> = splits.into_iter().map(|s| s.0).collect();
-		Arc::new(Split {
-			input: filtered,
-			idioms,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		filtered
-	};
-
-	// Apply GROUP BY if present
-	let (grouped, skip_projections) = if let Some(groups) = group {
-		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
-
-		// Validate: $this and $parent are invalid in GROUP BY context
-		check_forbidden_group_by_params(&fields)?;
-
-		// Build aggregate fields and group-by expressions from the SELECT expression
-		// This also expands GROUP BY aliases to their actual expressions
-		let (aggregates, group_by_exprs) =
-			plan_aggregation_with_group_exprs(&fields, &group_by, ctx)?;
-
-		// For GROUP BY, the Aggregate operator handles projections internally
-		// Skip the separate projection step
-		(
-			Arc::new(Aggregate {
-				input: split,
-				group_by,
-				group_by_exprs,
-				aggregates,
-			}) as Arc<dyn ExecOperator>,
-			true,
-		)
-	} else {
-		(split, false)
-	};
-
-	// Apply ORDER BY if present
-	// Use the consolidated approach that computes expressions once:
-	// 1. Resolve ORDER BY aliases to SELECT expressions
-	// 2. Compute complex expressions in a Compute operator
-	// 3. Sort by the computed field names
-	//
-	// Note: When GROUP BY is present, the Aggregate operator already handles
-	// expression evaluation, so we use the legacy approach.
-	//
-	// The consolidated approach returns a list of fields that were computed
-	// only for sorting (not in SELECT) - these need to be added to OMIT.
-	let (sorted, sort_only_omits) = if let Some(order) = &order {
-		if skip_projections {
-			// GROUP BY present - use legacy approach (Aggregate handles expressions)
-			(plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?, vec![])
-		} else {
-			// No GROUP BY - use consolidated approach
-			plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles, ctx)?
-		}
-	} else {
-		(grouped, vec![])
-	};
-
-	// Apply LIMIT/START if present
-	let limited = if limit.is_some() || start.is_some() {
-		let limit_expr = if let Some(limit) = &limit {
-			Some(expr_to_physical_expr(limit.0.clone(), ctx)?)
-		} else {
-			None
-		};
-		let offset_expr = if let Some(start) = &start {
-			Some(expr_to_physical_expr(start.0.clone(), ctx)?)
-		} else {
-			None
-		};
-		Arc::new(Limit {
-			input: sorted,
-			limit: limit_expr,
-			offset: offset_expr,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		sorted
-	};
-
-	// Combine user-specified OMIT with sort-only computed fields
-	let mut all_omit = omit.to_vec();
-	for field_name in sort_only_omits {
-		all_omit.push(Expr::Idiom(Idiom::field(field_name)));
-	}
-
-	// Apply projections (SELECT fields or SELECT VALUE)
-	// Skip if GROUP BY is present (handled by Aggregate operator)
-	// However, still apply OMIT if present since Aggregate doesn't handle it
-	let projected = if skip_projections {
-		// GROUP BY case - skip projections but apply OMIT if needed
-		if !all_omit.is_empty() {
-			let omit_fields = plan_omit_fields(all_omit, ctx)?;
-			Arc::new(Project {
-				input: limited,
-				fields: vec![], // No specific fields - pass through
-				omit: omit_fields,
-				include_all: true,
-			}) as Arc<dyn ExecOperator>
-		} else {
-			limited
-		}
-	} else {
-		plan_projections(&fields, &all_omit, limited, ctx, is_value_source)?
-	};
+	// Apply the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
+	let projected = plan_select_pipeline(
+		source,
+		Some(fields.clone()),
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		omit.to_vec(),
+		is_value_source,
+		tempfiles,
+		ctx,
+	)?;
 
 	// Apply FETCH if present - after projections so it can expand record IDs
 	// in computed fields like graph traversals
@@ -945,6 +842,151 @@ fn plan_select(
 	};
 
 	Ok(timed)
+}
+
+/// Plan the SELECT pipeline after the source is determined.
+///
+/// This applies the standard query pipeline: Filter -> Split -> Aggregate -> Sort -> Limit ->
+/// Project Used by both `plan_select` and `plan_lookup` to share the common operator chain.
+///
+/// Parameters:
+/// - `source`: The already-planned source operator (Scan, GraphEdgeScan, Union, etc.)
+/// - `fields`: Optional fields for projection. If None, passes through all fields.
+/// - `cond`: Optional WHERE clause
+/// - `split`: Optional SPLIT BY clause
+/// - `group`: Optional GROUP BY clause
+/// - `order`: Optional ORDER BY clause
+/// - `limit`: Optional LIMIT clause
+/// - `start`: Optional START clause
+/// - `omit`: Fields to omit from output
+/// - `is_value_source`: Whether source is a value (affects projection behavior)
+/// - `tempfiles`: Whether to use disk-based sorting
+/// - `ctx`: The frozen context
+#[allow(clippy::too_many_arguments)]
+fn plan_select_pipeline(
+	source: Arc<dyn ExecOperator>,
+	fields: Option<Fields>,
+	cond: Option<crate::expr::cond::Cond>,
+	split: Option<crate::expr::split::Splits>,
+	group: Option<crate::expr::group::Groups>,
+	order: Option<crate::expr::order::Ordering>,
+	limit: Option<crate::expr::limit::Limit>,
+	start: Option<crate::expr::start::Start>,
+	omit: Vec<Expr>,
+	is_value_source: bool,
+	tempfiles: bool,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn ExecOperator>, Error> {
+	// Apply WHERE clause if present
+	let filtered = if let Some(cond) = cond {
+		let predicate = expr_to_physical_expr(cond.0, ctx)?;
+		Arc::new(Filter {
+			input: source,
+			predicate,
+		}) as Arc<dyn ExecOperator>
+	} else {
+		source
+	};
+
+	// Apply SPLIT BY if present
+	let split_op = if let Some(splits) = split {
+		let idioms: Vec<_> = splits.into_iter().map(|s| s.0).collect();
+		Arc::new(Split {
+			input: filtered,
+			idioms,
+		}) as Arc<dyn ExecOperator>
+	} else {
+		filtered
+	};
+
+	// Get fields or use default (SELECT *)
+	let fields = fields.unwrap_or_else(Fields::all);
+
+	// Apply GROUP BY if present
+	let (grouped, skip_projections) = if let Some(groups) = group {
+		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
+
+		// Validate: $this and $parent are invalid in GROUP BY context
+		check_forbidden_group_by_params(&fields)?;
+
+		// Build aggregate fields and group-by expressions from the SELECT expression
+		let (aggregates, group_by_exprs) =
+			plan_aggregation_with_group_exprs(&fields, &group_by, ctx)?;
+
+		// For GROUP BY, the Aggregate operator handles projections internally
+		(
+			Arc::new(Aggregate {
+				input: split_op,
+				group_by,
+				group_by_exprs,
+				aggregates,
+			}) as Arc<dyn ExecOperator>,
+			true,
+		)
+	} else {
+		(split_op, false)
+	};
+
+	// Apply ORDER BY if present
+	let (sorted, sort_only_omits) = if let Some(ref order) = order {
+		if skip_projections {
+			// GROUP BY present - use legacy approach (Aggregate handles expressions)
+			(plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?, vec![])
+		} else {
+			// No GROUP BY - use consolidated approach
+			plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles, ctx)?
+		}
+	} else {
+		(grouped, vec![])
+	};
+
+	// Apply LIMIT/START if present
+	let limited = if limit.is_some() || start.is_some() {
+		let limit_expr = if let Some(ref limit) = limit {
+			Some(expr_to_physical_expr(limit.0.clone(), ctx)?)
+		} else {
+			None
+		};
+		let offset_expr = if let Some(ref start) = start {
+			Some(expr_to_physical_expr(start.0.clone(), ctx)?)
+		} else {
+			None
+		};
+		Arc::new(Limit {
+			input: sorted,
+			limit: limit_expr,
+			offset: offset_expr,
+		}) as Arc<dyn ExecOperator>
+	} else {
+		sorted
+	};
+
+	// Combine user-specified OMIT with sort-only computed fields
+	let mut all_omit = omit;
+	for field_name in sort_only_omits {
+		all_omit.push(Expr::Idiom(Idiom::field(field_name)));
+	}
+
+	// Apply projections (SELECT fields or SELECT VALUE)
+	// Skip if GROUP BY is present (handled by Aggregate operator)
+	let projected = if skip_projections {
+		// GROUP BY case - skip projections but apply OMIT if needed
+		if !all_omit.is_empty() {
+			let omit_fields = plan_omit_fields(all_omit, ctx)?;
+			Arc::new(Project {
+				input: limited,
+				fields: vec![],
+				omit: omit_fields,
+				include_all: true,
+			}) as Arc<dyn ExecOperator>
+		} else {
+			limited
+		}
+	} else {
+		plan_projections(&fields, &all_omit, limited, ctx, is_value_source)?
+	};
+
+	Ok(projected)
 }
 
 /// Check if a source expression represents a "value source" (array, primitive)
@@ -2572,7 +2614,6 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 				direction,
 				edge_tables,
 				plan,
-				alias: lookup.alias.clone(),
 			}))
 		}
 
@@ -2688,11 +2729,16 @@ fn convert_recurse_instruction(
 pub(crate) const LOOKUP_SOURCE_PARAM: &str = "__lookup_source__";
 
 /// Plan a Lookup operation, creating the operator tree.
+///
+/// This function creates a plan for graph edge or reference traversals.
+/// For simple lookups (no subquery clauses), it returns target IDs directly.
+/// For complex lookups (GROUP BY, explicit fields, etc.), it uses `plan_select_pipeline`
+/// to apply the standard query operators (Filter, Split, Aggregate, Sort, Limit, Project).
 fn plan_lookup(
 	lookup: &crate::expr::lookup::Lookup,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	use crate::exec::operators::{Filter, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
+	use crate::exec::operators::{GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
 
 	// The source expression reads from a special parameter that will be bound at execution time.
 	// When evaluate_lookup_for_rid executes this plan, it creates an ExecutionContext with
@@ -2700,9 +2746,16 @@ fn plan_lookup(
 	let source_expr: Arc<dyn crate::exec::PhysicalExpr> =
 		Arc::new(crate::exec::physical_expr::Param(LOOKUP_SOURCE_PARAM.into()));
 
-	// Determine the output mode based on whether we have projection (expr field)
-	// If there's a SELECT * or field list, we need to fetch full records
-	let output_mode = if lookup.expr.is_some() {
+	// Determine if we need the full pipeline with projection/aggregation
+	// Use the pipeline when:
+	// - There's an explicit SELECT clause (expr)
+	// - There's GROUP BY (needs aggregation)
+	// For simple lookups (just filter/sort/limit), we can skip projection
+	let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
+
+	// Determine the output mode based on whether we need full edge records
+	let needs_full_records = needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
+	let output_mode = if needs_full_records {
 		GraphScanOutput::FullEdge
 	} else {
 		GraphScanOutput::TargetId
@@ -2760,59 +2813,83 @@ fn plan_lookup(
 		}
 	};
 
-	// Apply filter if present
-	let filtered: Arc<dyn ExecOperator> = if let Some(cond) = &lookup.cond {
-		let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
-		Arc::new(Filter {
-			input: base_scan,
-			predicate,
-		})
+	if needs_full_pipeline {
+		// Use the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
+		// This enables full support for subquery clauses like GROUP BY
+		plan_select_pipeline(
+			base_scan,
+			lookup.expr.clone(),
+			lookup.cond.clone(),
+			lookup.split.clone(),
+			lookup.group.clone(),
+			lookup.order.clone(),
+			lookup.limit.clone(),
+			lookup.start.clone(),
+			vec![], // No OMIT for lookups
+			false,  // Lookups are not value sources
+			false,  // No TEMPFILES for lookups
+			ctx,
+		)
 	} else {
-		base_scan
-	};
+		// Simple lookup without projection - apply filter/split/sort/limit manually
+		// This preserves the original behavior of returning target IDs or filtered edges
 
-	// Apply split if SPLIT is present
-	let split: Arc<dyn ExecOperator> = if let Some(splits) = &lookup.split {
-		Arc::new(crate::exec::operators::Split {
-			input: filtered,
-			idioms: splits.0.iter().map(|s| s.0.clone()).collect(),
-		})
-	} else {
-		filtered
-	};
-
-	// Apply sort if ORDER BY is present
-	let sorted: Arc<dyn ExecOperator> =
-		if let Some(crate::expr::order::Ordering::Order(order_list)) = &lookup.order {
-			let order_by = convert_order_list(order_list, ctx)?;
-			Arc::new(crate::exec::operators::Sort {
-				input: split,
-				order_by,
+		// Apply filter if present
+		let filtered: Arc<dyn ExecOperator> = if let Some(cond) = &lookup.cond {
+			let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
+			Arc::new(Filter {
+				input: base_scan,
+				predicate,
 			})
 		} else {
-			split
+			base_scan
 		};
 
-	// Apply limit if present
-	let limited: Arc<dyn ExecOperator> = if lookup.limit.is_some() || lookup.start.is_some() {
-		let limit_expr =
-			lookup.limit.as_ref().map(|l| expr_to_physical_expr(l.0.clone(), ctx)).transpose()?;
-		let offset_expr =
-			lookup.start.as_ref().map(|s| expr_to_physical_expr(s.0.clone(), ctx)).transpose()?;
-		Arc::new(Limit {
-			input: sorted,
-			limit: limit_expr,
-			offset: offset_expr,
-		})
-	} else {
-		sorted
-	};
+		// Apply split if SPLIT is present
+		let split_op: Arc<dyn ExecOperator> = if let Some(splits) = &lookup.split {
+			Arc::new(crate::exec::operators::Split {
+				input: filtered,
+				idioms: splits.0.iter().map(|s| s.0.clone()).collect(),
+			})
+		} else {
+			filtered
+		};
 
-	// TODO: Add Group and Project operators when needed
-	// GROUP BY requires the Aggregate operator which is complex to set up
-	// Projection would require the Project operator for field selection
+		// Apply sort if ORDER BY is present
+		let sorted: Arc<dyn ExecOperator> =
+			if let Some(crate::expr::order::Ordering::Order(order_list)) = &lookup.order {
+				let order_by = convert_order_list(order_list, ctx)?;
+				Arc::new(crate::exec::operators::Sort {
+					input: split_op,
+					order_by,
+				})
+			} else {
+				split_op
+			};
 
-	Ok(limited)
+		// Apply limit if present
+		let limited: Arc<dyn ExecOperator> = if lookup.limit.is_some() || lookup.start.is_some() {
+			let limit_expr = lookup
+				.limit
+				.as_ref()
+				.map(|l| expr_to_physical_expr(l.0.clone(), ctx))
+				.transpose()?;
+			let offset_expr = lookup
+				.start
+				.as_ref()
+				.map(|s| expr_to_physical_expr(s.0.clone(), ctx))
+				.transpose()?;
+			Arc::new(Limit {
+				input: sorted,
+				limit: limit_expr,
+				offset: offset_expr,
+			})
+		} else {
+			sorted
+		};
+
+		Ok(limited)
+	}
 }
 
 #[cfg(test)]

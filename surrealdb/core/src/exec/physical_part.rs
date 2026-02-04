@@ -335,9 +335,6 @@ pub struct PhysicalLookup {
 	/// The pre-planned operator tree for executing the lookup.
 	/// This includes GraphEdgeScan/ReferenceScan + optional Filter, Sort, Limit, Project.
 	pub plan: Arc<dyn ExecOperator>,
-
-	/// Optional alias for multi-yield expressions
-	pub alias: Option<Idiom>,
 }
 
 /// Direction for lookup operations.

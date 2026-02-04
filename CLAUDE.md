@@ -13,6 +13,7 @@ surrealdb/           # Main SDK crate
 surrealdb/core/      # Core database engine (query execution, storage)
 surrealdb/server/    # HTTP, WebSocket, gRPC server
 surrealdb/types/     # Public types and derive macros
+surrealism/          # Surrealism (WASM plugin system) crates
 language-tests/      # SurrealQL test suite (.surql files)
 tests/               # Integration tests (CLI, HTTP, WebSocket, GraphQL)
 ```
@@ -36,9 +37,11 @@ cargo test
 cd language-tests && cargo run run
 
 # Run specific language test
+# Note: all paths are relative to the language-tests/tests directory
 cd language-tests && cargo run run -- --test path/to/test.surql
 
 # Auto-generate test results
+# Note: The test results must be empty for the auto-generation to work.
 cd language-tests && cargo run run -- --results accept path/to/test.surql
 ```
 
