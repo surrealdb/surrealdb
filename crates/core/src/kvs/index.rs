@@ -20,7 +20,6 @@ use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
-use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,7 +31,7 @@ use tracing::warn;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BuildingStatus {
 	/// The indexing process has started
 	Started,
@@ -413,11 +412,6 @@ impl QueueSequences {
 		i
 	}
 
-	fn clear(&mut self) {
-		self.to_index = 0;
-		self.next = 0;
-	}
-
 	/// Returns the number of updates pending in the queue
 	fn pending(&self) -> u32 {
 		self.next - self.to_index
@@ -426,13 +420,6 @@ impl QueueSequences {
 	/// Sets the index of the next update to be indexed
 	fn set_to_index(&mut self, i: u32) {
 		self.to_index = i;
-	}
-
-	/// Returns the range of the next batch of updates to be indexed
-	fn next_indexing_batch(&self, page: u32) -> Range<u32> {
-		let s = self.to_index;
-		let e = (s + page).min(self.next);
-		s..e
 	}
 
 	/// Restores the queue range from the given minimum and maximum indices
@@ -494,6 +481,9 @@ impl Building {
 	/// Set the status of the building process
 	async fn set_status(&self, status: BuildingStatus) {
 		let mut s = self.status.write().await;
+		if status.ne(&s) {
+			trace!("{}: set_status: {:?}", self.ix.name, status);
+		}
 		// We want to keep only the first error
 		if !s.is_error() {
 			*s = status;
@@ -504,14 +494,14 @@ impl Building {
 	/// This is used when the server is restarted during an indexing process.
 	async fn recover_queue(&self) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		let beg = crate::key::index::ia::prefix_beg(ns, db, &self.ix.what, &self.ix.name)?;
-		let end = crate::key::index::ia::prefix_end(ns, db, &self.ix.what, &self.ix.name)?;
+		let (beg, end) = crate::key::index::ia::range(ns, db, &self.ix.what, &self.ix.name)?;
 		let mut next = Some(beg..end);
 		let mut min_idx: Option<u32> = None;
 		let mut max_idx: Option<u32> = None;
 		while let Some(rng) = next {
 			let tx = self.new_read_tx().await?;
 			let batch = catch!(tx, tx.batch_keys(rng, *NORMAL_FETCH_SIZE, None).await);
+			tx.cancel().await?;
 			next = batch.next;
 			for key in batch.result {
 				let ia = Ia::decode(&key)?;
@@ -539,12 +529,10 @@ impl Building {
 	) -> Result<ConsumeResult, Error> {
 		let mut queue = self.queue.write().await;
 		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
-		if queue.is_empty() {
-			// If the appending queue is empty and the index is built, and it is not a deferred index:
-			if !self.ix.defer && self.status.read().await.is_ready() {
-				// ... we return the values back, so the document can be updated the usual way
-				return Ok(ConsumeResult::Ignored(old_values, new_values));
-			}
+		// If the appending queue is empty and the index is built, and it is not a deferred index:
+		if queue.is_empty() && !self.ix.defer && self.status.read().await.is_ready() {
+			// ... we return the values back, so the document can be updated the usual way
+			return Ok(ConsumeResult::Ignored(old_values, new_values));
 		}
 
 		let tx = ctx.tx();
@@ -631,7 +619,9 @@ impl Building {
 			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
-				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
+				let batch = catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await);
+				tx.cancel().await?;
+				batch
 			};
 			// Set the next scan range
 			next = batch.next;
@@ -683,18 +673,30 @@ impl Building {
 
 	/// Loop through the appending queue and index the records
 	async fn index_appending_loop(&self, initial_count: Option<usize>) -> Result<(), Error> {
+		trace!("{}: index_appending_loop: {:?}", self.ix.name, initial_count);
 		let mut updates_count = initial_count.map(|_| 0);
-		let mut next_to_index = None;
+		let (ns, db) = self.opt.ns_db()?;
+		let (beg, end) = crate::key::index::ia::range(ns, db, &self.ix.what, &self.ix.name)?;
+		let rng = beg..end;
 		loop {
 			if self.is_aborted().await {
 				break;
 			}
-			let range = {
-				let mut queue = self.queue.write().await;
-				if let Some(ni) = next_to_index {
-					queue.set_to_index(ni);
-				}
-				if queue.is_empty() {
+			let keys = {
+				let queue = self.queue.write().await;
+				let keys = {
+					let tx = self.new_read_tx().await?;
+					let keys = catch!(tx, tx.keys(rng.clone(), *NORMAL_FETCH_SIZE, None).await);
+					tx.cancel().await?;
+					keys
+				};
+				trace!(
+					"{}: index_appending_loop keys: {:?} {}",
+					self.ix.name,
+					keys.len(),
+					keys.is_empty()
+				);
+				if keys.is_empty() {
 					// If the batch is empty, we are done.
 					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
 					self.set_status(BuildingStatus::Ready {
@@ -704,25 +706,24 @@ impl Building {
 					})
 					.await;
 					// This is here to be sure the lock on back is not released early
-					queue.clear();
+					drop(queue);
 					break;
 				}
-				queue.next_indexing_batch(*NORMAL_FETCH_SIZE)
+				keys
 			};
-			if range.is_empty() {
-				continue;
-			}
-			next_to_index = Some(range.end);
 			// Create a new context with a write transaction
 			{
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
-				catch!(
+				let last_id = catch!(
 					tx,
-					self.index_appending_range(&ctx, &tx, range, initial_count, &mut updates_count)
+					self.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
 						.await
 				);
 				tx.commit().await?;
+				if let Some(last_id) = last_id {
+					self.queue.write().await.set_to_index(last_id + 1);
+				}
 			}
 		}
 		Ok(())
@@ -796,19 +797,21 @@ impl Building {
 		&self,
 		ctx: &Context,
 		tx: &Transaction,
-		range: Range<u32>,
+		keys: Vec<Key>,
 		initial: Option<usize>,
 		count: &mut Option<usize>,
-	) -> Result<(), Error> {
+	) -> Result<Option<u32>, Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
-		for i in range {
+		let mut last_id = None;
+		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
+		for k in keys {
 			if self.is_aborted().await {
-				return Ok(());
+				return Ok(last_id);
 			}
-			let ia = self.new_ia_key(i)?;
+			let ia = Ia::decode(&k)?;
+			last_id = Some(ia.i);
 			if let Some(v) = tx.get(ia.clone(), None).await? {
-				tx.del(ia).await?;
 				let a: Appending = revision::from_slice(&v)?;
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
@@ -818,22 +821,23 @@ impl Building {
 				// We can delete the ip record if any
 				let ip = self.new_ip_key(rid.id)?;
 				tx.del(ip).await?;
-
-				if let Some(c) = count {
-					*c += 1;
-				}
-				self.set_status(BuildingStatus::Indexing {
-					initial,
-					pending: Some(self.queue.read().await.pending() as usize),
-					updated: *count,
-				})
-				.await;
 			}
+			if let Some(c) = count {
+				*c += 1;
+			}
+			self.set_status(BuildingStatus::Indexing {
+				initial,
+				pending: Some(self.queue.read().await.pending() as usize),
+				updated: *count,
+			})
+			.await;
+			tx.del(ia).await?;
 		}
+		trace!("{}: index_appending_range EXIT: {:?}", self.ix.name, last_id);
 		// Check if we trigger the compaction
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
-		Ok(())
+		Ok(last_id)
 	}
 
 	/// Check if the index needs compaction and trigger it if necessary

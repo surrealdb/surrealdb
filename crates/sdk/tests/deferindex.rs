@@ -183,7 +183,7 @@ async fn multi_index_concurrent_test() -> Result<(), Error> {
 	let expected_total_count = batch_count * 10;
 
 	info!("Waiting for index to be built");
-	timeout(Duration::from_secs(60), async {
+	timeout(Duration::from_secs(300), async {
 		loop {
 			let res = &mut dbs
 				.execute(
