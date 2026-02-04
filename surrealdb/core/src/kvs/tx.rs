@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
@@ -31,6 +30,7 @@ use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
@@ -652,18 +652,13 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
+	pub async fn timestamp(&self) -> Result<TimeStamp> {
 		Ok(self.tr.timestamp().await.map_err(Error::from)?)
 	}
 
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		Ok(self.tr.timestamp_bytes_from_versionstamp(version).await.map_err(Error::from)?)
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		Ok(self.tr.timestamp_bytes_from_datetime(datetime).await.map_err(Error::from)?)
+	/// Returns the implementation of timestamp that this transaction uses.
+	pub fn timestamp_impl(&self) -> TimeStampImpl {
+		self.tr.timestamp_impl()
 	}
 
 	// --------------------------------------------------
