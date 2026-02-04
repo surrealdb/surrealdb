@@ -15,7 +15,7 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 use crate::val::Duration;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

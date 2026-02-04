@@ -1,12 +1,13 @@
 use std::fmt;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Base {
 	#[default]
 	Root,

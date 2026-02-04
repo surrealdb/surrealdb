@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
@@ -24,6 +25,7 @@ use crate::val::Value;
 	Deserialize,
 	Encode,
 	BorrowDecode,
+	DeepSizeOf,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
@@ -67,7 +69,7 @@ impl From<u32> for NamespaceId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, DeepSizeOf)]
 pub struct NamespaceDefinition {
 	pub namespace_id: NamespaceId,
 	pub name: String,

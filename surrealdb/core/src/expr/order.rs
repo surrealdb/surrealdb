@@ -1,12 +1,13 @@
 use std::cmp;
 use std::ops::Deref;
 
+use priority_lfu::DeepSizeOf;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::Value;
 use crate::expr::idiom::Idiom;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Ordering {
 	Random,
 	Order(OrderList),
@@ -19,7 +20,7 @@ impl ToSql for Ordering {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct OrderList(pub(crate) Vec<Order>);
 
 impl Deref for OrderList {
@@ -56,7 +57,7 @@ impl OrderList {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Order {
 	/// The value to order by
 	pub(crate) value: Idiom,

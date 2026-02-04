@@ -14,7 +14,7 @@ use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

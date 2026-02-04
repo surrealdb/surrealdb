@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -10,7 +11,7 @@ use crate::sql::{self};
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 #[non_exhaustive]
 pub struct EventDefinition {
 	pub(crate) name: String,

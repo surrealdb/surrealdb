@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -6,7 +7,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's

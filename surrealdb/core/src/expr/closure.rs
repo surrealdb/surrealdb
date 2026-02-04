@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
@@ -8,7 +9,7 @@ use crate::dbs::ParameterCapturePass;
 use crate::expr::{Expr, Kind, Param};
 use crate::val::{Closure, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct ClosureExpr {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,

@@ -32,10 +32,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use priority_lfu::DeepSizeOf;
 use surrealism_types::args::Args;
 use surrealism_types::err::PrefixError;
 use surrealism_types::transfer::AsyncTransfer;
-use wasmtime::*;
+use wasmtime::{Config, Engine, Extern, ExternType, Instance, Linker, Memory, Module, Store};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 
 use crate::config::SurrealismConfig;
@@ -67,6 +68,13 @@ pub struct Runtime {
 	config: Arc<SurrealismConfig>,
 }
 
+impl DeepSizeOf for Runtime {
+	fn deep_size_of_children(&self, _: &mut priority_lfu::Context) -> usize {
+		// TODO
+		1024 * 1024 // 1 MiB
+	}
+}
+
 impl Runtime {
 	/// Compile the WASM module and prepare the runtime.
 	/// This is expensive - do it once and share via Arc<Runtime>.
@@ -85,12 +93,12 @@ impl Runtime {
 		{
 			// Use Winch baseline compiler for extremely fast compilation in debug builds
 			// Falls back to Cranelift if Winch doesn't support the WASM features used
-			engine_config.strategy(Strategy::Winch);
+			engine_config.strategy(wasmtime::Strategy::Winch);
 		}
 		#[cfg(not(debug_assertions))]
 		{
 			// Optimize for runtime performance in release builds
-			engine_config.cranelift_opt_level(OptLevel::Speed);
+			engine_config.cranelift_opt_level(wasmtime::OptLevel::Speed);
 		}
 		let engine = Engine::new(&engine_config)?;
 		let module =

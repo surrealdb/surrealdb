@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::ToSql;
@@ -11,7 +12,7 @@ use crate::doc::CursorDoc;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Block(pub(crate) Vec<Expr>);
 
 impl Revisioned for Block {

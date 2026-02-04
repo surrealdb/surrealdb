@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::revisioned;
 
@@ -27,7 +28,7 @@ use crate::val::Value;
 /// This prevents confusing behaviour like `FETCH a.b, a` only returning `a` because `a.b` gets
 /// clobbered by `a`.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Fetchs(Vec<Fetch>);
 
 impl Fetchs {
@@ -66,7 +67,7 @@ impl InfoStructure for Fetchs {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Fetch(pub(crate) Expr);
 
 impl Fetch {

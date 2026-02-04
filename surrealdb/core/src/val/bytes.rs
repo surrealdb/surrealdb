@@ -1,5 +1,6 @@
 use std::ops::Deref;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -7,7 +8,9 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(
+	Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode, DeepSizeOf,
+)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 #[repr(transparent)]

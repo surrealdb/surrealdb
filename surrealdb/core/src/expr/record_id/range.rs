@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::RecordIdKeyRange;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RecordIdKeyRangeLit {
 	pub(crate) start: Bound<RecordIdKeyLit>,
 	pub(crate) end: Bound<RecordIdKeyLit>,

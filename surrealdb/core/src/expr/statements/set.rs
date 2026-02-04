@@ -8,7 +8,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct SetStatement {
 	pub name: String,
 	pub what: Expr,

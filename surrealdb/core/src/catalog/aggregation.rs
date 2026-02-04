@@ -43,6 +43,7 @@ use std::mem;
 
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::ToSql;
 
@@ -60,7 +61,7 @@ use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryM
 
 /// An expression which will be aggregated over for each group.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Aggregation {
 	Count,
 	/// The usizes are index into the exprs field on the aggregate collector and represent the
@@ -134,7 +135,7 @@ impl Aggregation {
 
 /// A enum containing the data for an aggregation.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DeepSizeOf)]
 pub enum AggregationStat {
 	Count {
 		count: i64,
@@ -957,7 +958,7 @@ impl MutVisitor for ParentRewritor {
 
 /// Enum for the field expression of an aggregate.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum AggregateFields {
 	/// the selector had a `VALUE` clause
 	Value(Expr),
@@ -967,7 +968,7 @@ pub enum AggregateFields {
 
 /// A struct which contains an anaylzed aggregation and data on how to compute that aggregation.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct AggregationAnalysis {
 	/// The expressions which calculate the arguments to an aggregate.
 	pub aggregate_arguments: Vec<Expr>,

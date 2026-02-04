@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -13,7 +14,7 @@ use crate::expr::{Cond, Data, Explain, Expr, Literal, Output, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct UpdateStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,

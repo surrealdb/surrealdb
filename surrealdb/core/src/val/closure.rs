@@ -298,3 +298,24 @@ impl DeserializeRevisioned for Closure {
 		Err(revision::Error::Conversion("Closures cannot be deserialized from disk".to_string()))
 	}
 }
+
+impl priority_lfu::DeepSizeOf for Closure {
+	fn deep_size_of_children(&self, context: &mut priority_lfu::Context) -> usize {
+		match self {
+			Closure::Expr {
+				args,
+				returns,
+				body,
+				captures,
+			} => {
+				args.deep_size_of_children(context)
+					+ returns.deep_size_of_children(context)
+					+ body.deep_size_of_children(context)
+					+ captures.deep_size_of_children(context)
+			}
+			// Builtin closures are Arc'd and contain function pointers,
+			// we approximate their size as the size of the Arc pointer
+			Closure::Builtin(_) => std::mem::size_of::<BuiltinClosure>(),
+		}
+	}
+}

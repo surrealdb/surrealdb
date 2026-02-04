@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use std::io::{BufRead, Read, Write};
 use std::ops::Deref;
 
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Decode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
@@ -10,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::fmt::EscapeIdent;
 
 /// A value type referencing a specific table.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct TableName(String);

@@ -7,7 +7,7 @@ use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RemoveParamStatement {
 	pub name: String,
 	pub if_exists: bool,

@@ -11,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RemoveModuleStatement {
 	pub name: ModuleName,
 	pub if_exists: bool,

@@ -27,6 +27,7 @@ use std::str::FromStr;
 
 use anyhow::{Result, bail, ensure};
 use fastnum::D128;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
@@ -47,7 +48,7 @@ pub(crate) enum NumberKind {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Number {
 	Int(i64),

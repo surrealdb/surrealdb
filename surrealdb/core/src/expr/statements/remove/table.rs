@@ -14,7 +14,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RemoveTableStatement {
 	pub name: Expr,
 	pub if_exists: bool,

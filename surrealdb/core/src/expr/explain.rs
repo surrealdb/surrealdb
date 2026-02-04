@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct Explain(pub bool);
 
 impl ToSql for Explain {

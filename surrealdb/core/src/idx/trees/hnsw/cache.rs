@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use dashmap::{DashMap, Entry};
 use parking_lot::RwLock;
-use quick_cache::sync::Cache;
-use quick_cache::{DefaultHashBuilder, Lifecycle, Weighter};
+use priority_lfu::{Cache, CacheKey};
 use roaring::RoaringTreemap;
 
 use crate::catalog::{IndexId, TableId};
@@ -11,18 +10,13 @@ use crate::cnf;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SharedVector;
 
-/// Custom weighter for SharedVector that calculates memory usage
-/// based on a vector type and dimensions.
-/// Called during cache eviction, so must be fast and lightweight.
-#[derive(Clone)]
-struct VectorWeighter;
+// Newtype wrapper for the cache key to avoid orphan rule issues
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct VectorCacheKey(TableId, IndexId, ElementId);
 
-type VectorCacheKey = (TableId, IndexId, ElementId);
-impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
-	fn weight(&self, key: &VectorCacheKey, val: &SharedVector) -> u64 {
-		// Calculate total memory: vector (including Arc + hash) + TableId + IndexId
-		(val.mem_size() + std::mem::size_of_val(&key.0) + std::mem::size_of_val(&key.1)) as u64
-	}
+// Implement CacheKey for the newtype wrapper
+impl CacheKey for VectorCacheKey {
+	type Value = SharedVector;
 }
 
 type ElementsPerIndexKey = (TableId, IndexId);
@@ -62,30 +56,11 @@ impl ElementsPerIndex {
 		}
 	}
 
-	fn evict_element(&self, key: VectorCacheKey) {
-		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1)) {
-			entry.get_mut().write().remove(key.2);
-			// Note: We intentionally don't clean up empty index entries here to avoid potential
-			// race conditions. Empty entries are cleaned up during remove_element() calls.
-		}
-	}
-}
-
-/// Lifecycle hook that removes element IDs from the indexes tracking structure
-/// when entries are evicted from the LRU cache
-#[derive(Clone)]
-struct VectorCacheLifecycle(ElementsPerIndex);
-
-impl Lifecycle<VectorCacheKey, SharedVector> for VectorCacheLifecycle {
-	type RequestState = ();
-
-	fn begin_request(&self) -> Self::RequestState {}
-
-	fn on_evict(&self, _state: &mut Self::RequestState, key: VectorCacheKey, _val: SharedVector) {
-		// Called synchronously by quick_cache during eviction.
-		// We use the sync variant to maintain consistency without async overhead.
-		self.0.evict_element(key)
-	}
+	// Note: With weighted_cache, we no longer have lifecycle hooks for eviction tracking.
+	// The ElementsPerIndex may contain IDs for vectors that have been evicted, but this
+	// is acceptable since remove_index already checks for existence before removing.
+	// This trade-off simplifies the cache implementation and avoids the complexity
+	// of tracking evictions separately.
 }
 
 #[derive(Clone)]
@@ -93,16 +68,11 @@ pub(crate) struct VectorCache(Arc<Inner>);
 
 struct Inner {
 	/// For each index/element pair, the vector
-	vectors: Cache<
-		VectorCacheKey,
-		SharedVector,
-		VectorWeighter,
-		DefaultHashBuilder,
-		VectorCacheLifecycle,
-	>,
+	vectors: Cache,
 	/// For each index, the set of element ids that have been cached.
 	/// This allows efficient bulk removal of all vectors for an index without
 	/// iterating through the entire cache.
+	/// Note: May contain IDs for evicted vectors, but this is acceptable.
 	indexes: ElementsPerIndex,
 }
 
@@ -116,19 +86,8 @@ impl VectorCache {
 		// Create the shared indexes structure
 		let indexes = ElementsPerIndex::default();
 
-		// Create the lifecycle hook with access to the indexes
-		let lifecycle = VectorCacheLifecycle(indexes.clone());
-
 		Self(Arc::new(Inner {
-			vectors: Cache::with(
-				// estimated_items_capacity (rough estimate)
-				(cache_size / 256) as usize,
-				// weight_capacity in bytes
-				cache_size,
-				VectorWeighter,
-				DefaultHashBuilder::default(),
-				lifecycle,
-			),
+			vectors: Cache::new(cache_size as usize),
 			indexes,
 		}))
 	}
@@ -144,7 +103,8 @@ impl VectorCache {
 		// This prevents a race condition where eviction could occur immediately after
 		// cache insertion but before index tracking is updated, leaving an inconsistent state.
 		self.0.indexes.insert(table_id, index_id, element_id);
-		self.0.vectors.insert((table_id, index_id, element_id), vector);
+		let key = VectorCacheKey(table_id, index_id, element_id);
+		self.0.vectors.insert(key, vector);
 	}
 
 	pub(super) async fn get(
@@ -153,15 +113,16 @@ impl VectorCache {
 		index_id: IndexId,
 		element_id: ElementId,
 	) -> Option<SharedVector> {
-		let key = (table_id, index_id, element_id);
-		self.0.vectors.get(&key)
+		let key = VectorCacheKey(table_id, index_id, element_id);
+		self.0.vectors.get_clone(&key)
 	}
 
 	pub(super) async fn remove(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
 		// Remove from the indexes tracking structure first
 		self.0.indexes.remove_element(table_id, index_id, element_id);
 		// Remove from the vector cache
-		self.0.vectors.remove(&(table_id, index_id, element_id));
+		let key = VectorCacheKey(table_id, index_id, element_id);
+		self.0.vectors.remove(&key);
 	}
 
 	pub(crate) async fn remove_index(&self, table_id: TableId, index_id: IndexId) {
@@ -169,7 +130,8 @@ impl VectorCache {
 		if let Some(elements_ids) = self.0.indexes.remove_index(table_id, index_id) {
 			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
 			for element_id in ids {
-				self.0.vectors.remove(&(table_id, index_id, element_id));
+				let key = VectorCacheKey(table_id, index_id, element_id);
+				self.0.vectors.remove(&key);
 				// Yield control every 1000 removals to prevent blocking other async tasks
 				// during bulk operations
 				if count % 1000 == 0 {
@@ -191,7 +153,8 @@ impl VectorCache {
 		index_id: IndexId,
 		element_id: ElementId,
 	) -> bool {
-		self.0.vectors.contains_key(&(table_id, index_id, element_id))
+		let key = VectorCacheKey(table_id, index_id, element_id);
+		self.0.vectors.contains(&key)
 	}
 }
 

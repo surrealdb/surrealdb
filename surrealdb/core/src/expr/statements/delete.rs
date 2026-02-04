@@ -13,7 +13,7 @@ use crate::expr::{Cond, Explain, Expr, Literal, Output, With};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DeleteStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,

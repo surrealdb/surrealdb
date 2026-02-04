@@ -18,7 +18,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, TableName, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.

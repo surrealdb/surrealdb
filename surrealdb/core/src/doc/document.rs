@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Result;
+use priority_lfu::CacheKeyLookup;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
@@ -535,13 +536,13 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) if txn.is_local() => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Db(ns, db);
+				let lookup = cache::ds::key::DbCacheKeyRef(ns, db);
 				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_type(),
+				match cache.get_clone_by(&lookup) {
+					Some(val) => Ok(val),
 					None => {
 						let val = txn.get_or_add_db(Some(ctx), ns, db).await?;
-						cache.insert(key, cache::ds::Entry::Any(val.clone()));
+						cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 						Ok(val)
 					}
 				}
@@ -579,13 +580,13 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Fts(ns, db, &tb.name, tb.cache_tables_ts);
+				let lookup = cache::ds::key::ForiegnTablesCacheKeyRef(ns, db, &tb.name);
 				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_fts(),
+				match cache.get_clone_by(&lookup) {
+					Some(val) => Ok(val),
 					None => {
 						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
-						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
+						cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 						Ok(val)
 					}
 				}
@@ -614,13 +615,14 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
+				let lookup =
+					cache::ds::key::EventsCacheKeyRef(ns, db, &tb.name, tb.cache_events_ts);
 				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_evs(),
+				match cache.get_clone_by(&lookup) {
+					Some(val) => Ok(val),
 					None => {
 						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
-						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
+						cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 						Ok(val)
 					}
 				}
@@ -663,13 +665,14 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Ixs(ns, db, &tb.name, tb.cache_indexes_ts);
+				let lookup =
+					cache::ds::key::IndexesCacheKeyRef(ns, db, &tb.name, tb.cache_indexes_ts);
 				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_ixs(),
+				match cache.get_clone_by(&lookup) {
+					Some(val) => Ok(val),
 					None => {
 						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
-						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
+						cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 						Ok(val)
 					}
 				}
@@ -700,13 +703,13 @@ impl Document {
 				// Get the live-queries cache version
 				let version = cache.get_live_queries_version(ns, db, &tb.name)?;
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Lvs(ns, db, &tb.name, version);
+				let lookup = cache::ds::key::LiveQueriesCacheKeyRef(ns, db, &tb.name, version);
 				// Get or update the cache entry
-				match cache.get(&key) {
-					Some(val) => val.try_into_lvs(),
+				match cache.get_clone_by(&lookup) {
+					Some(val) => Ok(val),
 					None => {
 						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
-						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
+						cache.insert(lookup.to_owned_key(), Arc::clone(&val));
 						Ok(val)
 					}
 				}

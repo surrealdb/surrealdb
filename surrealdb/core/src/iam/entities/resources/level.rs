@@ -1,8 +1,11 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
+#[derive(
+	Clone, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Level {
 	#[default]

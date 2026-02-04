@@ -12,7 +12,7 @@ use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
@@ -40,7 +40,7 @@ impl ToSql for RebuildStatement {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RebuildIndexStatement {
 	pub name: String,
 	pub table: TableName,

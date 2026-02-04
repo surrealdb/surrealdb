@@ -1,4 +1,5 @@
 use md5::Digest;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use sha2::Sha256;
 use surrealdb_types::ToSql;
@@ -8,7 +9,7 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Datetime, RecordId};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Subject {
 	Record(RecordId),
 	User(String),
@@ -25,7 +26,7 @@ impl Subject {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Grant {
 	Jwt(GrantJwt),
 	Record(GrantRecord),
@@ -44,14 +45,14 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
 	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
@@ -59,7 +60,7 @@ pub struct GrantRecord {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct GrantBearer {
 	pub id: String, // Key ID
 	// Key. Will not be stored and be returned as redacted.
@@ -83,7 +84,7 @@ impl GrantBearer {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct AccessGrant {
 	pub id: String,                   // Unique grant identifier.
 	pub ac: String,                   // Access method used to create the grant.

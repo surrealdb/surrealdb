@@ -13,7 +13,18 @@ use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Hash,
+	Encode,
+	BorrowDecode,
+	priority_lfu::DeepSizeOf,
 )]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]

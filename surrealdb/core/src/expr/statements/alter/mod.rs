@@ -23,7 +23,7 @@ pub(crate) use namespace::AlterNamespaceStatement;
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 /// Helper to express a tri‑state alteration:
 /// - `None`: leave the current value unchanged
 /// - `Set(T)`: set/replace the current value to `T`
@@ -85,7 +85,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 /// Execution‑time representation of all `ALTER` statements.
 ///
 /// Variants map to specific resources and delegate execution to their

@@ -13,7 +13,7 @@ pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
 pub(crate) mod range;
 pub(crate) use range::RecordIdKeyRangeLit;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct RecordIdLit {
 	/// Table name
 	pub table: TableName,

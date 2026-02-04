@@ -1,10 +1,11 @@
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
+use priority_lfu::DeepSizeOf;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::val::{Datetime, Duration, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, DeepSizeOf)]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,

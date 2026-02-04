@@ -13,15 +13,16 @@ license-file.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+priority-lfu.workspace = true
+semver.workspace = true
 serde.workspace = true
 surrealdb-types.workspace = true
-wasmtime.workspace = true
 surrealism-types = { workspace = true, features = ["host"] }
 tar.workspace = true
-zstd.workspace = true
-semver.workspace = true
-wasmtime-wasi.workspace = true
 toml.workspace = true
+wasmtime-wasi.workspace = true
+wasmtime.workspace = true
+zstd.workspace = true
 
 [lints]
 workspace = true

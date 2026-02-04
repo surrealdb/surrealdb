@@ -10,7 +10,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::Key;
 use crate::val::{Duration, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 /// Alters system-wide settings and maintenance operations.
 ///
 /// Supported operations:

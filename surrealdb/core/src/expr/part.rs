@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -17,7 +18,7 @@ use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
 use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{Array, RecordId};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Part {
 	All,
 	Flatten,
@@ -416,7 +417,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 // ------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum DestructurePart {
 	All(String),
 	Field(String),
@@ -459,7 +460,7 @@ impl ToSql for DestructurePart {
 
 // ------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
@@ -502,7 +503,7 @@ impl ToSql for Recurse {
 
 // ------------------------------
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?

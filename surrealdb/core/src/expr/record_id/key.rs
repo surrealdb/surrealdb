@@ -11,7 +11,7 @@ use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
 use crate::val::{Array, Object, RecordIdKey, Uuid};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub enum RecordIdKeyGen {
 	Rand,
 	Ulid,
@@ -28,7 +28,7 @@ impl RecordIdKeyGen {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum RecordIdKeyLit {
 	Number(i64),
 	String(String),

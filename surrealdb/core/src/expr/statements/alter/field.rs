@@ -15,7 +15,7 @@ use crate::expr::{Base, Expr, Idiom, Kind};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum AlterDefault {
 	#[default]
 	None,
@@ -24,7 +24,7 @@ pub(crate) enum AlterDefault {
 	Set(Expr),
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: TableName,

@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -12,7 +13,7 @@ use crate::syn;
 use crate::types::PublicKind;
 use crate::val::{Array, Object, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
@@ -259,7 +260,7 @@ impl DeserializeRevisioned for Path {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum Segment {
 	Fixed(String),
 	Dynamic(String, Option<Kind>),

@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 use std::ops::{Add, Sub};
 use std::time::Duration;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -13,7 +14,9 @@ use crate::val::{Object, Value};
 
 /// A node in the cluster
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, DeepSizeOf,
+)]
 pub struct Node {
 	/// The id of the node
 	pub id: Uuid,
@@ -84,7 +87,9 @@ impl InfoStructure for Node {
 // order events in a cluster. It should be derived from a timestamp oracle, such
 // as the one available in TiKV via the client `TimestampExt` implementation.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
+#[derive(
+	Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, DeepSizeOf,
+)]
 pub struct Timestamp {
 	pub value: u64,
 }

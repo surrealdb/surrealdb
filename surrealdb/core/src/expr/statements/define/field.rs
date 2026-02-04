@@ -22,7 +22,7 @@ use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) enum DefineDefault {
 	#[default]
 	None,
@@ -30,7 +30,7 @@ pub(crate) enum DefineDefault {
 	Set(Expr),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, priority_lfu::DeepSizeOf)]
 pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

@@ -1,17 +1,13 @@
-mod entry;
-mod key;
-mod lookup;
-mod weight;
+pub(crate) mod key;
+
+use std::ops::Deref;
 
 use anyhow::Result;
-pub(crate) use entry::Entry;
-pub(crate) use lookup::Lookup;
+use priority_lfu::{Cache, CacheKeyLookup};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::TableName;
-
-pub(crate) type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 
 pub struct DatastoreCache {
 	/// Store the cache entries
@@ -21,35 +17,21 @@ pub struct DatastoreCache {
 impl DatastoreCache {
 	/// Creates a new datastore cache
 	pub(in crate::kvs) fn new() -> Self {
-		let cache = Cache::with_weighter(
-			*crate::cnf::DATASTORE_CACHE_SIZE,
-			*crate::cnf::DATASTORE_CACHE_SIZE as u64,
-			weight::Weight,
-		);
+		let cache = Cache::new(*crate::cnf::DATASTORE_CACHE_SIZE);
 		Self {
 			cache,
 		}
 	}
 
-	/// Fetches an item from the datastore cache
-	pub(crate) fn get(&self, lookup: &Lookup) -> Option<Entry> {
-		self.cache.get(lookup)
-	}
-
-	/// Inserts an item into the datastore cache
-	pub(crate) fn insert(&self, lookup: Lookup, entry: Entry) {
-		self.cache.insert(lookup.into(), entry);
-	}
-
-	/// Clear the cache entry for a table
-	pub(crate) fn clear_tb(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
-		let key = Lookup::Tb(ns, db, tb);
-		self.cache.remove(&key);
-	}
-
 	/// Clear all items from the datastore cache
 	pub(crate) fn clear(&self) {
 		self.cache.clear();
+	}
+
+	/// Clear the cache entries for a specific table by creating a new version
+	pub(crate) fn clear_tb(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
+		// Generate a new live queries version to invalidate all related caches
+		self.new_live_queries_version(ns, db, tb);
 	}
 
 	pub fn get_live_queries_version(
@@ -59,21 +41,27 @@ impl DatastoreCache {
 		tb: &TableName,
 	) -> Result<Uuid> {
 		// Get the live-queries cache version
-		let key = Lookup::Lvv(ns, db, tb);
-		let version = match self.get(&key) {
-			Some(val) => val.try_info_lvv()?,
+		let lookup = key::LiveQueriesVersionCacheKeyRef(ns, db, tb);
+		match self.cache.get_clone_by(&lookup) {
+			Some(val) => Ok(val),
 			None => {
 				let version = Uuid::now_v7();
-				let val = Entry::Lvv(version);
-				self.insert(key, val);
-				version
+				self.cache.insert(lookup.to_owned_key(), version);
+				Ok(version)
 			}
-		};
-		Ok(version)
+		}
 	}
 
 	pub(crate) fn new_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
-		let key = Lookup::Lvv(ns, db, tb);
-		self.insert(key, Entry::Lvv(Uuid::now_v7()));
+		let lookup = key::LiveQueriesVersionCacheKeyRef(ns, db, tb);
+		self.cache.insert(lookup.to_owned_key(), Uuid::now_v7());
+	}
+}
+
+impl Deref for DatastoreCache {
+	type Target = Cache;
+
+	fn deref(&self) -> &Self::Target {
+		&self.cache
 	}
 }

@@ -1,4 +1,5 @@
 use futures::future::try_join_all;
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -13,7 +14,7 @@ use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
 use crate::fnc;
 use crate::iam::AuthLimit;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Function {
 	Normal(String),
 	Custom(String),
@@ -213,7 +214,7 @@ impl Function {
 
 ///TODO(3.0): Remove after proper first class function support?
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct FunctionCall {
 	pub receiver: Function,
 	pub arguments: Vec<Expr>,

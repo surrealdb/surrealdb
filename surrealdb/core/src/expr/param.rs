@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::str;
 
 use anyhow::{Result, bail};
+use priority_lfu::DeepSizeOf;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{SqlFormat, ToSql};
@@ -17,7 +18,7 @@ use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::Action;
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Param(String);
 
 impl Revisioned for Param {

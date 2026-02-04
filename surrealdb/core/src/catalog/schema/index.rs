@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -14,7 +15,9 @@ use crate::sql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, TableName, Value};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[repr(transparent)]
 pub struct IndexId(pub u32);
@@ -51,7 +54,7 @@ impl From<u32> for IndexId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 #[non_exhaustive]
 pub struct IndexDefinition {
 	pub(crate) index_id: IndexId,
@@ -124,7 +127,7 @@ impl ToSql for IndexDefinition {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Index {
 	/// (Basic) non unique
 	#[default]
@@ -171,7 +174,7 @@ impl ToSql for Index {
 
 /// Full-Text search parameters.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct FullTextParams {
 	/// The analyzer to use.
 	pub analyzer: String,
@@ -183,7 +186,7 @@ pub struct FullTextParams {
 
 /// Scoring for Full-Text search.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, DeepSizeOf)]
 pub enum Scoring {
 	/// BestMatching25 scoring.
 	///
@@ -245,7 +248,7 @@ impl Default for Scoring {
 
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum Distance {
 	/// Chebyshev distance.
 	///
@@ -318,7 +321,7 @@ impl ToSql for Distance {
 
 /// Vector type for storing vectors.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum VectorType {
 	/// 64-bit floating point.
 	F64,
@@ -347,7 +350,7 @@ impl Display for VectorType {
 
 /// HNSW index parameters.
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct HnswParams {
 	/// The dimension of the index.
 	pub dimension: u16,

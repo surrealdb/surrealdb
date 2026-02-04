@@ -11,7 +11,19 @@ use crate::val::{IndexFormat, Value};
 ///
 /// Sets use BTreeSet internally to maintain uniqueness and sorted order.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Hash,
+	Encode,
+	BorrowDecode,
+	priority_lfu::DeepSizeOf,
+)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) struct Set(pub(crate) BTreeSet<Value>);

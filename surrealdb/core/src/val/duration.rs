@@ -23,7 +23,18 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, BorrowDecode,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	PartialOrd,
+	Hash,
+	Ord,
+	Encode,
+	BorrowDecode,
+	priority_lfu::DeepSizeOf,
 )]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]

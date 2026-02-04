@@ -1,7 +1,8 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, DeepSizeOf)]
 pub enum AuthLevel {
 	No,
 	Root,
@@ -37,7 +38,7 @@ impl From<&AuthLevel> for crate::iam::Level {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, DeepSizeOf)]
 pub struct AuthLimit {
 	pub level: AuthLevel,
 	pub role: Option<String>,

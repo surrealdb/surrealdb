@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
@@ -11,7 +12,7 @@ use crate::sql;
 use crate::sql::statements::DefineTableStatement;
 use crate::val::{TableName, Value};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TableId(pub u32);
 
@@ -41,7 +42,7 @@ impl DeserializeRevisioned for TableId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
 	pub(crate) database_id: DatabaseId,
@@ -146,7 +147,7 @@ impl InfoStructure for TableDefinition {
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub enum TableType {
 	#[default]
 	Any,
@@ -209,7 +210,7 @@ impl InfoStructure for TableType {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, DeepSizeOf)]
 pub struct Relation {
 	#[revision(end = 2, convert_fn = "rev_convert_from")]
 	pub old_from: Option<Kind>,

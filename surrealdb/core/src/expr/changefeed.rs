@@ -1,12 +1,13 @@
 use std::time;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Duration, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct ChangeFeed {
 	pub expiry: time::Duration,

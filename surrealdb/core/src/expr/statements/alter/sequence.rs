@@ -14,7 +14,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::val::Duration;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default, priority_lfu::DeepSizeOf)]
 pub(crate) struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,

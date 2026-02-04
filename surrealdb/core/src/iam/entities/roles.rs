@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +9,9 @@ use crate::iam::Error;
 // In the future, we will allow for custom roles. For now, provide predefined
 // roles.
 #[revisioned(revision = 1)]
-#[derive(Hash, Copy, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(
+	Hash, Copy, Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, DeepSizeOf,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Role {

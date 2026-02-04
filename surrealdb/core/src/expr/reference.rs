@@ -1,3 +1,4 @@
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -6,7 +7,7 @@ use super::statements::info::InfoStructure;
 use crate::expr::Expr;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) struct Reference {
 	pub(crate) on_delete: ReferenceDeleteStrategy,
 }
@@ -28,7 +29,7 @@ impl InfoStructure for Reference {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub(crate) enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,

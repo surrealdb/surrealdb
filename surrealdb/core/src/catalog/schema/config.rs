@@ -1,4 +1,5 @@
 use anyhow::Result;
+use priority_lfu::DeepSizeOf;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -11,7 +12,7 @@ use crate::val::{TableName, Value};
 
 /// The config struct as it is stored on disk.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum ConfigDefinition {
 	Default(DefaultConfig),
 	GraphQL(GraphQLConfig),
@@ -77,7 +78,7 @@ impl InfoStructure for ConfigDefinition {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct GraphQLConfig {
 	pub tables: GraphQLTablesConfig,
 	pub functions: GraphQLFunctionsConfig,
@@ -93,7 +94,7 @@ impl InfoStructure for GraphQLConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum GraphQLTablesConfig {
 	#[default]
 	None,
@@ -118,7 +119,7 @@ impl InfoStructure for GraphQLTablesConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub enum GraphQLFunctionsConfig {
 	#[default]
 	None,
@@ -143,7 +144,7 @@ impl InfoStructure for GraphQLFunctionsConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, DeepSizeOf)]
 pub struct DefaultConfig {
 	pub namespace: Option<String>,
 	pub database: Option<String>,
