@@ -268,8 +268,7 @@ mod tests {
 
 		for &value in &values {
 			let bytes = ts_impl.from_versionstamp(value).unwrap().as_ts_bytes();
-			let recovered =
-				ts_impl.from_ts_bytes(&bytes).unwrap().as_versionstamp().try_into().unwrap();
+			let recovered = ts_impl.from_ts_bytes(&bytes).unwrap().as_versionstamp();
 			assert_eq!(value, recovered, "Failed roundtrip for u64 value {}", value);
 		}
 	}
