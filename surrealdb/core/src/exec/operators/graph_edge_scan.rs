@@ -24,20 +24,15 @@ const BATCH_SIZE: usize = 1000;
 
 /// What kind of output the GraphEdgeScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-
+#[derive(Default)]
 pub enum GraphScanOutput {
 	/// Return the edge record IDs (e.g., `knows:1`)
 	EdgeId,
 	/// Return the target record IDs (e.g., `person:bob`)
+	#[default]
 	TargetId,
 	/// Return the full edge records (fetched from the datastore)
 	FullEdge,
-}
-
-impl Default for GraphScanOutput {
-	fn default() -> Self {
-		Self::TargetId
-	}
 }
 
 /// Scans graph edges for a given source record.

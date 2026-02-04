@@ -127,10 +127,10 @@ impl PhysicalExpr for Param {
 		}
 
 		// Check block-local parameters (they shadow global params)
-		if let Some(local_params) = ctx.local_params {
-			if let Some(value) = local_params.get(&self.0) {
-				return Ok(value.clone());
-			}
+		if let Some(local_params) = ctx.local_params
+			&& let Some(value) = local_params.get(&self.0)
+		{
+			return Ok(value.clone());
 		}
 
 		// Check execution context parameters

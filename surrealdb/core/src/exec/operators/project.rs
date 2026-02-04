@@ -22,7 +22,7 @@ use crate::exec::{
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
-use crate::val::{Object, RecordId, Value};
+use crate::val::{Object, Value};
 
 /// Field selection specification.
 #[derive(Debug, Clone)]
@@ -147,8 +147,6 @@ impl ExecOperator for Project {
 			let ctx = ctx.clone();
 
 			async move {
-				use crate::expr::ControlFlow;
-
 				let batch = batch_result?;
 				let mut projected_values = Vec::with_capacity(batch.values.len());
 
@@ -269,13 +267,13 @@ async fn evaluate_and_set_field(
 					// No alias - use the dynamic field names from the function
 					for (idiom, value) in bindings {
 						// Convert idiom to FieldPath
-						if let Ok(path) = FieldPath::try_from(&idiom) {
-							if !path.is_empty() {
-								let mut target = Value::Object(std::mem::take(obj));
-								target.set_at_field_path(&path, value);
-								if let Value::Object(new_obj) = target {
-									*obj = new_obj;
-								}
+						if let Ok(path) = FieldPath::try_from(&idiom)
+							&& !path.is_empty()
+						{
+							let mut target = Value::Object(std::mem::take(obj));
+							target.set_at_field_path(&path, value);
+							if let Value::Object(new_obj) = target {
+								*obj = new_obj;
 							}
 						}
 					}
@@ -323,10 +321,10 @@ async fn evaluate_and_set_field(
 fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
 	// For simple single-part idioms, directly remove from object
 	if idiom.len() == 1 {
-		if let Some(Part::Field(field_name)) = idiom.first() {
-			if let Value::Object(obj) = value {
-				obj.remove(&**field_name);
-			}
+		if let Some(Part::Field(field_name)) = idiom.first()
+			&& let Value::Object(obj) = value
+		{
+			obj.remove(&**field_name);
 		}
 	} else {
 		// For nested paths, traverse and remove
@@ -389,16 +387,15 @@ fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
 		}
 		Part::Value(expr) => {
 			// Handle array index access: [0], [1], etc.
-			if let crate::expr::Expr::Literal(crate::expr::Literal::Integer(idx)) = expr {
-				if let Value::Array(arr) = value {
-					if let Some(nested) = arr.get_mut(*idx as usize) {
-						if depth == idiom.len() - 1 {
-							// Can't "remove" an array element by index, set to None
-							*nested = Value::None;
-						} else {
-							omit_nested_field(nested, idiom, depth + 1);
-						}
-					}
+			if let crate::expr::Expr::Literal(crate::expr::Literal::Integer(idx)) = expr
+				&& let Value::Array(arr) = value
+				&& let Some(nested) = arr.get_mut(*idx as usize)
+			{
+				if depth == idiom.len() - 1 {
+					// Can't "remove" an array element by index, set to None
+					*nested = Value::None;
+				} else {
+					omit_nested_field(nested, idiom, depth + 1);
 				}
 			}
 		}

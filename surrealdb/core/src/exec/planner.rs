@@ -35,13 +35,12 @@ fn expr_to_physical_expr_as_name(
 	use crate::expr::part::Part;
 
 	// Check if this is a simple identifier (idiom with single Field part)
-	if let Expr::Idiom(ref idiom) = expr {
-		if idiom.0.len() == 1 {
-			if let Part::Field(name) = &idiom.0[0] {
-				// Convert simple identifier to string literal
-				return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
-			}
-		}
+	if let Expr::Idiom(ref idiom) = expr
+		&& idiom.0.len() == 1
+		&& let Part::Field(name) = &idiom.0[0]
+	{
+		// Convert simple identifier to string literal
+		return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
 	}
 
 	// Otherwise use normal conversion
@@ -54,9 +53,9 @@ pub(crate) fn expr_to_physical_expr(
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
 		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
-		ClosureExec, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec,
-		ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral,
-		SiloModuleExec, SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
+		ClosureExec, IfElseExpr, Literal as PhysicalLiteral, ObjectLiteral, Param, PostfixOp,
+		ProjectionFunctionExec, ScalarSubquery, SetLiteral, SiloModuleExec, UnaryOp,
+		UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -213,21 +212,15 @@ pub(crate) fn expr_to_physical_expr(
 					name,
 					arguments: phys_args,
 				})),
-				Function::Script(script) => {
-					return Err(Error::Unimplemented(
-						"Script functions not yet supported in execution plans".to_string(),
-					));
-				}
-				Function::Model(model) => {
-					return Err(Error::Unimplemented(
-						"Model functions not yet supported in execution plans".to_string(),
-					));
-				}
-				Function::Module(module, sub) => {
-					return Err(Error::Unimplemented(
-						"Module functions not yet supported in execution plans".to_string(),
-					));
-				}
+				Function::Script(script) => Err(Error::Unimplemented(
+					"Script functions not yet supported in execution plans".to_string(),
+				)),
+				Function::Model(model) => Err(Error::Unimplemented(
+					"Model functions not yet supported in execution plans".to_string(),
+				)),
+				Function::Module(module, sub) => Err(Error::Unimplemented(
+					"Module functions not yet supported in execution plans".to_string(),
+				)),
 				Function::Silo {
 					org,
 					pkg,
@@ -460,7 +453,7 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 			};
 
 			Ok(Value::RecordId(RecordId {
-				table: rid_lit.table.clone(),
+				table: rid_lit.table,
 				key,
 			}))
 		}
@@ -667,7 +660,7 @@ pub(crate) fn try_plan_expr(
 			inner: None,
 		})),
 		Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
-			duration: sleep_stmt.duration.clone(),
+			duration: sleep_stmt.duration,
 		})),
 		Expr::Explain {
 			format,
@@ -819,7 +812,7 @@ fn plan_select(
 		order,
 		limit,
 		start,
-		omit.to_vec(),
+		omit.clone(),
 		is_value_source,
 		tempfiles,
 		ctx,
@@ -1093,19 +1086,21 @@ fn plan_projections(
 			// Special case: For value sources (arrays, primitives), a single `$this` or `$param`
 			// without an explicit alias should return raw values (like SELECT VALUE).
 			// This matches legacy behavior where `SELECT $this FROM [1,2,3]` returns `[1,2,3]`.
-			if is_value_source && !has_wildcard && field_list.len() == 1 {
-				if let Some(Field::Single(selector)) = field_list.first() {
-					// Check if it's a bare parameter reference without alias
-					if selector.alias.is_none() {
-						if let Expr::Param(_) = &selector.expr {
-							// Use ProjectValue to return raw values
-							let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-							return Ok(Arc::new(ProjectValue {
-								input,
-								expr,
-							}) as Arc<dyn ExecOperator>);
-						}
-					}
+			if is_value_source
+				&& !has_wildcard
+				&& field_list.len() == 1
+				&& let Some(Field::Single(selector)) = field_list.first()
+			{
+				// Check if it's a bare parameter reference without alias
+				if selector.alias.is_none()
+					&& let Expr::Param(_) = &selector.expr
+				{
+					// Use ProjectValue to return raw values
+					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
+					return Ok(Arc::new(ProjectValue {
+						input,
+						expr,
+					}) as Arc<dyn ExecOperator>);
 				}
 			}
 
@@ -1194,7 +1189,7 @@ fn derive_field_name(expr: &Expr) -> String {
 		Expr::Param(param) => param.as_str().to_string(),
 		// Function call - use the function's idiom representation (name without arguments)
 		Expr::FunctionCall(call) => {
-			let idiom: crate::expr::idiom::Idiom = call.receiver.to_idiom().into();
+			let idiom: crate::expr::idiom::Idiom = call.receiver.to_idiom();
 			idiom_to_field_name(&idiom)
 		}
 		// For other expressions, use the SQL representation
@@ -1219,11 +1214,11 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	// Check for graph traversal alias first
 	// For expressions like `->(bought AS purchases)`, use the alias as the field name
 	for part in idiom.0.iter() {
-		if let Part::Lookup(lookup) = part {
-			if let Some(alias) = &lookup.alias {
-				// Recursively extract field name from alias
-				return idiom_to_field_name(alias);
-			}
+		if let Part::Lookup(lookup) = part
+			&& let Some(alias) = &lookup.alias
+		{
+			// Recursively extract field name from alias
+			return idiom_to_field_name(alias);
 		}
 	}
 
@@ -1232,10 +1227,10 @@ fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
 	let simplified = idiom.simplify();
 
 	// For simple single-part idioms, use the raw field name
-	if simplified.len() == 1 {
-		if let Some(Part::Field(name)) = simplified.first() {
-			return name.to_string();
-		}
+	if simplified.len() == 1
+		&& let Some(Part::Field(name)) = simplified.first()
+	{
+		return name.clone();
 	}
 	// For complex idioms, use the SQL representation of the simplified idiom
 	simplified.to_sql()
@@ -1257,11 +1252,11 @@ fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPath {
 
 	// Check for graph traversal alias first - if any Lookup has an alias, use flat output
 	for part in idiom.0.iter() {
-		if let Part::Lookup(lookup) = part {
-			if lookup.alias.is_some() {
-				// Has explicit alias - use flat output (single field name)
-				return FieldPath::field(idiom_to_field_name(idiom));
-			}
+		if let Part::Lookup(lookup) = part
+			&& lookup.alias.is_some()
+		{
+			// Has explicit alias - use flat output (single field name)
+			return FieldPath::field(idiom_to_field_name(idiom));
 		}
 	}
 
@@ -1294,7 +1289,7 @@ fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPath {
 			}
 			Part::Field(name) => {
 				// Regular field - add as Field part
-				parts.push(FieldPathPart::Field(name.to_string()));
+				parts.push(FieldPathPart::Field(name.clone()));
 			}
 			// Skip other parts (Destructure, All, Where, etc.) for path construction
 			// These affect evaluation but not the output field structure
@@ -1380,10 +1375,10 @@ fn plan_aggregation_with_group_exprs(
 		}
 		Fields::Select(field_list) => {
 			for field in field_list {
-				if let Field::Single(selector) = field {
-					if let Some(alias) = &selector.alias {
-						alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
-					}
+				if let Field::Single(selector) = field
+					&& let Some(alias) = &selector.alias
+				{
+					alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
 				}
 			}
 		}
@@ -1496,18 +1491,18 @@ fn find_group_key_index(
 	use surrealdb_types::ToSql;
 
 	// Check if the expression itself is a simple idiom that matches
-	if let Expr::Idiom(idiom) = expr {
-		if let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql()) {
-			return Some(idx);
-		}
+	if let Expr::Idiom(idiom) = expr
+		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql())
+	{
+		return Some(idx);
 	}
 
 	// Check if the alias matches a group-by idiom
 	// This handles cases like `time::year(time) AS year` with `GROUP BY year`
-	if let Some(alias) = alias {
-		if let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql()) {
-			return Some(idx);
-		}
+	if let Some(alias) = alias
+		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql())
+	{
+		return Some(idx);
 	}
 
 	None
@@ -1551,10 +1546,10 @@ impl<'a> AggregateExtractor<'a> {
 	/// Check if an expression directly contains an aggregate function call at the top level.
 	/// Used to determine if array::distinct should be treated as an aggregate or scalar.
 	fn contains_aggregate_call(&self, expr: &Expr) -> bool {
-		if let Expr::FunctionCall(func_call) = expr {
-			if let Function::Normal(name) = &func_call.receiver {
-				return self.registry.get_aggregate(name.as_str()).is_some();
-			}
+		if let Expr::FunctionCall(func_call) = expr
+			&& let Function::Normal(name) = &func_call.receiver
+		{
+			return self.registry.get_aggregate(name.as_str()).is_some();
 		}
 		false
 	}
@@ -1572,55 +1567,54 @@ impl MutVisitor for AggregateExtractor<'_> {
 		// Check if this is an aggregate function call that we need to replace
 		// Note: We handle FunctionCall here because after visiting, we need to
 		// replace the entire Expr, not just the FunctionCall inside it
-		if let Expr::FunctionCall(func_call) = expr {
-			if let Function::Normal(name) = &func_call.receiver {
-				// Special handling for array::distinct:
-				// - When its argument is another aggregate function, treat it as a scalar (e.g.,
-				//   array::distinct(array::group(name)) - array::distinct is scalar)
-				// - When its argument is NOT an aggregate function, treat it as an aggregate (e.g.,
-				//   array::distinct(name) - array::distinct collects unique values)
-				if name.as_str() == "array::distinct" {
-					if !func_call.arguments.is_empty()
-						&& self.contains_aggregate_call(&func_call.arguments[0])
-					{
-						// Argument contains an aggregate - treat array::distinct as scalar
-						// Just visit children to process the nested aggregate
-						return expr.visit_mut(self);
-					}
-					// Fall through to normal aggregate handling
-				}
+		if let Expr::FunctionCall(func_call) = expr
+			&& let Function::Normal(name) = &func_call.receiver
+		{
+			// Special handling for array::distinct:
+			// - When its argument is another aggregate function, treat it as a scalar (e.g.,
+			//   array::distinct(array::group(name)) - array::distinct is scalar)
+			// - When its argument is NOT an aggregate function, treat it as an aggregate (e.g.,
+			//   array::distinct(name) - array::distinct collects unique values)
+			if name.as_str() == "array::distinct"
+				&& !func_call.arguments.is_empty()
+				&& self.contains_aggregate_call(&func_call.arguments[0])
+			{
+				// Argument contains an aggregate - treat array::distinct as scalar
+				// Just visit children to process the nested aggregate
+				return expr.visit_mut(self);
+			}
+			// Fall through to normal aggregate handling
 
-				if self.registry.get_aggregate(name.as_str()).is_some() {
-					// Found an aggregate function
-					if self.inside_aggregate {
-						// Nested aggregates are not allowed
-						self.error = Some(Error::Unimplemented(
-							"Nested aggregate functions are not supported".to_string(),
-						));
-						return Ok(());
-					}
-
-					// Visit arguments to check for nested aggregates
-					self.inside_aggregate = true;
-					for arg in &mut func_call.arguments {
-						arg.visit_mut(self)?;
-					}
-					self.inside_aggregate = false;
-
-					// Check if visiting arguments found an error
-					if self.error.is_some() {
-						return Ok(());
-					}
-
-					// Store this aggregate and replace with field reference
-					let field_name = aggregate_field_name(self.aggregate_count);
-					self.aggregates.push((name.clone(), func_call.as_ref().clone()));
-					self.aggregate_count += 1;
-
-					// Replace the aggregate with a field reference idiom
-					*expr = Expr::Idiom(Idiom::field(field_name));
+			if self.registry.get_aggregate(name.as_str()).is_some() {
+				// Found an aggregate function
+				if self.inside_aggregate {
+					// Nested aggregates are not allowed
+					self.error = Some(Error::Unimplemented(
+						"Nested aggregate functions are not supported".to_string(),
+					));
 					return Ok(());
 				}
+
+				// Visit arguments to check for nested aggregates
+				self.inside_aggregate = true;
+				for arg in &mut func_call.arguments {
+					arg.visit_mut(self)?;
+				}
+				self.inside_aggregate = false;
+
+				// Check if visiting arguments found an error
+				if self.error.is_some() {
+					return Ok(());
+				}
+
+				// Store this aggregate and replace with field reference
+				let field_name = aggregate_field_name(self.aggregate_count);
+				self.aggregates.push((name.clone(), func_call.as_ref().clone()));
+				self.aggregate_count += 1;
+
+				// Replace the aggregate with a field reference idiom
+				*expr = Expr::Idiom(Idiom::field(field_name));
+				return Ok(());
 			}
 		}
 
@@ -2102,7 +2096,7 @@ fn convert_let_statement(
 
 		// Everything else is a scalar expression - wrap in ExprPlan
 		other => {
-			let expr = expr_to_physical_expr(other.clone(), ctx)?;
+			let expr = expr_to_physical_expr(other, ctx)?;
 
 			// Validate: LET expressions can't reference current row
 			if expr.references_current_value() {
@@ -2156,25 +2150,23 @@ fn plan_sort(
 
 			// Check if we should use ExternalSort (TEMPFILES specified)
 			#[cfg(storage)]
-			if tempfiles {
-				if let Some(temp_dir) = ctx.temporary_directory() {
-					return Ok(Arc::new(ExternalSort {
-						input,
-						order_by,
-						temp_dir: temp_dir.to_path_buf(),
-					}) as Arc<dyn ExecOperator>);
-				}
+			if tempfiles && let Some(temp_dir) = ctx.temporary_directory() {
+				return Ok(Arc::new(ExternalSort {
+					input,
+					order_by,
+					temp_dir: temp_dir.to_path_buf(),
+				}) as Arc<dyn ExecOperator>);
 			}
 
 			// Check if we should use SortTopK (small limit)
-			if let Some(effective_limit) = get_effective_limit_literal(start, limit) {
-				if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize {
-					return Ok(Arc::new(SortTopK {
-						input,
-						order_by,
-						limit: effective_limit,
-					}) as Arc<dyn ExecOperator>);
-				}
+			if let Some(effective_limit) = get_effective_limit_literal(start, limit)
+				&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
+			{
+				return Ok(Arc::new(SortTopK {
+					input,
+					order_by,
+					limit: effective_limit,
+				}) as Arc<dyn ExecOperator>);
 			}
 
 			// Default: full in-memory sort with parallel sorting

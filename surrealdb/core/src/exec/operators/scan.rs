@@ -405,10 +405,10 @@ impl ScanExecutor {
 				if self.check_and_add_to_batch(value).await? {
 					// Batch is full - update beg to continue from after this key
 					// Append 0x00 to get a key strictly after the current one
-					let mut next_beg = key.to_vec();
+					let mut next_beg = key.clone();
 					next_beg.push(0x00);
 					self.mode = ScanMode::KvStream {
-						beg: next_beg.into(),
+						beg: next_beg,
 						end,
 					};
 					return self.flush_batch().await.map(Some);
@@ -677,10 +677,8 @@ async fn filter_fields_by_permission(
 				ControlFlow::Err(anyhow::anyhow!("Failed to check field permission: {}", e))
 			})?;
 
-			if !allowed {
-				if let Value::Object(obj) = value {
-					obj.remove(&field_name);
-				}
+			if !allowed && let Value::Object(obj) = value {
+				obj.remove(&field_name);
 			}
 		}
 	}

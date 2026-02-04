@@ -8,18 +8,13 @@ use crate::exec::field_path::FieldPath;
 use crate::val::Value;
 
 /// Sort direction for ORDER BY
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortDirection {
 	/// Ascending order (default)
+	#[default]
 	Asc,
 	/// Descending order
 	Desc,
-}
-
-impl Default for SortDirection {
-	fn default() -> Self {
-		Self::Asc
-	}
 }
 
 /// A single field in an ORDER BY clause that evaluates an expression.

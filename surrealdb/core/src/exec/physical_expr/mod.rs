@@ -166,10 +166,10 @@ impl<'a> EvalContext<'a> {
 	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
 		use crate::err::Error;
 
-		if let Some(caps) = self.capabilities() {
-			if !caps.allows_function_name(name) {
-				return Err(Error::FunctionNotAllowed(name.to_string()).into());
-			}
+		if let Some(caps) = self.capabilities()
+			&& !caps.allows_function_name(name)
+		{
+			return Err(Error::FunctionNotAllowed(name.to_string()).into());
 		}
 		Ok(())
 	}
@@ -248,7 +248,7 @@ mod recurse;
 mod subquery;
 
 // Re-export all expression types for external use
-pub(crate) use block::{BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow, ReturnValue};
+pub(crate) use block::{BlockPhysicalExpr, ReturnValue};
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{

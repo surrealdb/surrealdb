@@ -191,7 +191,7 @@ impl ToSql for IfElsePlan {
 				f.push_str(" ELSE IF ");
 			}
 			cond.fmt_sql(f, fmt);
-			f.push_str(" ");
+			f.push(' ');
 			body.fmt_sql(f, fmt);
 		}
 		if let Some(ref else_body) = self.else_body {

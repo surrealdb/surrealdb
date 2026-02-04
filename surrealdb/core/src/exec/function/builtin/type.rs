@@ -5,7 +5,7 @@ use std::pin::Pin;
 use anyhow::Result;
 
 use crate::exec::ContextLevel;
-use crate::exec::function::{FunctionRegistry, ProjectionFunction, ScalarFunction, Signature};
+use crate::exec::function::{FunctionRegistry, ProjectionFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;

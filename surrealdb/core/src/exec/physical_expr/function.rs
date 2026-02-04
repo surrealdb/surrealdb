@@ -22,7 +22,7 @@ use crate::exec::physical_expr::block::{
 };
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
-use crate::exec::{AccessMode, CombineAccessModes, ExecutionContext};
+use crate::exec::{AccessMode, CombineAccessModes};
 use crate::expr::{Kind, Model, Script};
 use crate::val::Value;
 
@@ -248,10 +248,10 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		})?;
 
 		// 2. Check if function is allowed by capabilities
-		if let Some(caps) = ctx.capabilities() {
-			if !caps.allows_function_name(&func_name) {
-				return Err(Error::FunctionNotAllowed(func_name).into());
-			}
+		if let Some(caps) = ctx.capabilities()
+			&& !caps.allows_function_name(&func_name)
+		{
+			return Err(Error::FunctionNotAllowed(func_name).into());
 		}
 
 		// 3. Retrieve function definition
@@ -667,25 +667,24 @@ impl PhysicalExpr for ClosureCallExec {
 			} => {
 				// Create isolated execution context with captured variables
 				let mut isolated_ctx = ctx.exec_ctx.clone();
-				for (name, value) in captures.clone().into_iter() {
+				for (name, value) in captures.clone() {
 					isolated_ctx = isolated_ctx.with_param(name, value);
 				}
 
 				// Check for missing required arguments
-				if arg_spec.len() > evaluated_args.len() {
-					if let Some((param, kind)) =
+				if arg_spec.len() > evaluated_args.len()
+					&& let Some((param, kind)) =
 						arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
-					{
-						return Err(Error::InvalidArguments {
-							name: "ANONYMOUS".to_string(),
-							message: format!(
-								"Expected a value of type '{}' for argument {}",
-								kind.to_sql(),
-								param.to_sql()
-							),
-						}
-						.into());
+				{
+					return Err(Error::InvalidArguments {
+						name: "ANONYMOUS".to_string(),
+						message: format!(
+							"Expected a value of type '{}' for argument {}",
+							kind.to_sql(),
+							param.to_sql()
+						),
 					}
+					.into());
 				}
 
 				// Bind arguments to parameter names with type coercion

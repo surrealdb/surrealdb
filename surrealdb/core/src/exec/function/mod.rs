@@ -23,7 +23,7 @@ pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
-pub use signature::{ArgSpec, Signature};
+pub use signature::Signature;
 
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
@@ -48,7 +48,7 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// This is used during planning for type inference. The default
 	/// implementation returns the signature's return type.
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
-		Ok(self.signature().returns.clone())
+		Ok(self.signature().returns)
 	}
 
 	/// Whether this function is pure (no context needed).

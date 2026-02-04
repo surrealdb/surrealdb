@@ -41,7 +41,7 @@ pub trait ProjectionFunction: Send + Sync + Debug {
 	///
 	/// The default implementation returns the signature's return type.
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
-		Ok(self.signature().returns.clone())
+		Ok(self.signature().returns)
 	}
 
 	/// Whether this function requires async execution.

@@ -545,10 +545,10 @@ const AGGREGATE_FUNCTIONS: &[&str] = &[
 /// This is used to determine if array::distinct should be treated as an aggregate
 /// or as a scalar function applied to an aggregate result.
 fn is_aggregate_function_call(expr: &Expr) -> bool {
-	if let Expr::FunctionCall(f) = expr {
-		if let Function::Normal(name) = &f.receiver {
-			return AGGREGATE_FUNCTIONS.contains(&name.as_str());
-		}
+	if let Expr::FunctionCall(f) = expr
+		&& let Function::Normal(name) = &f.receiver
+	{
+		return AGGREGATE_FUNCTIONS.contains(&name.as_str());
 	}
 	false
 }

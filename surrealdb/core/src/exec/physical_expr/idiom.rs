@@ -63,10 +63,10 @@ impl IdiomExpr {
 
 	/// Get the simple identifier name if this is a simple identifier.
 	pub fn simple_identifier_name(&self) -> Option<&str> {
-		if self.parts.len() == 1 {
-			if let PhysicalPart::Field(name) = &self.parts[0] {
-				return Some(name.as_str());
-			}
+		if self.parts.len() == 1
+			&& let PhysicalPart::Field(name) = &self.parts[0]
+		{
+			return Some(name.as_str());
 		}
 		None
 	}
@@ -161,12 +161,11 @@ impl PhysicalExpr for IdiomExpr {
 
 			// After a Lookup, flatten if the NEXT part is also a Lookup or Where
 			// This matches legacy SurrealDB semantics
-			if matches!(part, PhysicalPart::Lookup(_)) {
-				if let Some(next_part) = self.parts.get(i + 1) {
-					if matches!(next_part, PhysicalPart::Lookup(_) | PhysicalPart::Where(_)) {
-						value = value.flatten();
-					}
-				}
+			if matches!(part, PhysicalPart::Lookup(_))
+				&& let Some(next_part) = self.parts.get(i + 1)
+				&& matches!(next_part, PhysicalPart::Lookup(_) | PhysicalPart::Where(_))
+			{
+				value = value.flatten();
 			}
 
 			// Short-circuit on None for optional chaining
@@ -953,12 +952,11 @@ pub(crate) fn evaluate_physical_path<'a>(
 
 			// After a Lookup, flatten if the NEXT part is also a Lookup or Where
 			// This matches SurrealDB semantics for consecutive lookups
-			if matches!(part, PhysicalPart::Lookup(_)) {
-				if let Some(next_part) = path.get(i + 1) {
-					if matches!(next_part, PhysicalPart::Lookup(_) | PhysicalPart::Where(_)) {
-						current = current.flatten();
-					}
-				}
+			if matches!(part, PhysicalPart::Lookup(_))
+				&& let Some(next_part) = path.get(i + 1)
+				&& matches!(next_part, PhysicalPart::Lookup(_) | PhysicalPart::Where(_))
+			{
+				current = current.flatten();
 			}
 		}
 		Ok(current)
@@ -1136,7 +1134,7 @@ async fn evaluate_recurse_path(
 				other => vec![other],
 			};
 
-			if values.is_empty() || values.iter().all(|v| is_final(v)) {
+			if values.is_empty() || values.iter().all(is_final) {
 				// Dead end
 				if depth >= min_depth && !current_path.is_empty() {
 					completed_paths.push(Value::Array(current_path.into()));

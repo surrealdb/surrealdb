@@ -628,10 +628,10 @@ impl Context {
 		let mut params = HashMap::new();
 
 		// First collect from parent (if not isolated)
-		if !self.isolated {
-			if let Some(ref parent) = self.parent {
-				params = parent.collect_params();
-			}
+		if !self.isolated
+			&& let Some(ref parent) = self.parent
+		{
+			params = parent.collect_params();
 		}
 
 		// Then add our own values (shadowing parent values)

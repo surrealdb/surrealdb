@@ -172,7 +172,7 @@ fn make_cursor_stream(
 	input: Option<Arc<dyn ExecOperator>>,
 ) -> ValueBatchStream {
 	let cursor_state = CursorState {
-		state: state.clone(),
+		state,
 		position: 0,
 		changed_rx,
 	};

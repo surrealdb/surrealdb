@@ -611,7 +611,7 @@ impl Accumulator for MedianAccumulator {
 			.as_any()
 			.downcast_ref::<MedianAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.values.extend(other.values.iter().cloned());
+		self.values.extend(other.values.iter().copied());
 		Ok(())
 	}
 
@@ -625,7 +625,7 @@ impl Accumulator for MedianAccumulator {
 		sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
 		let len = sorted.len();
-		let median = if len % 2 == 0 {
+		let median = if len.is_multiple_of(2) {
 			// Even number of elements: average of the two middle values
 			let mid = len / 2;
 			let a = sorted[mid - 1].to_float();
@@ -937,7 +937,7 @@ impl Accumulator for ArrayJoinAccumulator {
 			.map(|v| v.clone().into_raw_string())
 			.collect::<Vec<_>>()
 			.join(&self.separator);
-		Ok(Value::String(joined.into()))
+		Ok(Value::String(joined))
 	}
 
 	fn reset(&mut self) {

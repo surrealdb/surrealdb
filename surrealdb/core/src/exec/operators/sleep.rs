@@ -44,7 +44,7 @@ impl ExecOperator for SleepPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let duration = self.duration.clone();
+		let duration = self.duration;
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {

@@ -183,17 +183,17 @@ fn fetch_field_recursive<'a>(
 				}
 			}
 			Part::First => {
-				if let Value::Array(arr) = value {
-					if let Some(first) = arr.first_mut() {
-						fetch_field_recursive(ctx, first, path, depth + 1).await?;
-					}
+				if let Value::Array(arr) = value
+					&& let Some(first) = arr.first_mut()
+				{
+					fetch_field_recursive(ctx, first, path, depth + 1).await?;
 				}
 			}
 			Part::Last => {
-				if let Value::Array(arr) = value {
-					if let Some(last) = arr.last_mut() {
-						fetch_field_recursive(ctx, last, path, depth + 1).await?;
-					}
+				if let Value::Array(arr) = value
+					&& let Some(last) = arr.last_mut()
+				{
+					fetch_field_recursive(ctx, last, path, depth + 1).await?;
 				}
 			}
 			// For other path parts, we don't support fetching through them
@@ -250,7 +250,7 @@ pub(crate) async fn fetch_record(
 			Ok(val)
 		}
 		Ok(None) => Ok(Value::None),
-		Err(e) => Err(crate::expr::ControlFlow::Err(e.into())),
+		Err(e) => Err(crate::expr::ControlFlow::Err(e)),
 	}
 }
 

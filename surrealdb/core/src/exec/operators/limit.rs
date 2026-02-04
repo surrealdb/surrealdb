@@ -111,7 +111,7 @@ fn coerce_to_usize(value: &crate::val::Value) -> Result<usize, String> {
 	match value {
 		Value::Number(n) => {
 			// Try to get as int first
-			let i = n.clone().to_int();
+			let i = (*n).to_int();
 			if i >= 0 {
 				Ok(i as usize)
 			} else {
@@ -163,11 +163,11 @@ impl futures::Stream for LimitStream {
 		}
 
 		// Check if we've hit the limit
-		if let Some(limit) = self.limit {
-			if self.emitted >= limit {
-				self.done = true;
-				return Poll::Ready(None);
-			}
+		if let Some(limit) = self.limit
+			&& self.emitted >= limit
+		{
+			self.done = true;
+			return Poll::Ready(None);
 		}
 
 		// Poll the inner stream
@@ -199,10 +199,10 @@ impl futures::Stream for LimitStream {
 				self.emitted += values.len();
 
 				// Check if we've hit the limit
-				if let Some(limit) = self.limit {
-					if self.emitted >= limit {
-						self.done = true;
-					}
+				if let Some(limit) = self.limit
+					&& self.emitted >= limit
+				{
+					self.done = true;
 				}
 
 				// Only emit non-empty batches

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator, PhysicalExpr};
+use crate::expr::Dir;
 use crate::expr::part::DestructurePart;
-use crate::expr::{Dir, Idiom};
 use crate::val::TableName;
 
 /// Physical representation of an idiom part for streaming execution.
@@ -188,7 +188,7 @@ impl ToSql for PhysicalPart {
 				}
 				f.push_str(" }");
 			}
-			PhysicalPart::Optional => f.push_str("?"),
+			PhysicalPart::Optional => f.push('?'),
 			PhysicalPart::Lookup(lookup) => lookup.fmt_sql(f, fmt),
 			PhysicalPart::Recurse(recurse) => recurse.fmt_sql(f, fmt),
 		}

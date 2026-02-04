@@ -121,7 +121,7 @@ impl ExpressionRegistry {
 				updated.compute_point = compute_point;
 				self.expressions.insert(expr_sql.clone(), updated);
 			}
-			return Ok(self.expressions.get(&expr_sql).unwrap().internal_name.clone());
+			return Ok(self.expressions[&expr_sql].internal_name.clone());
 		}
 
 		// Convert to physical expression
@@ -559,28 +559,22 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 			for field in field_list {
 				if let Field::Single(selector) = field {
 					// Check if this field has the matching alias
-					let field_alias = selector.alias.as_ref().map(|i| idiom_to_string(i));
+					let field_alias = selector.alias.as_ref().map(idiom_to_string);
 
-					if let Some(ref alias) = field_alias {
-						if alias == alias_name {
-							return Some((selector.expr.clone(), alias.clone()));
-						}
+					if let Some(ref alias) = field_alias
+						&& alias == alias_name
+					{
+						return Some((selector.expr.clone(), alias.clone()));
 					}
 
 					// Also check if the expression itself is a simple field with this name
-					if field_alias.is_none() {
-						if let Expr::Idiom(ref expr_idiom) = selector.expr {
-							if expr_idiom.len() == 1 {
-								if let Some(Part::Field(name)) = expr_idiom.first() {
-									if name.as_str() == alias_name {
-										return Some((
-											selector.expr.clone(),
-											alias_name.to_string(),
-										));
-									}
-								}
-							}
-						}
+					if field_alias.is_none()
+						&& let Expr::Idiom(ref expr_idiom) = selector.expr
+						&& expr_idiom.len() == 1
+						&& let Some(Part::Field(name)) = expr_idiom.first()
+						&& name.as_str() == alias_name
+					{
+						return Some((selector.expr.clone(), alias_name.to_string()));
 					}
 				}
 			}
@@ -591,10 +585,10 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 
 /// Convert an idiom to a simple string (for single-part field idioms).
 fn idiom_to_string(idiom: &Idiom) -> String {
-	if idiom.len() == 1 {
-		if let Some(Part::Field(name)) = idiom.first() {
-			return name.to_string();
-		}
+	if idiom.len() == 1
+		&& let Some(Part::Field(name)) = idiom.first()
+	{
+		return name.clone();
 	}
 	// Fallback to SQL representation
 	idiom.to_sql()
