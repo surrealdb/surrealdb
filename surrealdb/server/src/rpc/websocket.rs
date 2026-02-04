@@ -9,7 +9,9 @@ use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
+use opentelemetry::propagation::{TextMapCompositePropagator, TextMapPropagator};
 use opentelemetry::trace::FutureExt;
+use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
@@ -21,6 +23,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 use super::RpcState;
@@ -329,15 +332,36 @@ impl Websocket {
 			Message::Binary(ref msg) => msg.len(),
 			_ => 0,
 		};
+		// Read message pre-emptively (for otel context)
+		let req_result = rpc.format.req_ws(msg);
 		// Prepare span and otel context
 		let span = span_for_request(&rpc.id);
+		if let Ok(ref req) = req_result
+			&& let Some(traceparent) = req.traceparent.clone()
+		{
+			let mut carrier = std::collections::HashMap::new();
+			carrier.insert("traceparent".to_string(), traceparent);
+
+			let baggage_propagator = BaggagePropagator::new();
+			let trace_context_propagator = TraceContextPropagator::new();
+
+			let propagator = TextMapCompositePropagator::new(vec![
+				Box::new(baggage_propagator),
+				Box::new(trace_context_propagator),
+			]);
+
+			let parent_context = propagator.extract(&carrier);
+			if let Err(err) = span.set_parent(parent_context) {
+				warn!("Failed to set trace parent: {err}");
+			};
+		}
 		// Parse the request
 		async move {
 			let span = Span::current();
 			let req_cx = RequestContext::default();
 			let otel_cx = Arc::new(TelemetryContext::new().with_value(req_cx.clone()));
 			// Parse the RPC request structure
-			match rpc.format.req_ws(msg) {
+			match req_result {
 				Ok(req) => {
 					// Now that we know the method, we can update the span and create otel context
 					span.record("rpc.method", req.method.to_str());
