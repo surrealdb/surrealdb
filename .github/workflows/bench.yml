@@ -56,7 +56,7 @@ jobs:
   #         cargo install --quiet --locked critcmp cargo-make
 
   #     - name: Checkout changes
-  #       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+  #       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
   #     - name: Run benchmark
   #       run: |
@@ -123,7 +123,7 @@ jobs:
           #   features: "protocol-ws"
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (Actions must be pinned by commit hash)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 (Actions must be pinned by commit hash)
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -131,7 +131,7 @@ jobs:
           components: rustfmt
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8 (Actions must be pinned by commit hash)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2 (Actions must be pinned by commit hash)
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 

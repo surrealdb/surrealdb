@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Label community PRs
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1 (Actions must be pinned by commit hash)
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8 (Actions must be pinned by commit hash)
         with:
           script: |
             // Core team members - update this list when team membership changes

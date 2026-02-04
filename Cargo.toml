@@ -47,7 +47,7 @@ surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
 # SurrealML crates
-surrealml-core = { version = "0.1.9", path = "surrealml/core" }
+surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
