@@ -139,9 +139,11 @@ impl From<BuildingStatus> for Value {
 
 type IndexBuilding = Arc<Building>;
 
+pub(super) type SharedIndexKey = Arc<IndexKey>;
+
 /// A unique key for an index building process
 #[derive(Hash, PartialEq, Eq, Clone)]
-struct IndexKey {
+pub(super) struct IndexKey {
 	ns: String,
 	db: String,
 	tb: String,
@@ -163,7 +165,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
+	indexes: Arc<RwLock<HashMap<SharedIndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -189,17 +191,17 @@ impl IndexBuilder {
 		let (ns, db) = opt.ns_db()?;
 		let tx = ctx.tx();
 		let df = Df::new(ns, db, tb, &ix.name);
-		let key = IndexKey::new(ns, db, df.tb, df.ix);
+		let key = Arc::new(IndexKey::new(ns, db, df.tb, df.ix));
 		let initial_build_done = match tx.get(df, None).await? {
 			None => false,
 			Some(v) => revision::from_slice::<bool>(&v)?,
 		};
 		let ix = Arc::new(ix.clone());
-		if let Entry::Vacant(e) = self.indexes.write().await.entry(key) {
+		if let Entry::Vacant(e) = self.indexes.write().await.entry(key.clone()) {
 			let building = if initial_build_done {
-				self.start_deferred_index(ctx, opt.clone(), ix).await?
+				self.start_deferred_index(ctx, opt.clone(), ix, key).await?
 			} else {
-				self.start_building(ctx, opt.clone(), ix, None, true).await?
+				self.start_building(ctx, opt.clone(), ix, key, None, true).await?
 			};
 			e.insert(building);
 		}
@@ -212,10 +214,11 @@ impl IndexBuilder {
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
+		ix_key: SharedIndexKey,
 		sdr: Option<Sender<Result<(), Error>>>,
 		recover_queue: bool,
 	) -> Result<IndexBuilding, Error> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
 		if recover_queue {
 			building.recover_queue().await?;
 		};
@@ -253,8 +256,9 @@ impl IndexBuilder {
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
+		ix_key: SharedIndexKey,
 	) -> Result<IndexBuilding, Error> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
 		building.recover_queue().await?;
 		building.initial_build_complete.store(true, Ordering::Relaxed);
 		Self::spawn_deferred_daemon(building.clone());
@@ -294,7 +298,7 @@ impl IndexBuilder {
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<(), Error>>>, Error> {
 		let (ns, db) = opt.ns_db()?;
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = Arc::new(IndexKey::new(ns, db, &ix.what, &ix.name));
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -310,12 +314,12 @@ impl IndexBuilder {
 				// Wait for the old builder to fully stop
 				old_builder.wait_for_completion().await;
 				// Start building the index
-				let ib = self.start_building(ctx, opt, ix, sdr, false).await?;
+				let ib = self.start_building(ctx, opt, ix, key, sdr, false).await?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr, false).await?;
+				let ib = self.start_building(ctx, opt, ix, key, sdr, false).await?;
 				e.insert(ib);
 			}
 		}
@@ -387,24 +391,29 @@ struct Appending {
 	id: Id,
 }
 
-/// A sequence number for the primary key of the appending queue
+/// Identifies the primary appending entry for a record.
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
-struct PrimaryAppending(u32);
+struct PrimaryAppending {
+	/// Appending id within the queue.
+	appending_id: AppendingId,
+	/// Batch id owning the append.
+	batch_id: BatchId,
+}
 
 pub(crate) type BatchId = u32;
 pub(crate) type AppendingId = u32;
 
-/// Manages the sequence numbers for the background indexing queue
+/// Manages sequence numbers and batch tracking for the background indexing queue.
 pub(super) struct QueueSequences {
-	/// The number of pending appending
+	/// The number of pending appends.
 	pending: u32,
-	/// The index of the next appending element to be added
+	/// The next appending id to assign.
 	next_appending: AppendingId,
-	/// The sequence index of generated id batches
+	/// The next batch id to assign.
 	next_batch: BatchId,
-	/// Active batches
+	/// Tracked appending ids per batch for cleanup on cancel.
 	batches: HashMap<BatchId, RoaringBitmap>,
 }
 
@@ -415,7 +424,7 @@ impl Default for QueueSequences {
 		Self {
 			pending: 0,
 			next_appending: 0,
-			// Batch ID is 1 based. 0 = absence of batch in the Transaction
+			// Batch IDs are 1-based; 0 indicates no batch in the transaction.
 			next_batch: 1,
 			batches: Default::default(),
 		}
@@ -488,6 +497,8 @@ struct Building {
 	ix: Arc<DefineIndexStatement>,
 	/// The table name
 	tb: String,
+	/// The index key
+	ix_key: SharedIndexKey,
 	/// The current status of the building process
 	status: RwLock<BuildingStatus>,
 	/// The queue of records that need to be indexed
@@ -509,6 +520,7 @@ impl Building {
 		tf: TransactionFactory,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
+		ix_key: SharedIndexKey,
 	) -> Result<Self, Error> {
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
@@ -516,6 +528,7 @@ impl Building {
 			tf,
 			tb: ix.what.to_raw(),
 			ix,
+			ix_key,
 			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
@@ -565,8 +578,8 @@ impl Building {
 			}
 		}
 		let mut queue = self.queue.write().await;
-		queue.next_appending = max_appending_id.unwrap_or(0);
-		queue.next_batch = max_batch_id.unwrap_or(QueueSequences::DEFAULT_NEXT_BATCH_ID);
+		queue.next_appending = max_appending_id.map_or(0, |v| v + 1);
+		queue.next_batch = max_batch_id.map_or(QueueSequences::DEFAULT_NEXT_BATCH_ID, |v| v + 1);
 		queue.batches = batches;
 		queue.pending = pending;
 		Ok(())
@@ -599,32 +612,40 @@ impl Building {
 
 		// Get the batch_id for the current transaction
 		let mut pending_index_batches = tx.lock_pending_index_batches().await;
-		let batch_id = if let Some((batch_id, _)) = pending_index_batches.get(&self.ix.name.0) {
+		let batch_id = if let Some((batch_id, _)) = pending_index_batches.get(&self.ix_key) {
 			*batch_id
 		} else {
 			let batch_id = queue.new_batch();
-			pending_index_batches.insert(self.ix.name.0.clone(), (batch_id, self.queue.clone()));
+			pending_index_batches.insert(self.ix_key.clone(), (batch_id, self.queue.clone()));
 			batch_id
 		};
 
-		// Get the idx of this appended record from the sequence
-		let idx = queue.add_update(batch_id)?;
+		// Get the appending_id of this appended record from the sequence
+		let appending_id = queue.add_update(batch_id)?;
 		// Store the appending
-		let ib = self.new_ib_key(idx, batch_id)?;
+		let ib = self.new_ib_key(appending_id, batch_id)?;
 		tx.set(ib, revision::to_vec(&appending)?, None).await?;
 		// Do we already have a primary appending?
 		let ip = self.new_ip_key(rid.id.clone())?;
 		if tx.get(ip.clone(), None).await?.is_none() {
 			// If not, we set it
-			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
+			tx.set(
+				ip,
+				revision::to_vec(&PrimaryAppending {
+					appending_id,
+					batch_id,
+				})?,
+				None,
+			)
+			.await?;
 		}
 		// Free the queue
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
 	}
 
-	/// Create a new index appending key for the given sequence number.
-	fn new_ib_key(&self, appending_id: u32, batch_id: u32) -> Result<Ib<'_>, Error> {
+	/// Create a new index appending key for the given appending and batch ids.
+	fn new_ib_key(&self, appending_id: AppendingId, batch_id: BatchId) -> Result<Ib<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(Ib::new(ns, db, &self.ix.what, &self.ix.name, appending_id, batch_id))
 	}
@@ -772,7 +793,7 @@ impl Building {
 						updated: updates_count,
 					})
 					.await;
-					// This is here to be sure the lock on back is not released early
+					// This is here to be sure the lock on the queue is not released early.
 					drop(queue);
 					break;
 				}
@@ -823,7 +844,7 @@ impl Building {
 			if let Some(v) = tx.get(ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
 				let pa: PrimaryAppending = revision::from_slice(&v)?;
-				let ib = self.new_ib_key(pa.0, 0)?;
+				let ib = self.new_ib_key(pa.appending_id, pa.batch_id)?;
 				let v = tx
 					.get(ib, None)
 					.await?
@@ -860,7 +881,7 @@ impl Building {
 	}
 
 	/// Index a batch of records from the appending queue.
-	/// Returns the last processed sequence id so the caller can advance the queue cursor.
+	/// Returns the indexed appending ids grouped by batch so the caller can clean queue tracking.
 	async fn index_appending_range(
 		&self,
 		ctx: &Context,

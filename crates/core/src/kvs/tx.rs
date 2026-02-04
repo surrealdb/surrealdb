@@ -12,7 +12,7 @@ use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::index::{BatchId, SharedQueueSequences};
+use crate::kvs::index::{BatchId, SharedIndexKey, SharedQueueSequences};
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
 use crate::sql::statements::define::ApiDefinition;
@@ -55,8 +55,8 @@ pub struct Transaction {
 	index_caches: IndexTreeCaches,
 	/// Does this supports reverse scan
 	has_reverse_scan: bool,
-	/// For each index a batch of pending appending
-	pending_index_batches: Mutex<HashMap<String, (BatchId, SharedQueueSequences)>>,
+	/// For each index, track the pending append batch for cleanup on cancel.
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>>,
 }
 
 impl Transaction {
@@ -74,7 +74,7 @@ impl Transaction {
 
 	pub(super) async fn lock_pending_index_batches<'a>(
 		&'a self,
-	) -> MutexGuard<'a, HashMap<String, (u32, SharedQueueSequences)>> {
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (u32, SharedQueueSequences)>> {
 		self.pending_index_batches.lock().await
 	}
 
@@ -118,7 +118,7 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<(), Error> {
-		// Remove any index pending batches
+		// Remove any pending index batches for this transaction.
 		for (_, (batch_id, queue)) in self.lock_pending_index_batches().await.drain() {
 			queue.write().await.clean_batch(batch_id);
 		}

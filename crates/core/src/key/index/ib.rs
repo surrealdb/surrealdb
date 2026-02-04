@@ -1,4 +1,5 @@
-//! Store appended records for concurrent index building
+//! Store appended records for concurrent index building, keyed by appending and batch ids.
+use crate::kvs::index::{AppendingId, BatchId};
 use crate::kvs::{impl_key, KeyEncode};
 use crate::{err::Error, key::index::all};
 use serde::{Deserialize, Serialize};
@@ -19,8 +20,8 @@ pub struct Ib<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub appending_id: u32,
-	pub batch_id: u32,
+	pub appending_id: AppendingId,
+	pub batch_id: BatchId,
 }
 impl_key!(Ib<'a>);
 
