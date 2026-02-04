@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 
+use super::{Error, Result};
 #[cfg(feature = "kv-tikv")]
 use crate::kvs::tikv::TiKVStamp;
-
-use super::{Error, Result};
 
 /// The kind of implementation of a version stamp.
 /// Should not be created manually but retrieved from the KV store.

@@ -4,12 +4,11 @@ use std::ops::Range;
 
 use futures::stream::Stream;
 
-use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
-
 use super::api::Transactable;
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
 use super::{IntoBytes, Key, Result, Val, Version};
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
