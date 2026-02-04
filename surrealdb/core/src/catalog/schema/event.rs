@@ -9,7 +9,7 @@ use crate::sql::statements::define::DefineKind;
 use crate::sql::{self};
 use crate::val::{TableName, Value};
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
@@ -21,13 +21,35 @@ pub struct EventDefinition {
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
+	/// Whether this event should be queued for async processing.
+	#[revision(start = 3, default_fn = "default_event_kind")]
+	pub(crate) kind: EventKind,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum EventKind {
+	Sync,
+	Async {
+		/// Maximum retry count for async events (0 disables retries; event still runs once).
+		retry: u16,
+		/// Maximum async event nesting depth for this event (0 allows top-level only).
+		max_depth: u16,
+	},
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
 // non-breaking way
 impl EventDefinition {
+	pub(crate) const DEFAULT_RETRY: u16 = 1;
+	pub(crate) const DEFAULT_MAX_DEPTH: u16 = 3;
+
 	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
+	}
+
+	fn default_event_kind(_revision: u16) -> Result<EventKind, revision::Error> {
+		Ok(EventKind::Sync)
 	}
 }
 
@@ -46,19 +68,50 @@ impl EventDefinition {
 				.clone()
 				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+			event_kind: self.kind.clone(),
+		}
+	}
+
+	pub(crate) fn retry(&self) -> u16 {
+		match self.kind {
+			EventKind::Sync => 0,
+			EventKind::Async {
+				retry,
+				..
+			} => retry,
+		}
+	}
+
+	pub(crate) fn max_depth(&self) -> u16 {
+		match self.kind {
+			EventKind::Sync => 0,
+			EventKind::Async {
+				max_depth,
+				..
+			} => max_depth,
 		}
 	}
 }
 
 impl InfoStructure for EventDefinition {
 	fn structure(self) -> Value {
-		Value::from(map! {
+		let mut map = map! {
 			"name".to_string() => self.name.into(),
 			"what".to_string() => self.target_table.into(),
 			"when".to_string() => self.when.structure(),
 			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
+		};
+		if let EventKind::Async {
+			retry,
+			max_depth,
+		} = &self.kind
+		{
+			map.insert("async".to_string(), Value::Bool(true));
+			map.insert("retry".to_string(), (*retry).into());
+			map.insert("maxdepth".to_string(), (*max_depth).into());
+		}
+		Value::from(map)
 	}
 }
 

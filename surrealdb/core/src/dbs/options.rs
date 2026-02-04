@@ -31,7 +31,7 @@ pub struct Options {
 	/// The currently selected Database
 	pub(crate) db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
-	dive: u32,
+	pub(crate) dive: u32,
 	/// Connection authentication data
 	pub(crate) auth: Arc<Auth>,
 	/// Is authentication enabled on this datastore?
@@ -50,6 +50,8 @@ pub struct Options {
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
 	/// Configuration parameters that can be dynamically changed
 	dynamic_configuration: DynamicConfiguration,
+	/// Tracks async event nesting depth for enforcing event MAXDEPTH.
+	async_event_depth: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +89,7 @@ impl Options {
 			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			async_event_depth: None,
 			dynamic_configuration,
 		}
 	}
@@ -172,6 +175,13 @@ impl Options {
 	// Set the version
 	pub fn with_version(mut self, version: Option<u64>) -> Self {
 		self.version = version;
+		self
+	}
+
+	/// Set the current async event nesting depth (0 for top-level).
+	/// Used to enforce MAXDEPTH when async events trigger async events.
+	pub fn with_async_event_depth(mut self, depth: u16) -> Self {
+		self.async_event_depth = Some(depth);
 		self
 	}
 
@@ -289,15 +299,31 @@ impl Options {
 		self.ns.as_deref().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
 	}
 
+	pub(crate) fn arc_ns(&self) -> Result<Arc<str>> {
+		self.ns.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+	}
+
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str> {
 		self.db.as_deref().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
 	}
 
+	pub(crate) fn arc_db(&self) -> Result<Arc<str>> {
+		self.db.clone().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
+	}
+
 	/// Get currently selected NS and DB
 	#[inline(always)]
 	pub fn ns_db(&self) -> Result<(&str, &str)> {
+		Ok((self.ns()?, self.db()?))
+	}
+
+	pub(crate) fn arc_ns_db(&self) -> Result<(Arc<str>, Arc<str>)> {
+		Ok((self.arc_ns()?, self.arc_db()?))
+	}
+
+	pub fn ns_db_arc(&self) -> Result<(&str, &str)> {
 		Ok((self.ns()?, self.db()?))
 	}
 
@@ -414,6 +440,10 @@ impl Options {
 	/// via `ALTER SYSTEM QUERY_TIMEOUT ...`.
 	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
 		&self.dynamic_configuration
+	}
+
+	pub(crate) fn async_event_depth(&self) -> Option<u16> {
+		self.async_event_depth
 	}
 }
 

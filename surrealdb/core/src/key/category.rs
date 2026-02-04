@@ -35,6 +35,8 @@ pub enum Category {
 	RootConfig,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
+	/// crate::key::root::eq                 /!eq{ns}{db}{tb}{ev}{ts}{nid}
+	EventQueue,
 	///
 	/// ------------------------------
 	///
@@ -283,6 +285,7 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::EventQueue => "EventQueue",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
 		};
