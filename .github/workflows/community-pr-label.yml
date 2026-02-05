@@ -43,7 +43,7 @@ jobs:
               'tobiemh',
             ];
 
-            const author = context.payload.pull_request.user.login;
+            const author = context.payload.pull_request.user.login.toLowerCase();
             console.log('PR Author:', author);
 
             if (!CORE_TEAM.includes(author)) {
