@@ -333,6 +333,83 @@ async fn field_assert_subquery_permissions() -> Result<()> {
 }
 
 #[tokio::test]
+async fn field_assert_subquery_with_where_clause() -> Result<()> {
+	// A SELECT subquery with WHERE inside ASSERT returns empty results
+	let sql = "
+		DEFINE TABLE account SCHEMAFULL
+			PERMISSIONS FOR select, create, update FULL;
+		DEFINE FIELD name ON account TYPE string;
+		DEFINE TABLE email_address SCHEMAFULL
+			PERMISSIONS FOR select, create FULL;
+		DEFINE FIELD address ON email_address TYPE string;
+		DEFINE TABLE has_email TYPE RELATION SCHEMAFULL
+			PERMISSIONS FOR select, create FULL;
+		DEFINE FIELD verified ON has_email TYPE bool DEFAULT true;
+		DEFINE FIELD email ON account TYPE option<record<email_address>>
+			ASSERT $value = NONE OR
+				$value IN (SELECT VALUE out FROM has_email
+					WHERE in = $this.id
+						AND out = $value
+						AND verified = true
+				);
+	";
+	let dbs = new_ds("test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = dbs.execute(sql, &ses, None).await?;
+	for r in &res {
+		r.result.as_ref().unwrap();
+	}
+
+	let sql = "
+		CREATE account:alpha SET name = 'alpha';
+		CREATE email_address:one SET address = 'alpha@test.com';
+		RELATE account:alpha->has_email->email_address:one SET verified = true;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	for _ in 0..3 {
+		res.remove(0).result.unwrap();
+	}
+
+	// Verify the subquery works outside of ASSERT context
+	let sql = "SELECT VALUE out FROM has_email WHERE in = account:alpha AND out = email_address:one AND verified = true";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let tmp = res.remove(0).result?;
+	let val = syn::value("[email_address:one]").unwrap();
+	assert_eq!(tmp, val, "Subquery should return results outside ASSERT");
+
+	// The ASSERT subquery should find the has_email relation and pass
+	let sql = "UPDATE account:alpha SET email = email_address:one";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[
+			{
+				id: account:alpha,
+				email: email_address:one,
+				name: 'alpha',
+			},
+		]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val, "ASSERT with WHERE clause subquery should pass when relation exists");
+
+	// ASSERT correctly rejects invalid values
+	let sql = "CREATE email_address:two SET address = 'other@test.com'";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	res.remove(0).result.unwrap();
+
+	let sql = "UPDATE account:alpha SET email = email_address:two";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert!(
+		res.remove(0).result.is_err(),
+		"ASSERT should reject value when no matching relation exists"
+	);
+
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_readonly() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
