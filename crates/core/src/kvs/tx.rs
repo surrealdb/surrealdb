@@ -74,7 +74,7 @@ impl Transaction {
 
 	pub(super) async fn lock_pending_index_batches<'a>(
 		&'a self,
-	) -> MutexGuard<'a, HashMap<SharedIndexKey, (u32, SharedQueueSequences)>> {
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>> {
 		self.pending_index_batches.lock().await
 	}
 
@@ -119,7 +119,11 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<(), Error> {
 		// Remove any pending index batches for this transaction.
-		for (_, (batch_id, queue)) in self.lock_pending_index_batches().await.drain() {
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, queue)) in batches {
 			queue.write().await.clean_batch(batch_id);
 		}
 		self.lock().await.cancel().await
