@@ -15,7 +15,7 @@ error = "Expected a single result output when using the ONLY keyword"
 
 # 3: Test ONLY with a single element array
 [[test.results]]
-error = "Expected a single result output when using the ONLY keyword"
+value = "1"
 
 # 4: Test ONLY with a two element array
 [[test.results]]

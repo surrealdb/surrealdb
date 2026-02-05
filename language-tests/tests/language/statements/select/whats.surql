@@ -79,11 +79,11 @@ value = "['bob']"
 
 # 19
 [[test.results]]
-value = "[]"
+value = "[NONE]"
 
 # 20
 [[test.results]]
-value = "[]"
+value = "[NULL]"
 
 # 21
 [[test.results]]
@@ -91,7 +91,7 @@ value = "NONE"
 
 # 22
 [[test.results]]
-value = "NONE"
+value = "NULL"
 */
 
 # 0: Setup

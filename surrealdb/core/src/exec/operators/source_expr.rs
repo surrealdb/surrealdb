@@ -59,10 +59,6 @@ impl ExecOperator for SourceExpr {
 				.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
 
 			match value {
-				// None and Null yield no rows
-				Value::None | Value::Null => {
-					// Empty stream - don't yield anything
-				}
 				// Arrays yield their elements
 				Value::Array(arr) => {
 					if !arr.is_empty() {
