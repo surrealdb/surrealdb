@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::time::Instant;
+use tokio::time::{Instant, sleep};
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -305,7 +305,13 @@ impl Appending {
 
 #[revisioned(revision = 2)]
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub(crate) struct PrimaryAppending(AppendingId, BatchId);
+pub(crate) struct PrimaryAppending(
+	/// Appending id within the queue.
+	AppendingId,
+	/// Batch id owning the append.
+	#[revision(start = 2)]
+	BatchId,
+);
 
 pub(crate) type BatchId = u32;
 pub(crate) type AppendingId = u32;
@@ -644,24 +650,32 @@ impl Building {
 					tx.cancel().await?;
 					keys
 				};
-				if keys.is_empty() {
-					// If the batch is empty, we are done.
-					// Due to the lock on self.queue, we know that no external process can add an
-					// item to the queue.
+				let pending = queue.pending() as usize;
+				if keys.is_empty() && pending == 0 {
+					// If the batch is empty, and there are no pending left, we are done.
+					// Due to the lock on self.queue, we know that no external process can't add an
+					// item to the queue. So we know the concurrent indexing is completed.
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
-						pending: Some(queue.pending() as usize),
+						pending: Some(pending),
 						updated: Some(updates_count),
 					})
 					.await;
-					// This is here to be sure the lock on the queue is not released early.
-					drop(queue);
 					break;
 				}
+				// Pending appends exist but none are committed yet; wait and retry.
+				self.set_status(BuildingStatus::Indexing {
+					initial: Some(initial_count),
+					pending: Some(pending),
+					updated: Some(updates_count),
+				})
+				.await;
+				drop(queue);
 				keys
 			};
-			// Create a new context with a write transaction
-			{
+			if !keys.is_empty() {
+				// We have appendings to index.
+				// Create a new context with a write transaction
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
 				let indexed = catch!(
@@ -673,6 +687,9 @@ impl Building {
 				if !indexed.is_empty() {
 					self.queue.write().await.clean(indexed);
 				}
+			} else {
+				// No appends yet, but pending in process, let's wait
+				sleep(Duration::from_millis(100)).await;
 			}
 		}
 		Ok(())
