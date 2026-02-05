@@ -52,7 +52,7 @@ pub(crate) enum Iterable {
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
 	Lookup {
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: NsDbCtx,
 		kind: LookupKind,
 		from: RecordId,
 		what: Vec<ComputedLookupSubject>,
@@ -252,7 +252,7 @@ impl Iterator {
 					self.prepare_lookup(
 						ctx,
 						opt,
-						stm_ctx.stm,
+						stm_ctx,
 						doc_ctx,
 						from,
 						lookup.kind.clone(),
@@ -424,17 +424,17 @@ impl Iterator {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn prepare_lookup(
 		&mut self,
-		ctx: &FrozenContext,
-		opt: &Options,
-		stm: &Statement<'_>,
+		_ctx: &FrozenContext,
+		_opt: &Options,
+		stm_ctx: &StatementContext<'_>,
 		doc_ctx: &NsDbCtx,
 		from: RecordId,
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,
 	) -> Result<()> {
-		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
 		// Check if this is a create statement
-		if stm.is_create() {
+		if stm_ctx.stm.is_create() {
 			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
 				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
@@ -451,31 +451,9 @@ impl Iterator {
 			})
 		}
 
-		let txn = ctx.tx();
-		let tb = if stm.requires_table_existence() {
-			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?
-		} else {
-			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?
-		};
-		let fields = txn
-			.all_tb_fields(
-				doc_ctx.ns.namespace_id,
-				doc_ctx.db.database_id,
-				&from.table,
-				opt.version,
-			)
-			.await?;
-
-		let doc_ctx = NsDbTbCtx {
-			ns: Arc::clone(&doc_ctx.ns),
-			db: Arc::clone(&doc_ctx.db),
-			tb,
-			fields,
-		};
-
 		// Add the record to the iterator
 		self.ingest(Iterable::Lookup {
-			doc_ctx,
+			doc_ctx: doc_ctx.clone(),
 			from,
 			kind,
 			what,
@@ -652,7 +630,7 @@ impl Iterator {
 							.prepare_lookup(
 								ctx,
 								opt,
-								stm_ctx.stm,
+								stm_ctx,
 								doc_ctx,
 								from,
 								lookup.kind.clone(),

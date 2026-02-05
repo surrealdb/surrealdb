@@ -204,6 +204,135 @@ async fn field_definition_edge_permissions() -> Result<()> {
 }
 
 #[tokio::test]
+async fn field_computed_graph_query_permissions() -> Result<()> {
+	// Setup: Define tables with permissions and a COMPUTED field that does a graph traversal
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL
+			PERMISSIONS FOR select FULL;
+		DEFINE FIELD name ON person TYPE string;
+		DEFINE TABLE account SCHEMAFULL
+			PERMISSIONS FOR select WHERE id = $auth;
+		DEFINE FIELD name ON account TYPE string;
+		DEFINE TABLE has_account TYPE RELATION SCHEMAFULL
+			PERMISSIONS FOR select FULL;
+		DEFINE FIELD person ON account COMPUTED <-has_account[0].in ?? NONE;
+		DEFINE ACCESS account_access ON DATABASE TYPE RECORD
+			SIGNUP (CREATE account SET name = $name)
+			SIGNIN (SELECT * FROM account WHERE name = $name);
+	";
+	let dbs = new_ds("test", "test").await?.with_auth_enabled(true);
+	let owner_ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &owner_ses, None).await?;
+	// 7 DEFINE statements
+	for _ in 0..7 {
+		res.remove(0).result.unwrap();
+	}
+
+	// Create data as owner
+	let sql = "
+		CREATE person:one SET name = 'Alice';
+		CREATE account:alpha SET name = 'alpha';
+		RELATE person:one->has_account->account:alpha;
+	";
+	let res = &mut dbs.execute(sql, &owner_ses, None).await?;
+	assert_eq!(res.len(), 3);
+	for _ in 0..3 {
+		res.remove(0).result.unwrap();
+	}
+
+	// Query as record-authenticated user (account:alpha)
+	let ses = Session::for_record(
+		"test",
+		"test",
+		"account_access",
+		Value::RecordId(RecordId::new("account", "alpha".to_string())),
+	);
+	let sql = "SELECT * FROM account:alpha";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[
+			{
+				id: account:alpha,
+				name: 'alpha',
+				person: person:one,
+			},
+		]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn field_assert_subquery_permissions() -> Result<()> {
+	// Setup: Define tables with an ASSERT that uses a graph sub-query
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL
+			PERMISSIONS FOR select, create FULL;
+		DEFINE FIELD name ON person TYPE string;
+		DEFINE TABLE account SCHEMAFULL
+			PERMISSIONS FOR select, create, update FULL;
+		DEFINE FIELD name ON account TYPE string;
+		DEFINE TABLE has_account TYPE RELATION SCHEMAFULL
+			PERMISSIONS FOR select, create FULL;
+		DEFINE FIELD verified ON account TYPE bool
+			DEFAULT false
+			ASSERT $value = false OR (<-has_account.in IS NOT NONE);
+		DEFINE ACCESS account_access ON DATABASE TYPE RECORD
+			SIGNUP (CREATE account SET name = $name)
+			SIGNIN (SELECT * FROM account WHERE name = $name);
+	";
+	let dbs = new_ds("test", "test").await?.with_auth_enabled(true);
+	let owner_ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &owner_ses, None).await?;
+	// 7 DEFINE statements
+	for _ in 0..7 {
+		res.remove(0).result.unwrap();
+	}
+
+	// Create data as owner
+	let sql = "
+		CREATE person:one SET name = 'Alice';
+		CREATE account:alpha SET name = 'alpha';
+		RELATE person:one->has_account->account:alpha;
+	";
+	let res = &mut dbs.execute(sql, &owner_ses, None).await?;
+	assert_eq!(res.len(), 3);
+	for _ in 0..3 {
+		res.remove(0).result.unwrap();
+	}
+
+	// Now try to set verified=true as record-authenticated user
+	// The ASSERT should pass because <-has_account.in IS NOT NONE
+	let ses = Session::for_record(
+		"test",
+		"test",
+		"account_access",
+		Value::RecordId(RecordId::new("account", "alpha".to_string())),
+	);
+	let sql = "UPDATE account:alpha SET verified = true";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[
+			{
+				id: account:alpha,
+				name: 'alpha',
+				verified: true,
+			},
+		]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
+
+#[tokio::test]
 async fn field_definition_readonly() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
