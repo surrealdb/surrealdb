@@ -392,15 +392,16 @@ struct Appending {
 }
 
 /// Identifies the primary appending entry for a record.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Serialize, Deserialize, Debug)]
 #[non_exhaustive]
-struct PrimaryAppending {
+struct PrimaryAppending(
 	/// Appending id within the queue.
-	appending_id: AppendingId,
+	AppendingId,
 	/// Batch id owning the append.
-	batch_id: BatchId,
-}
+	#[revision(start = 2)]
+	BatchId,
+);
 
 pub(crate) type BatchId = u32;
 pub(crate) type AppendingId = u32;
@@ -629,15 +630,7 @@ impl Building {
 		let ip = self.new_ip_key(rid.id.clone())?;
 		if tx.get(ip.clone(), None).await?.is_none() {
 			// If not, we set it
-			tx.set(
-				ip,
-				revision::to_vec(&PrimaryAppending {
-					appending_id,
-					batch_id,
-				})?,
-				None,
-			)
-			.await?;
+			tx.set(ip, revision::to_vec(&PrimaryAppending(appending_id, batch_id))?, None).await?;
 		}
 		// Free the queue
 		drop(queue);
@@ -844,7 +837,7 @@ impl Building {
 			if let Some(v) = tx.get(ip, None).await? {
 				// Then we take the old value of the appending value as the initial indexing value
 				let pa: PrimaryAppending = revision::from_slice(&v)?;
-				let ib = self.new_ib_key(pa.appending_id, pa.batch_id)?;
+				let ib = self.new_ib_key(pa.0, pa.1)?;
 				let v = tx
 					.get(ib, None)
 					.await?
