@@ -425,7 +425,7 @@ impl Default for QueueSequences {
 		Self {
 			pending: 0,
 			next_appending: 0,
-			// Batch IDs are 1-based; 0 indicates no batch in the transaction.
+			// Batch IDs are 1-based; 0 is reserved for legacy/missing batch ids.
 			next_batch: 1,
 			batches: Default::default(),
 		}
@@ -434,6 +434,7 @@ impl Default for QueueSequences {
 
 impl QueueSequences {
 	const DEFAULT_NEXT_BATCH_ID: u32 = 1;
+	const NO_BATCH_ID: u32 = 0;
 
 	fn is_empty(&self) -> bool {
 		self.pending == 0
@@ -685,6 +686,7 @@ impl Building {
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
+		let mut v1_appending_sentinel = false;
 		// Set the initial status
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
@@ -717,7 +719,14 @@ impl Building {
 				// Index the batch
 				catch!(
 					tx,
-					self.index_initial_batch(&ctx, &tx, batch.result, &mut initial_count).await
+					self.index_initial_batch(
+						&ctx,
+						&tx,
+						batch.result,
+						&mut initial_count,
+						&mut v1_appending_sentinel
+					)
+					.await
 				);
 				tx.commit().await?;
 			}
@@ -817,6 +826,7 @@ impl Building {
 		tx: &Transaction,
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
+		v1_appending_sentinel: &mut bool,
 	) -> Result<(), Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
@@ -830,28 +840,20 @@ impl Building {
 			let val: Value = revision::from_slice(&v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
-			let opt_values;
-
 			// Do we already have an appended value?
-			let ip = self.new_ip_key(rid.id.clone())?;
-			if let Some(v) = tx.get(ip, None).await? {
-				// Then we take the old value of the appending value as the initial indexing value
-				let pa: PrimaryAppending = revision::from_slice(&v)?;
-				let ib = self.new_ib_key(pa.0, pa.1)?;
-				let v = tx
-					.get(ib, None)
-					.await?
-					.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
-				let a: Appending = revision::from_slice(&v)?;
-				opt_values = a.old_values;
+			let opt_values = if let Some(a) =
+				self.check_existing_primary_appending(tx, &rid.id, v1_appending_sentinel).await?
+			{
+				a.old_values
 			} else {
 				// Otherwise, we normally proceed to the indexing
 				let doc = CursorDoc::new(Some(rid.clone()), None, val);
-				opt_values = stack
+				let opt_values = stack
 					.enter(|stk| Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc))
 					.finish()
 					.await?;
-			}
+				opt_values
+			};
 
 			// Index the record
 			let mut io =
@@ -871,6 +873,37 @@ impl Building {
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
 		Ok(())
+	}
+
+	async fn check_existing_primary_appending(
+		&self,
+		tx: &Transaction,
+		id: &Id,
+		v1_appending_sentinel: &mut bool,
+	) -> Result<Option<Appending>, Error> {
+		let ip = self.new_ip_key(id.clone())?;
+		let Some(v) = tx.get(&ip, None).await? else {
+			return Ok(None);
+		};
+		// Then we take the old value of the appending value as the initial indexing value
+		let pa: PrimaryAppending = revision::from_slice(&v)?;
+		if pa.1 == QueueSequences::NO_BATCH_ID {
+			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
+			// We can't resolve it to a v2 !ib record, so drop the marker and ignore the legacy queue.
+			tx.del(ip).await?;
+			if !*v1_appending_sentinel {
+				*v1_appending_sentinel = true;
+				warn!("Found legacy v1 primary appending entry from an older version; legacy queued updates will be ignored. Consider rebuilding index {} on table {}.", self.ix.name, self.ix.what);
+			}
+			return Ok(None);
+		}
+		let ib = self.new_ib_key(pa.0, pa.1)?;
+		let v = tx
+			.get(ib, None)
+			.await?
+			.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
+		let a: Appending = revision::from_slice(&v)?;
+		Ok(Some(a))
 	}
 
 	/// Index a batch of records from the appending queue.
