@@ -5,10 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
-use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef, select_access_path};
+use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::{FullTextScan, IndexScan};
 use crate::exec::permission::{
@@ -27,29 +27,11 @@ use crate::expr::{Cond, ControlFlow};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::record;
-use crate::kvs::{KVKey, KVValue, Key};
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::kvs::{KVKey, KVValue};
+use crate::val::{RecordIdKey, TableName, Value};
 
 /// Batch size for collecting records before yielding.
 const BATCH_SIZE: usize = 1000;
-
-/// Represents the target of a scan operation.
-enum ScanTarget {
-	/// Scan all records in a table
-	Table(TableName),
-	/// Scan a specific record or range by RecordId
-	RecordId(RecordId),
-}
-
-impl ScanTarget {
-	/// Get the table name for permission lookup
-	fn table_name(&self) -> TableName {
-		match self {
-			ScanTarget::Table(t) => t.clone(),
-			ScanTarget::RecordId(rid) => rid.table.clone(),
-		}
-	}
-}
 
 /// Full table scan - iterates over all records in a table.
 ///
@@ -114,14 +96,275 @@ impl ExecOperator for Scan {
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
-			let mut executor = ScanExecutor::init(&ctx, source_expr, version, check_perms, cond, order, with).await?;
+			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+			let txn = Arc::clone(ctx.txn());
+			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+			let db = Arc::clone(&db_ctx.db);
 
-			while let Some(batch) = executor.next_batch().await? {
-				yield batch;
+			// Evaluate table expression
+			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+			let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
+			})?;
+
+			// Determine scan target: either a table name or a record ID
+			let (table_name, rid) = match table_value {
+				Value::String(s) => (TableName::from(s), None),
+				Value::Table(t) => (t, None),
+				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
+				Value::None => {
+					// Return early with NONE
+					yield ValueBatch { values: vec![Value::None] };
+					return;
+				}
+				Value::Array(arr) => {
+					yield ValueBatch { values: arr.0 };
+					return;
+				}
+				_ => {
+					Err(ControlFlow::Err(anyhow::anyhow!(
+						"Table expression must evaluate to a string, table, or record ID, got: {:?}",
+						table_value
+					)))?
+				}
+			};
+
+			// Check table existence and resolve SELECT permission
+			let table_def = txn
+				.get_tb_by_name(&ns.name, &db.name, &table_name)
+				.await
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
+
+			if table_def.is_none() {
+				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+					name: table_name.clone(),
+				})))?;
+			}
+
+			let select_permission = if check_perms {
+				let catalog_perm = match &table_def {
+					Some(def) => def.permissions.select.clone(),
+					None => Permission::None,
+				};
+				convert_permission_to_physical(&catalog_perm, ctx.ctx()).map_err(|e| {
+					ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}"))
+				})?
+			} else {
+				PhysicalPermission::Allow
+			};
+
+			// Early exit if denied
+			if matches!(select_permission, PhysicalPermission::Deny) {
+				return;
+			}
+
+			// Lazy field state (initialized on first batch)
+			let mut field_state: Option<FieldState> = None;
+
+			match rid {
+				// === POINT LOOKUP (single record by ID) ===
+				Some(rid) if !matches!(rid.key, RecordIdKey::Range(_)) => {
+					let record = txn
+						.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
+						.await
+						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
+
+					if record.data.as_ref().is_none() {
+						return;
+					}
+
+					let mut value = record.data.as_ref().clone();
+					value.def(&rid);
+
+					if check_permission(&select_permission, &value, &ctx).await? {
+						let mut batch = vec![value];
+						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+						yield ValueBatch { values: batch };
+					}
+				}
+
+				// === RANGE SCAN (record ID with range key) ===
+				Some(rid) => {
+					let RecordIdKey::Range(range) = &rid.key else { unreachable!() };
+
+					let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
+					let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+
+					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+					futures::pin_mut!(kv_stream);
+
+					let mut batch = Vec::with_capacity(BATCH_SIZE);
+					while let Some(result) = kv_stream.next().await {
+						let (key, val) = result
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+						let value = decode_record(&key, val)?;
+
+						if check_permission(&select_permission, &value, &ctx).await? {
+							batch.push(value);
+							if batch.len() >= BATCH_SIZE {
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+								let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+								yield ValueBatch { values: ready };
+							}
+						}
+					}
+
+					if !batch.is_empty() {
+						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+						yield ValueBatch { values: batch };
+					}
+				}
+
+				// === TABLE SCAN (with optional index selection) ===
+				None => {
+					// Determine if we should use an index
+					let access_path = if matches!(&with, Some(With::NoIndex)) {
+						None
+					} else {
+						let indexes = txn
+							.all_tb_indexes(ns.namespace_id, db.database_id, &table_name)
+							.await
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}")))?;
+
+						let analyzer = IndexAnalyzer::new(&table_name, indexes, with.as_ref());
+						let candidates = analyzer.analyze(cond.as_ref(), order.as_ref());
+						let direction = determine_scan_direction(&order);
+						Some(select_access_path(table_name.clone(), candidates, with.as_ref(), direction))
+					};
+
+					match access_path {
+						// B-tree index scan (single-column only)
+						Some(AccessPath::BTreeScan { index_ref, access, direction }) if index_ref.cols.len() == 1 => {
+							let operator = IndexScan { index_ref, access, direction, table_name: table_name.clone() };
+							let mut stream = operator.execute(&ctx)?;
+							while let Some(batch_result) = stream.next().await {
+								yield batch_result?;
+							}
+						}
+
+						// Full-text search
+						Some(AccessPath::FullTextSearch { index_ref, query, operator }) => {
+							let ft_op = FullTextScan { index_ref, query, operator, table_name: table_name.clone() };
+							let mut stream = ft_op.execute(&ctx)?;
+							while let Some(batch_result) = stream.next().await {
+								yield batch_result?;
+							}
+						}
+
+						// Fall back to table scan (NOINDEX, compound indexes, KNN, etc.)
+						_ => {
+							let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)
+								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
+							let end = record::suffix(ns.namespace_id, db.database_id, &table_name)
+								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
+
+							let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+							futures::pin_mut!(kv_stream);
+
+							let mut batch = Vec::with_capacity(BATCH_SIZE);
+							while let Some(result) = kv_stream.next().await {
+								let (key, val) = result
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+								let value = decode_record(&key, val)?;
+
+								if check_permission(&select_permission, &value, &ctx).await? {
+									batch.push(value);
+									if batch.len() >= BATCH_SIZE {
+										ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+										process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+										let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+										yield ValueBatch { values: ready };
+									}
+								}
+							}
+
+							if !batch.is_empty() {
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+								yield ValueBatch { values: batch };
+							}
+						}
+					}
+				}
 			}
 		};
 
 		Ok(Box::pin(stream))
+	}
+}
+
+/// Determine scan direction from ORDER BY clause.
+/// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
+fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
+	use crate::expr::order::Ordering as OrderingType;
+	if let Some(OrderingType::Order(order_list)) = order
+		&& let Some(first) = order_list.0.first()
+		&& !first.direction
+		&& first.value.is_id()
+	{
+		ScanDirection::Backward
+	} else {
+		ScanDirection::Forward
+	}
+}
+
+/// Check if a value passes the permission check.
+async fn check_permission(
+	permission: &PhysicalPermission,
+	value: &Value,
+	ctx: &ExecutionContext,
+) -> Result<bool, ControlFlow> {
+	check_permission_for_value(permission, value, ctx)
+		.await
+		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))
+}
+
+/// Compute the start key for a range scan.
+fn range_start_key(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	table: &TableName,
+	bound: &Bound<RecordIdKey>,
+) -> Result<crate::kvs::Key, ControlFlow> {
+	match bound {
+		Bound::Unbounded => record::prefix(ns_id, db_id, table)
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}"))),
+		Bound::Included(v) => record::new(ns_id, db_id, table, v)
+			.encode_key()
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}"))),
+		Bound::Excluded(v) => {
+			let mut key = record::new(ns_id, db_id, table, v).encode_key().map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}"))
+			})?;
+			key.push(0x00);
+			Ok(key)
+		}
+	}
+}
+
+/// Compute the end key for a range scan.
+fn range_end_key(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	table: &TableName,
+	bound: &Bound<RecordIdKey>,
+) -> Result<crate::kvs::Key, ControlFlow> {
+	match bound {
+		Bound::Unbounded => record::suffix(ns_id, db_id, table)
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}"))),
+		Bound::Excluded(v) => record::new(ns_id, db_id, table, v)
+			.encode_key()
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}"))),
+		Bound::Included(v) => {
+			let mut key = record::new(ns_id, db_id, table, v)
+				.encode_key()
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?;
+			key.push(0x00);
+			Ok(key)
+		}
 	}
 }
 
@@ -165,594 +408,17 @@ struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
-/// The active scan mode with its associated state
-enum ScanMode {
-	/// KV stream iteration (used for both table and range scans)
-	/// Stores the key range (begin, end)
-	KvStream {
-		beg: Key,
-		end: Key,
-	},
-	/// Single record point lookup
-	PointLookup {
-		rid: RecordId,
-		done: bool,
-	},
-	/// Delegate to an index operator (IndexScan, FullTextScan, KnnScan)
-	IndexDelegate(IndexDelegateMode),
-	/// Scan complete
-	Done,
-}
-
-/// Mode for delegating to specialized index operators.
-#[derive(Clone)]
-enum IndexDelegateMode {
-	/// B-tree index scan (Idx or Uniq)
-	BTree {
-		index_ref: IndexRef,
-		access: BTreeAccess,
-		direction: ScanDirection,
-		table_name: TableName,
-	},
-	/// Full-text search scan
-	FullText {
-		index_ref: IndexRef,
-		query: String,
-		operator: crate::expr::operator::MatchesOperator,
-		table_name: TableName,
-	},
-	// NOTE: Future variants when operators are implemented:
-	// /// KNN vector search scan
-	// Knn { index_ref, vector, k, ef, table_name },
-}
-
-/// Executes a scan operation, managing state across batch yields.
-struct ScanExecutor {
-	ctx: ExecutionContext,
-	table_name: TableName,
-	select_permission: PhysicalPermission,
+/// Ensure field state is initialized, building it if necessary.
+async fn ensure_field_state(
+	field_state: &mut Option<FieldState>,
+	ctx: &ExecutionContext,
+	table_name: &TableName,
 	check_perms: bool,
-	version: Option<u64>,
-	field_state: Option<FieldState>,
-	batch: Vec<Value>,
-	mode: ScanMode,
-}
-
-impl ScanExecutor {
-	/// Initialize a new ScanExecutor by evaluating the source expression,
-	/// resolving permissions, and creating the appropriate scan mode.
-	///
-	/// When the source is a table, index selection is performed based on
-	/// the provided WHERE condition, ORDER BY clause, and WITH hints.
-	async fn init(
-		ctx: &ExecutionContext,
-		source_expr: Arc<dyn PhysicalExpr>,
-		version: Option<u64>,
-		check_perms: bool,
-		cond: Option<Cond>,
-		order: Option<Ordering>,
-		with: Option<With>,
-	) -> Result<Self, ControlFlow> {
-		let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
-		let txn = Arc::clone(ctx.txn());
-		let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-		let db = Arc::clone(&db_ctx.db);
-
-		// Evaluate table expression
-		let eval_ctx = EvalContext::from_exec_ctx(ctx);
-		let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
-			ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
-		})?;
-
-		// Determine scan target: either a table name or a record ID
-		let scan_target = match table_value {
-			Value::String(s) => ScanTarget::Table(TableName::from(s)),
-			Value::Table(t) => ScanTarget::Table(t),
-			Value::RecordId(rid) => ScanTarget::RecordId(rid),
-			_ => {
-				return Err(ControlFlow::Err(anyhow::anyhow!(
-					"Table expression must evaluate to a string, table, or record ID, got: {:?}",
-					table_value
-				)));
-			}
-		};
-
-		// Get table name for permission lookup
-		let table_name = scan_target.table_name();
-
-		// Check table existence and resolve SELECT permission
-		let table_def = txn
-			.get_tb_by_name(&ns.name, &db.name, &table_name)
-			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
-
-		// For SELECT queries, the table must exist (unless it's schemaless and we allow creation)
-		// Check if the table is defined; if not, return TbNotFound error
-		if table_def.is_none() {
-			return Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-				name: table_name.clone(),
-			})));
-		}
-
-		let select_permission = if check_perms {
-			let catalog_perm = match &table_def {
-				Some(def) => def.permissions.select.clone(),
-				None => Permission::None, // Should not reach here after above check
-			};
-
-			convert_permission_to_physical(&catalog_perm, ctx.ctx()).map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}"))
-			})?
-		} else {
-			PhysicalPermission::Allow
-		};
-
-		// Early exit if denied - mode is Done
-		if matches!(select_permission, PhysicalPermission::Deny) {
-			return Ok(Self {
-				ctx: ctx.clone(),
-				table_name,
-				select_permission,
-				check_perms,
-				version,
-				field_state: None,
-				batch: Vec::new(),
-				mode: ScanMode::Done,
-			});
-		}
-
-		// Create the appropriate scan mode
-		let mode = match scan_target {
-			ScanTarget::Table(table_name_ref) => {
-				// Check for WITH NOINDEX - skip index selection and do full table scan
-				if matches!(&with, Some(With::NoIndex)) {
-					let beg = record::prefix(ns.namespace_id, db.database_id, &table_name_ref)
-						.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}"))
-						})?;
-					let end = record::suffix(ns.namespace_id, db.database_id, &table_name_ref)
-						.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}"))
-						})?;
-					ScanMode::KvStream {
-						beg,
-						end,
-					}
-				} else {
-					// Fetch indexes for this table
-					let indexes = txn
-						.all_tb_indexes(ns.namespace_id, db.database_id, &table_name_ref)
-						.await
-						.map_err(|e| {
-							ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}"))
-						})?;
-
-					// Analyze and select access path
-					let analyzer = IndexAnalyzer::new(&table_name_ref, indexes, with.as_ref());
-					let candidates = analyzer.analyze(cond.as_ref(), order.as_ref());
-
-					// Determine scan direction from ORDER BY
-					let direction = Self::determine_scan_direction(&order);
-
-					// Select the best access path
-					let access_path = select_access_path(
-						table_name_ref.clone(),
-						candidates,
-						with.as_ref(),
-						direction,
-					);
-
-					// Create appropriate scan mode based on access path
-					match access_path {
-						AccessPath::BTreeScan {
-							index_ref,
-							access,
-							direction,
-						} => {
-							// Check if this is a compound index (multiple columns).
-							// The IndexScan operator currently only supports single-column
-							// indexes properly. For compound indexes, fall back to table scan.
-							let is_compound_index = index_ref.cols.len() > 1;
-							if is_compound_index {
-								// Fall back to table scan for compound indexes
-								let beg = record::prefix(
-									ns.namespace_id,
-									db.database_id,
-									&table_name_ref,
-								)
-								.map_err(|e| {
-									ControlFlow::Err(anyhow::anyhow!(
-										"Failed to create prefix key: {e}"
-									))
-								})?;
-								let end = record::suffix(
-									ns.namespace_id,
-									db.database_id,
-									&table_name_ref,
-								)
-								.map_err(|e| {
-									ControlFlow::Err(anyhow::anyhow!(
-										"Failed to create suffix key: {e}"
-									))
-								})?;
-								ScanMode::KvStream {
-									beg,
-									end,
-								}
-							} else {
-								// IndexScan operator is implemented for single-column indexes
-								ScanMode::IndexDelegate(IndexDelegateMode::BTree {
-									index_ref,
-									access,
-									direction,
-									table_name: table_name_ref,
-								})
-							}
-						}
-						AccessPath::FullTextSearch {
-							index_ref,
-							query,
-							operator,
-						} => ScanMode::IndexDelegate(IndexDelegateMode::FullText {
-							index_ref,
-							query,
-							operator,
-							table_name: table_name_ref,
-						}),
-						// NOTE: KnnScan operator is not yet implemented.
-						// For now, fall back to table scan.
-						// AccessPath::KnnSearch { .. } => ScanMode::IndexDelegate(...)
-						_ => {
-							// Fall back to KV stream for:
-							// - TableScan
-							// - KnnSearch (operator not implemented)
-							// - PointLookup, IndexUnion, CountIndex
-							let beg =
-								record::prefix(ns.namespace_id, db.database_id, &table_name_ref)
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create prefix key: {e}"
-										))
-									})?;
-							let end =
-								record::suffix(ns.namespace_id, db.database_id, &table_name_ref)
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create suffix key: {e}"
-										))
-									})?;
-							ScanMode::KvStream {
-								beg,
-								end,
-							}
-						}
-					}
-				}
-			}
-			ScanTarget::RecordId(rid) => {
-				match &rid.key {
-					RecordIdKey::Range(range) => {
-						// Range scan within the table - store the key range
-						let beg = match &range.start {
-							Bound::Unbounded => {
-								record::prefix(ns.namespace_id, db.database_id, &rid.table)
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create prefix key: {e}"
-										))
-									})?
-							}
-							Bound::Included(v) => {
-								record::new(ns.namespace_id, db.database_id, &rid.table, v)
-									.encode_key()
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create begin key: {e}"
-										))
-									})?
-							}
-							Bound::Excluded(v) => {
-								let mut key =
-									record::new(ns.namespace_id, db.database_id, &rid.table, v)
-										.encode_key()
-										.map_err(|e| {
-											ControlFlow::Err(anyhow::anyhow!(
-												"Failed to create begin key: {e}"
-											))
-										})?;
-								key.push(0x00);
-								key
-							}
-						};
-						let end = match &range.end {
-							Bound::Unbounded => {
-								record::suffix(ns.namespace_id, db.database_id, &rid.table)
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create suffix key: {e}"
-										))
-									})?
-							}
-							Bound::Excluded(v) => {
-								record::new(ns.namespace_id, db.database_id, &rid.table, v)
-									.encode_key()
-									.map_err(|e| {
-										ControlFlow::Err(anyhow::anyhow!(
-											"Failed to create end key: {e}"
-										))
-									})?
-							}
-							Bound::Included(v) => {
-								let mut key =
-									record::new(ns.namespace_id, db.database_id, &rid.table, v)
-										.encode_key()
-										.map_err(|e| {
-											ControlFlow::Err(anyhow::anyhow!(
-												"Failed to create end key: {e}"
-											))
-										})?;
-								key.push(0x00);
-								key
-							}
-						};
-
-						ScanMode::KvStream {
-							beg,
-							end,
-						}
-					}
-					_ => {
-						// Point lookup for a single record
-						ScanMode::PointLookup {
-							rid,
-							done: false,
-						}
-					}
-				}
-			}
-		};
-
-		Ok(Self {
-			ctx: ctx.clone(),
-			table_name,
-			select_permission,
-			check_perms,
-			version,
-			field_state: None,
-			batch: Vec::with_capacity(BATCH_SIZE),
-			mode,
-		})
+) -> Result<(), ControlFlow> {
+	if field_state.is_none() {
+		*field_state = Some(build_field_state(ctx, table_name, check_perms).await?);
 	}
-
-	/// Determine scan direction from ORDER BY clause.
-	///
-	/// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
-	fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
-		use crate::expr::order::Ordering as OrderingType;
-		if let Some(OrderingType::Order(order_list)) = order
-			&& let Some(first) = order_list.0.first()
-			&& !first.direction
-			&& first.value.is_id()
-		{
-			ScanDirection::Backward
-		} else {
-			ScanDirection::Forward
-		}
-	}
-
-	/// Get the next batch of values, or None if the scan is complete.
-	async fn next_batch(&mut self) -> Result<Option<ValueBatch>, ControlFlow> {
-		// Handle IndexDelegate mode first - it manages its own stream
-		if let ScanMode::IndexDelegate(delegate_mode) = &self.mode {
-			return self.execute_index_delegate(delegate_mode.clone()).await;
-		}
-
-		// Extract data from mode before processing to avoid borrow conflicts
-		let mode_info = match &self.mode {
-			ScanMode::KvStream {
-				beg,
-				end,
-			} => Some((beg.clone(), end.clone())),
-			ScanMode::PointLookup {
-				rid: _,
-				done,
-			} => {
-				if *done {
-					return Ok(None);
-				}
-				// Will process point lookup below
-				None
-			}
-			ScanMode::IndexDelegate(_) => unreachable!("Handled above"),
-			ScanMode::Done => return Ok(None),
-		};
-
-		if let Some((beg, end)) = mode_info {
-			// KV stream mode
-			let txn = Arc::clone(self.ctx.txn());
-			let kv_stream =
-				txn.stream_keys_vals(beg..end.clone(), self.version, None, ScanDirection::Forward);
-			futures::pin_mut!(kv_stream);
-
-			while let Some(result) = kv_stream.next().await {
-				let (key, val) = result
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-
-				let value = decode_record(&key, val)?;
-
-				// Check permission and add to batch
-				if self.check_and_add_to_batch(value).await? {
-					// Batch is full - update beg to continue from after this key
-					// Append 0x00 to get a key strictly after the current one
-					let mut next_beg = key.clone();
-					next_beg.push(0x00);
-					self.mode = ScanMode::KvStream {
-						beg: next_beg,
-						end,
-					};
-					return self.flush_batch().await.map(Some);
-				}
-			}
-
-			// Stream exhausted - flush remaining batch and mark as done
-			self.mode = ScanMode::Done;
-			if self.batch.is_empty() {
-				Ok(None)
-			} else {
-				self.flush_batch().await.map(Some)
-			}
-		} else {
-			// Point lookup mode
-			let rid = if let ScanMode::PointLookup {
-				rid,
-				..
-			} = &self.mode
-			{
-				rid.clone()
-			} else {
-				unreachable!()
-			};
-			self.point_lookup(rid).await
-		}
-	}
-
-	/// Perform a point lookup for a single record.
-	async fn point_lookup(&mut self, rid: RecordId) -> Result<Option<ValueBatch>, ControlFlow> {
-		// Mark as done immediately
-		if let ScanMode::PointLookup {
-			done,
-			..
-		} = &mut self.mode
-		{
-			*done = true;
-		}
-
-		let db_ctx = self.ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
-		let txn = self.ctx.txn();
-
-		let record = txn
-			.get_record(
-				db_ctx.ns_ctx.ns.namespace_id,
-				db_ctx.db.database_id,
-				&rid.table,
-				&rid.key,
-				self.version,
-			)
-			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
-
-		// Check if record exists
-		if record.data.as_ref().is_none() {
-			return Ok(None);
-		}
-
-		// Inject the id field into the document
-		let mut value = record.data.as_ref().clone();
-		value.def(&rid);
-
-		// Check permission and add to batch
-		self.check_and_add_to_batch(value).await?;
-
-		// Flush the single-item batch
-		if self.batch.is_empty() {
-			Ok(None)
-		} else {
-			self.flush_batch().await.map(Some)
-		}
-	}
-
-	/// Execute an index delegate mode by creating and running the appropriate index operator.
-	///
-	/// This method delegates execution to the IndexScan, FullTextScan, or KnnScan operators
-	/// and forwards their results.
-	async fn execute_index_delegate(
-		&mut self,
-		delegate_mode: IndexDelegateMode,
-	) -> Result<Option<ValueBatch>, ControlFlow> {
-		// Mark as done to prevent re-execution
-		self.mode = ScanMode::Done;
-
-		// Create the appropriate index operator
-		let operator: Box<dyn ExecOperator> = match delegate_mode {
-			IndexDelegateMode::BTree {
-				index_ref,
-				access,
-				direction,
-				table_name,
-			} => Box::new(IndexScan {
-				index_ref,
-				access,
-				direction,
-				table_name,
-			}),
-			IndexDelegateMode::FullText {
-				index_ref,
-				query,
-				operator,
-				table_name,
-			} => Box::new(FullTextScan {
-				index_ref,
-				query,
-				operator,
-				table_name,
-			}),
-		};
-
-		// Execute the index operator and collect all results
-		let mut stream = operator.execute(&self.ctx)?;
-		let mut all_values = Vec::new();
-
-		while let Some(batch_result) = stream.next().await {
-			let batch = batch_result?;
-			all_values.extend(batch.values);
-		}
-
-		if all_values.is_empty() {
-			Ok(None)
-		} else {
-			Ok(Some(ValueBatch {
-				values: all_values,
-			}))
-		}
-	}
-
-	/// Check permission for a value and add it to the batch if allowed.
-	/// Returns true if the batch is now full and should be flushed.
-	async fn check_and_add_to_batch(&mut self, value: Value) -> Result<bool, ControlFlow> {
-		let allowed = check_permission_for_value(&self.select_permission, &value, &self.ctx)
-			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
-
-		if allowed {
-			self.batch.push(value);
-			Ok(self.batch.len() >= BATCH_SIZE)
-		} else {
-			Ok(false)
-		}
-	}
-
-	/// Flush the current batch: process computed fields and field permissions,
-	/// then return the batch as a ValueBatch.
-	async fn flush_batch(&mut self) -> Result<ValueBatch, ControlFlow> {
-		// Lazy-initialize field state on first batch
-		if self.field_state.is_none() {
-			let state = build_field_state(&self.ctx, &self.table_name, self.check_perms).await?;
-			self.field_state = Some(state);
-		}
-
-		// Process batch: computed fields and field permissions
-		if let Some(ref state) = self.field_state {
-			process_batch(&self.ctx, state, self.check_perms, &mut self.batch).await?;
-		}
-
-		// Take the batch and reserve capacity for the next one
-		let batch = std::mem::take(&mut self.batch);
-		self.batch.reserve(BATCH_SIZE);
-
-		Ok(ValueBatch {
-			values: batch,
-		})
-	}
+	Ok(())
 }
 
 /// Fetch field definitions and build the cached field state.
@@ -979,7 +645,7 @@ mod tests {
 	#[test]
 	fn test_determine_scan_direction_no_order() {
 		// No order -> Forward
-		let direction = ScanExecutor::determine_scan_direction(&None);
+		let direction = determine_scan_direction(&None);
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 
@@ -989,7 +655,7 @@ mod tests {
 
 		// Random order -> Forward
 		let order = Ordering::Random;
-		let direction = ScanExecutor::determine_scan_direction(&Some(order));
+		let direction = determine_scan_direction(&Some(order));
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 }

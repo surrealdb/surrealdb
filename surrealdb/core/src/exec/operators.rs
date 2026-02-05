@@ -25,6 +25,7 @@ mod source_expr;
 mod split;
 mod timeout;
 mod union;
+mod unwrap_exactly_one;
 
 pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
@@ -59,3 +60,4 @@ pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;
 pub use union::Union;
+pub use unwrap_exactly_one::UnwrapExactlyOne;

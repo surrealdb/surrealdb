@@ -67,8 +67,14 @@ impl PhysicalExpr for ScalarSubquery {
 			}
 		}
 
-		// Return collected values as array (matches legacy SELECT behavior)
-		Ok(Value::Array(Array(values)))
+		// Check if the plan is scalar (e.g., SELECT ... FROM ONLY)
+		if self.plan.is_scalar() {
+			// Scalar plans should return a single value directly (or NONE if empty)
+			Ok(values.pop().unwrap_or(Value::None))
+		} else {
+			// Return collected values as array (matches legacy SELECT behavior)
+			Ok(Value::Array(Array(values)))
+		}
 	}
 
 	fn references_current_value(&self) -> bool {

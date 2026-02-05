@@ -87,7 +87,6 @@
 //!
 //! | Feature | Description |
 //! |---------|-------------|
-//! | `SELECT ... ONLY` | Unwrap single results |
 //! | `SELECT ... EXPLAIN` | Query plan output |
 //! | `SELECT ... WITH` | Index hints |
 //! | `SELECT * GROUP BY` | Wildcard with GROUP BY |
@@ -149,8 +148,8 @@ use crate::exec::operators::{
 	DatabaseInfoPlan, ExplainPlan, ExprPlan, ExtractedAggregate, Fetch, FieldSelection, Filter,
 	ForeachPlan, IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField,
 	Project, ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort,
-	SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UserInfoPlan,
-	aggregate_field_name,
+	SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UnwrapExactlyOne,
+	UserInfoPlan, aggregate_field_name,
 };
 use crate::expr::field::{Field, Fields};
 use crate::expr::statements::IfelseStatement;
@@ -191,7 +190,6 @@ use crate::expr::{BinaryOperator, Cond, Expr, Function, FunctionCall, Idiom, Lit
 /// - CREATE, UPDATE, UPSERT, DELETE, INSERT, RELATE subqueries
 ///
 /// ## SELECT Clauses
-/// - `SELECT ... ONLY` (unwrap single results)
 /// - `SELECT ... EXPLAIN` (query plan output)
 /// - `SELECT ... WITH` (index hints)
 /// - `SELECT *` with GROUP BY
@@ -1228,13 +1226,6 @@ fn plan_select(
 		tempfiles,
 	} = select;
 
-	// ONLY clause (unwraps single results)
-	if only {
-		return Err(Error::Unimplemented(
-			"SELECT ... ONLY not yet supported in execution plans".to_string(),
-		));
-	}
-
 	// EXPLAIN clause (query explain output)
 	if explain.is_some() {
 		return Err(Error::Unimplemented(
@@ -1265,6 +1256,29 @@ fn plan_select(
 
 	// Extract VERSION timestamp if present (for time-travel queries)
 	let version = extract_version(version)?;
+
+	// // Handle ONLY with literal value sources specially:
+	// // - Arrays without LIMIT → error (ONLY doesn't make sense for unbounded collections)
+	// // - NONE/NULL → return NONE directly (treated as a single value, not "empty")
+	// // - Other scalars → proceed normally (will produce one result)
+	// // Note: Arrays with LIMIT are allowed because LIMIT bounds the result count
+	// if only && what.len() == 1 {
+	// 	match &what[0] {
+	// 		// ONLY with array literal and no LIMIT → error immediately
+	// 		// (With LIMIT, the pipeline will handle it normally)
+	// 		Expr::Literal(Literal::Array(_)) if limit.is_none() => {
+	// 			return Err(Error::SingleOnlyOutput);
+	// 		}
+	// 		// ONLY with NONE or NULL → return NONE directly (bypass the pipeline)
+	// 		// Both NONE and NULL are treated as single values, not "empty stream"
+	// 		Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => {
+	// 			return Ok(Arc::new(ExprPlan {
+	// 				expr: expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?,
+	// 			}));
+	// 		}
+	// 		_ => {}
+	// 	}
+	// }
 
 	// Check if all sources are "value sources" (arrays, primitives) before consuming `what`.
 	// This affects projection behavior: `SELECT $this FROM [1,2,3]` should return raw values,
@@ -1308,7 +1322,17 @@ fn plan_select(
 		}
 	};
 
-	Ok(timed)
+	// Apply ONLY clause - unwrap single result or return NONE/error
+	// - Table sources (Scan) return NONE when no results (e.g., WHERE matches nothing)
+	// - Value sources (arrays) error when no results (e.g., empty array)
+	if only {
+		Ok(Arc::new(UnwrapExactlyOne {
+			input: timed,
+			none_on_empty: !is_value_source,
+		}))
+	} else {
+		Ok(timed)
+	}
 }
 
 /// Plan the SELECT pipeline after the source is determined.
@@ -1510,11 +1534,6 @@ fn plan_projections(
 	match fields {
 		// SELECT VALUE expr - return raw values (OMIT doesn't make sense here)
 		Fields::Value(selector) => {
-			if !omit.is_empty() {
-				return Err(Error::Unimplemented(
-					"OMIT clause with SELECT VALUE not supported".to_string(),
-				));
-			}
 			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 			Ok(Arc::new(ProjectValue {
 				input,
