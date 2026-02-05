@@ -258,6 +258,8 @@ pub struct ValueTestResult {
 	#[serde(default)]
 	pub skip_uuid: Option<bool>,
 	#[serde(default)]
+	pub skip_api_request_id: Option<bool>,
+	#[serde(default)]
 	pub float_roughly_eq: Option<bool>,
 	#[serde(default)]
 	pub decimal_roughly_eq: Option<bool>,

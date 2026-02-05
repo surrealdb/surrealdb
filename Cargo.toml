@@ -47,7 +47,7 @@ surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
 # SurrealML crates
-surrealml-core = { version = "0.1.9", path = "surrealml/core" }
+surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
@@ -100,7 +100,7 @@ base64 = "0.22.1"
 bcrypt = "0.18.0"
 blake3 = "1.8.3"
 boxcar = "0.2.14"
-bytes = "1.11.0"
+bytes = "1.11.1"
 castaway = "0.2.4"
 chrono = "0.4.43"
 ciborium = "0.2.2"
@@ -164,7 +164,7 @@ sha2 = "0.10.9"
 snap = "1.1.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.6.1", default-features = false }
+surrealdb-protocol = { version = "0.8.3", default-features = false }
 sysinfo = "0.37.2"
 tempfile = "3.24.0"
 thiserror = "2.0.17"

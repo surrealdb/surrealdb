@@ -6,37 +6,43 @@ reason = "Test HTTP status code handling"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 201 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 201 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 400 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 400 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 404 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 404 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 500 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 500 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { original: 200 }, context: {  }, headers: {}, status: 404 }"
+skip-api-request-id = true
+value = "{ body: { original: 200 }, headers: {}, status: 404 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

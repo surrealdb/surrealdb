@@ -92,7 +92,7 @@ impl<'key> IndexCompactionKey<'key> {
 		(b"/!ic\0".to_vec(), b"/!ic\0xff".to_vec())
 	}
 
-	pub fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
+	pub(crate) fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }

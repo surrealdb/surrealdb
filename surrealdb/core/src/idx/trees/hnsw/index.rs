@@ -84,7 +84,7 @@ impl HnswIndex {
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
 			docs: HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
-			vec_docs: VecDocs::new(ikb),
+			vec_docs: VecDocs::new(ikb, p.use_hashed_vector),
 		})
 	}
 

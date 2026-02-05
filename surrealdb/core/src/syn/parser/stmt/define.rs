@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::catalog::ApiMethod;
+use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -842,6 +842,7 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Sync,
 		};
 
 		loop {
@@ -851,22 +852,58 @@ impl Parser<'_> {
 					res.when = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("THEN") => {
-					self.pop_peek();
+					let token = self.pop_peek();
 					res.then = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
 						res.then.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+					}
+					if res.then.is_empty() {
+						bail!("Expected at least one `THEN` statement", @token.span => "`THEN` statement required");
 					}
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
+				t!("ASYNC") => {
+					self.pop_peek();
+					res.event_kind = EventKind::Async {
+						retry: EventDefinition::DEFAULT_RETRY,
+						max_depth: EventDefinition::DEFAULT_MAX_DEPTH,
+					};
+				}
+				t!("RETRY") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						retry,
+						..
+					} = &mut res.event_kind
+					{
+						*retry = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
+					}
+				}
+				t!("MAXDEPTH") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						max_depth,
+						..
+					} = &mut res.event_kind
+					{
+						*max_depth = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
+					}
+				}
 				_ => break,
 			}
 		}
+		if res.then.is_empty() {
+			bail!("Expected at least one `THEN` statement", @self.last_span => "`THEN` statement required");
+		}
 		Ok(res)
 	}
-
 	pub(crate) async fn parse_define_field(
 		&mut self,
 		stk: &mut Stk,
@@ -1078,6 +1115,7 @@ impl Parser<'_> {
 					let mut ef_construction = 150;
 					let mut extend_candidates = false;
 					let mut keep_pruned_connections = false;
+					let mut use_hashed_vector = false;
 					loop {
 						match self.peek_kind() {
 							t!("DISTANCE") => {
@@ -1114,6 +1152,10 @@ impl Parser<'_> {
 								self.pop_peek();
 								keep_pruned_connections = true;
 							}
+							t!("HASHED_VECTOR") => {
+								self.pop_peek();
+								use_hashed_vector = true;
+							}
 							_ => {
 								break;
 							}
@@ -1141,6 +1183,7 @@ impl Parser<'_> {
 						ef_construction,
 						extend_candidates,
 						keep_pruned_connections,
+						use_hashed_vector,
 					});
 				}
 				t!("CONCURRENTLY") => {
@@ -1681,19 +1724,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
-						// If the algorithm is symmetric and a key is already defined, a different
-						// key is not expected.
-						if let JwtAccessVerify::Key(ref ver) = res.verify
-							&& ver.alg.is_symmetric()
-							// TODO(3.0.0): This check is broken now that the value is
-							// parameterized. The expression can be the same by the final key might
-							// be different. Move this check to runtime instead?
-							&& key != ver.key
-						{
-							unexpected!(self, peek, "a symmetric key or no key");
-						}
-						iss.key = key;
+						iss.key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 					}
 					_ => break,
 				}

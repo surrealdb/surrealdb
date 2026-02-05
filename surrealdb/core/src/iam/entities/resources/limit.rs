@@ -26,8 +26,6 @@ impl AuthLimit {
 	}
 
 	pub fn limit_opt(&self, opt: &Options) -> Options {
-		let mut opt = opt.clone();
-		opt.auth = Arc::new(opt.auth.as_ref().new_limited(self));
-		opt
+		opt.clone().with_auth(Arc::new(opt.auth.new_limited(self)))
 	}
 }

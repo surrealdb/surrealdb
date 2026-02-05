@@ -8,7 +8,8 @@ value = "NONE"
 
 # 1
 [[test.results]]
-error = "The function 'fn::nonexistent' does not exist"
+skip-api-request-id = true
+value = "{ body: NONE, headers: {  }, status: 500 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

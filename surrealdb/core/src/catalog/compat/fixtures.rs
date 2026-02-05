@@ -459,6 +459,7 @@ pub fn event_basic() -> EventDefinition {
 		))],
 		comment: Some("Audit log on create".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
+		kind: EventKind::Sync,
 	}
 }
 

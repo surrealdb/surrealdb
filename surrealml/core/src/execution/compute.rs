@@ -69,7 +69,7 @@ impl ModelComputation<'_> {
 				return Err(SurrealError {
 					message: "input dims not found".into(),
 					status: SurrealErrorStatus::Unknown,
-				})
+				});
 			}
 		};
 
@@ -109,7 +109,7 @@ impl ModelComputation<'_> {
 							key
 						),
 						SurrealErrorStatus::NotFound,
-					))
+					));
 				}
 			};
 			buffer.push(std::mem::take(value));
@@ -142,7 +142,7 @@ impl ModelComputation<'_> {
 					return Err(SurrealError::new(
 						"Failed to reshape tensor to input dimensions".to_string(),
 						SurrealErrorStatus::Unknown,
-					))
+					));
 				}
 			}
 		};
@@ -152,7 +152,7 @@ impl ModelComputation<'_> {
 				return Err(SurrealError::new(
 					"Failed to convert tensor to ort tensor".to_string(),
 					SurrealErrorStatus::Unknown,
-				))
+				));
 			}
 		};
 		let x = ort::inputs![tensor];
@@ -214,12 +214,17 @@ impl ModelComputation<'_> {
 
 		// apply the normaliser to the output
 		let output_normaliser = match self.surml_file.header.output.normaliser.as_ref() {
-            Some(normaliser) => normaliser,
-            None => return Err(SurrealError::new(
-                String::from("No normaliser present for output which shouldn't happen as passed initial check for").to_string(), 
-                SurrealErrorStatus::Unknown
-            ))
-        };
+			Some(normaliser) => normaliser,
+			None => {
+				return Err(SurrealError::new(
+					String::from(
+						"No normaliser present for output which shouldn't happen as passed initial check for",
+					)
+					.to_string(),
+					SurrealErrorStatus::Unknown,
+				));
+			}
+		};
 		let mut buffer = Vec::with_capacity(output.len());
 
 		for value in output {

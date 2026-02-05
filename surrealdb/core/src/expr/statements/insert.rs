@@ -13,7 +13,7 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, Duration, RecordIdKey, TableName};
+use crate::val::{Duration, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct InsertStatement {
@@ -25,7 +25,6 @@ pub(crate) struct InsertStatement {
 	pub output: Option<Output>,
 	pub timeout: Expr,
 	pub relation: bool,
-	pub version: Expr,
 }
 
 impl InsertStatement {
@@ -42,15 +41,6 @@ impl InsertStatement {
 		opt.valid_for_db()?;
 		// Create a new iterator
 		let mut iterator = Iterator::new();
-		// Propagate the version to the underlying datastore
-		let version = stk
-			.run(|stk| self.version.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-			.cast_to::<Option<Datetime>>()?
-			.map(|x| x.to_version_stamp())
-			.transpose()?;
-		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
 		let ctx_store;
 		let ctx = match stk

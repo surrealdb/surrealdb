@@ -2,12 +2,14 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -41,8 +43,12 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// The sequences for this store
 	sequences: Sequences,
-	// The changefeed buffer
+	/// The changefeed buffer
 	cf: crate::cf::Writer,
+	/// Async event trigger
+	async_event_trigger: Arc<Notify>,
+	/// Do we have to trigger async events after the commit?
+	trigger_async_event: AtomicBool,
 }
 
 impl Deref for Transaction {
@@ -55,13 +61,20 @@ impl Deref for Transaction {
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, sequences: Sequences, tr: Transactor) -> Transaction {
+	pub fn new(
+		local: bool,
+		sequences: Sequences,
+		async_event_trigger: Arc<Notify>,
+		tr: Transactor,
+	) -> Transaction {
 		Transaction {
 			local,
 			tr,
 			cache: TransactionCache::new(),
 			sequences,
 			cf: crate::cf::Writer::new(),
+			async_event_trigger,
+			trigger_async_event: AtomicBool::new(false),
 		}
 	}
 
@@ -109,7 +122,14 @@ impl Transaction {
 			return Err(e);
 		}
 		// Commit the transaction
-		Ok(self.tr.commit().await.map_err(Error::from)?)
+		if let Err(e) = self.tr.commit().await {
+			anyhow::bail!(e);
+		}
+		if self.trigger_async_event.load(Ordering::Relaxed) {
+			// Notify after commit so queued events are visible to workers.
+			self.async_event_trigger.notify_one();
+		}
+		Ok(())
 	}
 
 	/// Check if a key exists in the datastore.
@@ -761,6 +781,11 @@ impl Transaction {
 			None => None,
 		};
 		self.tr.inner.compact(rng).await
+	}
+
+	/// Mark this transaction to wake the async event processor after commit.
+	pub(crate) fn trigger_async_event(&self) {
+		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}
 }
 

@@ -6,7 +6,8 @@ reason = "Test OVERWRITE and IF NOT EXISTS behavior"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
@@ -15,19 +16,22 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

@@ -1,6 +1,7 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -148,7 +149,6 @@ fn parse_create() {
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			version: Expr::Literal(Literal::None),
 		})),
 	);
 }
@@ -615,10 +615,6 @@ fn parse_define_access_jwt_key() {
 	// Symmetric verify and explicit issue non-matching data.
 	{
 		syn::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER ALGORITHM HS384 KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
-	}
-	// Symmetric verify and explicit issue non-matching key.
-	{
-		syn::parse_with(r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM HS256 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR TOKEN 10s"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap_err();
 	}
 	// Symmetric verify and explicit issue non-matching algorithm.
 	{
@@ -1251,7 +1247,7 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// TODO: Parameterization broke the guarentee that token duration is not none.
+	// TODO: Parameterization broke the guarantee that token duration is not none.
 	/*
 	// kjjification with JWT is explicitly defined only with symmetric key. Token
 	// duration is none.
@@ -1611,7 +1607,8 @@ fn parse_define_table() {
 #[test]
 fn parse_define_event() {
 	let res = syn::parse_with(
-		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none"#.as_bytes(),
+		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none ASYNC RETRY 5 MAXDEPTH 64"#
+			.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -1625,6 +1622,10 @@ fn parse_define_event() {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			}
 		})))
 	)
 }
@@ -1727,7 +1728,7 @@ fn parse_define_index() {
 	);
 
 	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
+		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a HNSW DIMENSION 128 EFC 250 TYPE F32 DISTANCE MANHATTAN M 6 M0 12 LM 0.5 EXTEND_CANDIDATES KEEP_PRUNED_CONNECTIONS HASHED_VECTOR"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
 	assert_eq!(
 		res,
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
@@ -1745,6 +1746,7 @@ fn parse_define_index() {
 				extend_candidates: true,
 				keep_pruned_connections: true,
 				ml: 0.5.into(),
+				use_hashed_vector: true,
 			}),
 			comment: Expr::Literal(Literal::None),
 			concurrently: false
@@ -2163,7 +2165,6 @@ fn parse_insert() {
 				},
 			])),
 			output: Some(Output::After),
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
 		})),
@@ -2205,7 +2206,6 @@ fn parse_insert_select() {
 			ignore: true,
 			update: None,
 			output: None,
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
 			relation: false,
 		})),
@@ -2342,7 +2342,6 @@ fn parse_relate() {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				version: Expr::Literal(Literal::None),
 			})),
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),
