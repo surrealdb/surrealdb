@@ -43,7 +43,7 @@ where
 
 async fn batch_ingestion(dbs: Arc<Datastore>, ses: &Session, batch_count: usize) -> Result<()> {
 	info!("Inserting {batch_count} batches concurrently");
-	// Insert content concurrently
+	// Insert content concurrently.
 	let sql = "CREATE |aaa:10| CONTENT {
 			field1: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field2: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
@@ -56,15 +56,15 @@ async fn batch_ingestion(dbs: Arc<Datastore>, ses: &Session, batch_count: usize)
 
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
-// Check this issue: https://github.com/surrealdb/surrealdb/issues/6837
+// Regression test for https://github.com/surrealdb/surrealdb/issues/6837
 async fn multi_index_concurrent_test() -> Result<()> {
 	let dbs = Arc::new(new_ds("test", "test").await?);
 	let ses = Session::owner().with_ns("test").with_db("test");
 
-	// Define the table
+	// Define the table.
 	dbs.execute("DEFINE TABLE aaa", &ses, None).await?;
 
-	// Ingest 500 records
+	// Ingest 500 records.
 	batch_ingestion(dbs.clone(), &ses, 50).await?;
 
 	let sql = ";
@@ -75,10 +75,10 @@ async fn multi_index_concurrent_test() -> Result<()> {
 	DEFINE INDEX field4 ON aaa FIELDS field4 FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
 	DEFINE INDEX field5 ON aaa FIELDS field5 FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
 ";
-	// Define analyzer and indexes
+	// Define analyzer and indexes.
 	dbs.execute(sql, &ses, None).await?;
 
-	// Ingest another 500 records
+	// Ingest another 500 records.
 	batch_ingestion(dbs.clone(), &ses, 50).await?;
 
 	let expected_total_count = 1000;
@@ -95,7 +95,7 @@ async fn multi_index_concurrent_test() -> Result<()> {
                     None,
                 )
                 .await?;
-            // INFO FOR INDEX
+            // INFO FOR INDEX result.
             let val = res.remove(0).result?;
             let Value::Object(o) = val else {
                 panic!("Invalid result format: {}", val.to_sql_pretty())
@@ -108,22 +108,22 @@ async fn multi_index_concurrent_test() -> Result<()> {
             let Value::String(status) =  status else {
                 panic!("Invalid result format: {}", status.to_sql_pretty())
             };
-            // Check that the status is valid (no error)
+            // Ensure the status is valid (no error).
             if status != "ready" && status != "indexing" && status != "cleaning" {
                 panic!("Invalid index status: {}", status.to_sql_pretty())
             }
-            // Collect the index count
+            // Collect the index count.
             let val = res.remove(0).result?;
             let Value::Number(index_count) = val else {
                 panic!("Invalid result: {}", val.to_sql_pretty())
             };
-            // Collect the real count
+            // Collect the real count.
             let val = res.remove(0).result?;
             let Value::Array(a) = &val else {
                 panic!("Invalid result format: {}", val.to_sql_pretty())
             };
             let mut real_total_count = 0;
-            // Collect count for the different values of field1 and compute the total
+            // Sum counts for the different values of field1.
             for item in a.iter() {
                 let Value::Array(record) = item else {
                     panic!("Invalid result format: {}", item.to_sql_pretty())
@@ -137,11 +137,11 @@ async fn multi_index_concurrent_test() -> Result<()> {
             if real_total_count == expected_total_count {
                 info!("Real count: {real_total_count} - Index: count: {index_count} - Index status: {status}");
                 if index_count.into_int()? == expected_total_count {
-                    // SUCCESS!
+                    // Success.
                     break;
                 }
             }
-            // Temporisation
+            // Wait before retrying.
             tokio::time::sleep(Duration::from_millis(1000)).await;
         }
         Ok::<(), anyhow::Error>(())

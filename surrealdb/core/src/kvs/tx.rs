@@ -51,7 +51,7 @@ pub struct Transaction {
 	async_event_trigger: Arc<Notify>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
-	/// For each index, track the pending append batch for cleanup on cancel.
+	/// Per index, track the pending append batch for cleanup on cancel.
 	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>>,
 }
 

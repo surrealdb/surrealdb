@@ -1,4 +1,4 @@
-//! Store appended records for concurrent index building
+//! Key encoding for appended records during concurrent index builds.
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::ops::Range;
@@ -93,7 +93,7 @@ mod tests {
 	}
 
 	#[test]
-	fn ib_range() {
+	fn ig_range() {
 		let tb = TableName::from("testtb");
 		let range =
 			IndexAppending::new_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
