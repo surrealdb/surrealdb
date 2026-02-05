@@ -1105,7 +1105,7 @@ pub fn appending_both() -> Appending {
 // ===========================================================================
 
 pub fn primary_appending_basic() -> PrimaryAppending {
-	PrimaryAppending::new(123)
+	PrimaryAppending::new(123, 456)
 }
 
 // ===========================================================================

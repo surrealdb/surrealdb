@@ -1,15 +1,17 @@
 mod helpers;
 
-use crate::helpers::new_ds;
-use anyhow::Result;
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::{ToSql, Value};
 use tokio::time::timeout;
 use tracing::info;
+
+use crate::helpers::new_ds;
 
 async fn concurrent_tasks<F>(
 	dbs: Arc<Datastore>,
@@ -34,7 +36,7 @@ where
 	}
 
 	for task in tasks {
-		task.await.unwrap()?;
+		task.await??;
 	}
 	Ok(())
 }
@@ -49,7 +51,7 @@ async fn batch_ingestion(dbs: Arc<Datastore>, ses: &Session, batch_count: usize)
 			field4: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field5: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 		} RETURN NONE;";
-	concurrent_tasks(dbs.clone(), &ses, batch_count, |_| Cow::Borrowed(sql)).await
+	concurrent_tasks(dbs.clone(), ses, batch_count, |_| Cow::Borrowed(sql)).await
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
@@ -9,7 +10,7 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, MutexGuard, Notify};
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -29,6 +30,7 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
+use crate::kvs::index::{BatchId, SharedIndexKey, SharedQueueSequences};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
@@ -49,6 +51,8 @@ pub struct Transaction {
 	async_event_trigger: Arc<Notify>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
+	/// For each index, track the pending append batch for cleanup on cancel.
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>>,
 }
 
 impl Deref for Transaction {
@@ -75,7 +79,14 @@ impl Transaction {
 			cf: crate::cf::Writer::new(),
 			async_event_trigger,
 			trigger_async_event: AtomicBool::new(false),
+			pending_index_batches: Mutex::new(HashMap::new()),
 		}
+	}
+
+	pub(super) async fn lock_pending_index_batches<'a>(
+		&'a self,
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>> {
+		self.pending_index_batches.lock().await
 	}
 
 	/// Check if the transaction is local or remote
@@ -105,6 +116,14 @@ impl Transaction {
 	pub async fn cancel(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		self.cf.clear();
+		// Remove any pending index batches for this transaction.
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, queue)) in batches {
+			queue.write().await.clean_batch(batch_id);
+		}
 		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
