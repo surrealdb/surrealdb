@@ -866,6 +866,7 @@ mod tests {
 	#[cfg(feature = "http")]
 	use url::Url;
 
+	use crate::cnf::MEMORY_THRESHOLD;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
@@ -1050,8 +1051,10 @@ mod tests {
 		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
 		// so there's no risk of data races when modifying the environment variable.
 		unsafe {
-			std::env::set_var("SURREAL_MEMORY_THRESHOLD", "1MB");
+			std::env::set_var("SURREAL_MEMORY_THRESHOLD", "1048576");
 		}
+		// Assert that SURREAL_MEMORY_THRESHOLD shows up as MEMORY_THRESHOLD with the expected value
+		assert_eq!(*MEMORY_THRESHOLD, 1048576);
 
 		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
 		// Instead, we rely on this test running in isolation with #[serial]
