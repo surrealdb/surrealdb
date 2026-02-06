@@ -12,10 +12,10 @@ use crate::cli::abstraction::{
 #[derive(Args, Debug)]
 pub struct ModelArguments {
 	#[arg(help = "The name of the model")]
-	#[arg(env = "SURREAL_ML_MODEL_NAME", long = "name")]
+	#[arg(env = "SURREAL_ML_EXPORT_MODEL_NAME", long = "name")]
 	pub(crate) name: String,
 	#[arg(help = "The version of the model")]
-	#[arg(env = "SURREAL_ML_MODEL_VERSION", long = "version")]
+	#[arg(env = "SURREAL_ML_EXPORT_MODEL_VERSION", long = "version")]
 	pub(crate) version: String,
 }
 
