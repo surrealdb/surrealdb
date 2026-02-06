@@ -12,7 +12,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use tokio::fs;
 
-use super::{ResolvedImport, TestCase};
+use super::TestCase;
 use crate::cli::ColorMode;
 use crate::format::{IndentFormatter, ansi};
 
@@ -125,7 +125,7 @@ impl TestSet {
 		let mut map = HashMap::new();
 		let mut errors = Vec::new();
 		Self::collect_recursive(path, path, &mut map, &mut all, &mut errors).await?;
-		Self::resolve_imports(&mut all, &map, &mut errors);
+		Self::resolve_imports(path, &mut all, &map, &mut errors);
 		let map = Arc::new(map);
 		Ok((
 			Self {
@@ -139,6 +139,7 @@ impl TestSet {
 	}
 
 	fn resolve_imports(
+		root_path: &str,
 		all: &mut [TestCase],
 		map: &HashMap<String, TestId>,
 		errors: &mut Vec<TestLoadError>,
@@ -146,21 +147,28 @@ impl TestSet {
 		// resolve all import paths.
 		for t in all.iter_mut() {
 			for import_path in t.config.imports() {
-				let mut import_name = Cow::Borrowed(import_path);
+				let mut import_name = Cow::Borrowed(import_path.trim());
+
+				if import_name.starts_with("./") {
+					let test_dir = t.path.rsplit_once("/").map(|x| x.0).unwrap_or("./");
+					import_name = Cow::Owned(format!(
+						"{}/{}",
+						test_dir.strip_prefix(root_path).unwrap_or(test_dir),
+						&import_name[2..]
+					));
+				}
+
 				if !import_name.starts_with(path::MAIN_SEPARATOR) {
 					import_name = Cow::Owned(format!("{}{import_name}", path::MAIN_SEPARATOR));
 				}
 
 				if let Some(resolved) = map.get(import_name.as_ref()) {
-					t.imports.push(ResolvedImport {
-						id: *resolved,
-						path: t.path.clone(),
-					});
+					t.imports.push(*resolved);
 				} else {
 					errors.push(TestLoadError {
 						path: t.path.clone(),
 						error: anyhow::anyhow!(
-							"Could not find import `{}` for test `{}`",
+							"Could not find import `{}` for test `{}`\nLooked at path",
 							import_path,
 							t.path
 						),
@@ -168,25 +176,6 @@ impl TestSet {
 					t.contains_error = true;
 				}
 			}
-		}
-
-		// ensure that imports don't have imports themselves.
-		for test_index in 0..all.len() {
-			let mut contains_error = false;
-			for import in all[test_index].imports.iter() {
-				if !all[import.id.0].config.imports().is_empty() {
-					contains_error = true;
-					errors.push(TestLoadError {
-						path: all[test_index].path.clone(),
-						error: anyhow::anyhow!(
-							"Importing test `{}` for test `{}` which contains imports itself is not supported.",
-							import.path,
-							all[test_index].path
-						),
-					});
-				}
-			}
-			all[test_index].contains_error |= contains_error;
 		}
 	}
 

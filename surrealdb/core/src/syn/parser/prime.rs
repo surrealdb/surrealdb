@@ -539,6 +539,7 @@ impl Parser<'_> {
 		self.expect_closing_delimiter(t!(")"), start)?;
 
 		// Ensure that `((..).a).b` is broken up into seperate idioms.
+		self.peek();
 		if self.peek_continues_idiom() {
 			self.parse_remaining_value_idiom(stk, vec![Part::Start(res)]).await
 		} else {

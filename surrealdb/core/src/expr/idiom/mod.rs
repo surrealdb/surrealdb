@@ -226,7 +226,7 @@ impl SerializeRevisioned for Idiom {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_raw_string(), writer)
+		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }
 
