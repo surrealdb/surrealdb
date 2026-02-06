@@ -51,7 +51,8 @@ pub struct Transaction {
 	async_event_trigger: Arc<Notify>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
-	/// Per index, track the pending append batch for cleanup on cancel.
+	/// Per index, track the pending append batch for cleanup after rollback (cancel or failed
+	/// commit).
 	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
@@ -116,15 +117,9 @@ impl Transaction {
 	pub async fn cancel(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		self.cf.clear();
-		// Remove any pending index batches for this transaction.
-		let batches = {
-			let mut pending = self.lock_pending_index_batches().await;
-			std::mem::take(&mut *pending)
-		};
-		for (_, (batch_id, clean_queue)) in batches {
-			// Enqueue batch ids for cleaning
-			clean_queue.lock().await.push(batch_id);
-		}
+		// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed
+		// commit).
+		self.cleanup_index_batches().await;
 		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
@@ -143,6 +138,8 @@ impl Transaction {
 		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
+			// Enqueue pending index batches for deferred cleanup after commit failure.
+			self.cleanup_index_batches().await;
 			anyhow::bail!(e);
 		}
 		if self.trigger_async_event.load(Ordering::Relaxed) {
@@ -150,6 +147,18 @@ impl Transaction {
 			self.async_event_trigger.notify_one();
 		}
 		Ok(())
+	}
+
+	/// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed commit).
+	async fn cleanup_index_batches(&self) {
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, clean_queue)) in batches {
+			// Enqueue batch ids for cleaning
+			clean_queue.lock().await.push(batch_id);
+		}
 	}
 
 	/// Check if a key exists in the datastore.

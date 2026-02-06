@@ -134,7 +134,7 @@ type IndexBuilding = Arc<Building>;
 
 pub(super) type SharedIndexKey = Arc<IndexKey>;
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq)]
 pub(super) struct IndexKey {
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -333,10 +333,11 @@ struct QueueSequences {
 	next_appending: AppendingId,
 	/// Next batch id to assign.
 	next_batch: BatchId,
-	/// Appends tracked per batch for cleanup on cancel.
+	/// Appends tracked per batch for cleanup after rollback (cancel or failed commit).
 	batches: HashMap<BatchId, RoaringBitmap>,
 }
 
+/// Batch IDs queued for deferred cleanup after rollback (cancel or failed commit).
 pub(super) type BatchIdsCleanQueue = Arc<Mutex<Vec<BatchId>>>;
 
 impl Default for QueueSequences {
@@ -425,7 +426,7 @@ struct Building {
 	status: Arc<RwLock<BuildingStatus>>,
 	/// Queue of records awaiting indexing.
 	queue: Arc<RwLock<QueueSequences>>,
-	/// Stores the BatchID(s) that can be cleaned.
+	/// Batch IDs scheduled for deferred cleanup after rollback (cancel or failed commit).
 	clean_queue: BatchIdsCleanQueue,
 	/// Abort flag for the build process.
 	aborted: AtomicBool,
@@ -651,7 +652,8 @@ impl Building {
 					let mut batch_ids_to_clean = self.clean_queue.lock().await;
 					std::mem::take(&mut *batch_ids_to_clean)
 				};
-				// Clean released batch ids
+				// Clean batch IDs from canceled or failed transactions before checking pending
+				// state.
 				queue.clean_batch_ids(clean_queue);
 				let keys = {
 					let tx = self.new_read_tx().await?;
@@ -693,7 +695,16 @@ impl Building {
 						.await
 				);
 				catch!(tx, tx.commit().await);
+				// Clean up completed appendings and drop any stale rollback batch IDs.
 				if !indexed.is_empty() {
+					{
+						let mut clean_queue = self.clean_queue.lock().await;
+						for batch_id in indexed.keys() {
+							if let Some(idx) = clean_queue.iter().position(|&id| id == *batch_id) {
+								clean_queue.remove(idx);
+							}
+						}
+					}
 					self.queue.write().await.clean(indexed);
 				}
 			} else {
@@ -838,7 +849,13 @@ impl Building {
 					&rid,
 				);
 				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				tx.del(&ig).await?;
+
+				// We can delete the ip record if any
+				let ip = self.ikb.new_ip_key(rid.key);
+				tx.del(&ip).await?;
 			}
+
 			*count += 1;
 			self.set_status(BuildingStatus::Indexing {
 				initial: Some(initial),
@@ -847,7 +864,6 @@ impl Building {
 			})
 			.await;
 			indexed.entry(ig.batch_id).or_insert(vec![]).push(ig.appending_id);
-			tx.del(&ig).await?;
 		}
 		// Trigger compaction if needed.
 		self.check_index_compaction(tx, &mut rc).await?;
