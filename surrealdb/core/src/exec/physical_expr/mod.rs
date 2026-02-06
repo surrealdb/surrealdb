@@ -8,6 +8,7 @@ use surrealdb_types::ToSql;
 use crate::dbs::Capabilities;
 use crate::exec::context::{Parameters, SessionInfo};
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
+use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::iam::Auth;
 use crate::kvs::Transaction;
@@ -179,8 +180,11 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 
 	/// Evaluate this expression to a value.
 	///
-	/// May execute subqueries internally, hence async.
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value>;
+	/// Returns `FlowResult<Value>` to support control flow signals (BREAK, CONTINUE,
+	/// RETURN) propagating through the physical expression layer. Regular errors
+	/// are wrapped in `ControlFlow::Err`. The `?` operator works on `anyhow::Result`
+	/// via the existing `From<anyhow::Error> for ControlFlow` impl.
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value>;
 
 	/// Does this expression reference the current row?
 	/// If false, can be evaluated in scalar context.
@@ -210,7 +214,7 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 	async fn evaluate_projection(
 		&self,
 		ctx: EvalContext<'_>,
-	) -> anyhow::Result<Option<Vec<(Idiom, Value)>>> {
+	) -> FlowResult<Option<Vec<(Idiom, Value)>>> {
 		let _ = ctx; // silence unused warning
 		Ok(None)
 	}
@@ -228,7 +232,7 @@ mod recurse;
 mod subquery;
 
 // Re-export all expression types for external use
-pub(crate) use block::{BlockPhysicalExpr, ReturnValue};
+pub(crate) use block::BlockPhysicalExpr;
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
 pub(crate) use function::{

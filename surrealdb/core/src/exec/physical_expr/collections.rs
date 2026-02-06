@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes};
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 /// Array literal - [1, 2, 3] or [expr1, expr2, ...]
@@ -27,7 +28,7 @@ impl PhysicalExpr for ArrayLiteral {
 			.unwrap_or(crate::exec::ContextLevel::Root)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let mut values = Vec::with_capacity(self.elements.len());
 		for elem in &self.elements {
 			let value = elem.evaluate(ctx.clone()).await?;
@@ -78,7 +79,7 @@ impl PhysicalExpr for ObjectLiteral {
 			.unwrap_or(crate::exec::ContextLevel::Root)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let mut map = std::collections::BTreeMap::new();
 		for (key, expr) in &self.entries {
 			let value = expr.evaluate(ctx.clone()).await?;
@@ -129,7 +130,7 @@ impl PhysicalExpr for SetLiteral {
 			.unwrap_or(crate::exec::ContextLevel::Root)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let mut set = crate::val::Set::new();
 		for elem in &self.elements {
 			let value = elem.evaluate(ctx.clone()).await?;

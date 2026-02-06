@@ -82,61 +82,12 @@
 //! | `REMOVE` | Schema removal statements |
 //! | `REBUILD` | Index rebuild statements |
 //! | `ALTER` | Schema alteration statements |
-//!
-//! ## SELECT Clauses
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | `SELECT ... EXPLAIN` | Query plan output |
-//! | `SELECT ... WITH` | Index hints |
-//! | `SELECT * GROUP BY` | Wildcard with GROUP BY |
-//! | `OMIT + SELECT VALUE` | OMIT clause with SELECT VALUE |
-//! | `OMIT + fields` | OMIT clause without wildcard |
-//!
-//! ## Control Flow (in expression context)
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | `BREAK` | Loop break (valid in FOR loops) |
-//! | `CONTINUE` | Loop continue (valid in FOR loops) |
-//! | `RETURN` | Function return |
-//! | `FOR` loops | Iteration (as expression) |
-//!
-//! ## Data Types
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | Array record keys | `table:[1,2,3]` syntax |
-//! | Object record keys | `table:{a:1}` syntax |
-//! | Nested range keys | Range within range |
-//! | Set literals | In USE statements |
-//! | Mock expressions | Test data generation |
-//!
-//! ## Functions
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | `search::*` | Full-text search functions |
-//! | `api::*` | External API functions |
-//! | Nested aggregates | `SUM(COUNT(...))` patterns |
-//!
-//! ## Other
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | Non-idiom FETCH | FETCH with non-field expressions |
-//! | Non-idiom OMIT | OMIT with non-field expressions |
-//! | Dynamic VERSION | VERSION clause with non-literal |
-//! | Row context errors | Expressions requiring FROM clause |
-//!
-//! # Future Improvements (TODOs)
-//!
-//! - `SortTopKByKey`: Optimized top-k sorting with pre-computed fields
 
 use std::sync::Arc;
 
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::FrozenContext;
+use crate::dbs::NewPlannerStrategy;
 use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -207,7 +158,7 @@ use crate::expr::{BinaryOperator, Cond, Expr, Function, FunctionCall, Idiom, Lit
 /// - Mock expressions
 ///
 /// ## Functions
-/// - `search::*` and `api::*` function families
+/// - `search::*` function family
 /// - Nested aggregate functions
 pub struct Planner<'ctx> {
 	/// The frozen context containing query parameters, capabilities, and session info.
@@ -275,14 +226,26 @@ impl<'ctx> Planner<'ctx> {
 		expr_to_physical_expr_as_name(expr, self.ctx)
 	}
 
+	/// When `AllReadOnlyStatements` strategy is active, convert `Error::Unimplemented`
+	/// into `Error::Query` so it becomes a hard error instead of a silent fallback.
+	fn require_planned<T>(&self, result: Result<T, Error>) -> Result<T, Error> {
+		match result {
+			Err(Error::Unimplemented(msg))
+				if *self.ctx.new_planner_strategy()
+					== NewPlannerStrategy::AllReadOnlyStatements =>
+			{
+				Err(Error::Query {
+					message: format!("New executor does not support: {msg}"),
+				})
+			}
+			other => other,
+		}
+	}
+
 	/// Internal method to plan an expression.
 	fn plan_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			// Supported statements
-			Expr::Select(select) => self.plan_select(*select),
-			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
-
-			// DML statements - not yet supported
+			// DML statements - always fall back to old executor regardless of strategy
 			Expr::Create(_) => Err(Error::Unimplemented(
 				"CREATE statements not yet supported in execution plans".to_string(),
 			)),
@@ -302,7 +265,7 @@ impl<'ctx> Planner<'ctx> {
 				"RELATE statements not yet supported in execution plans".to_string(),
 			)),
 
-			// DDL statements - not yet supported
+			// DDL statements - always fall back to old executor regardless of strategy
 			Expr::Define(_) => Err(Error::Unimplemented(
 				"DEFINE statements not yet supported in execution plans".to_string(),
 			)),
@@ -315,6 +278,21 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Alter(_) => Err(Error::Unimplemented(
 				"ALTER statements not yet supported in execution plans".to_string(),
 			)),
+
+			// All other statements: wrapped with require_planned so that in
+			// AllReadOnlyStatements mode, Unimplemented becomes a hard error.
+			other => self.require_planned(self.plan_non_ddl_dml_expr(other)),
+		}
+	}
+
+	/// Plan a non-DDL/DML expression. Returns `Error::Unimplemented` for features
+	/// not yet supported, which will be converted to `Error::Query` by `require_planned`
+	/// when `AllReadOnlyStatements` strategy is active.
+	fn plan_non_ddl_dml_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
+		match expr {
+			// Supported statements
+			Expr::Select(select) => self.plan_select(*select),
+			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
 
 			// INFO statements
 			Expr::Info(info) => {
@@ -394,14 +372,11 @@ impl<'ctx> Planner<'ctx> {
 				}
 			}
 			Expr::FunctionCall(_) => {
-				// Function calls are value expressions - convert to physical expression
+				// Function calls are value expressions - convert to physical expression.
+				// Note: we intentionally do NOT check references_current_value() here.
+				// Functions like type::field() gracefully return NONE when evaluated
+				// without row context, so this should not be a planning-time error.
 				let phys_expr = self.physical_expr(expr)?;
-				// Validate that the expression doesn't require row context
-				if phys_expr.references_current_value() {
-					return Err(Error::Unimplemented(
-						"Function call references row context but no table specified".to_string(),
-					));
-				}
 				Ok(Arc::new(ExprPlan {
 					expr: phys_expr,
 				}) as Arc<dyn ExecOperator>)
@@ -419,21 +394,13 @@ impl<'ctx> Planner<'ctx> {
 
 				// Wrap with Fetch operator if FETCH clause is present
 				let inner = if let Some(fetchs) = output_stmt.fetch {
-					// Extract idioms from fetch expressions
-					// FETCH expressions are typically Expr::Idiom(idiom)
-					let fields: Vec<_> = fetchs
-						.iter()
-						.filter_map(|f| {
-							if let Expr::Idiom(idiom) = &f.0 {
-								Some(idiom.clone())
-							} else {
-								// Non-idiom fetch expressions are not supported in the new planner
-								None
-							}
-						})
-						.collect();
+					// Resolve fetch expressions to idioms
+					let mut fields = Vec::with_capacity(fetchs.len());
+					for fetch_item in fetchs {
+						let mut idioms = resolve_field_expr_to_idioms(fetch_item.0, self.ctx)?;
+						fields.append(&mut idioms);
+					}
 					if fields.is_empty() {
-						// No idiom fields to fetch, pass through
 						inner
 					} else {
 						Arc::new(Fetch {
@@ -493,12 +460,6 @@ impl<'ctx> Planner<'ctx> {
 			}
 			| Expr::Table(_) => {
 				let phys_expr = self.physical_expr(expr)?;
-				// Validate that the expression doesn't require row context
-				if phys_expr.references_current_value() {
-					return Err(Error::Unimplemented(
-						"Expression references row context but no table specified".to_string(),
-					));
-				}
 				Ok(Arc::new(ExprPlan {
 					expr: phys_expr,
 				}) as Arc<dyn ExecOperator>)
@@ -539,6 +500,20 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(ExprPlan {
 					expr: phys_expr,
 				}) as Arc<dyn ExecOperator>)
+			}
+
+			// DDL/DML should never reach here - handled by plan_expr
+			Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Insert(_)
+			| Expr::Relate(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_) => {
+				unreachable!("DDL/DML statements should be handled in plan_expr")
 			}
 		}
 	}
@@ -812,7 +787,7 @@ pub(crate) fn expr_to_physical_expr(
 				Function::Normal(name) => {
 					// Some functions need database context that the streaming executor
 					// doesn't properly provide yet - fall back to legacy compute for these
-					if name.starts_with("search::") || name.starts_with("api::") {
+					if name.starts_with("search::") {
 						return Err(Error::Unimplemented(format!(
 							"Function '{}' not yet supported in streaming executor",
 							name
@@ -1111,14 +1086,21 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 /// This is the main entry point for the planner. It delegates to `Planner::plan()`
 /// which handles all top-level statement types.
 ///
+/// When `ComputeOnly` strategy is active, immediately returns `Error::Unimplemented`
+/// to skip the new planner entirely.
+///
 /// # Errors
 ///
 /// Returns `Error::Unimplemented` for statements not yet supported in the
-/// streaming executor.
+/// streaming executor (or all statements when `ComputeOnly`).
 pub(crate) fn try_plan_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
+	// ComputeOnly: skip the new planner entirely
+	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {
+		return Err(Error::Unimplemented("ComputeOnly strategy: skipping new planner".to_string()));
+	}
 	Planner::new(ctx).plan(expr)
 }
 
@@ -1257,29 +1239,6 @@ fn plan_select(
 	// Extract VERSION timestamp if present (for time-travel queries)
 	let version = extract_version(version)?;
 
-	// // Handle ONLY with literal value sources specially:
-	// // - Arrays without LIMIT → error (ONLY doesn't make sense for unbounded collections)
-	// // - NONE/NULL → return NONE directly (treated as a single value, not "empty")
-	// // - Other scalars → proceed normally (will produce one result)
-	// // Note: Arrays with LIMIT are allowed because LIMIT bounds the result count
-	// if only && what.len() == 1 {
-	// 	match &what[0] {
-	// 		// ONLY with array literal and no LIMIT → error immediately
-	// 		// (With LIMIT, the pipeline will handle it normally)
-	// 		Expr::Literal(Literal::Array(_)) if limit.is_none() => {
-	// 			return Err(Error::SingleOnlyOutput);
-	// 		}
-	// 		// ONLY with NONE or NULL → return NONE directly (bypass the pipeline)
-	// 		// Both NONE and NULL are treated as single values, not "empty stream"
-	// 		Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => {
-	// 			return Ok(Arc::new(ExprPlan {
-	// 				expr: expr_to_physical_expr(Expr::Literal(Literal::None), ctx)?,
-	// 			}));
-	// 		}
-	// 		_ => {}
-	// 	}
-	// }
-
 	// Check if all sources are "value sources" (arrays, primitives) before consuming `what`.
 	// This affects projection behavior: `SELECT $this FROM [1,2,3]` should return raw values,
 	// while `SELECT $this FROM table` should wrap in `{ this: ... }`.
@@ -1308,7 +1267,7 @@ fn plan_select(
 
 	// Apply FETCH if present - after projections so it can expand record IDs
 	// in computed fields like graph traversals
-	let fetched = plan_fetch(fetch, projected, &mut fields)?;
+	let fetched = plan_fetch(fetch, projected, ctx)?;
 
 	// Apply TIMEOUT if present (timeout is always Expr but may be Literal::None)
 	let timed = match timeout {
@@ -1520,7 +1479,7 @@ fn all_value_sources(sources: &[Expr]) -> bool {
 /// - `SELECT * OMIT field` - use Project with empty fields and omit populated
 /// - `SELECT VALUE expr` - use ProjectValue operator
 /// - `SELECT field1, field2` - use Project operator
-/// - `SELECT field1, *, field2` - mixed wildcards (returns Unimplemented for now)
+/// - `SELECT field1, *, field2`
 ///
 /// When `is_value_source` is true (source is array/primitive), single `$this` or `$param`
 /// projections without explicit aliases use ProjectValue (raw values) instead of Project.
@@ -1565,13 +1524,6 @@ fn plan_projections(
 
 			// Check for wildcards mixed with specific fields
 			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-			// OMIT doesn't make sense with specific field projections (without wildcard)
-			if !omit.is_empty() && !has_wildcard {
-				return Err(Error::Unimplemented(
-					"OMIT clause with specific field projections not supported".to_string(),
-				));
-			}
 
 			// Special case: For value sources (arrays, primitives), a single `$this` or `$param`
 			// without an explicit alias should return raw values (like SELECT VALUE).
@@ -1628,8 +1580,8 @@ fn plan_projections(
 				// Skip Field::All - handled by include_all flag
 			}
 
-			// Handle OMIT if present (only valid with wildcards)
-			let omit_fields = if has_wildcard && !omit.is_empty() {
+			// Handle OMIT if present
+			let omit_fields = if !omit.is_empty() {
 				plan_omit_fields(omit.to_vec(), ctx)?
 			} else {
 				vec![]
@@ -1648,25 +1600,131 @@ fn plan_projections(
 /// Plan OMIT fields - convert expressions to idioms
 fn plan_omit_fields(
 	omit: Vec<Expr>,
-	_ctx: &FrozenContext,
+	ctx: &FrozenContext,
 ) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
 	let mut fields = Vec::with_capacity(omit.len());
 
 	for expr in omit {
-		match expr {
-			Expr::Idiom(idiom) => {
-				fields.push(idiom);
-			}
-			_ => {
-				// Only simple idiom references are supported for OMIT
-				return Err(Error::Unimplemented(
-					"OMIT with non-idiom expressions not supported in execution plans".to_string(),
-				));
-			}
-		}
+		let mut idioms = resolve_field_expr_to_idioms(expr, ctx)?;
+		fields.append(&mut idioms);
 	}
 
 	Ok(fields)
+}
+
+/// Resolve a single field expression (from OMIT or FETCH) to one or more idioms.
+///
+/// Handles the common expression types that appear in OMIT and FETCH clauses:
+/// - `Expr::Idiom` - direct field reference
+/// - `Expr::Param` - parameter that resolves to a string field name
+/// - `Expr::FunctionCall(type::field)` - single dynamic field
+/// - `Expr::FunctionCall(type::fields)` - multiple dynamic fields
+///
+/// Returns `Error::Unimplemented` for `type::field`/`type::fields` calls with
+/// arguments that cannot be trivially resolved at plan time, causing fallback
+/// to the legacy execution path.
+fn resolve_field_expr_to_idioms(expr: Expr, ctx: &FrozenContext) -> Result<Vec<Idiom>, Error> {
+	match expr {
+		Expr::Idiom(idiom) => Ok(vec![idiom]),
+		Expr::Param(ref param) => {
+			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+			let s = value.clone().coerce_to::<String>().map_err(|_| Error::InvalidFetch {
+				value: value.into_literal(),
+			})?;
+			let idiom: Idiom = crate::syn::idiom(&s)
+				.map_err(|_| Error::InvalidFetch {
+					value: expr,
+				})?
+				.into();
+			Ok(vec![idiom])
+		}
+		Expr::FunctionCall(ref call) => match &call.receiver {
+			Function::Normal(name) if name == "type::field" => {
+				let arg = call.arguments.first().ok_or_else(|| {
+					Error::Unimplemented(
+						"type::field in OMIT/FETCH requires an argument".to_string(),
+					)
+				})?;
+				let s = resolve_expr_to_string(arg, ctx)?;
+				let idiom: Idiom = crate::syn::idiom(&s)
+					.map_err(|e| {
+						Error::Unimplemented(format!("Failed to parse field path '{}': {}", s, e))
+					})?
+					.into();
+				Ok(vec![idiom])
+			}
+			Function::Normal(name) if name == "type::fields" => {
+				let arg = call.arguments.first().ok_or_else(|| {
+					Error::Unimplemented(
+						"type::fields in OMIT/FETCH requires an argument".to_string(),
+					)
+				})?;
+				let strings = resolve_expr_to_string_array(arg, ctx)?;
+				let mut idioms = Vec::with_capacity(strings.len());
+				for s in strings {
+					let idiom: Idiom = crate::syn::idiom(&s)
+						.map_err(|e| {
+							Error::Unimplemented(format!(
+								"Failed to parse field path '{}': {}",
+								s, e
+							))
+						})?
+						.into();
+					idioms.push(idiom);
+				}
+				Ok(idioms)
+			}
+			_ => Err(Error::InvalidFetch {
+				value: expr,
+			}),
+		},
+		other => Err(Error::InvalidFetch {
+			value: other,
+		}),
+	}
+}
+
+/// Resolve a simple expression to a string value at plan time.
+///
+/// Handles string literals and parameters that resolve to strings.
+/// Returns `Error::Unimplemented` for complex expressions that cannot
+/// be resolved at plan time.
+fn resolve_expr_to_string(expr: &Expr, ctx: &FrozenContext) -> Result<String, Error> {
+	match expr {
+		Expr::Literal(Literal::String(s)) => Ok(s.clone()),
+		Expr::Param(param) => {
+			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+			value.coerce_to::<String>().map_err(|_| {
+				Error::Unimplemented("OMIT/FETCH parameter did not resolve to a string".to_string())
+			})
+		}
+		_ => Err(Error::Unimplemented(
+			"OMIT/FETCH with computed expressions not yet supported in execution plans".to_string(),
+		)),
+	}
+}
+
+/// Resolve a simple expression to an array of strings at plan time.
+///
+/// Handles array literals (of strings/params) and parameters that resolve
+/// to arrays of strings. Returns `Error::Unimplemented` for complex expressions.
+fn resolve_expr_to_string_array(expr: &Expr, ctx: &FrozenContext) -> Result<Vec<String>, Error> {
+	match expr {
+		Expr::Literal(Literal::Array(items)) => {
+			items.iter().map(|item| resolve_expr_to_string(item, ctx)).collect()
+		}
+		Expr::Param(param) => {
+			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+			value.coerce_to::<Vec<String>>().map_err(|_| {
+				Error::Unimplemented(
+					"OMIT/FETCH parameter did not resolve to an array of strings".to_string(),
+				)
+			})
+		}
+		_ => Err(Error::Unimplemented(
+			"OMIT/FETCH with computed expressions not yet supported in execution plans".to_string(),
+		)),
+	}
 }
 
 /// Derive a field name from an expression for projection output
@@ -1799,33 +1857,17 @@ fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPath {
 fn plan_fetch(
 	fetch: Option<crate::expr::fetch::Fetchs>,
 	input: Arc<dyn ExecOperator>,
-	_projection: &mut Fields,
+	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	let Some(fetchs) = fetch else {
 		return Ok(input);
 	};
 
 	// Convert fetch expressions to idioms
-	// We only support simple idiom fetches for now
 	let mut fields = Vec::with_capacity(fetchs.len());
 	for fetch_item in fetchs {
-		// The Fetch struct wraps an Expr in field .0
-		match fetch_item.0 {
-			Expr::Idiom(idiom) => {
-				fields.push(idiom.clone());
-				// Note: We don't add FETCH fields to the projection list.
-				// FETCH expands record references in-place but doesn't affect
-				// which fields appear in the final output - that's determined
-				// solely by the SELECT field list.
-			}
-			_ => {
-				// Complex fetch expressions (params, function calls) not yet supported
-				return Err(Error::Unimplemented(
-					"FETCH with non-idiom expressions not yet supported in execution plans"
-						.to_string(),
-				));
-			}
-		}
+		let mut idioms = resolve_field_expr_to_idioms(fetch_item.0, ctx)?;
+		fields.append(&mut idioms);
 	}
 
 	Ok(Arc::new(Fetch {
@@ -1927,9 +1969,10 @@ fn plan_aggregation_with_group_exprs(
 				match field {
 					Field::All => {
 						// SELECT * with GROUP BY doesn't make sense
-						return Err(Error::Unimplemented(
-							"SELECT * with GROUP BY not supported in execution plans".to_string(),
-						));
+						return Err(Error::Query {
+							message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
+								.to_string(),
+						});
 					}
 					Field::Single(selector) => {
 						// Determine the output name
@@ -2079,9 +2122,9 @@ impl MutVisitor for AggregateExtractor<'_> {
 				// Found an aggregate function
 				if self.inside_aggregate {
 					// Nested aggregates are not allowed
-					self.error = Some(Error::Unimplemented(
-						"Nested aggregate functions are not supported".to_string(),
-					));
+					self.error = Some(Error::Query {
+						message: "Nested aggregate functions are not supported".to_string(),
+					});
 					return Ok(());
 				}
 
@@ -2281,14 +2324,15 @@ fn extract_version(version_expr: Expr) -> Result<Option<u64>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
 		Expr::Literal(Literal::Datetime(dt)) => {
-			let stamp = dt
-				.to_version_stamp()
-				.map_err(|e| Error::Unimplemented(format!("Invalid VERSION timestamp: {}", e)))?;
+			let stamp = dt.to_version_stamp().map_err(|e| Error::Query {
+				message: format!("Invalid VERSION timestamp: {}", e),
+			})?;
 			Ok(Some(stamp))
 		}
-		_ => Err(Error::Unimplemented(
-			"VERSION clause only supports literal datetime values in execution plans".to_string(),
-		)),
+		_ => Err(Error::Query {
+			message: "VERSION clause only supports literal datetime values in execution plans"
+				.to_string(),
+		}),
 	}
 }
 
@@ -2418,7 +2462,9 @@ fn plan_select_sources(
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	if what.is_empty() {
-		return Err(Error::Unimplemented("SELECT requires at least one source".to_string()));
+		return Err(Error::Query {
+			message: "SELECT requires at least one source".to_string(),
+		});
 	}
 
 	// Convert each source to a plan
@@ -2543,6 +2589,34 @@ fn plan_single_source(
 			}
 		}
 
+		// Function calls may evaluate to a table name at runtime (e.g. type::table('person')),
+		// so route through Scan which handles Value::Table → table scan dynamically.
+		Expr::FunctionCall(_) => {
+			let source_expr = expr_to_physical_expr(expr, ctx)?;
+			Ok(Arc::new(Scan {
+				source: source_expr,
+				version,
+				cond: cond.cloned(),
+				order: order.cloned(),
+				with: with.cloned(),
+			}) as Arc<dyn ExecOperator>)
+		}
+
+		// Postfix expressions (e.g. closure calls like $param('n')) may also evaluate
+		// to a table name at runtime, so route through Scan.
+		Expr::Postfix {
+			..
+		} => {
+			let source_expr = expr_to_physical_expr(expr, ctx)?;
+			Ok(Arc::new(Scan {
+				source: source_expr,
+				version,
+				cond: cond.cloned(),
+				order: order.cloned(),
+				with: with.cloned(),
+			}) as Arc<dyn ExecOperator>)
+		}
+
 		// Other expressions (strings, objects, etc.) → SourceExpr
 		other => {
 			let phys_expr = expr_to_physical_expr(other, ctx)?;
@@ -2607,9 +2681,9 @@ fn convert_let_statement(
 
 			// Validate: LET expressions can't reference current row
 			if expr.references_current_value() {
-				return Err(Error::Unimplemented(
-					"LET expression cannot reference current row context".to_string(),
-				));
+				return Err(Error::Query {
+					message: "LET expression cannot reference current row context".to_string(),
+				});
 			}
 
 			Arc::new(ExprPlan {
@@ -2908,9 +2982,9 @@ pub(crate) fn plan_projections_consolidated(
 		// SELECT VALUE - still needs expression evaluation (not consolidated yet)
 		Fields::Value(selector) => {
 			if !omit.is_empty() {
-				return Err(Error::Unimplemented(
-					"OMIT clause with SELECT VALUE not supported".to_string(),
-				));
+				return Err(Error::Query {
+					message: "OMIT clause with SELECT VALUE not supported".to_string(),
+				});
 			}
 			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
 			Ok(Arc::new(ProjectValue {
@@ -3159,9 +3233,9 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 
 		Part::RepeatRecurse => {
 			// RepeatRecurse (@) is handled within recursion context
-			Err(Error::Unimplemented(
-				"RepeatRecurse should be handled within recursion context".to_string(),
-			))
+			Err(Error::Query {
+				message: "RepeatRecurse should be handled within recursion context".to_string(),
+			})
 		}
 	}
 }

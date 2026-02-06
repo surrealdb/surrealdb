@@ -35,20 +35,20 @@ pub struct Session {
 	pub exp: Option<i64>,
 	/// The variables set
 	pub variables: PublicVariables,
-	/// Planner strategy to use for the session.
-	pub planner_strategy: PlannerStrategy,
+	/// Strategy for the new streaming planner/executor.
+	pub new_planner_strategy: NewPlannerStrategy,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub enum PlannerStrategy {
-	/// Use the new planner without fallback to compute executor.
-	Pipelined,
-	/// Use the compute executor without trying to use the new planner.
-	Compute,
-	/// Use the best effort planner, which will try to use the new planner if it is available, but
-	/// will fall back to the compute executor if it is not.
+pub enum NewPlannerStrategy {
+	/// Try the new planner for read-only statements, fall back to compute on Unimplemented.
 	#[default]
-	BestEffort,
+	BestEffortReadOnlyStatements,
+	/// Skip the new planner entirely; always use the compute executor.
+	ComputeOnly,
+	/// Require the new planner for all read-only statements.
+	/// Returns Error::Query instead of Error::Unimplemented for non-DDL/DML failures.
+	AllReadOnlyStatements,
 }
 
 impl Session {
@@ -76,10 +76,9 @@ impl Session {
 		self
 	}
 
-	/// Require the new planner without fallback to compute executor
-	/// This is useful for testing to ensure queries use the new execution path
-	pub fn require_new_planner(mut self) -> Session {
-		self.planner_strategy = PlannerStrategy::Pipelined;
+	/// Set the new planner strategy for the session
+	pub fn new_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Session {
+		self.new_planner_strategy = strategy;
 		self
 	}
 
@@ -166,7 +165,7 @@ impl Session {
 			rd: Some(rid),
 			exp: None,
 			variables: Default::default(),
-			planner_strategy: PlannerStrategy::default(),
+			new_planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 

@@ -529,3 +529,35 @@ http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
 This field is not supported for upgrade tests.
+
+#### `[env.new-planner-strategy]`
+
+Controls the strategy for the new streaming planner/executor. This determines
+how read-only statements (SELECT, INFO, etc.) are executed and whether the new
+planner is required or optional.
+
+Valid values:
+- `"best-effort-ro"` (default): Try the new planner for read-only statements. If
+  the planner returns `Unimplemented`, silently fall back to the legacy compute
+  executor. This is the production default.
+- `"all-ro"`: Require the new planner for all read-only statements. If the new
+  planner cannot handle a non-DDL/DML statement, the test fails with an error
+  instead of silently falling back. DDL/DML statements (CREATE, UPDATE, DELETE,
+  DEFINE, etc.) always fall back regardless of this setting.
+- `"compute-only"`: Skip the new planner entirely and always use the legacy
+  compute executor for all statements.
+
+**Examples:**
+```toml
+# Require that all SELECTs use the new executor (test will fail if fallback occurs)
+[env]
+new-planner-strategy = "all-ro"
+```
+
+```toml
+# Force legacy compute path for all statements
+[env]
+new-planner-strategy = "compute-only"
+```
+
+Defaults to `"best-effort-ro"` (current production behavior).

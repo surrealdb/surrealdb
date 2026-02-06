@@ -15,7 +15,6 @@ use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
 };
-use crate::exec::physical_expr::ReturnValue;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -103,29 +102,22 @@ impl ExecOperator for Scan {
 
 			// Evaluate table expression
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let table_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate table expression: {e}"))
-			})?;
+			let table_value = source_expr.evaluate(eval_ctx).await?;
 
 			// Determine scan target: either a table name or a record ID
 			let (table_name, rid) = match table_value {
 				Value::String(s) => (TableName::from(s), None),
 				Value::Table(t) => (t, None),
 				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
-				Value::None => {
-					// Return early with NONE
-					yield ValueBatch { values: vec![Value::None] };
-					return;
-				}
 				Value::Array(arr) => {
 					yield ValueBatch { values: arr.0 };
 					return;
 				}
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Table expression must evaluate to a string, table, or record ID, got: {:?}",
-						table_value
-					)))?
+				// For any other value type, yield as a single row.
+				// This matches legacy FROM behavior for non-table values.
+				other => {
+					yield ValueBatch { values: vec![other] };
+					return;
 				}
 			};
 
@@ -511,18 +503,8 @@ async fn compute_fields_for_value(
 		let row_ctx = eval_ctx.with_value(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
-			Err(e) => {
-				// Check if this is a RETURN control flow - extract the value
-				if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
-					return_value.0.clone()
-				} else {
-					return Err(ControlFlow::Err(anyhow::anyhow!(
-						"Failed to compute field '{}': {}",
-						cf.field_name,
-						e
-					)));
-				}
-			}
+			Err(ControlFlow::Return(v)) => v,
+			Err(e) => return Err(e),
 		};
 
 		// Apply type coercion if specified

@@ -106,9 +106,7 @@ impl ExecOperator for GraphEdgeScan {
 
 			// Evaluate the source expression to get RecordId(s)
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let source_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate source: {}", e))
-			})?;
+			let source_value = source_expr.evaluate(eval_ctx).await?;
 
 			// Convert source value to a list of RecordIds
 			let source_rids = match source_value {

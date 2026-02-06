@@ -282,12 +282,7 @@ async fn evaluate_and_set_field(
 			}
 			Ok(None) => {
 				// Not actually a projection function (shouldn't happen), fall back to regular eval
-				let field_value = field.expr.evaluate(eval_ctx).await.map_err(|e| {
-					crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						"Failed to evaluate field expression: {}",
-						e
-					))
-				})?;
+				let field_value = field.expr.evaluate(eval_ctx).await?;
 				let mut target = Value::Object(std::mem::take(obj));
 				target.set_at_field_path(&field.output_path, field_value);
 				if let Value::Object(new_obj) = target {
@@ -295,19 +290,11 @@ async fn evaluate_and_set_field(
 				}
 				Ok(())
 			}
-			Err(e) => Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-				"Failed to evaluate projection function: {}",
-				e
-			))),
+			Err(e) => Err(e),
 		}
 	} else {
 		// Regular expression - evaluate and set at output_path
-		let field_value = field.expr.evaluate(eval_ctx).await.map_err(|e| {
-			crate::expr::ControlFlow::Err(anyhow::anyhow!(
-				"Failed to evaluate field expression: {}",
-				e
-			))
-		})?;
+		let field_value = field.expr.evaluate(eval_ctx).await?;
 		let mut target = Value::Object(std::mem::take(obj));
 		target.set_at_field_path(&field.output_path, field_value);
 		if let Value::Object(new_obj) = target {

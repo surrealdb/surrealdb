@@ -15,7 +15,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::exec::physical_expr::ReturnValue;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -127,18 +126,8 @@ async fn compute_fields_for_value(
 	for (name, expr) in fields {
 		let computed = match expr.evaluate(eval_ctx.clone()).await {
 			Ok(v) => v,
-			Err(e) => {
-				// Check if this is a RETURN control flow - extract the value
-				if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
-					return_value.0.clone()
-				} else {
-					return Err(ControlFlow::Err(anyhow::anyhow!(
-						"Failed to compute field '{}': {}",
-						name,
-						e
-					)));
-				}
-			}
+			Err(ControlFlow::Return(v)) => v,
+			Err(e) => return Err(e),
 		};
 		obj.insert(name.clone(), computed);
 	}

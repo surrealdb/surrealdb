@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
@@ -68,12 +67,10 @@ impl ExecOperator for TableInfoPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			match execute_table_info(&ctx, &*table, structured, version.as_deref()).await {
-				Ok(value) => Ok(ValueBatch {
-					values: vec![value],
-				}),
-				Err(e) => Err(crate::expr::ControlFlow::Err(e)),
-			}
+			let value = execute_table_info(&ctx, &*table, structured, version.as_deref()).await?;
+			Ok(ValueBatch {
+				values: vec![value],
+			})
 		})))
 	}
 
@@ -87,7 +84,7 @@ async fn execute_table_info(
 	table_expr: &dyn PhysicalExpr,
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
-) -> Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	// Check permissions
 	let root = ctx.root();
 	let opt = root
@@ -106,13 +103,18 @@ async fn execute_table_info(
 	// Evaluate the table name expression
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
 	let table_value = table_expr.evaluate(eval_ctx.clone()).await?;
-	let tb = TableName::new(table_value.coerce_to::<String>()?);
+	let tb = TableName::new(table_value.coerce_to::<String>().map_err(|e| anyhow::anyhow!("{e}"))?);
 
 	// Convert the version to u64 if present
 	let version = match version {
 		Some(v) => {
 			let value = v.evaluate(eval_ctx).await?;
-			Some(value.cast_to::<Datetime>()?.to_version_stamp()?)
+			Some(
+				value
+					.cast_to::<Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp()?,
+			)
 		}
 		None => None,
 	};

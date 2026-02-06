@@ -30,7 +30,7 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Options, Session, Variables};
+use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::idx::planner::executor::QueryExecutor;
@@ -95,6 +95,8 @@ pub struct Context {
 	surrealism_cache: Option<Arc<SurrealismCache>>,
 	// Function registry for built-in and custom functions
 	function_registry: Arc<FunctionRegistry>,
+	// Strategy for the new streaming planner/executor
+	new_planner_strategy: NewPlannerStrategy,
 }
 
 impl Default for Context {
@@ -148,6 +150,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -176,6 +179,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
 		}
 	}
 
@@ -206,6 +210,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
 		}
 	}
 
@@ -236,6 +241,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
 			function_registry: from.function_registry.clone(),
+			new_planner_strategy: from.new_planner_strategy.clone(),
 		}
 	}
 
@@ -276,6 +282,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: NewPlannerStrategy::default(),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -669,6 +676,7 @@ impl Context {
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
+		self.new_planner_strategy = session.new_planner_strategy.clone();
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}
@@ -717,6 +725,11 @@ impl Context {
 	/// Get the function registry for this context
 	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
 		&self.function_registry
+	}
+
+	/// Get the new planner strategy for this context
+	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
+		&self.new_planner_strategy
 	}
 
 	/// Check if scripting is allowed

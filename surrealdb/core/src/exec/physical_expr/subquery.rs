@@ -6,7 +6,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ExecOperator};
-use crate::expr::ControlFlow;
 use crate::val::{Array, Value};
 
 /// Scalar subquery - (SELECT ... LIMIT 1)
@@ -26,7 +25,7 @@ impl PhysicalExpr for ScalarSubquery {
 		crate::exec::ContextLevel::Database
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
 		// Create a derived execution context with the parent value set.
 		// This allows $parent references in the subquery to access the outer document.
 		let subquery_ctx = if let Some(parent_value) = ctx.current_value {
@@ -36,34 +35,14 @@ impl PhysicalExpr for ScalarSubquery {
 		};
 
 		// Execute the subquery plan with the derived context
-		let mut stream = match self.plan.execute(&subquery_ctx) {
-			Ok(s) => s,
-			Err(ControlFlow::Err(e)) => return Err(e),
-			Err(ControlFlow::Return(v)) => return Ok(v),
-			Err(other) => {
-				return Err(anyhow::anyhow!(
-					"Unexpected control flow when executing subquery: {:?}",
-					other
-				));
-			}
-		};
+		let mut stream = self.plan.execute(&subquery_ctx)?;
 
 		// Collect all values from the stream
 		let mut values = Vec::new();
 		while let Some(batch_result) = stream.next().await {
 			match batch_result {
 				Ok(batch) => values.extend(batch.values),
-				Err(ControlFlow::Return(v)) => {
-					// Return statement in subquery - use the returned value
-					return Ok(v);
-				}
-				Err(ControlFlow::Err(e)) => return Err(e),
-				Err(other) => {
-					return Err(anyhow::anyhow!(
-						"Unexpected control flow in subquery: {:?}",
-						other
-					));
-				}
+				Err(ctrl) => return Err(ctrl),
 			}
 		}
 

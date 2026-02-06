@@ -1,35 +1,24 @@
 /**
 [test]
-wip = true
 
 [[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ name: 'A' }, { name: 'B' }, { name: 'C' }]"
+value = "NONE"
 
 [[test.results]]
-value = "[{ name: 'A' }]"
+value = "[{ age: 17, can_drive: false, id: person:a, name: 'A' }]"
 
 [[test.results]]
-value = "[1, 2, 3]"
+value = "[{ age: 17, can_drive: false, id: person:a, name: 'A' }]"
 
 [[test.results]]
-value = "[{ name: 'B' }, { name: 'C' }]"
+value = "NONE"
 
 [[test.results]]
-value = "[{ age: 17, can_drive: false, id: person:a, knows: [[person:b]], name: 'A' }, { age: 18, can_drive: true, id: person:b, knows: [[person:c]], name: 'B' }]"
+value = "[{ age: 17, can_drive: false, id: person:a, name: 'A' }]"
 
-[[test.results]]
-value = "{ age: person:b, id: person:a }"
-
-[[test.results]]
-value = """\
-["Project [ctx: Db]
-└────> Sort [ctx: Db] [order_by: id ASC]
-       └────> Split [ctx: Db] [on: a, b]
-              └────> Scan [ctx: Db] [source: 'test']
-"]"""
 
 */
 
@@ -48,15 +37,11 @@ value = """\
     RETURN "OK";
 };
 
-SELECT name FROM person;
-SELECT name FROM person:a;
-SELECT * FROM [1, 2, 3];
-SELECT name FROM [{ name: 'A', age: 1 }, { name: 'B', age: 2 }, { name: 'C', age: 3 }] WHERE age > 1;
+type::field('bob');
 
-EXPLAIN SELECT *, ->knows->person AS knows FROM person WHERE age < 19;
+SELECT * FROM person LIMIT 1;
+SELECT * FROM type::table('person') LIMIT 1;
 
-{ id: person:a, age: person:b }.*;
+LET $param = |$n: string| type::table('perso' + $n);
 
-EXPLAIN SELECT id, a, b FROM test SPLIT a, b ORDER BY id;
-
-{ EXPLAIN SELECT * FROM person; EXPLAIN RETURN "OK"; };
+SELECT * FROM $param('n') LIMIT 1;

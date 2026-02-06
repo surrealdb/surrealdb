@@ -8,6 +8,7 @@ use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::expr::FlowResult;
 use crate::iam::Action;
 use crate::val::Value;
 
@@ -26,7 +27,7 @@ impl PhysicalExpr for Literal {
 		crate::exec::ContextLevel::Root
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
 		Ok(self.0.clone())
 	}
 
@@ -108,7 +109,7 @@ impl PhysicalExpr for Param {
 		crate::exec::ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// Handle special params $this and $self
 		match self.0.as_str() {
 			"this" | "self" => {
@@ -145,7 +146,7 @@ impl PhysicalExpr for Param {
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
 
-			return self.fetch_db_param(ctx, txn, ns_id, db_id).await;
+			return Ok(self.fetch_db_param(ctx, txn, ns_id, db_id).await?);
 		}
 
 		// If no database context but we have options with ns/db set, look up by name
@@ -153,11 +154,11 @@ impl PhysicalExpr for Param {
 			// Check if namespace/database are set - if not, throw appropriate error
 			let ns_name = match opts.ns() {
 				Ok(ns) => ns,
-				Err(_) => bail!(Error::NsEmpty),
+				Err(_) => return Err(Error::NsEmpty.into()),
 			};
 			let db_name = match opts.db() {
 				Ok(db) => db,
-				Err(_) => bail!(Error::DbEmpty),
+				Err(_) => return Err(Error::DbEmpty.into()),
 			};
 
 			let txn = ctx.exec_ctx.txn();
@@ -166,14 +167,14 @@ impl PhysicalExpr for Param {
 				let ns_id = db_def.namespace_id;
 				let db_id = db_def.database_id;
 
-				return self.fetch_db_param(ctx, txn, ns_id, db_id).await;
+				return Ok(self.fetch_db_param(ctx, txn, ns_id, db_id).await?);
 			}
 			// Database doesn't exist yet, param cannot be found
 			return Ok(Value::None);
 		}
 
 		// No options available and param not found locally - throw error
-		bail!("Parameter not found: ${}", self.0)
+		Err(anyhow::anyhow!("Parameter not found: ${}", self.0).into())
 	}
 
 	fn references_current_value(&self) -> bool {

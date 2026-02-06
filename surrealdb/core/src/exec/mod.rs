@@ -209,7 +209,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_all_from_table() {
 // 		let ds = setup_test_data().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM users
 // 		let select_stmt = SelectStatement {
@@ -243,7 +245,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_from_record_id() {
 // 		let ds = setup_test_data().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM users:1
 // 		let record_id_lit = crate::expr::RecordIdLit {
@@ -292,7 +296,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_with_where_clause() {
 // 		let ds = setup_test_data().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM users WHERE age > 28
 // 		// The condition: age > 28
@@ -336,7 +342,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_from_multiple_tables() {
 // 		let ds = setup_test_data().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM users, posts
 // 		let select_stmt = SelectStatement {
@@ -482,7 +490,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_owner_bypasses_permissions() {
 // 		let ds = setup_test_data_with_permissions().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM private_data (which has PERMISSIONS NONE)
 // 		let select_stmt = SelectStatement {
@@ -522,7 +532,8 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 			"id".to_string(),
 // 			PublicValue::String("user:test".to_string()),
 // 		)]));
-// 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+// 		let ses = Session::for_record("test", "test", "user",
+// rid).new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM private_data (which has PERMISSIONS NONE)
 // 		let select_stmt = SelectStatement {
@@ -567,7 +578,8 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 			"id".to_string(),
 // 			PublicValue::String("user:test".to_string()),
 // 		)]));
-// 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+// 		let ses = Session::for_record("test", "test", "user",
+// rid).new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM public_data (which has default FULL permissions)
 // 		let select_stmt = SelectStatement {
@@ -612,7 +624,8 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 			"id".to_string(),
 // 			PublicValue::String("user:test".to_string()),
 // 		)]));
-// 		let ses = Session::for_record("test", "test", "user", rid).require_new_planner();
+// 		let ses = Session::for_record("test", "test", "user",
+// rid).new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM undefined_table (table doesn't exist - schemaless)
 // 		let select_stmt = SelectStatement {
@@ -651,7 +664,9 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_select_schemaless_table_allowed_for_owner() {
 // 		let ds = setup_test_data_with_permissions().await;
-// 		let ses = Session::owner().with_ns("test").with_db("test").require_new_planner();
+// 		let ses =
+// Session::owner().with_ns("test").with_db("test").
+// new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Create SELECT * FROM undefined_table (table doesn't exist - schemaless)
 // 		let select_stmt = SelectStatement {
@@ -681,7 +696,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_literal_integer() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: 42
 // 		let plan = LogicalPlan {
@@ -705,7 +720,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_literal_string() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: "hello"
 // 		let plan = LogicalPlan {
@@ -729,7 +744,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_binary_expression() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: 1 + 2
 // 		let plan = LogicalPlan {
@@ -759,7 +774,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_prefix_negate() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: -5
 // 		let plan = LogicalPlan {
@@ -786,7 +801,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_prefix_not() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: !true
 // 		let plan = LogicalPlan {
@@ -813,7 +828,7 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 // 	#[tokio::test]
 // 	async fn test_scalar_constant_math_pi() {
 // 		let ds = Datastore::new("memory").await.unwrap();
-// 		let ses = Session::owner().require_new_planner();
+// 		let ses = Session::owner().new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
 
 // 		// Expression: MATH::PI
 // 		let plan = LogicalPlan {

@@ -4,6 +4,7 @@
 //! Functions are organized by category (math, string, array, etc.).
 
 pub mod aggregates;
+mod api;
 mod array;
 mod bytes;
 mod count;
@@ -38,6 +39,7 @@ use super::FunctionRegistry;
 /// Register all built-in functions with the registry.
 pub fn register_all(registry: &mut FunctionRegistry) {
 	// Scalar functions
+	api::register(registry);
 	array::register(registry);
 	bytes::register(registry);
 	count::register(registry);

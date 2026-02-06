@@ -55,8 +55,7 @@ impl ExecOperator for SourceExpr {
 
 		let stream = async_stream::try_stream! {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let value = expr.evaluate(eval_ctx).await
-				.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
+			let value = expr.evaluate(eval_ctx).await?;
 
 			match value {
 				// Arrays yield their elements

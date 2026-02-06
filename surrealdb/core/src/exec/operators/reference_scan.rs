@@ -81,9 +81,7 @@ impl ExecOperator for ReferenceScan {
 
 			// Evaluate the source expression to get the target RecordId(s)
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let source_value = source_expr.evaluate(eval_ctx).await.map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to evaluate source: {}", e))
-			})?;
+			let source_value = source_expr.evaluate(eval_ctx).await?;
 
 			// Convert source value to a list of RecordIds
 			let target_rids = match source_value {

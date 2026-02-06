@@ -133,7 +133,7 @@ impl PhysicalExpr for IdiomExpr {
 		ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
 		// When there's no current_value:
 		// - Simple identifiers return NONE (undefined variable)
 		// - Complex idioms are an error (they need a document context)
@@ -149,7 +149,7 @@ impl PhysicalExpr for IdiomExpr {
 					// This matches legacy SurrealQL behavior for undefined variables
 					return Ok(Value::None);
 				}
-				return Err(anyhow::anyhow!("Idiom evaluation requires current value"));
+				return Err(anyhow::anyhow!("Idiom evaluation requires current value").into());
 			}
 		};
 
@@ -201,22 +201,22 @@ async fn evaluate_part(
 	value: &Value,
 	part: &PhysicalPart,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	match part {
-		PhysicalPart::Field(name) => evaluate_field(value, name, ctx.clone()).await,
+		PhysicalPart::Field(name) => Ok(evaluate_field(value, name, ctx.clone()).await?),
 
 		PhysicalPart::Index(expr) => {
 			let index = expr.evaluate(ctx).await?;
-			evaluate_index(value, &index)
+			Ok(evaluate_index(value, &index)?)
 		}
 
-		PhysicalPart::All => evaluate_all(value, ctx).await,
+		PhysicalPart::All => Ok(evaluate_all(value, ctx).await?),
 
-		PhysicalPart::Flatten => evaluate_flatten(value),
+		PhysicalPart::Flatten => Ok(evaluate_flatten(value)?),
 
-		PhysicalPart::First => evaluate_first(value),
+		PhysicalPart::First => Ok(evaluate_first(value)?),
 
-		PhysicalPart::Last => evaluate_last(value),
+		PhysicalPart::Last => Ok(evaluate_last(value)?),
 
 		PhysicalPart::Where(predicate) => evaluate_where(value, predicate.as_ref(), ctx).await,
 
@@ -232,7 +232,7 @@ async fn evaluate_part(
 			Ok(value.clone())
 		}
 
-		PhysicalPart::Lookup(lookup) => evaluate_lookup(value, lookup, ctx).await,
+		PhysicalPart::Lookup(lookup) => Ok(evaluate_lookup(value, lookup, ctx).await?),
 
 		PhysicalPart::Recurse(recurse) => evaluate_recurse(value, recurse, ctx).await,
 	}
@@ -544,7 +544,7 @@ async fn evaluate_where(
 	value: &Value,
 	predicate: &dyn PhysicalExpr,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	match value {
 		Value::Array(arr) => {
 			let mut result = Vec::new();
@@ -582,7 +582,7 @@ async fn evaluate_method(
 	name: &str,
 	args: &[Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	// Determine the type-specific function namespace based on the value type
 	let namespace = match value {
 		Value::String(_) => "string",
@@ -601,7 +601,8 @@ async fn evaluate_method(
 				"Method '{}' cannot be called on value of type '{}'",
 				name,
 				value.kind_of()
-			));
+			)
+			.into());
 		}
 	};
 
@@ -622,10 +623,10 @@ async fn evaluate_method(
 	if let Some(func) = registry.get(&func_name) {
 		// Try sync invocation first for pure functions
 		if func.is_pure() {
-			func.invoke(func_args)
+			Ok(func.invoke(func_args)?)
 		} else {
 			// Use async invocation for context-aware functions
-			func.invoke_async(&ctx, func_args).await
+			Ok(func.invoke_async(&ctx, func_args).await?)
 		}
 	} else {
 		// Try without namespace (some methods might be value-generic)
@@ -634,7 +635,8 @@ async fn evaluate_method(
 			name,
 			value.kind_of(),
 			func_name
-		))
+		)
+		.into())
 	}
 }
 
@@ -643,7 +645,7 @@ async fn evaluate_destructure(
 	value: &Value,
 	parts: &[PhysicalDestructurePart],
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	match value {
 		Value::Object(obj) => {
 			let mut result = std::collections::BTreeMap::new();
@@ -925,7 +927,8 @@ fn evaluate_recurse<'a>(
 	value: &'a Value,
 	recurse: &'a PhysicalRecurse,
 	ctx: EvalContext<'a>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Value>> + Send + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<Value>> + Send + 'a>>
+{
 	Box::pin(async move {
 		// Get the system recursion limit
 		let system_limit = *IDIOM_RECURSION_LIMIT as u32;
@@ -989,7 +992,8 @@ pub(crate) fn evaluate_physical_path<'a>(
 	value: &'a Value,
 	path: &'a [PhysicalPart],
 	ctx: EvalContext<'a>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<Value>> + Send + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<Value>> + Send + 'a>>
+{
 	Box::pin(async move {
 		let mut current = value.clone();
 		for (i, part) in path.iter().enumerate() {
@@ -1041,7 +1045,7 @@ async fn evaluate_recurse_default(
 	min_depth: u32,
 	max_depth: u32,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	let mut current = start.clone();
 	let mut depth = 0u32;
 
@@ -1087,7 +1091,7 @@ async fn evaluate_recurse_collect(
 	max_depth: u32,
 	inclusive: bool,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	let mut collected = Vec::new();
 	let mut seen: HashSet<u64> = HashSet::new();
 	let mut frontier = vec![start.clone()];
@@ -1149,7 +1153,7 @@ async fn evaluate_recurse_path(
 	max_depth: u32,
 	inclusive: bool,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	let mut completed_paths: Vec<Value> = Vec::new();
 	let mut active_paths: Vec<Vec<Value>> = if inclusive {
 		vec![vec![start.clone()]]
@@ -1223,7 +1227,7 @@ async fn evaluate_recurse_shortest(
 	max_depth: u32,
 	inclusive: bool,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	let mut seen: HashSet<u64> = HashSet::new();
 
 	// BFS with path tracking

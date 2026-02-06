@@ -8,7 +8,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::exec::physical_expr::ReturnValue;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -70,17 +69,8 @@ impl ExecOperator for ProjectValue {
 
 					match expr.evaluate(eval_ctx).await {
 						Ok(result) => projected_values.push(result),
-						Err(e) => {
-							// Check if this is a RETURN control flow - use the value
-							if let Some(return_val) = e.downcast_ref::<ReturnValue>() {
-								projected_values.push(return_val.0.clone());
-							} else {
-								return Err(ControlFlow::Err(anyhow::anyhow!(
-									"Failed to evaluate projection expression: {}",
-									e
-								)));
-							}
-						}
+						Err(ControlFlow::Return(v)) => projected_values.push(v),
+						Err(e) => return Err(e),
 					}
 				}
 

@@ -47,12 +47,10 @@ impl ExecOperator for ExprPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			match expr.evaluate(eval_ctx).await {
-				Ok(value) => Ok(ValueBatch {
-					values: vec![value],
-				}),
-				Err(e) => Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
-			}
+			let value = expr.evaluate(eval_ctx).await?;
+			Ok(ValueBatch {
+				values: vec![value],
+			})
 		})))
 	}
 

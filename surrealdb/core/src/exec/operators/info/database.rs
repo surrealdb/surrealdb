@@ -16,7 +16,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
@@ -72,12 +71,10 @@ impl ExecOperator for DatabaseInfoPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			match execute_database_info(&ctx, structured, version.as_deref()).await {
-				Ok(value) => Ok(ValueBatch {
-					values: vec![value],
-				}),
-				Err(e) => Err(crate::expr::ControlFlow::Err(e)),
-			}
+			let value = execute_database_info(&ctx, structured, version.as_deref()).await?;
+			Ok(ValueBatch {
+				values: vec![value],
+			})
 		})))
 	}
 
@@ -90,7 +87,7 @@ async fn execute_database_info(
 	ctx: &ExecutionContext,
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
-) -> Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	// Check permissions
 	let root = ctx.root();
 	let opt = root
@@ -111,7 +108,12 @@ async fn execute_database_info(
 		Some(v) => {
 			let eval_ctx = EvalContext::from_exec_ctx(ctx);
 			let value = v.evaluate(eval_ctx).await?;
-			Some(value.cast_to::<Datetime>()?.to_version_stamp()?)
+			Some(
+				value
+					.cast_to::<Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp()?,
+			)
 		}
 		None => None,
 	};

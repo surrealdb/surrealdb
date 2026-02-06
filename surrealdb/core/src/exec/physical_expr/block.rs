@@ -18,59 +18,32 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::FrozenContext;
+use crate::dbs::NewPlannerStrategy;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
-use crate::expr::{Block, Expr};
+use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
-/// Error type for RETURN control flow in physical expressions.
-///
-/// Since `PhysicalExpr::evaluate` returns `anyhow::Result<Value>`, we use this
-/// custom error type to propagate RETURN statements through the physical
-/// expression layer. Callers can downcast to check for RETURN control flow.
-#[derive(Debug)]
-pub struct ReturnValue(pub Value);
-
-impl std::fmt::Display for ReturnValue {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "RETURN {:?}", self.0)
-	}
+/// Check if an expression is a DDL or DML statement that should always
+/// fall back to the legacy compute path regardless of planner strategy.
+fn is_ddl_or_dml(expr: &Expr) -> bool {
+	matches!(
+		expr,
+		Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Insert(_)
+			| Expr::Relate(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_)
+	)
 }
-
-impl std::error::Error for ReturnValue {}
-
-/// Error type for BREAK control flow in physical expressions.
-///
-/// Used to propagate BREAK statements through the physical expression layer.
-/// The FOR loop handler will catch this and exit the loop.
-#[derive(Debug)]
-pub struct BreakControlFlow;
-
-impl std::fmt::Display for BreakControlFlow {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "BREAK")
-	}
-}
-
-impl std::error::Error for BreakControlFlow {}
-
-/// Error type for CONTINUE control flow in physical expressions.
-///
-/// Used to propagate CONTINUE statements through the physical expression layer.
-/// The FOR loop handler will catch this and skip to the next iteration.
-#[derive(Debug)]
-pub struct ContinueControlFlow;
-
-impl std::fmt::Display for ContinueControlFlow {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "CONTINUE")
-	}
-}
-
-impl std::error::Error for ContinueControlFlow {}
 
 /// Block expression with deferred planning.
 ///
@@ -161,7 +134,7 @@ impl PhysicalExpr for BlockPhysicalExpr {
 		crate::exec::ContextLevel::Database
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// Empty block returns NONE
 		if self.block.0.is_empty() {
 			return Ok(Value::None);
@@ -208,17 +181,18 @@ impl PhysicalExpr for BlockPhysicalExpr {
 									Some(&local_params)
 								},
 							};
-							// Check for RETURN control flow and propagate it
-							match phys_expr.evaluate(eval_ctx).await {
-								Ok(v) => v,
-								Err(e) => {
-									// Check if this is a RETURN control flow - propagate it
-									if e.is::<ReturnValue>() {
-										return Err(e);
-									}
-									return Err(e);
-								}
-							}
+							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
+							phys_expr.evaluate(eval_ctx).await?
+						}
+						Err(Error::Unimplemented(ref msg))
+							if *frozen_ctx.new_planner_strategy()
+								== NewPlannerStrategy::AllReadOnlyStatements
+								&& !is_ddl_or_dml(&set_stmt.what) =>
+						{
+							// Hard fail: non-DDL/DML expression can't be planned
+							return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+								message: format!("New executor does not support: {msg}"),
+							})));
 						}
 						Err(Error::Unimplemented(_)) => {
 							// Fallback to legacy compute path
@@ -229,31 +203,17 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								.as_ref()
 								.map(|v| CursorDoc::new(None, None, v.clone()));
 							let mut stack = TreeStack::new();
-							match stack
+							// Legacy compute returns FlowResult directly - propagate as-is
+							stack
 								.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
 								.finish()
-								.await
-							{
-								Ok(v) => v,
-								Err(crate::expr::ControlFlow::Return(v)) => {
-									// RETURN statement - propagate as ReturnValue error
-									return Err(ReturnValue(v).into());
-								}
-								Err(crate::expr::ControlFlow::Break) => {
-									// BREAK statement - propagate as BreakControlFlow error
-									return Err(BreakControlFlow.into());
-								}
-								Err(crate::expr::ControlFlow::Continue) => {
-									// CONTINUE statement - propagate as ContinueControlFlow error
-									return Err(ContinueControlFlow.into());
-								}
-								Err(crate::expr::ControlFlow::Err(e)) => {
-									return Err(e);
-								}
-							}
+								.await?
 						}
 						Err(e) => {
-							return Err(anyhow::anyhow!("Failed to plan LET expression: {}", e));
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"Failed to plan LET expression: {}",
+								e
+							)));
 						}
 					};
 
@@ -298,17 +258,18 @@ impl PhysicalExpr for BlockPhysicalExpr {
 									Some(&local_params)
 								},
 							};
-							// Check for RETURN control flow and propagate it
-							match phys_expr.evaluate(eval_ctx).await {
-								Ok(v) => v,
-								Err(e) => {
-									// Check if this is a RETURN control flow - propagate it
-									if e.is::<ReturnValue>() {
-										return Err(e);
-									}
-									return Err(e);
-								}
-							}
+							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
+							phys_expr.evaluate(eval_ctx).await?
+						}
+						Err(Error::Unimplemented(ref msg))
+							if *frozen_ctx.new_planner_strategy()
+								== NewPlannerStrategy::AllReadOnlyStatements
+								&& !is_ddl_or_dml(other) =>
+						{
+							// Hard fail: non-DDL/DML expression can't be planned
+							return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+								message: format!("New executor does not support: {msg}"),
+							})));
 						}
 						Err(Error::Unimplemented(_)) => {
 							// Fallback to legacy compute path
@@ -319,31 +280,17 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								.as_ref()
 								.map(|v| CursorDoc::new(None, None, v.clone()));
 							let mut stack = TreeStack::new();
-							match stack
+							// Legacy compute returns FlowResult directly - propagate as-is
+							stack
 								.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
 								.finish()
-								.await
-							{
-								Ok(v) => v,
-								Err(crate::expr::ControlFlow::Return(v)) => {
-									// RETURN statement - propagate as ReturnValue error
-									return Err(ReturnValue(v).into());
-								}
-								Err(crate::expr::ControlFlow::Break) => {
-									// BREAK statement - propagate as BreakControlFlow error
-									return Err(BreakControlFlow.into());
-								}
-								Err(crate::expr::ControlFlow::Continue) => {
-									// CONTINUE statement - propagate as ContinueControlFlow error
-									return Err(ContinueControlFlow.into());
-								}
-								Err(crate::expr::ControlFlow::Err(e)) => {
-									return Err(e);
-								}
-							}
+								.await?
 						}
 						Err(e) => {
-							return Err(anyhow::anyhow!("Failed to plan block expression: {}", e));
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"Failed to plan block expression: {}",
+								e
+							)));
 						}
 					};
 				}

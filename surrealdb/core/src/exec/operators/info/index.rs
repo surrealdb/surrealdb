@@ -8,7 +8,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
@@ -61,12 +60,10 @@ impl ExecOperator for IndexInfoPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			match execute_index_info(&ctx, &*index, &*table).await {
-				Ok(value) => Ok(ValueBatch {
-					values: vec![value],
-				}),
-				Err(e) => Err(crate::expr::ControlFlow::Err(e)),
-			}
+			let value = execute_index_info(&ctx, &*index, &*table).await?;
+			Ok(ValueBatch {
+				values: vec![value],
+			})
 		})))
 	}
 
@@ -79,7 +76,7 @@ async fn execute_index_info(
 	ctx: &ExecutionContext,
 	index_expr: &dyn PhysicalExpr,
 	table_expr: &dyn PhysicalExpr,
-) -> Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	// Check permissions
 	let root = ctx.root();
 	let opt = root
@@ -95,8 +92,9 @@ async fn execute_index_info(
 	let index_value = index_expr.evaluate(eval_ctx.clone()).await?;
 	let table_value = table_expr.evaluate(eval_ctx).await?;
 
-	let index = index_value.coerce_to::<String>()?;
-	let table = TableName::new(table_value.coerce_to::<String>()?);
+	let index = index_value.coerce_to::<String>().map_err(|e| anyhow::anyhow!("{e}"))?;
+	let table =
+		TableName::new(table_value.coerce_to::<String>().map_err(|e| anyhow::anyhow!("{e}"))?);
 
 	// Get the index builder from the frozen context
 	let frozen_ctx = ctx.ctx();

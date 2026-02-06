@@ -17,13 +17,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
 use crate::err::Error;
-use crate::exec::physical_expr::block::{
-	BlockPhysicalExpr, BreakControlFlow, ContinueControlFlow, ReturnValue,
-};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{AccessMode, CombineAccessModes};
-use crate::expr::{Kind, Model, Script};
+use crate::expr::{ControlFlow, FlowResult, Kind, Model, Script};
 use crate::val::Value;
 
 // =============================================================================
@@ -34,7 +31,7 @@ use crate::val::Value;
 async fn evaluate_args(
 	args: &[Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Vec<Value>> {
+) -> FlowResult<Vec<Value>> {
 	let mut values = Vec::with_capacity(args.len());
 	for arg_expr in args {
 		values.push(arg_expr.evaluate(ctx.clone()).await?);
@@ -47,7 +44,7 @@ async fn check_permission(
 	permission: &Permission,
 	func_name: &str,
 	ctx: &EvalContext<'_>,
-) -> anyhow::Result<()> {
+) -> FlowResult<()> {
 	match permission {
 		Permission::Full => Ok(()),
 		Permission::None => Err(Error::FunctionPermissions {
@@ -171,7 +168,7 @@ impl PhysicalExpr for BuiltinFunctionExec {
 		args_ctx.max(self.func_required_context)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// Check if function is allowed by capabilities
 		ctx.check_allowed_function(&self.name)?;
 
@@ -186,9 +183,9 @@ impl PhysicalExpr for BuiltinFunctionExec {
 
 		// Invoke the function based on whether it's pure or needs context
 		if func.is_pure() && !func.is_async() {
-			func.invoke(args)
+			Ok(func.invoke(args)?)
 		} else {
-			func.invoke_async(&ctx, args).await
+			Ok(func.invoke_async(&ctx, args).await?)
 		}
 	}
 
@@ -239,7 +236,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		crate::exec::ContextLevel::Database
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let func_name = format!("fn::{}", self.name);
 
 		// 1. Require database context
@@ -300,21 +297,16 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		};
 		let result = match block_expr.evaluate(eval_ctx).await {
 			Ok(v) => v,
-			Err(e) => {
-				// Check if this is a RETURN control flow - extract the value
-				if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
-					return_value.0.clone()
-				} else if e.is::<BreakControlFlow>() || e.is::<ContinueControlFlow>() {
-					// BREAK/CONTINUE inside a function (outside of loop) is an error
-					return Err(anyhow::Error::new(Error::InvalidControlFlow));
-				} else {
-					return Err(e);
-				}
+			Err(ControlFlow::Return(v)) => v,
+			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+				// BREAK/CONTINUE inside a function (outside of loop) is an error
+				return Err(Error::InvalidControlFlow.into());
 			}
+			Err(e) => return Err(e),
 		};
 
 		// 10. Validate and coerce return type
-		validate_return(&func_name, func_def.returns.as_ref(), result)
+		Ok(validate_return(&func_name, func_def.returns.as_ref(), result)?)
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -358,7 +350,7 @@ impl PhysicalExpr for JsFunctionExec {
 	}
 
 	#[cfg(feature = "scripting")]
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use reblessive::TreeStack;
 
 		use crate::doc::CursorDoc;
@@ -385,16 +377,16 @@ impl PhysicalExpr for JsFunctionExec {
 		// This is required because JavaScript can call back into SurrealDB functions
 		// via surrealdb.functions.* which need TreeStack for recursive computation
 		let mut stack = TreeStack::new();
-		stack
+		Ok(stack
 			.enter(|_stk| async {
 				script::run(&frozen_ctx, &opt, doc.as_ref(), &self.script.0, args).await
 			})
 			.finish()
-			.await
+			.await?)
 	}
 
 	#[cfg(not(feature = "scripting"))]
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
 		Err(Error::InvalidScript {
 			message: String::from("Embedded functions are not enabled."),
 		}
@@ -440,7 +432,7 @@ impl PhysicalExpr for ModelFunctionExec {
 	}
 
 	#[cfg(feature = "ml")]
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use surrealml_core::errors::error::SurrealError;
 		use surrealml_core::execution::compute::ModelComputation;
 		use surrealml_core::ndarray as mlNdarray;
@@ -616,7 +608,7 @@ impl PhysicalExpr for ModelFunctionExec {
 	}
 
 	#[cfg(not(feature = "ml"))]
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
 		Err(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),
 		}
@@ -664,7 +656,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 	}
 
 	#[cfg(feature = "surrealism")]
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use reblessive::TreeStack;
 
 		use crate::doc::CursorDoc;
@@ -757,7 +749,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 	}
 
 	#[cfg(not(feature = "surrealism"))]
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let name = match &self.sub {
 			Some(s) => format!("mod::{}::{}", self.module, s),
 			None => format!("mod::{}", self.module),
@@ -765,7 +757,8 @@ impl PhysicalExpr for SurrealismModuleExec {
 		Err(anyhow::anyhow!(
 			"Module function '{}' requires the 'surrealism' feature to be enabled",
 			name
-		))
+		)
+		.into())
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -817,7 +810,7 @@ impl PhysicalExpr for SiloModuleExec {
 		crate::exec::ContextLevel::Database
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let name = format!(
 			"silo::{}::{}<{}.{}.{}>",
 			self.org, self.pkg, self.major, self.minor, self.patch
@@ -825,7 +818,8 @@ impl PhysicalExpr for SiloModuleExec {
 		Err(anyhow::anyhow!(
 			"Silo function '{}' is not yet supported in the streaming executor",
 			name
-		))
+		)
+		.into())
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -880,7 +874,7 @@ impl PhysicalExpr for ClosureExec {
 		crate::exec::ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use crate::dbs::ParameterCapturePass;
 		use crate::val::Closure;
 
@@ -946,7 +940,7 @@ impl PhysicalExpr for ClosureCallExec {
 		target_ctx.max(args_ctx)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use crate::val::Closure;
 
 		// 1. Evaluate the target expression to get the closure
@@ -1028,28 +1022,24 @@ impl PhysicalExpr for ClosureCallExec {
 
 				let result = match block_expr.evaluate(eval_ctx).await {
 					Ok(v) => v,
-					Err(e) => {
-						// Handle RETURN control flow - extract the returned value
-						if let Some(return_value) = e.downcast_ref::<ReturnValue>() {
-							return_value.0.clone()
-						} else if e.is::<BreakControlFlow>() || e.is::<ContinueControlFlow>() {
-							// BREAK/CONTINUE inside a closure (outside of loop) is an error
-							return Err(anyhow::Error::new(Error::InvalidControlFlow));
-						} else {
-							return Err(e);
-						}
+					Err(ControlFlow::Return(v)) => v,
+					Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+						// BREAK/CONTINUE inside a closure (outside of loop) is an error
+						return Err(Error::InvalidControlFlow.into());
 					}
+					Err(e) => return Err(e),
 				};
 
 				// Coerce return value to declared type if specified
-				validate_return("ANONYMOUS", returns.as_ref(), result)
+				Ok(validate_return("ANONYMOUS", returns.as_ref(), result)?)
 			}
 			Closure::Builtin(_) => {
 				// Builtin closures are not yet supported in the streaming executor
 				// They require the legacy compute path with Stk
 				Err(anyhow::anyhow!(
 					"Builtin closures are not yet supported in the streaming executor"
-				))
+				)
+				.into())
 			}
 		}
 	}
@@ -1101,7 +1091,7 @@ impl PhysicalExpr for ProjectionFunctionExec {
 		args_ctx.max(self.func_required_context)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// When evaluated as a regular expression (not in projection context),
 		// return the first value from the projection bindings, or None if empty.
 		// This handles cases like: RETURN type::field("name")
@@ -1133,7 +1123,7 @@ impl PhysicalExpr for ProjectionFunctionExec {
 	async fn evaluate_projection(
 		&self,
 		ctx: EvalContext<'_>,
-	) -> anyhow::Result<Option<Vec<(crate::expr::idiom::Idiom, Value)>>> {
+	) -> FlowResult<Option<Vec<(crate::expr::idiom::Idiom, Value)>>> {
 		// Look up the projection function in the registry
 		let registry = ctx.exec_ctx.function_registry();
 		let func = registry.get_projection(&self.name).ok_or_else(|| {

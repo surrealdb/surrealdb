@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 /// Binary operation - left op right (e.g., age > 10)
@@ -26,7 +27,7 @@ impl PhysicalExpr for BinaryOp {
 		self.left.required_context().max(self.right.required_context())
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use crate::expr::operator::BinaryOperator;
 		use crate::fnc::operate;
 
@@ -40,121 +41,123 @@ impl PhysicalExpr for BinaryOp {
 		}
 
 		// Apply the operator
-		match &self.op {
-			BinaryOperator::Add => operate::add(left, eval!(self.right)),
-			BinaryOperator::Subtract => operate::sub(left, eval!(self.right)),
-			BinaryOperator::Multiply => operate::mul(left, eval!(self.right)),
-			BinaryOperator::Divide => operate::div(left, eval!(self.right)),
-			BinaryOperator::Remainder => operate::rem(left, eval!(self.right)),
-			BinaryOperator::Power => operate::pow(left, eval!(self.right)),
+		// Note: operate::* functions return anyhow::Result<Value>.
+		// The ? operator converts anyhow::Error to ControlFlow via From impl.
+		Ok(match &self.op {
+			BinaryOperator::Add => operate::add(left, eval!(self.right))?,
+			BinaryOperator::Subtract => operate::sub(left, eval!(self.right))?,
+			BinaryOperator::Multiply => operate::mul(left, eval!(self.right))?,
+			BinaryOperator::Divide => operate::div(left, eval!(self.right))?,
+			BinaryOperator::Remainder => operate::rem(left, eval!(self.right))?,
+			BinaryOperator::Power => operate::pow(left, eval!(self.right))?,
 
-			BinaryOperator::Equal => operate::equal(&left, &eval!(self.right)),
-			BinaryOperator::ExactEqual => operate::exact(&left, &eval!(self.right)),
-			BinaryOperator::NotEqual => operate::not_equal(&left, &eval!(self.right)),
-			BinaryOperator::AllEqual => operate::all_equal(&left, &eval!(self.right)),
-			BinaryOperator::AnyEqual => operate::any_equal(&left, &eval!(self.right)),
+			BinaryOperator::Equal => operate::equal(&left, &eval!(self.right))?,
+			BinaryOperator::ExactEqual => operate::exact(&left, &eval!(self.right))?,
+			BinaryOperator::NotEqual => operate::not_equal(&left, &eval!(self.right))?,
+			BinaryOperator::AllEqual => operate::all_equal(&left, &eval!(self.right))?,
+			BinaryOperator::AnyEqual => operate::any_equal(&left, &eval!(self.right))?,
 
-			BinaryOperator::LessThan => operate::less_than(&left, &eval!(self.right)),
-			BinaryOperator::LessThanEqual => operate::less_than_or_equal(&left, &eval!(self.right)),
-			BinaryOperator::MoreThan => operate::more_than(&left, &eval!(self.right)),
-			BinaryOperator::MoreThanEqual => operate::more_than_or_equal(&left, &eval!(self.right)),
+			BinaryOperator::LessThan => operate::less_than(&left, &eval!(self.right))?,
+			BinaryOperator::LessThanEqual => {
+				operate::less_than_or_equal(&left, &eval!(self.right))?
+			}
+			BinaryOperator::MoreThan => operate::more_than(&left, &eval!(self.right))?,
+			BinaryOperator::MoreThanEqual => {
+				operate::more_than_or_equal(&left, &eval!(self.right))?
+			}
 
 			BinaryOperator::And => {
 				// Short-circuit AND
 				if !left.is_truthy() {
-					Ok(left)
+					left
 				} else {
-					Ok(eval!(self.right))
+					eval!(self.right)
 				}
 			}
 			BinaryOperator::Or => {
 				// Short-circuit OR
 				if left.is_truthy() {
-					Ok(left)
+					left
 				} else {
-					Ok(eval!(self.right))
+					eval!(self.right)
 				}
 			}
 
-			BinaryOperator::Contain => operate::contain(&left, &eval!(self.right)),
-			BinaryOperator::NotContain => operate::not_contain(&left, &eval!(self.right)),
-			BinaryOperator::ContainAll => operate::contain_all(&left, &eval!(self.right)),
-			BinaryOperator::ContainAny => operate::contain_any(&left, &eval!(self.right)),
-			BinaryOperator::ContainNone => operate::contain_none(&left, &eval!(self.right)),
-			BinaryOperator::Inside => operate::inside(&left, &eval!(self.right)),
-			BinaryOperator::NotInside => operate::not_inside(&left, &eval!(self.right)),
-			BinaryOperator::AllInside => operate::inside_all(&left, &eval!(self.right)),
-			BinaryOperator::AnyInside => operate::inside_any(&left, &eval!(self.right)),
-			BinaryOperator::NoneInside => operate::inside_none(&left, &eval!(self.right)),
+			BinaryOperator::Contain => operate::contain(&left, &eval!(self.right))?,
+			BinaryOperator::NotContain => operate::not_contain(&left, &eval!(self.right))?,
+			BinaryOperator::ContainAll => operate::contain_all(&left, &eval!(self.right))?,
+			BinaryOperator::ContainAny => operate::contain_any(&left, &eval!(self.right))?,
+			BinaryOperator::ContainNone => operate::contain_none(&left, &eval!(self.right))?,
+			BinaryOperator::Inside => operate::inside(&left, &eval!(self.right))?,
+			BinaryOperator::NotInside => operate::not_inside(&left, &eval!(self.right))?,
+			BinaryOperator::AllInside => operate::inside_all(&left, &eval!(self.right))?,
+			BinaryOperator::AnyInside => operate::inside_any(&left, &eval!(self.right))?,
+			BinaryOperator::NoneInside => operate::inside_none(&left, &eval!(self.right))?,
 
-			BinaryOperator::Outside => operate::outside(&left, &eval!(self.right)),
-			BinaryOperator::Intersects => operate::intersects(&left, &eval!(self.right)),
+			BinaryOperator::Outside => operate::outside(&left, &eval!(self.right))?,
+			BinaryOperator::Intersects => operate::intersects(&left, &eval!(self.right))?,
 
 			BinaryOperator::NullCoalescing => {
 				if !left.is_nullish() {
-					Ok(left)
+					left
 				} else {
-					Ok(eval!(self.right))
+					eval!(self.right)
 				}
 			}
 			BinaryOperator::TenaryCondition => {
 				// Same as OR for this context
 				if left.is_truthy() {
-					Ok(left)
+					left
 				} else {
-					Ok(eval!(self.right))
+					eval!(self.right)
 				}
 			}
 
 			// Range operators - create Range values
 			BinaryOperator::Range => {
 				// a..b means start: Included(a), end: Excluded(b)
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Included(left),
 					end: std::ops::Bound::Excluded(eval!(self.right)),
-				})))
+				}))
 			}
 			BinaryOperator::RangeInclusive => {
 				// a..=b means start: Included(a), end: Included(b)
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Included(left),
 					end: std::ops::Bound::Included(eval!(self.right)),
-				})))
+				}))
 			}
 			BinaryOperator::RangeSkip => {
 				// a>..b means start: Excluded(a), end: Excluded(b)
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Excluded(left),
 					end: std::ops::Bound::Excluded(eval!(self.right)),
-				})))
+				}))
 			}
 			BinaryOperator::RangeSkipInclusive => {
 				// a>..=b means start: Excluded(a), end: Included(b)
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Excluded(left),
 					end: std::ops::Bound::Included(eval!(self.right)),
-				})))
+				}))
 			}
 
 			// Match operators require full-text search index context.
-			// When evaluated after a FullTextScan, the records have already been verified
-			// to match the query, so we return true. This allows the Filter operator to
-			// pass through records that were matched by the full-text index.
-			//
-			// Note: If MATCHES appears in a WHERE clause without a full-text index,
-			// the query should be rejected at planning time (currently falls back to
-			// the old executor which has proper index support).
 			BinaryOperator::Matches(_) => {
 				// Records reaching this point via FullTextScan are already matches
-				Ok(Value::Bool(true))
+				Value::Bool(true)
 			}
 
 			// Nearest neighbor requires vector index context
 			// TODO(stu): IMPLEMENT
 			BinaryOperator::NearestNeighbor(_) => {
-				Err(anyhow::anyhow!("KNN operator not yet supported in physical expressions"))
+				return Err(anyhow::anyhow!(
+					"KNN operator not yet supported in physical expressions"
+				)
+				.into());
 			}
-		}
+		})
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -191,38 +194,38 @@ impl PhysicalExpr for UnaryOp {
 		self.expr.required_context()
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use crate::expr::operator::PrefixOperator;
 		use crate::fnc::operate;
 
 		let value = self.expr.evaluate(ctx).await?;
 
-		match &self.op {
-			PrefixOperator::Not => operate::not(value),
-			PrefixOperator::Negate => operate::neg(value),
+		Ok(match &self.op {
+			PrefixOperator::Not => operate::not(value)?,
+			PrefixOperator::Negate => operate::neg(value)?,
 			PrefixOperator::Positive => {
 				// Positive is essentially a no-op for numbers
-				Ok(value)
+				value
 			}
 			PrefixOperator::Range => {
 				// ..value creates range with unbounded start, excluded end
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Unbounded,
 					end: std::ops::Bound::Excluded(value),
-				})))
+				}))
 			}
 			PrefixOperator::RangeInclusive => {
 				// ..=value creates range with unbounded start, included end
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Unbounded,
 					end: std::ops::Bound::Included(value),
-				})))
+				}))
 			}
 			PrefixOperator::Cast(kind) => {
 				// Type casting
-				value.cast_to_kind(kind).map_err(|e| anyhow::anyhow!("{}", e))
+				value.cast_to_kind(kind).map_err(|e| anyhow::anyhow!("{}", e))?
 			}
-		}
+		})
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -259,28 +262,31 @@ impl PhysicalExpr for PostfixOp {
 		self.expr.required_context()
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		use crate::expr::operator::PostfixOperator;
 
 		let value = self.expr.evaluate(ctx).await?;
 
-		match &self.op {
+		Ok(match &self.op {
 			PostfixOperator::Range => {
 				// value.. creates range with included start, unbounded end
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Included(value),
 					end: std::ops::Bound::Unbounded,
-				})))
+				}))
 			}
 			PostfixOperator::RangeSkip => {
 				// value>.. creates range with excluded start, unbounded end
-				Ok(Value::Range(Box::new(crate::val::Range {
+				Value::Range(Box::new(crate::val::Range {
 					start: std::ops::Bound::Excluded(value),
 					end: std::ops::Bound::Unbounded,
-				})))
+				}))
 			}
 			PostfixOperator::MethodCall(..) => {
-				Err(anyhow::anyhow!("Method calls not yet supported in physical expressions"))
+				return Err(anyhow::anyhow!(
+					"Method calls not yet supported in physical expressions"
+				)
+				.into());
 			}
 			PostfixOperator::Call(..) => {
 				// Closure calls are handled by ClosureCallExec in the planner
@@ -289,7 +295,7 @@ impl PhysicalExpr for PostfixOp {
 					"PostfixOperator::Call should be converted to ClosureCallExec by the planner"
 				)
 			}
-		}
+		})
 	}
 
 	fn references_current_value(&self) -> bool {

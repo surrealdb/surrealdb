@@ -119,12 +119,7 @@ impl ExecOperator for ExternalSort {
 					let mut keys = Vec::with_capacity(order_by.len());
 
 					for field in order_by.iter() {
-						let key = field.expr.evaluate(row_ctx.clone()).await.map_err(|e| {
-							crate::expr::ControlFlow::Err(anyhow::anyhow!(
-								"Sort key evaluation error: {}",
-								e
-							))
-						})?;
+						let key = field.expr.evaluate(row_ctx.clone()).await?;
 						keys.push(key);
 					}
 

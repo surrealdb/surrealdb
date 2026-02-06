@@ -11,6 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::physical_part::PhysicalRecurseInstruction;
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 // ============================================================================
@@ -64,7 +65,7 @@ impl PhysicalExpr for RecurseExpr {
 		path_ctx.max(instruction_ctx)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let current =
 			ctx.current_value.ok_or_else(|| anyhow::anyhow!("Recursion requires current value"))?;
 
@@ -104,7 +105,7 @@ impl PhysicalExpr for RecurseExpr {
 
 impl RecurseExpr {
 	/// Default recursion: keep following the path until bounds or dead end.
-	async fn evaluate_default(&self, start: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate_default(&self, start: &Value, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let max_depth = self.max_depth.unwrap_or(100); // System limit
 		let mut current = start.clone();
 		let mut depth = 0u32;
@@ -139,7 +140,7 @@ impl RecurseExpr {
 	}
 
 	/// Collect: gather all unique nodes encountered during traversal.
-	async fn evaluate_collect(&self, start: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate_collect(&self, start: &Value, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let max_depth = self.max_depth.unwrap_or(100);
 		let mut collected = Vec::new();
 		let mut seen = std::collections::HashSet::new();
@@ -186,7 +187,7 @@ impl RecurseExpr {
 	}
 
 	/// Path: return all paths as arrays of arrays.
-	async fn evaluate_path(&self, start: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate_path(&self, start: &Value, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let max_depth = self.max_depth.unwrap_or(100);
 		let mut completed_paths = Vec::new();
 		let mut active_paths: Vec<Vec<Value>> = if self.inclusive {
@@ -251,7 +252,7 @@ impl RecurseExpr {
 		start: &Value,
 		target: &Value,
 		ctx: EvalContext<'_>,
-	) -> anyhow::Result<Value> {
+	) -> FlowResult<Value> {
 		let max_depth = self.max_depth.unwrap_or(100);
 		let mut seen = std::collections::HashSet::new();
 

@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
@@ -77,12 +76,10 @@ impl ExecOperator for UserInfoPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			match execute_user_info(&ctx, &*user, base, structured).await {
-				Ok(value) => Ok(ValueBatch {
-					values: vec![value],
-				}),
-				Err(e) => Err(crate::expr::ControlFlow::Err(e)),
-			}
+			let value = execute_user_info(&ctx, &*user, base, structured).await?;
+			Ok(ValueBatch {
+				values: vec![value],
+			})
 		})))
 	}
 
@@ -96,7 +93,7 @@ async fn execute_user_info(
 	user_expr: &dyn PhysicalExpr,
 	base: Option<Base>,
 	structured: bool,
-) -> Result<Value> {
+) -> crate::expr::FlowResult<Value> {
 	// Check permissions
 	let root = ctx.root();
 	let opt = root
@@ -113,7 +110,7 @@ async fn execute_user_info(
 	// Evaluate the user name expression
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
 	let user_value = user_expr.evaluate(eval_ctx).await?;
-	let user = user_value.coerce_to::<String>()?;
+	let user = user_value.coerce_to::<String>().map_err(|e| anyhow::anyhow!("{e}"))?;
 
 	// Get the transaction
 	let txn = ctx.txn();

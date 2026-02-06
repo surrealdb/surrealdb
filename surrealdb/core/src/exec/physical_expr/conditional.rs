@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes};
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 /// IF/THEN/ELSE expression - IF condition THEN value ELSE other END
@@ -39,7 +40,7 @@ impl PhysicalExpr for IfElseExpr {
 		branches_ctx.max(otherwise_ctx)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// Evaluate each condition in order
 		for (condition, value) in &self.branches {
 			let cond_result = condition.evaluate(ctx.clone()).await?;

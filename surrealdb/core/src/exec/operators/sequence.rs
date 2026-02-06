@@ -106,7 +106,18 @@ impl ExecOperator for SequencePlan {
 
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
 		// Execute all statements and return the final context
-		let (_result, final_ctx) = execute_block_with_context(&self.block, input).await?;
+		let (_result, final_ctx) =
+			execute_block_with_context(&self.block, input).await.map_err(|ctrl| match ctrl {
+				crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue => {
+					// BREAK/CONTINUE at top-level LET binding context is invalid
+					Error::InvalidControlFlow
+				}
+				crate::expr::ControlFlow::Return(_) => {
+					// RETURN during output_context is also invalid
+					Error::InvalidControlFlow
+				}
+				crate::expr::ControlFlow::Err(e) => Error::Thrown(e.to_string()),
+			})?;
 		Ok(final_ctx)
 	}
 
@@ -126,20 +137,23 @@ async fn execute_block_sequence(
 	block: &Block,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<ValueBatch> {
-	let (result, _final_ctx) = execute_block_with_context(block, ctx)
-		.await
-		.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+	let (result, _final_ctx) = execute_block_with_context(block, ctx).await?;
 
 	Ok(ValueBatch {
 		values: vec![result],
 	})
 }
 
-/// Execute a block and return both the result and the final execution context
+/// Execute a block and return both the result and the final execution context.
+///
+/// Returns `FlowResult` to allow BREAK/CONTINUE/RETURN to propagate through
+/// block expressions nested inside FOR loops.
 async fn execute_block_with_context(
 	block: &Block,
 	initial_ctx: &ExecutionContext,
-) -> Result<(Value, ExecutionContext), Error> {
+) -> crate::expr::FlowResult<(Value, ExecutionContext)> {
+	use crate::expr::ControlFlow;
+
 	// Empty block returns NONE
 	if block.0.is_empty() {
 		return Ok((Value::None, initial_ctx.clone()));
@@ -165,40 +179,10 @@ async fn execute_block_with_context(
 					result = Value::None; // Context-mutating statements return NONE
 				} else {
 					// Execute the plan and get the result
-					// Handle control flow signals from execute()
-					let stream = match plan.execute(&current_ctx) {
-						Ok(s) => s,
-						Err(crate::expr::ControlFlow::Return(v)) => {
-							// RETURN statement - return immediately
-							return Ok((v, current_ctx));
-						}
-						Err(crate::expr::ControlFlow::Break) => {
-							// BREAK outside of loop context is an error
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Continue) => {
-							// CONTINUE outside of loop context is an error
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Err(e)) => {
-							return Err(Error::Thrown(e.to_string()));
-						}
-					};
+					// Control flow signals (BREAK/CONTINUE/RETURN) propagate directly
+					let stream = plan.execute(&current_ctx)?;
 
-					let values = match collect_stream(stream).await {
-						Ok(v) => v,
-						Err(crate::expr::ControlFlow::Return(v)) => {
-							// RETURN statement - propagate immediately
-							return Ok((v, current_ctx));
-						}
-						Err(crate::expr::ControlFlow::Err(e)) => {
-							return Err(Error::Thrown(e.to_string()));
-						}
-						Err(ctrl) => {
-							// Break/Continue outside loop context
-							return Err(Error::Thrown(format!("Invalid control flow: {}", ctrl)));
-						}
-					};
+					let values = collect_stream(stream).await?;
 
 					// For scalar expressions, return the single value
 					// For queries, the result is already an array from the plan
@@ -212,31 +196,17 @@ async fn execute_block_with_context(
 			}
 			Err(Error::Unimplemented(_)) => {
 				// Fallback to legacy compute path
-				let (opt, frozen) = get_legacy_context(&current_ctx, &mut legacy_ctx)?;
+				let (opt, frozen) = get_legacy_context(&current_ctx, &mut legacy_ctx)
+					.map_err(|e| ControlFlow::Err(e.into()))?;
 
 				// Handle LET statements specially - only compute the value expression
 				if let crate::expr::Expr::Let(set_stmt) = expr {
 					let mut stack = TreeStack::new();
-					let value = match stack
+					// Legacy compute returns FlowResult directly - propagate as-is
+					let value = stack
 						.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, None))
 						.finish()
-						.await
-					{
-						Ok(v) => v,
-						Err(crate::expr::ControlFlow::Return(v)) => {
-							// RETURN in LET value - return immediately
-							return Ok((v, current_ctx));
-						}
-						Err(crate::expr::ControlFlow::Break) => {
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Continue) => {
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Err(e)) => {
-							return Err(Error::Thrown(e.to_string()));
-						}
-					};
+						.await?;
 
 					// Update context with the new variable
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
@@ -249,33 +219,13 @@ async fn execute_block_with_context(
 					result = Value::None;
 				} else {
 					// For other expressions, compute the whole expression
+					// Legacy compute returns FlowResult directly - propagate as-is
 					let mut stack = TreeStack::new();
-					result = match stack
-						.enter(|stk| expr.compute(stk, &frozen, opt, None))
-						.finish()
-						.await
-					{
-						Ok(v) => v,
-						Err(crate::expr::ControlFlow::Return(v)) => {
-							// RETURN statement - return immediately from sequence
-							return Ok((v, current_ctx));
-						}
-						Err(crate::expr::ControlFlow::Break) => {
-							// BREAK outside of loop context is an error
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Continue) => {
-							// CONTINUE outside of loop context is an error
-							return Err(Error::InvalidControlFlow);
-						}
-						Err(crate::expr::ControlFlow::Err(e)) => {
-							// Propagate the actual error
-							return Err(Error::Thrown(e.to_string()));
-						}
-					};
+					result =
+						stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await?;
 				}
 			}
-			Err(e) => return Err(e),
+			Err(e) => return Err(ControlFlow::Err(e.into())),
 		}
 	}
 
@@ -319,27 +269,19 @@ fn get_legacy_context<'a>(
 ///
 /// Returns `FlowResult` to properly propagate control flow signals:
 /// - `Ok(values)` - normal completion with collected values
-/// - `Err(ControlFlow::Return(v))` - early return from RETURN statement
+/// - `Err(ControlFlow::Break)` - BREAK signal (propagated to enclosing FOR loop)
+/// - `Err(ControlFlow::Continue)` - CONTINUE signal (propagated to enclosing FOR loop)
+/// - `Err(ControlFlow::Return(v))` - RETURN statement
 /// - `Err(ControlFlow::Err(e))` - error during execution
 async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
-	use crate::expr::ControlFlow;
-
 	let mut results = Vec::new();
 	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
 			Ok(batch) => results.extend(batch.values),
-			Err(ctrl) => match ctrl {
-				ControlFlow::Break | ControlFlow::Continue => continue,
-				ControlFlow::Return(v) => {
-					// Propagate RETURN as control flow signal
-					return Err(ControlFlow::Return(v));
-				}
-				ControlFlow::Err(e) => {
-					return Err(ControlFlow::Err(e));
-				}
-			},
+			// Propagate all control flow signals directly
+			Err(ctrl) => return Err(ctrl),
 		}
 	}
 
