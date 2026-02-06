@@ -9,7 +9,7 @@ use surrealdb::err::Error;
 use surrealdb::sql::Value;
 use surrealdb_core::kvs::Datastore;
 use tokio::time::timeout;
-use tracing::info;
+use tracing::{info, trace};
 
 async fn concurrent_tasks<F>(
 	dbs: Arc<Datastore>,
@@ -28,7 +28,10 @@ where
 		let sql = sql_func(i);
 		tasks.push(tokio::spawn(async move {
 			let mut res = dbs.execute(&sql, &session, None).await?;
-			res.remove(0).result?;
+			// Ignore errors
+			if let Err(e) = res.remove(0).result {
+				trace!("Concurrent task error: {sql} - {e}")
+			}
 			Ok::<(), Error>(())
 		}));
 	}
@@ -169,18 +172,8 @@ async fn multi_index_concurrent_test() -> Result<(), Error> {
 	// Define analyzer and indexes
 	dbs.execute(sql, &ses, None).await?;
 
-	let batch_count = 100;
-	info!("Inserting {batch_count} batches concurrently");
-	// Insert content concurrently
-	let sql = "CREATE |aaa:10| CONTENT {
-			field1: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
-			field2: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
-			field3: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
-			field4: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
-			field5: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
-		} RETURN NONE;";
-	concurrent_tasks(dbs.clone(), &ses, batch_count, |_| Cow::Borrowed(sql)).await?;
-	let expected_total_count = batch_count * 10;
+	batch_ingestion(dbs.clone(), &ses, 10).await?;
+	let expected_total_count = 1000;
 
 	info!("Waiting for index to be built");
 	timeout(Duration::from_secs(300), async {
@@ -233,8 +226,8 @@ async fn multi_index_concurrent_test() -> Result<(), Error> {
 				};
 				real_total_count += count.as_usize();
 			}
+			info!("Real count: {real_total_count} - Index: count: {index_count} - Index status: {status}");
 			if real_total_count == expected_total_count {
-				info!("Real count: {real_total_count} - Index: count: {index_count} - Index status: {status}");
 				if index_count.as_usize() == expected_total_count {
 					// SUCCESS!
 					break;
@@ -248,4 +241,64 @@ async fn multi_index_concurrent_test() -> Result<(), Error> {
 	.await
 	.map_err(|_| Error::QueryTimedout)??;
 	Ok(())
+}
+
+async fn batch_ingestion(
+	dbs: Arc<Datastore>,
+	ses: &Session,
+	batch_count: usize,
+) -> Result<(), Error> {
+	info!("Inserting {batch_count} batches concurrently");
+	// Create records and commit.
+	let sql_create_commit = "CREATE |aaa:10| CONTENT {
+			field1: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
+			field2: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
+			field3: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
+			field4: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
+			field5: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
+		} RETURN NONE;";
+	// Create records and cancel
+	let sql_create_throw = "
+        BEGIN;
+            CREATE |aaa:10| CONTENT
+                { field1: '-', field2: '-', field3: '-', field4: '-', field5: '-' }
+                RETURN NONE;
+			THROW 'Ooch';
+	    COMMIT;";
+	let sql_create_cancel = "
+        BEGIN;
+            CREATE |aaa:10| CONTENT
+                { field1: '-', field2: '-', field3: '-', field4: '-', field5: '-' }
+                RETURN NONE;
+	    CANCEL;";
+	let task_sequence = [
+		// 10 normal committed transaction
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		// 5 explicitely thrown transactions
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		// 5 explicitely cancelled transactions
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+	];
+	let mut batch = Vec::new();
+	for _ in 0..batch_count {
+		batch.extend(task_sequence);
+	}
+	concurrent_tasks(dbs.clone(), ses, batch.len(), |i| Cow::Borrowed(batch.get(i).unwrap())).await
 }

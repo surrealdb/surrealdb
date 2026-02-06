@@ -12,7 +12,7 @@ use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::kvs::cache;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::index::{BatchId, SharedIndexKey, SharedQueueSequences};
+use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Scanner;
 use crate::kvs::Transactor;
 use crate::sql::statements::define::ApiDefinition;
@@ -56,7 +56,7 @@ pub struct Transaction {
 	/// Does this supports reverse scan
 	has_reverse_scan: bool,
 	/// For each index, track the pending append batch for cleanup on cancel.
-	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>>,
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
 impl Transaction {
@@ -74,7 +74,7 @@ impl Transaction {
 
 	pub(super) async fn lock_pending_index_batches<'a>(
 		&'a self,
-	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>> {
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>> {
 		self.pending_index_batches.lock().await
 	}
 
@@ -118,14 +118,10 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<(), Error> {
-		// Remove any pending index batches for this transaction.
-		let batches = {
-			let mut pending = self.lock_pending_index_batches().await;
-			std::mem::take(&mut *pending)
-		};
-		for (_, (batch_id, queue)) in batches {
-			queue.write().await.clean_batch(batch_id);
-		}
+		// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed
+		// commit).
+		self.cleanup_index_batches().await;
+		// Cancel the transaction
 		self.lock().await.cancel().await
 	}
 
@@ -134,7 +130,25 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<(), Error> {
-		self.lock().await.commit().await
+		// Commit the transaction
+		if let Err(e) = self.lock().await.commit().await {
+			// Enqueue pending index batches for deferred cleanup after commit failure.
+			self.cleanup_index_batches().await;
+			return Err(e);
+		}
+		Ok(())
+	}
+
+	/// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed commit).
+	async fn cleanup_index_batches(&self) {
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, clean_queue)) in batches {
+			// Enqueue batch ids for cleaning
+			clean_queue.lock().await.push(batch_id);
+		}
 	}
 
 	/// Check if a key exists in the datastore.

@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::sleep;
 use tracing::warn;
 #[cfg(target_family = "wasm")]
@@ -407,7 +407,7 @@ pub(crate) type BatchId = u32;
 pub(crate) type AppendingId = u32;
 
 /// Manages sequence numbers and batch tracking for the background indexing queue.
-pub(super) struct QueueSequences {
+struct QueueSequences {
 	/// The number of pending appends.
 	pending: u32,
 	/// The next appending id to assign.
@@ -418,7 +418,8 @@ pub(super) struct QueueSequences {
 	batches: HashMap<BatchId, RoaringBitmap>,
 }
 
-pub(super) type SharedQueueSequences = Arc<RwLock<QueueSequences>>;
+/// Batch IDs queued for deferred cleanup after rollback (cancel or failed commit).
+pub(super) type BatchIdsCleanQueue = Arc<Mutex<Vec<BatchId>>>;
 
 impl Default for QueueSequences {
 	fn default() -> Self {
@@ -480,9 +481,11 @@ impl QueueSequences {
 		}
 	}
 
-	pub(super) fn clean_batch(&mut self, batch_id: BatchId) {
-		if let Some(v) = self.batches.remove(&batch_id) {
-			self.pending -= v.len() as u32;
+	fn clean_batch_ids(&mut self, batch_ids: Vec<BatchId>) {
+		for batch_id in batch_ids {
+			if let Some(v) = self.batches.remove(&batch_id) {
+				self.pending -= v.len() as u32;
+			}
 		}
 	}
 }
@@ -504,7 +507,9 @@ struct Building {
 	/// The current status of the building process
 	status: RwLock<BuildingStatus>,
 	/// The queue of records that need to be indexed
-	queue: SharedQueueSequences,
+	queue: RwLock<QueueSequences>,
+	/// Batch IDs scheduled for deferred cleanup after rollback (cancel or failed commit).
+	clean_queue: BatchIdsCleanQueue,
 	/// Whether the building process has been aborted
 	aborted: AtomicBool,
 	/// Whether the initial building process (run()) has completed
@@ -533,6 +538,7 @@ impl Building {
 			ix_key,
 			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
+			clean_queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			initial_build_complete: AtomicBool::new(false),
 			deferred_daemon_running: AtomicBool::new(false),
@@ -618,7 +624,7 @@ impl Building {
 			*batch_id
 		} else {
 			let batch_id = queue.new_batch();
-			pending_index_batches.insert(self.ix_key.clone(), (batch_id, self.queue.clone()));
+			pending_index_batches.insert(self.ix_key.clone(), (batch_id, self.clean_queue.clone()));
 			batch_id
 		};
 
@@ -773,20 +779,25 @@ impl Building {
 				break;
 			}
 			let keys = {
-				let queue = self.queue.write().await;
+				let mut queue = self.queue.write().await;
+				let clean_queue = {
+					let mut batch_ids_to_clean = self.clean_queue.lock().await;
+					std::mem::take(&mut *batch_ids_to_clean)
+				};
+				// Clean batch IDs from canceled or failed transactions before checking pending
+				// state.
+				queue.clean_batch_ids(clean_queue);
+
 				let keys = {
 					let tx = self.new_read_tx().await?;
 					let keys = catch!(tx, tx.keys(rng.clone(), *NORMAL_FETCH_SIZE, None).await);
 					tx.cancel().await?;
 					keys
 				};
-				trace!(
-					"{}: index_appending_loop keys: {:?} {}",
-					self.ix.name,
-					keys.len(),
-					keys.is_empty()
-				);
-				if keys.is_empty() {
+
+				let pending = queue.pending() as usize;
+
+				if keys.is_empty() && pending == 0 {
 					// If the batch is empty, we are done.
 					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
 					self.set_status(BuildingStatus::Ready {
@@ -801,19 +812,40 @@ impl Building {
 				}
 				keys
 			};
-			// Create a new context with a write transaction
-			{
-				let ctx = self.new_write_tx_ctx().await?;
-				let tx = ctx.tx();
-				let indexed = catch!(
-					tx,
-					self.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
+			if !keys.is_empty() {
+				// Create a new context with a write transaction
+				{
+					let ctx = self.new_write_tx_ctx().await?;
+					let tx = ctx.tx();
+					let indexed = catch!(
+						tx,
+						self.index_appending_range(
+							&ctx,
+							&tx,
+							keys,
+							initial_count,
+							&mut updates_count
+						)
 						.await
-				);
-				tx.commit().await?;
-				if !indexed.is_empty() {
-					self.queue.write().await.clean(indexed);
+					);
+					tx.commit().await?;
+					if !indexed.is_empty() {
+						{
+							let mut clean_queue = self.clean_queue.lock().await;
+							for batch_id in indexed.keys() {
+								if let Some(idx) =
+									clean_queue.iter().position(|&id| id == *batch_id)
+								{
+									clean_queue.remove(idx);
+								}
+							}
+						}
+						self.queue.write().await.clean(indexed);
+					}
 				}
+			} else {
+				// No committed appends yet, but updates are in-flight; wait.
+				sleep(Duration::from_millis(100)).await;
 			}
 		}
 		Ok(())
