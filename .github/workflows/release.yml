@@ -128,10 +128,9 @@ jobs:
   # Bump version (optional)
   # ----------------------------------------
   # Release branch strategy:
-  # - Temporary branches: release/v{version} (e.g., release/v3.0.0-beta.1)
-  # - Long-lived patch branches: release/{major}.{minor} (e.g., release/3.0)
-  #   * Created automatically for stable x.y.0 releases
-  #   * Used as git-ref for future patch releases (3.0.1, 3.0.2, etc.)
+  # - Temporary branch: releases/v{version} (e.g., releases/v3.0.0-beta.1)
+  #   * Created during version bump, deleted after successful release
+  #   * For patch releases (X.Y.Z), manually create a branch from the previous tag
   # - Main branch version (when update-main is true):
   #   * If main-version specified: uses that exact version
   #   * Pre-releases: auto-strips patch (3.0.0-beta.1 -> 3.0.0-beta)
@@ -165,10 +164,6 @@ jobs:
         if: ${{ inputs.release-type == 'versioned' }}
         id: bump
         run: .github/scripts/bump-version.sh "${{ inputs.release-version }}" "$GITHUB_OUTPUT"
-
-      - name: Create long-lived patch branch
-        if: ${{ inputs.release-type == 'versioned' }}
-        run: .github/scripts/create-patch-branch.sh "${{ inputs.release-version }}" "${{ inputs.publish }}"
 
       - name: Create PR to update main
         if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
