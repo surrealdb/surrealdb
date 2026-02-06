@@ -912,10 +912,56 @@ pub(crate) fn expr_to_physical_expr(
 			"ALTER statements cannot be used in expression context".to_string(),
 		)),
 
-		// Utility statements - cannot be used in expression context
-		Expr::Info(_) => Err(Error::Unimplemented(
-			"INFO statements cannot be used in expression context".to_string(),
-		)),
+		// INFO statements used as sub-expressions, e.g. `(INFO FOR DATABASE).analyzers`
+		Expr::Info(info) => {
+			use crate::expr::statements::info::InfoStatement;
+			let plan: Arc<dyn ExecOperator> = match *info {
+				InfoStatement::Root(structured) => Arc::new(RootInfoPlan {
+					structured,
+				}),
+				InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan {
+					structured,
+				}),
+				InfoStatement::Db(structured, version) => {
+					let version =
+						version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					Arc::new(DatabaseInfoPlan {
+						structured,
+						version,
+					})
+				}
+				InfoStatement::Tb(table, structured, version) => {
+					let table = expr_to_physical_expr_as_name(table, ctx)?;
+					let version =
+						version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					Arc::new(TableInfoPlan {
+						table,
+						structured,
+						version,
+					})
+				}
+				InfoStatement::User(user, base, structured) => {
+					let user = expr_to_physical_expr_as_name(user, ctx)?;
+					Arc::new(UserInfoPlan {
+						user,
+						base,
+						structured,
+					})
+				}
+				InfoStatement::Index(index, table, structured) => {
+					let index = expr_to_physical_expr_as_name(index, ctx)?;
+					let table = expr_to_physical_expr_as_name(table, ctx)?;
+					Arc::new(IndexInfoPlan {
+						index,
+						table,
+						structured,
+					})
+				}
+			};
+			Ok(Arc::new(ScalarSubquery {
+				plan,
+			}))
+		}
 		Expr::Foreach(_) => {
 			Err(Error::Unimplemented("FOR loops cannot be used in expression context".to_string()))
 		}
@@ -3093,13 +3139,25 @@ use crate::expr::part::{DestructurePart, Part, RecurseInstruction};
 ///
 /// All idioms are converted to `IdiomExpr` which handles runtime type checking
 /// (e.g., fetching records when accessing fields on RecordIds).
+///
+/// If the first part is `Part::Start(expr)`, the expression is converted to a
+/// physical expression and stored as the start expression on `IdiomExpr`. The
+/// remaining parts are converted normally. At evaluation time, the start
+/// expression is evaluated first to produce the base value.
 fn convert_idiom_to_physical_expr(
 	idiom: &crate::expr::idiom::Idiom,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	// Always convert all parts - runtime handles type-specific behavior
+	// Check if the first part is a Start expression (e.g. `(INFO FOR KV).namespaces`)
+	if let Some(Part::Start(expr)) = idiom.0.first() {
+		let start_phys = expr_to_physical_expr(expr.clone(), ctx)?;
+		let remaining_parts = convert_parts_to_physical(&idiom.0[1..], ctx)?;
+		return Ok(Arc::new(IdiomExpr::new(idiom.clone(), Some(start_phys), remaining_parts)));
+	}
+
+	// Normal path: no start expression, convert all parts
 	let physical_parts = convert_parts_to_physical(&idiom.0, ctx)?;
-	Ok(Arc::new(IdiomExpr::new(idiom.clone(), physical_parts)))
+	Ok(Arc::new(IdiomExpr::new(idiom.clone(), None, physical_parts)))
 }
 
 /// Convert idiom parts to physical parts.

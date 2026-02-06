@@ -36,15 +36,25 @@ use crate::val::{RecordId, Value};
 pub struct IdiomExpr {
 	/// The original idiom for display/debugging
 	pub(crate) idiom: Idiom,
+	/// Optional start expression that provides the base value for the idiom.
+	/// When present, this expression is evaluated first and its result is used
+	/// as the base value instead of `ctx.current_value`.
+	/// This corresponds to `Part::Start(expr)` in the AST, e.g. `(INFO FOR KV).namespaces`.
+	pub(crate) start_expr: Option<Arc<dyn PhysicalExpr>>,
 	/// Pre-converted physical parts for evaluation
 	pub(crate) parts: Vec<PhysicalPart>,
 }
 
 impl IdiomExpr {
 	/// Create a new IdiomExpr with the given idiom and physical parts.
-	pub fn new(idiom: Idiom, parts: Vec<PhysicalPart>) -> Self {
+	pub fn new(
+		idiom: Idiom,
+		start_expr: Option<Arc<dyn PhysicalExpr>>,
+		parts: Vec<PhysicalPart>,
+	) -> Self {
 		Self {
 			idiom,
+			start_expr,
 			parts,
 		}
 	}
@@ -81,6 +91,13 @@ impl PhysicalExpr for IdiomExpr {
 	fn required_context(&self) -> crate::exec::ContextLevel {
 		use crate::exec::ContextLevel;
 		use crate::exec::physical_part::PhysicalPart;
+
+		// If we have a start expression, check its context requirements
+		if let Some(ref start) = self.start_expr {
+			if start.required_context() == ContextLevel::Database {
+				return ContextLevel::Database;
+			}
+		}
 
 		// Check if any part requires database context
 		// - Lookup parts (graph traversal) require database
@@ -134,27 +151,33 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
-		// When there's no current_value:
-		// - Simple identifiers return NONE (undefined variable)
-		// - Complex idioms are an error (they need a document context)
-		//
-		// Note: Patterns like `INFO FOR USER test` where `test` should be a name
-		// are handled at the planner level by converting simple identifiers to
-		// string literals before creating the physical expression.
-		let current = match ctx.current_value {
-			Some(v) => v,
-			None => {
-				if self.is_simple_identifier() {
-					// Simple identifier without context evaluates to NONE
-					// This matches legacy SurrealQL behavior for undefined variables
-					return Ok(Value::None);
+		// Determine the base value for the idiom evaluation.
+		// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
+		// it first to produce the base value. Otherwise use the current row value.
+		let mut value = if let Some(ref start) = self.start_expr {
+			start.evaluate(ctx.clone()).await?
+		} else {
+			// When there's no current_value:
+			// - Simple identifiers return NONE (undefined variable)
+			// - Complex idioms are an error (they need a document context)
+			//
+			// Note: Patterns like `INFO FOR USER test` where `test` should be a name
+			// are handled at the planner level by converting simple identifiers to
+			// string literals before creating the physical expression.
+			match ctx.current_value {
+				Some(v) => v.clone(),
+				None => {
+					if self.is_simple_identifier() {
+						// Simple identifier without context evaluates to NONE
+						// This matches legacy SurrealQL behavior for undefined variables
+						return Ok(Value::None);
+					}
+					return Err(
+						anyhow::anyhow!("Idiom evaluation requires current value").into(),
+					);
 				}
-				return Err(anyhow::anyhow!("Idiom evaluation requires current value").into());
 			}
 		};
-
-		// Start with the current value and apply each part in sequence
-		let mut value = current.clone();
 
 		for (i, part) in self.parts.iter().enumerate() {
 			value = evaluate_part(&value, part, ctx.clone()).await?;
@@ -179,6 +202,12 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	fn references_current_value(&self) -> bool {
+		// When we have a start expression, the idiom provides its own base value
+		// and doesn't need the current row value -- but the start expression itself
+		// might reference it.
+		if let Some(ref start) = self.start_expr {
+			return start.references_current_value();
+		}
 		// Simple identifiers (single Field part) can be evaluated without current_value
 		// - they return NONE (undefined variable)
 		// Complex idioms require current_value to provide the base object for field access
@@ -186,7 +215,12 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.parts.iter().map(|p| p.access_mode()).combine_all()
+		let parts_mode = self.parts.iter().map(|p| p.access_mode()).combine_all();
+		if let Some(ref start) = self.start_expr {
+			parts_mode.combine(start.access_mode())
+		} else {
+			parts_mode
+		}
 	}
 }
 

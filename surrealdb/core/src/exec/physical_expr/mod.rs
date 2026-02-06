@@ -371,7 +371,7 @@ mod tests {
 
 		let idiom = Idiom(vec![Part::Field("test".to_string())]);
 		let parts = vec![PhysicalPart::Field("test".to_string())];
-		let expr = IdiomExpr::new(idiom, parts);
+		let expr = IdiomExpr::new(idiom, None, parts);
 
 		assert!(expr.is_simple());
 	}
