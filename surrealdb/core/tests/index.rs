@@ -1,6 +1,5 @@
 mod helpers;
 
-use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,23 +12,18 @@ use tracing::info;
 
 use crate::helpers::new_ds;
 
-async fn concurrent_tasks<F>(
+async fn concurrent_tasks(
 	dbs: Arc<Datastore>,
 	session: &Session,
-	task_count: usize,
-	sql_func: F,
-) -> Result<()>
-where
-	F: Fn(usize) -> Cow<'static, str>,
-{
-	let mut tasks = Vec::with_capacity(task_count);
+	batch: Vec<&'static str>,
+) -> Result<()> {
+	let mut tasks = Vec::with_capacity(batch.len());
 
-	for i in 0..task_count {
+	for sql in batch {
 		let dbs = dbs.clone();
 		let session = session.clone();
-		let sql = sql_func(i);
 		tasks.push(tokio::spawn(async move {
-			let mut res = dbs.execute(&sql, &session, None).await?;
+			let mut res = dbs.execute(sql, &session, None).await?;
 			res.remove(0).result?;
 			Ok::<(), anyhow::Error>(())
 		}));
@@ -43,15 +37,58 @@ where
 
 async fn batch_ingestion(dbs: Arc<Datastore>, ses: &Session, batch_count: usize) -> Result<()> {
 	info!("Inserting {batch_count} batches concurrently");
-	// Insert content concurrently.
-	let sql = "CREATE |aaa:10| CONTENT {
+	// Create records and commit.
+	let sql_create_commit = "CREATE |aaa:10| CONTENT {
 			field1: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field2: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field3: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field4: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 			field5: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 		} RETURN NONE;";
-	concurrent_tasks(dbs.clone(), ses, batch_count, |_| Cow::Borrowed(sql)).await
+	// Create records and cancel
+	let sql_create_throw = "
+        BEGIN;
+            CREATE |aaa:10| CONTENT
+                { field1: '-', field2: '-', field3: '-', field4: '-', field5: '-' }
+                RETURN NONE;
+			THROW 'Ooch!';
+	    COMMIT;";
+	let sql_create_cancel = "
+        BEGIN;
+            CREATE |aaa:10| CONTENT
+                { field1: '-', field2: '-', field3: '-', field4: '-', field5: '-' }
+                RETURN NONE;
+	    CANCEL;";
+	let task_sequence = [
+		// 10 normal committed transaction
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		sql_create_commit,
+		// 5 explicitely thrown transactions
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		sql_create_throw,
+		// 5 explicitely cancelled transactions
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+		sql_create_cancel,
+	];
+	let mut batch = Vec::new();
+	for _ in 0..batch_count {
+		batch.extend(task_sequence);
+	}
+	concurrent_tasks(dbs.clone(), ses, batch).await
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -64,8 +101,8 @@ async fn multi_index_concurrent_test() -> Result<()> {
 	// Define the table.
 	dbs.execute("DEFINE TABLE aaa", &ses, None).await?;
 
-	// Ingest 500 records.
-	batch_ingestion(dbs.clone(), &ses, 50).await?;
+	// Ingest 500 records (including cancellation transaction)
+	batch_ingestion(dbs.clone(), &ses, 5).await?;
 
 	let sql = ";
 	DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase, ascii, edgengram(1, 10);
@@ -78,8 +115,8 @@ async fn multi_index_concurrent_test() -> Result<()> {
 	// Define analyzer and indexes.
 	dbs.execute(sql, &ses, None).await?;
 
-	// Ingest another 500 records.
-	batch_ingestion(dbs.clone(), &ses, 50).await?;
+	// Ingest another 5 records (including cancellation transaction)
+	batch_ingestion(dbs.clone(), &ses, 5).await?;
 
 	let expected_total_count = 1000;
 
@@ -97,6 +134,7 @@ async fn multi_index_concurrent_test() -> Result<()> {
                 .await?;
             // INFO FOR INDEX result.
             let val = res.remove(0).result?;
+            info!("{}", val.to_sql());
             let Value::Object(o) = val else {
                 panic!("Invalid result format: {}", val.to_sql_pretty())
             };

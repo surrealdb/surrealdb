@@ -12,7 +12,7 @@ use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::{Instant, sleep};
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
@@ -134,7 +134,7 @@ type IndexBuilding = Arc<Building>;
 
 pub(super) type SharedIndexKey = Arc<IndexKey>;
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Debug, Hash, PartialEq, Eq)]
 pub(super) struct IndexKey {
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -326,7 +326,7 @@ impl PrimaryAppending {
 }
 
 /// Tracks sequence numbers and batches for the background indexing queue.
-pub(super) struct QueueSequences {
+struct QueueSequences {
 	/// Number of queued appends awaiting indexing.
 	pending: u32,
 	/// Next appending id to assign.
@@ -337,7 +337,7 @@ pub(super) struct QueueSequences {
 	batches: HashMap<BatchId, RoaringBitmap>,
 }
 
-pub(super) type SharedQueueSequences = Arc<RwLock<QueueSequences>>;
+pub(super) type BatchIdsCleanQueue = Arc<Mutex<Vec<BatchId>>>;
 
 impl Default for QueueSequences {
 	fn default() -> Self {
@@ -398,9 +398,11 @@ impl QueueSequences {
 		}
 	}
 
-	pub(super) fn clean_batch(&mut self, batch_id: BatchId) {
-		if let Some(v) = self.batches.remove(&batch_id) {
-			self.pending -= v.len() as u32;
+	pub(super) fn clean_batch_ids(&mut self, batch_ids: Vec<BatchId>) {
+		for batch_id in batch_ids {
+			if let Some(v) = self.batches.remove(&batch_id) {
+				self.pending -= v.len() as u32;
+			}
 		}
 	}
 }
@@ -422,7 +424,9 @@ struct Building {
 	/// Current build status.
 	status: Arc<RwLock<BuildingStatus>>,
 	/// Queue of records awaiting indexing.
-	queue: SharedQueueSequences,
+	queue: Arc<RwLock<QueueSequences>>,
+	/// Stores the BatchID(s) that can be cleaned.
+	clean_queue: BatchIdsCleanQueue,
 	/// Abort flag for the build process.
 	aborted: AtomicBool,
 	finished: AtomicBool,
@@ -448,6 +452,7 @@ impl Building {
 			ix_key,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
+			clean_queue: Default::default(),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 		})
@@ -489,7 +494,7 @@ impl Building {
 			*batch_id
 		} else {
 			let batch_id = queue.new_batch();
-			pending_index_batches.insert(self.ix_key.clone(), (batch_id, self.queue.clone()));
+			pending_index_batches.insert(self.ix_key.clone(), (batch_id, self.clean_queue.clone()));
 			batch_id
 		};
 
@@ -641,7 +646,13 @@ impl Building {
 			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 
 			let keys = {
-				let queue = self.queue.write().await;
+				let mut queue = self.queue.write().await;
+				let clean_queue = {
+					let mut batch_ids_to_clean = self.clean_queue.lock().await;
+					std::mem::take(&mut *batch_ids_to_clean)
+				};
+				// Clean released batch ids
+				queue.clean_batch_ids(clean_queue);
 				let keys = {
 					let tx = self.new_read_tx().await?;
 					let keys = catch!(tx, tx.keys(rng.clone(), *INDEXING_BATCH_SIZE, None).await);

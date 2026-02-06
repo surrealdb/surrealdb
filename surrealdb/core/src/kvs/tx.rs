@@ -30,7 +30,7 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::index::{BatchId, SharedIndexKey, SharedQueueSequences};
+use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
@@ -52,7 +52,7 @@ pub struct Transaction {
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
 	/// Per index, track the pending append batch for cleanup on cancel.
-	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>>,
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
 impl Deref for Transaction {
@@ -85,7 +85,7 @@ impl Transaction {
 
 	pub(super) async fn lock_pending_index_batches<'a>(
 		&'a self,
-	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, SharedQueueSequences)>> {
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>> {
 		self.pending_index_batches.lock().await
 	}
 
@@ -121,8 +121,9 @@ impl Transaction {
 			let mut pending = self.lock_pending_index_batches().await;
 			std::mem::take(&mut *pending)
 		};
-		for (_, (batch_id, queue)) in batches {
-			queue.write().await.clean_batch(batch_id);
+		for (_, (batch_id, clean_queue)) in batches {
+			// Enqueue batch ids for cleaning
+			clean_queue.lock().await.push(batch_id);
 		}
 		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
