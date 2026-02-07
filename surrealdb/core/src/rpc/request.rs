@@ -9,6 +9,7 @@ pub static PARAMS: &str = "params";
 pub static VERSION: &str = "version";
 pub static TXN: &str = "txn";
 pub static SESSION_ID: &str = "session";
+pub static TRACEPARENT: &str = "traceparent";
 
 #[derive(Debug)]
 pub struct Request {
@@ -18,6 +19,7 @@ pub struct Request {
 	pub txn: Option<PublicUuid>,
 	pub method: Method,
 	pub params: PublicArray,
+	pub traceparent: Option<String>,
 }
 
 impl Request {
@@ -75,11 +77,19 @@ impl Request {
 			Some(PublicValue::String(v)) => v,
 			_ => return Err(RpcError::InvalidRequest),
 		};
+
 		// Fetch the 'params' argument
 		let params = match obj.remove(PARAMS) {
 			Some(PublicValue::Array(v)) => v,
 			_ => PublicArray::new(),
 		};
+
+		// Fetch the 'traceparent' argument
+		let traceparent = match obj.remove(TRACEPARENT) {
+			Some(PublicValue::String(v)) => Some(v),
+			_ => None,
+		};
+
 		// Parse the specified method
 		let method = Method::parse_case_sensitive(method);
 		// Return the parsed request
@@ -90,6 +100,7 @@ impl Request {
 			version,
 			txn,
 			session_id,
+			traceparent,
 		})
 	}
 }
