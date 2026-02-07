@@ -435,7 +435,7 @@ impl Default for QueueSequences {
 
 impl QueueSequences {
 	const DEFAULT_NEXT_BATCH_ID: u32 = 1;
-	const NO_BATCH_ID: u32 = 0;
+	const LEGACY_BATCH_ID: u32 = 0;
 
 	fn is_empty(&self) -> bool {
 		self.pending == 0
@@ -633,9 +633,23 @@ impl Building {
 		// Store the appending
 		let ib = self.new_ib_key(appending_id, batch_id)?;
 		tx.set(ib, revision::to_vec(&appending)?, None).await?;
-		// Do we already have a primary appending?
+		// Do we already have a primary indexing?
 		let ip = self.new_ip_key(rid.id.clone())?;
-		if tx.get(ip.clone(), None).await?.is_none() {
+		let v = tx.get(ip.clone(), None).await?;
+		let pa: Option<PrimaryAppending> = if let Some(v) = v {
+			Some(revision::from_slice(&v)?)
+		} else {
+			None
+		};
+		// We ignore legacy primary indexing.
+		// The initial batch is responsible for removing them, if any,
+		// and reporting their presence in the logs.
+		let is_pa = if let Some(pa) = pa {
+			pa.1 != QueueSequences::LEGACY_BATCH_ID
+		} else {
+			false
+		};
+		if !is_pa {
 			// If not, we set it
 			tx.set(ip, revision::to_vec(&PrimaryAppending(appending_id, batch_id))?, None).await?;
 		}
@@ -919,7 +933,7 @@ impl Building {
 		};
 		// Then we take the old value of the appending value as the initial indexing value
 		let pa: PrimaryAppending = revision::from_slice(&v)?;
-		if pa.1 == QueueSequences::NO_BATCH_ID {
+		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
 			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
 			// We can't resolve it to a v2 !ib record, so drop the marker and ignore the legacy queue.
 			tx.del(ip).await?;
