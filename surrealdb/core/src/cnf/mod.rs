@@ -18,9 +18,17 @@ pub const ID_CHARS: [char; 36] = [
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// The memory usage threshold before tasks are forced to exit (default: 0
-/// bytes)
-pub static MEMORY_THRESHOLD: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_MEMORY_THRESHOLD", usize, 0);
+/// bytes). The default 0 bytes means that there is no memory threshold.
+/// Any other user-set memory threshold will default to at least 1 MiB.
+pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
+	let n = std::env::var("SURREAL_MEMORY_THRESHOLD")
+		.map(|s| s.parse::<usize>().unwrap_or(0))
+		.unwrap_or(0);
+	match n {
+		default @ 0 => default,
+		specified => std::cmp::max(specified, 1024 * 1024),
+	}
+});
 
 /// Specifies how many concurrent jobs can be buffered in the worker channel
 #[cfg(not(target_family = "wasm"))]
@@ -142,12 +150,13 @@ pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
 
-/// Used to limit allocation for builtin functions
+/// Used to limit allocation for builtin functions. Default: 2^20 (1 MiB),
+/// can be as large as 28 (2^28, 256 MiB)
 pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
 	let n = std::env::var("SURREAL_GENERATION_ALLOCATION_LIMIT")
 		.map(|s| s.parse::<u32>().unwrap_or(20))
 		.unwrap_or(20);
-	2usize.pow(n)
+	2usize.pow(n.min(28))
 });
 
 /// Specifies a list of paths in which files can be accessed (default: empty)

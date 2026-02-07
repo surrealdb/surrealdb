@@ -80,14 +80,17 @@ impl Datastore {
 		// Set incremental asynchronous bytes per sync to 2MiB
 		opts.set_wal_bytes_per_sync(2 * 1024 * 1024);
 		// Increase the background thread count
-		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
-		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
+		let threads = cnf::ROCKSDB_THREAD_COUNT.min(i32::MAX as usize) as i32;
+		info!(target: TARGET, "Background thread count: {threads}");
+		opts.increase_parallelism(threads);
 		// Specify the max concurrent background jobs
-		info!(target: TARGET, "Maximum background jobs count: {}", *cnf::ROCKSDB_JOBS_COUNT);
-		opts.set_max_background_jobs(*cnf::ROCKSDB_JOBS_COUNT);
+		let background_jobs = cnf::ROCKSDB_JOBS_COUNT.min(i32::MAX as usize) as i32;
+		info!(target: TARGET, "Maximum background jobs count: {background_jobs}");
+		opts.set_max_background_jobs(background_jobs);
 		// Set the maximum number of open files that can be used by the database
-		info!(target: TARGET, "Maximum number of open files: {}", *cnf::ROCKSDB_MAX_OPEN_FILES);
-		opts.set_max_open_files(*cnf::ROCKSDB_MAX_OPEN_FILES);
+		let max_open_files = cnf::ROCKSDB_MAX_OPEN_FILES.min(i32::MAX as usize) as i32;
+		info!(target: TARGET, "Maximum number of open files: {max_open_files}");
+		opts.set_max_open_files(max_open_files);
 		// Set the number of log files to keep
 		info!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
@@ -95,11 +98,14 @@ impl Datastore {
 		info!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Set the levelled target file size multipler
-		info!(target: TARGET, "Target file size compaction multiplier: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
-		opts.set_target_file_size_multiplier(*cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
+		let size_multiplier =
+			cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER.min(i32::MAX as usize) as i32;
+		info!(target: TARGET, "Target file size compaction multiplier: {size_multiplier}");
+		opts.set_target_file_size_multiplier(size_multiplier);
 		// Delay compaction until the minimum number of files accumulate
-		info!(target: TARGET, "Number of files to trigger compaction: {}", *cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
-		opts.set_level_zero_file_num_compaction_trigger(*cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
+		let compaction_trigger = cnf::ROCKSDB_FILE_COMPACTION_TRIGGER.min(i32::MAX as usize) as i32;
+		info!(target: TARGET, "Number of files to trigger compaction: {compaction_trigger}");
+		opts.set_level_zero_file_num_compaction_trigger(compaction_trigger);
 		// Set the compaction readahead size
 		info!(target: TARGET, "Compaction readahead size: {}", *cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
 		opts.set_compaction_readahead_size(*cnf::ROCKSDB_COMPACTION_READAHEAD_SIZE);
