@@ -582,7 +582,7 @@ impl FieldEditContext<'_> {
 			// Get the current document
 			let doc = Some(&self.doc.current);
 			// Configure the context
-			let ctx = match self.context.take() {
+			let mut ctx = match self.context.take() {
 				Some(mut ctx) => {
 					ctx.add_value("after", now.clone());
 					ctx.add_value("value", now.clone());
@@ -597,6 +597,9 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 			};
+			// Store $this in the context so subqueries can reference
+			// the current document via $this even inside WHERE clauses
+			ctx.add_value("this", self.doc.current.doc.as_ref().clone().into());
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause

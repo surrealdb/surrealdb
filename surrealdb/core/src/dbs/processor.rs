@@ -83,7 +83,7 @@ impl Iterable {
 }
 
 pub(super) enum Collectable {
-	Lookup(NsDbTbCtx, LookupKind, Key),
+	Lookup(NsDbCtx, LookupKind, Key),
 	RangeKey(NsDbTbCtx, Key),
 	TableKey(NsDbTbCtx, Key),
 	Relatable {
@@ -130,7 +130,7 @@ impl Collectable {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Lookup(doc_ctx, kind, key) => {
-				Self::process_lookup(doc_ctx, txn, kind, key, rid_only).await
+				Self::process_lookup(doc_ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
@@ -173,12 +173,16 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: NsDbCtx,
+		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
 		key: Key,
 		rid_only: bool,
 	) -> Result<Processable> {
+		let ns_id = doc_ctx.ns.namespace_id;
+		let db_id = doc_ctx.db.database_id;
+
 		// Parse the data from the store
 		let (ft, fk) = match kind {
 			LookupKind::Graph(_) => {
@@ -191,12 +195,21 @@ impl Collectable {
 			}
 		};
 
+		// Resolve the target table definition and fields
+		let tb = txn.expect_tb(ns_id, db_id, ft.as_ref()).await?;
+		let fields = txn.all_tb_fields(ns_id, db_id, ft.as_ref(), opt.version).await?;
+		let target_ctx = NsDbTbCtx {
+			ns: doc_ctx.ns,
+			db: doc_ctx.db,
+			tb,
+			fields,
+		};
+
 		// Fetch the data from the store
 		let record = if rid_only {
 			Arc::new(Default::default())
 		} else {
-			txn.get_record(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, ft.as_ref(), &fk, None)
-				.await?
+			txn.get_record(ns_id, db_id, ft.as_ref(), &fk, None).await?
 		};
 		let rid = RecordId {
 			table: ft.into_owned(),
@@ -206,7 +219,7 @@ impl Collectable {
 		let val = Operable::Value(record);
 		// Process the record
 		Ok(Processable {
-			doc_ctx: DocumentContext::NsDbTbCtx(doc_ctx),
+			doc_ctx: DocumentContext::NsDbTbCtx(target_ctx),
 			record_strategy: RecordStrategy::KeysAndValues,
 			generate: None,
 			rid: Some(rid.into()),
@@ -991,7 +1004,7 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: NsDbCtx,
 		from: RecordId,
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,

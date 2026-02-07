@@ -93,11 +93,16 @@ impl Param {
 		// Find the variable by name
 		match self.0.as_str() {
 			// This is a special param
-			"this" | "self" => match doc {
-				// The base document exists
-				Some(v) => Ok(v.doc.as_ref().clone()),
-				// The base document does not exist
-				None => Ok(Value::None),
+			"this" | "self" => match ctx.value("this") {
+				// $this was explicitly set in context (e.g. field ASSERT/VALUE
+				// expressions), so subqueries can still reference the original
+				// document being validated via $this
+				Some(v) => Ok(v.clone()),
+				// Otherwise use the current cursor document
+				None => match doc {
+					Some(v) => Ok(v.doc.as_ref().clone()),
+					None => Ok(Value::None),
+				},
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
