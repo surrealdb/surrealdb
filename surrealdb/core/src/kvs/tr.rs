@@ -2,13 +2,13 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 
-use chrono::{DateTime, Utc};
 use futures::stream::Stream;
 
 use super::api::Transactable;
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
 use super::{IntoBytes, Key, Result, Val, Version};
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -588,17 +588,12 @@ impl Transactor {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	pub async fn timestamp(&self) -> Result<Box<dyn super::Timestamp>> {
+	pub async fn timestamp(&self) -> Result<TimeStamp> {
 		self.inner.timestamp().await
 	}
 
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		self.inner.timestamp_bytes_from_versionstamp(version).await
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		self.inner.timestamp_bytes_from_datetime(datetime).await
+	/// Returns the implementation of timestamp that this transaction uses.
+	pub fn timestamp_impl(&self) -> TimeStampImpl {
+		self.inner.timestamp_impl()
 	}
 }

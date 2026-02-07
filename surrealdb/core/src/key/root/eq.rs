@@ -70,7 +70,7 @@ impl<'a> EventQueue<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::kvs::{HlcTimestamp, KVKey};
 
 	#[test]
 	fn key() {

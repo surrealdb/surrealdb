@@ -4,14 +4,14 @@
 use std::ops::Range;
 
 use anyhow::bail;
-use chrono::{DateTime, Utc};
 
 use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::{Key, Timestamp, Val, Version};
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
+use crate::kvs::{DefaultTimestamp, Key, Val, Version};
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -495,25 +495,12 @@ pub trait Transactable: requirements::TransactionRequirements {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	#[cfg(test)]
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(super::timestamp::IncTimestamp::next()))
+	async fn timestamp(&self) -> Result<TimeStamp> {
+		Ok(TimeStamp::Default(DefaultTimestamp::next()))
 	}
 
-	/// Get the current monotonic timestamp
-	#[cfg(not(test))]
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(super::timestamp::HlcTimestamp::next()))
-	}
-
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		Ok(<u64 as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		Ok(<u64 as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
+	fn timestamp_impl(&self) -> TimeStampImpl {
+		TimeStampImpl::Default
 	}
 
 	async fn compact(&self, _range: Option<Range<Key>>) -> anyhow::Result<()> {
