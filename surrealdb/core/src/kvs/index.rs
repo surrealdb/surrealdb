@@ -511,10 +511,8 @@ impl Building {
 		// We ignore legacy primary indexing.
 		// The initial batch is responsible for removing them, if any,
 		// and reporting their presence in the logs.
-		let is_pa = if let Some(pa) = pa
-			&& pa.1 != QueueSequences::LEGACY_BATCH_ID
-		{
-			true
+		let is_pa = if let Some(pa) = pa {
+			pa.1 != QueueSequences::LEGACY_BATCH_ID
 		} else {
 			false
 		};
