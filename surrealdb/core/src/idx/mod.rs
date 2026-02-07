@@ -24,9 +24,9 @@ use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
+use crate::key::index::ig::IndexAppending;
 use crate::key::index::ii::Ii;
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
@@ -34,6 +34,7 @@ use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
+use crate::kvs::index::{AppendingId, BatchId};
 use crate::val::{RecordIdKey, TableName};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -98,8 +99,16 @@ impl IndexKeyBase {
 		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
-	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
-		Ia::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, i)
+	pub(crate) fn new_ig_key(
+		&self,
+		appending_id: AppendingId,
+		batch_id: BatchId,
+	) -> IndexAppending<'_> {
+		IndexAppending::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, appending_id, batch_id)
+	}
+
+	pub(crate) fn new_ig_range(&self) -> Result<Range<Key>> {
+		IndexAppending::new_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
