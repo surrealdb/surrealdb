@@ -353,7 +353,7 @@ impl Default for QueueSequences {
 }
 impl QueueSequences {
 	const DEFAULT_NEXT_BATCH_ID: u32 = 1;
-	const NO_BATCH_ID: u32 = 0;
+	const LEGACY_BATCH_ID: u32 = 0;
 
 	fn is_empty(&self) -> bool {
 		self.pending == 0
@@ -506,7 +506,19 @@ impl Building {
 		tx.set(&ig, &appending, None).await?;
 		// Do we already have a primary appending?
 		let ip = self.ikb.new_ip_key(rid.key.clone());
-		if tx.get(&ip, None).await?.is_none() {
+		let pa = tx.get(&ip, None).await?;
+		// Do we have a primary indexing?
+		// We ignore legacy primary indexing.
+		// The initial batch is responsible for removing them, if any,
+		// and reporting their presence in the logs.
+		let is_pa = if let Some(pa) = pa
+			&& pa.1 != QueueSequences::LEGACY_BATCH_ID
+		{
+			true
+		} else {
+			false
+		};
+		if !is_pa {
 			// If not, set it.
 			tx.set(&ip, &PrimaryAppending(appending_id, batch_id), None).await?;
 		}
@@ -793,7 +805,7 @@ impl Building {
 			return Ok(None);
 		};
 		// Use the old values from the queued update as the initial indexing input.
-		if pa.1 == QueueSequences::NO_BATCH_ID {
+		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
 			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
 			// We can't resolve it to a v2 !ig record, so drop the marker and ignore the legacy
 			// queue.
