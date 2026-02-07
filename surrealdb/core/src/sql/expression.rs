@@ -201,7 +201,7 @@ impl Expr {
 				..
 			} => expr.has_left_none_null(),
 			Expr::Idiom(x) => {
-				if let Some(Part::Start(x)) = x.0.first() {
+				if let Some(Part::Value(x)) = x.0.first() {
 					x.has_left_none_null()
 				} else {
 					false

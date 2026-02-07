@@ -322,7 +322,7 @@ impl<'a> TreeBuilder<'a> {
 		};
 
 		// Compute the idiom value if it is a param
-		if let Some(Part::Start(x)) = i.0.first()
+		if let Some(Part::Value(x)) = i.0.first()
 			&& matches!(x, Expr::Param(_))
 		{
 			let v = stk

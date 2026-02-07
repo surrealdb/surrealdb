@@ -216,7 +216,7 @@ impl Iterator {
 						.await;
 				}
 
-				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
+				let Part::Value(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 					return self
 						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
 						.await;
@@ -437,7 +437,7 @@ impl Iterator {
 		if stm.is_create() {
 			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
-				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
+				expr::Part::Value(Expr::Literal(Literal::RecordId(from.into_literal()))),
 				expr::Part::Lookup(Lookup {
 					kind,
 					what: what.into_iter().map(|x| x.into_literal()).collect(),
@@ -614,7 +614,7 @@ impl Iterator {
 							.await;
 					}
 
-					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
+					let Part::Value(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
 						return self
 							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
 							.await;

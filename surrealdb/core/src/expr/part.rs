@@ -27,8 +27,6 @@ pub(crate) enum Part {
 	Where(Expr),
 	Lookup(Lookup),
 	Value(Expr),
-	/// TODO: Remove, start and move it out of part to elimite invalid state.
-	Start(Expr),
 	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
@@ -71,7 +69,6 @@ impl Part {
 	/// Check if we require a writeable transaction
 	pub(crate) fn read_only(&self) -> bool {
 		match self {
-			Part::Start(v) => v.read_only(),
 			Part::Where(v) => v.read_only(),
 			Part::Value(v) => v.read_only(),
 			Part::Method(_, v) => v.iter().all(Expr::read_only),
@@ -134,7 +131,6 @@ impl Part {
 
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
-			Part::Start(v) => v.to_raw_string(),
 			Part::Field(v) => {
 				let mut s = ".".to_string();
 				EscapeKwFreeIdent(v).fmt_sql(&mut s, SqlFormat::SingleLine);
@@ -155,13 +151,12 @@ impl Part {
 			Part::Where(_) => 5,
 			Part::Lookup(_) => 6,
 			Part::Value(_) => 7,
-			Part::Start(_) => 8,
-			Part::Method(_, _) => 9,
-			Part::Destructure(_) => 10,
-			Part::Optional => 11,
-			Part::Recurse(_, _, _) => 12,
-			Part::Doc => 13,
-			Part::RepeatRecurse => 14,
+			Part::Method(_, _) => 8,
+			Part::Destructure(_) => 9,
+			Part::Optional => 10,
+			Part::Recurse(_, _, _) => 11,
+			Part::Doc => 12,
+			Part::RepeatRecurse => 13,
 		}
 	}
 }
@@ -200,14 +195,13 @@ impl PartialOrd for Part {
 					| (Part::Optional, Part::Optional)
 					| (Part::Doc, Part::Doc)
 					| (Part::RepeatRecurse, Part::RepeatRecurse) => Some(Ordering::Equal),
-					// For complex variants (Where, Lookup, Value, Start, Destructure, Recurse),
+					// For complex variants (Where, Lookup, Value, Destructure, Recurse),
 					// we can't easily compare their contents, so consider them equal when same
 					// variant This is acceptable for FETCH clause sorting since these are
 					// rarely used
 					(Part::Where(_), Part::Where(_))
 					| (Part::Lookup(_), Part::Lookup(_))
 					| (Part::Value(_), Part::Value(_))
-					| (Part::Start(_), Part::Start(_))
 					| (Part::Destructure(_), Part::Destructure(_))
 					| (Part::Recurse(_, _, _), Part::Recurse(_, _, _)) => Some(Ordering::Equal),
 
