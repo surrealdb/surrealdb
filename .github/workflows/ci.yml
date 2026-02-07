@@ -603,7 +603,6 @@ jobs:
 
       - name: Run JavaScript tests (HTTP)
         id: test-http
-        continue-on-error: true
         run: bun test
         env:
           SURREAL_PROTOCOL: http
@@ -612,7 +611,6 @@ jobs:
 
       - name: Run JavaScript tests (WebSocket)
         id: test-ws
-        continue-on-error: true
         run: bun test
         env:
           SURREAL_PROTOCOL: ws
@@ -686,7 +684,6 @@ jobs:
       - name: Run Golang tests (HTTP)
         id: test-http
         timeout-minutes: 5
-        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: http://localhost:8000/rpc
@@ -694,7 +691,6 @@ jobs:
       - name: Run Golang tests (WebSocket)
         id: test-ws
         timeout-minutes: 5
-        continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
@@ -773,7 +769,6 @@ jobs:
       - name: Run Python tests (HTTP)
         id: test-http
         timeout-minutes: 5
-        continue-on-error: true
         run: uv run pytest
         env:
           PYTHONPATH: ./src
@@ -784,7 +779,6 @@ jobs:
       - name: Run Python tests (WebSocket)
         id: test-ws
         timeout-minutes: 5
-        continue-on-error: true
         run: uv run pytest
         env:
           PYTHONPATH: ./src
@@ -862,7 +856,6 @@ jobs:
       - name: Run PHP tests
         id: test-php
         timeout-minutes: 5
-        continue-on-error: true
         run: composer test-coverage-v2
 
       - name: ${{ (steps.test-php.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
@@ -939,7 +932,6 @@ jobs:
       - name: Run .NET tests
         id: test-main
         timeout-minutes: 5
-        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
@@ -949,7 +941,6 @@ jobs:
       - name: Run .NET tests (Live Query)
         id: test-live
         timeout-minutes: 5
-        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
