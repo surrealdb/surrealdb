@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::method::{self, MethodDescriptor, MethodRegistry};
 use super::{AggregateFunction, ProjectionFunction, ScalarFunction, builtin};
 
 /// Registry of functions available during query execution.
@@ -22,6 +23,8 @@ pub struct FunctionRegistry {
 	aggregates: HashMap<&'static str, Arc<dyn AggregateFunction>>,
 	/// Projection functions (e.g., type::field, type::fields)
 	projections: HashMap<&'static str, Arc<dyn ProjectionFunction>>,
+	/// Method registry for value dot-syntax method dispatch
+	methods: MethodRegistry,
 }
 
 impl FunctionRegistry {
@@ -31,6 +34,7 @@ impl FunctionRegistry {
 			functions: HashMap::new(),
 			aggregates: HashMap::new(),
 			projections: HashMap::new(),
+			methods: MethodRegistry::default(),
 		}
 	}
 
@@ -165,6 +169,15 @@ impl FunctionRegistry {
 	}
 
 	// =========================================================================
+	// Method registry methods
+	// =========================================================================
+
+	/// Look up a method descriptor by method name.
+	pub fn get_method(&self, name: &str) -> Option<&Arc<MethodDescriptor>> {
+		self.methods.get(name)
+	}
+
+	// =========================================================================
 	// Combined methods
 	// =========================================================================
 
@@ -172,6 +185,8 @@ impl FunctionRegistry {
 	pub fn with_builtins() -> Self {
 		let mut registry = Self::new();
 		builtin::register_all(&mut registry);
+		// Build method registry from the registered scalar functions
+		registry.methods = method::build_method_registry(&registry);
 		registry
 	}
 }

@@ -13,6 +13,7 @@
 mod aggregate;
 mod builtin;
 mod macros;
+mod method;
 mod projection;
 mod registry;
 mod signature;
@@ -21,6 +22,7 @@ use std::fmt::Debug;
 
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
+pub use method::{MethodDescriptor, MethodRegistry};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
 pub use signature::Signature;

@@ -923,8 +923,7 @@ pub(crate) fn expr_to_physical_expr(
 					structured,
 				}),
 				InfoStatement::Db(structured, version) => {
-					let version =
-						version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
 					Arc::new(DatabaseInfoPlan {
 						structured,
 						version,
@@ -932,8 +931,7 @@ pub(crate) fn expr_to_physical_expr(
 				}
 				InfoStatement::Tb(table, structured, version) => {
 					let table = expr_to_physical_expr_as_name(table, ctx)?;
-					let version =
-						version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
+					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
 					Arc::new(TableInfoPlan {
 						table,
 						structured,
@@ -3201,8 +3199,13 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 			for arg in args {
 				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
 			}
+			let registry = ctx.function_registry();
+			let descriptor = registry
+				.get_method(name)
+				.ok_or_else(|| Error::Thrown(format!("Unknown method '{name}'")))?
+				.clone();
 			Ok(PhysicalPart::Method {
-				name: name.clone(),
+				descriptor,
 				args: phys_args,
 			})
 		}

@@ -7,6 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::TableProvider;
 use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::exec::function::MethodDescriptor;
 use crate::exec::physical_expr::recurse::value_hash;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::physical_part::{
@@ -172,9 +173,7 @@ impl PhysicalExpr for IdiomExpr {
 						// This matches legacy SurrealQL behavior for undefined variables
 						return Ok(Value::None);
 					}
-					return Err(
-						anyhow::anyhow!("Idiom evaluation requires current value").into(),
-					);
+					return Err(anyhow::anyhow!("Idiom evaluation requires current value").into());
 				}
 			}
 		};
@@ -191,10 +190,13 @@ impl PhysicalExpr for IdiomExpr {
 				value = value.flatten();
 			}
 
-			// Short-circuit on None for optional chaining
-			if matches!(value, Value::None) {
-				// Check if the next part would handle None specially
-				// For now, we continue evaluation
+			// Short-circuit on None/Null for optional chaining (.?)
+			// When an Optional part produces None/Null, skip all remaining parts
+			// and return None immediately. This matches the semantics of
+			// `a.?.b.to_string()` where if `a` is None, the chain short-circuits.
+			if matches!(part, PhysicalPart::Optional) && matches!(value, Value::None | Value::Null)
+			{
+				return Ok(Value::None);
 			}
 		}
 
@@ -255,9 +257,9 @@ async fn evaluate_part(
 		PhysicalPart::Where(predicate) => evaluate_where(value, predicate.as_ref(), ctx).await,
 
 		PhysicalPart::Method {
-			name,
+			descriptor,
 			args,
-		} => evaluate_method(value, name, args, ctx).await,
+		} => evaluate_method(value, descriptor, args, ctx).await,
 
 		PhysicalPart::Destructure(parts) => evaluate_destructure(value, parts, ctx).await,
 
@@ -610,38 +612,16 @@ async fn evaluate_where(
 /// - `"hello".len()` → `string::len("hello")`
 /// - `[1, 2, 3].len()` → `array::len([1, 2, 3])`
 ///
-/// The method name is mapped to a function name based on the value type.
+/// The method descriptor (resolved at plan time) contains the per-type function
+/// dispatch table. At eval time we just look up the function for the value's type.
 async fn evaluate_method(
 	value: &Value,
-	name: &str,
+	descriptor: &MethodDescriptor,
 	args: &[Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'_>,
 ) -> crate::expr::FlowResult<Value> {
-	// Determine the type-specific function namespace based on the value type
-	let namespace = match value {
-		Value::String(_) => "string",
-		Value::Array(_) | Value::Set(_) => "array",
-		Value::Object(_) => "object",
-		Value::Bytes(_) => "bytes",
-		Value::Duration(_) => "duration",
-		Value::Datetime(_) => "time",
-		Value::Number(_) => "math",
-		Value::Geometry(_) => "geo",
-		Value::RecordId(_) => "record",
-		Value::File(_) => "file",
-		_ => {
-			// Try common namespaces for generic methods
-			return Err(anyhow::anyhow!(
-				"Method '{}' cannot be called on value of type '{}'",
-				name,
-				value.kind_of()
-			)
-			.into());
-		}
-	};
-
-	// Build the full function name
-	let func_name = format!("{}::{}", namespace, name);
+	// Resolve the function for this value's type
+	let func = descriptor.resolve(value)?;
 
 	// Build the arguments: receiver value first, then method arguments
 	let mut func_args = Vec::with_capacity(1 + args.len());
@@ -651,26 +631,11 @@ async fn evaluate_method(
 		func_args.push(arg_value);
 	}
 
-	// Get the function registry from the execution context
-	let registry = ctx.exec_ctx.function_registry();
-
-	if let Some(func) = registry.get(&func_name) {
-		// Try sync invocation first for pure functions
-		if func.is_pure() {
-			Ok(func.invoke(func_args)?)
-		} else {
-			// Use async invocation for context-aware functions
-			Ok(func.invoke_async(&ctx, func_args).await?)
-		}
+	// Invoke the resolved function
+	if func.is_pure() {
+		Ok(func.invoke(func_args)?)
 	} else {
-		// Try without namespace (some methods might be value-generic)
-		Err(anyhow::anyhow!(
-			"Unknown method '{}' on type '{}' (tried function '{}')",
-			name,
-			value.kind_of(),
-			func_name
-		)
-		.into())
+		Ok(func.invoke_async(&ctx, func_args).await?)
 	}
 }
 

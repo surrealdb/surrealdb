@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::exec::function::MethodDescriptor;
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator, PhysicalExpr};
 use crate::expr::Dir;
 use crate::expr::part::DestructurePart;
@@ -41,8 +42,11 @@ pub enum PhysicalPart {
 	Where(Arc<dyn PhysicalExpr>),
 
 	/// Method call on value - `.method(args...)`
+	///
+	/// The descriptor is resolved at plan time from the method name and contains
+	/// per-type function dispatch information.
 	Method {
-		name: String,
+		descriptor: Arc<MethodDescriptor>,
 		args: Vec<Arc<dyn PhysicalExpr>>,
 	},
 
@@ -107,6 +111,17 @@ impl PhysicalPart {
 		}
 	}
 
+	/// Returns the method name if this is a Method part.
+	pub fn method_name(&self) -> Option<&str> {
+		match self {
+			PhysicalPart::Method {
+				descriptor,
+				..
+			} => Some(descriptor.name),
+			_ => None,
+		}
+	}
+
 	/// Returns the required context level for this part.
 	pub fn required_context(&self) -> ContextLevel {
 		match self {
@@ -162,11 +177,11 @@ impl ToSql for PhysicalPart {
 				f.push(']');
 			}
 			PhysicalPart::Method {
-				name,
+				descriptor,
 				args,
 			} => {
 				f.push('.');
-				f.push_str(name);
+				f.push_str(descriptor.name);
 				f.push('(');
 				for (i, arg) in args.iter().enumerate() {
 					if i > 0 {
