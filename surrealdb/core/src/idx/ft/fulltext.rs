@@ -643,7 +643,7 @@ impl FullTextIndex {
 		}
 	}
 
-	pub(in crate::idx) async fn get_doc_id(
+	pub(crate) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
 		rid: &RecordId,
@@ -653,7 +653,7 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
-	pub(in crate::idx) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
+	pub(crate) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
@@ -743,7 +743,7 @@ impl FullTextIndex {
 	/// This method highlights the occurrences of search terms in the document
 	/// value. It uses the provided highlighting parameters to format the
 	/// highlighted text.
-	pub(in crate::idx) async fn highlight(
+	pub(crate) async fn highlight(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -777,7 +777,7 @@ impl FullTextIndex {
 		tx.get(&key, None).await
 	}
 
-	pub(in crate::idx) async fn read_offsets(
+	pub(crate) async fn read_offsets(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -851,7 +851,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 }
 
 /// Implements BM25 scoring for relevance ranking of search results
-pub(in crate::idx) struct Scorer {
+pub(crate) struct Scorer {
 	/// precomputed BM25 scoring parameters
 	k1: f64,
 	k1_plus_1: f64,

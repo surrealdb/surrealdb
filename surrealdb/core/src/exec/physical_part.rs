@@ -50,6 +50,17 @@ pub enum PhysicalPart {
 		args: Vec<Arc<dyn PhysicalExpr>>,
 	},
 
+	/// Closure field call - `.name(args...)` where `name` is not a known method.
+	///
+	/// When the method name is not found in the method registry at plan time,
+	/// we fall back to field access + closure invocation at runtime.
+	/// This handles patterns like `$obj.fnc()` where `fnc` is a field
+	/// containing a closure value, not a built-in method.
+	ClosureFieldCall {
+		field: String,
+		args: Vec<Arc<dyn PhysicalExpr>>,
+	},
+
 	/// Object destructuring - `{ field1, field2: alias, ... }`
 	Destructure(Vec<PhysicalDestructurePart>),
 
@@ -62,6 +73,14 @@ pub enum PhysicalPart {
 
 	/// Recursion with bounds and instruction - `{min..max+instruction}`
 	Recurse(PhysicalRecurse),
+
+	/// Repeat the current recursion from this point - `.@`
+	///
+	/// This is a marker that, when evaluated inside a recursion context,
+	/// re-invokes the entire recursion on the current value. Used for
+	/// building recursive tree structures via destructuring patterns like:
+	/// `person:alice.{..}.{name, reports_to: ->reports_to->person.@}`
+	RepeatRecurse,
 }
 
 impl PhysicalPart {
@@ -80,7 +99,10 @@ impl PhysicalPart {
 
 	/// Returns true if this part requires database access (Lookup, Recurse).
 	pub fn requires_database(&self) -> bool {
-		matches!(self, PhysicalPart::Lookup(_) | PhysicalPart::Recurse(_))
+		matches!(
+			self,
+			PhysicalPart::Lookup(_) | PhysicalPart::Recurse(_) | PhysicalPart::RepeatRecurse
+		)
 	}
 
 	/// Returns the access mode for this part.
@@ -92,7 +114,8 @@ impl PhysicalPart {
 			| PhysicalPart::Flatten
 			| PhysicalPart::First
 			| PhysicalPart::Last
-			| PhysicalPart::Optional => AccessMode::ReadOnly,
+			| PhysicalPart::Optional
+			| PhysicalPart::RepeatRecurse => AccessMode::ReadOnly,
 
 			// Expression-based parts inherit from the expression
 			PhysicalPart::Index(expr) => expr.access_mode(),
@@ -101,6 +124,12 @@ impl PhysicalPart {
 				args,
 				..
 			} => args.iter().map(|a| a.access_mode()).combine_all(),
+
+			// Closure field calls may do anything (closures can read/write)
+			PhysicalPart::ClosureFieldCall {
+				args,
+				..
+			} => AccessMode::ReadWrite.combine(args.iter().map(|a| a.access_mode()).combine_all()),
 
 			// Destructure inherits from all parts
 			PhysicalPart::Destructure(parts) => parts.iter().map(|p| p.access_mode()).combine_all(),
@@ -143,13 +172,18 @@ impl PhysicalPart {
 				..
 			} => args.iter().map(|a| a.required_context()).max().unwrap_or(ContextLevel::Database),
 
+			// Closure field calls are conservative (closure body may need database)
+			PhysicalPart::ClosureFieldCall {
+				..
+			} => ContextLevel::Database,
+
 			// Destructure inherits from all parts
 			PhysicalPart::Destructure(parts) => {
 				parts.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root)
 			}
 
 			// Lookup and Recurse require database access
-			PhysicalPart::Lookup(_) => ContextLevel::Database,
+			PhysicalPart::Lookup(_) | PhysicalPart::RepeatRecurse => ContextLevel::Database,
 			PhysicalPart::Recurse(recurse) => recurse.required_context(),
 		}
 	}
@@ -191,6 +225,21 @@ impl ToSql for PhysicalPart {
 				}
 				f.push(')');
 			}
+			PhysicalPart::ClosureFieldCall {
+				field,
+				args,
+			} => {
+				f.push('.');
+				f.push_str(field);
+				f.push('(');
+				for (i, arg) in args.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					arg.fmt_sql(f, fmt);
+				}
+				f.push(')');
+			}
 			PhysicalPart::Destructure(parts) => {
 				f.push_str(".{ ");
 				for (i, part) in parts.iter().enumerate() {
@@ -204,6 +253,7 @@ impl ToSql for PhysicalPart {
 			PhysicalPart::Optional => f.push('?'),
 			PhysicalPart::Lookup(lookup) => lookup.fmt_sql(f, fmt),
 			PhysicalPart::Recurse(recurse) => recurse.fmt_sql(f, fmt),
+			PhysicalPart::RepeatRecurse => f.push('@'),
 		}
 	}
 }
@@ -347,6 +397,12 @@ pub struct PhysicalLookup {
 	/// The pre-planned operator tree for executing the lookup.
 	/// This includes GraphEdgeScan/ReferenceScan + optional Filter, Sort, Limit, Project.
 	pub plan: Arc<dyn ExecOperator>,
+
+	/// When true, extract just the RecordId from result objects.
+	/// This is set when the scan uses FullEdge mode for WHERE/SPLIT filtering
+	/// but no explicit SELECT clause is present, so the final result should be
+	/// RecordIds rather than full objects.
+	pub extract_id: bool,
 }
 
 /// Direction for lookup operations.
@@ -421,6 +477,11 @@ pub struct PhysicalRecurse {
 
 	/// Whether to include the starting node in results
 	pub inclusive: bool,
+
+	/// Whether the inner path contains RepeatRecurse markers.
+	/// When true, the recursion uses a single-step evaluation where
+	/// tree building is handled by the RepeatRecurse callbacks.
+	pub has_repeat_recurse: bool,
 }
 
 /// Instruction for how to handle recursion results.

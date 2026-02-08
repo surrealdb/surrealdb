@@ -180,6 +180,7 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								} else {
 									Some(&local_params)
 								},
+								recursion_ctx: None,
 							};
 							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
 							phys_expr.evaluate(eval_ctx).await?
@@ -257,6 +258,7 @@ impl PhysicalExpr for BlockPhysicalExpr {
 								} else {
 									Some(&local_params)
 								},
+								recursion_ctx: None,
 							};
 							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
 							phys_expr.evaluate(eval_ctx).await?

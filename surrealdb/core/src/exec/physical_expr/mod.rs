@@ -7,12 +7,35 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::{Parameters, SessionInfo};
+use crate::exec::physical_part::{PhysicalPart, PhysicalRecurseInstruction};
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::iam::Auth;
 use crate::kvs::Transaction;
 use crate::val::Value;
+
+/// Context for recursive tree-building via RepeatRecurse (@).
+///
+/// When a recursion path contains RepeatRecurse markers (e.g., in destructure
+/// patterns like `{name, children: ->edge->table.@}`), this context is set by
+/// the recursion evaluator and read by the RepeatRecurse handler to re-invoke
+/// the recursion from the current value.
+#[derive(Clone, Copy)]
+pub struct RecursionCtx<'a> {
+	/// The recursion's inner path (containing Destructure with RepeatRecurse)
+	pub path: &'a [PhysicalPart],
+	/// Minimum recursion depth
+	pub min_depth: u32,
+	/// Maximum recursion depth (None = system limit)
+	pub max_depth: Option<u32>,
+	/// How to handle recursion results
+	pub instruction: &'a PhysicalRecurseInstruction,
+	/// Whether to include starting node
+	pub inclusive: bool,
+	/// Current recursion depth (incremented at each RepeatRecurse call)
+	pub depth: u32,
+}
 
 /// Evaluation context - what's available during expression evaluation.
 ///
@@ -30,6 +53,10 @@ pub struct EvalContext<'a> {
 	/// Block-local parameters (LET bindings within current block scope).
 	/// These shadow global parameters with the same name.
 	pub local_params: Option<&'a HashMap<String, Value>>,
+
+	/// Active recursion context for RepeatRecurse evaluation.
+	/// Set by evaluate_recurse_* when the inner path contains .@ markers.
+	pub recursion_ctx: Option<RecursionCtx<'a>>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -41,6 +68,7 @@ impl<'a> EvalContext<'a> {
 			exec_ctx,
 			current_value: None,
 			local_params: None,
+			recursion_ctx: None,
 		}
 	}
 
@@ -48,6 +76,14 @@ impl<'a> EvalContext<'a> {
 	pub fn with_value(&self, value: &'a Value) -> Self {
 		Self {
 			current_value: Some(value),
+			..*self
+		}
+	}
+
+	/// Set the recursion context for RepeatRecurse evaluation.
+	pub fn with_recursion_ctx(&self, ctx: RecursionCtx<'a>) -> Self {
+		Self {
+			recursion_ctx: Some(ctx),
 			..*self
 		}
 	}
@@ -224,7 +260,8 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 mod block;
 mod collections;
 mod conditional;
-mod function;
+mod control_flow;
+pub(crate) mod function;
 mod idiom;
 mod literal;
 mod ops;
@@ -235,12 +272,13 @@ mod subquery;
 pub(crate) use block::BlockPhysicalExpr;
 pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
 pub(crate) use conditional::IfElseExpr;
+pub(crate) use control_flow::ControlFlowExpr;
 pub(crate) use function::{
 	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
 	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
-pub(crate) use literal::{Literal, Param};
+pub(crate) use literal::{Literal, MockExpr, Param};
 pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
 pub(crate) use subquery::ScalarSubquery;
 

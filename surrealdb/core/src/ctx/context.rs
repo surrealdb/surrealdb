@@ -97,6 +97,8 @@ pub struct Context {
 	function_registry: Arc<FunctionRegistry>,
 	// Strategy for the new streaming planner/executor
 	new_planner_strategy: NewPlannerStrategy,
+	// Matches context for index functions (search::highlight, search::score, etc.)
+	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 }
 
 impl Default for Context {
@@ -151,6 +153,7 @@ impl Context {
 			surrealism_cache: None,
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
+			matches_context: None,
 		}
 	}
 
@@ -180,6 +183,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
+			matches_context: parent.matches_context.clone(),
 		}
 	}
 
@@ -211,6 +215,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
+			matches_context: parent.matches_context.clone(),
 		}
 	}
 
@@ -242,6 +247,7 @@ impl Context {
 			surrealism_cache: from.surrealism_cache.clone(),
 			function_registry: from.function_registry.clone(),
 			new_planner_strategy: from.new_planner_strategy.clone(),
+			matches_context: from.matches_context.clone(),
 		}
 	}
 
@@ -283,6 +289,7 @@ impl Context {
 			surrealism_cache: Some(surrealism_cache),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
+			matches_context: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -725,6 +732,18 @@ impl Context {
 	/// Get the function registry for this context
 	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
 		&self.function_registry
+	}
+
+	/// Set the matches context for index functions (search::highlight, etc.)
+	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
+		self.matches_context = Some(Arc::new(ctx));
+	}
+
+	/// Get the matches context for index functions
+	pub(crate) fn get_matches_context(
+		&self,
+	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
+		self.matches_context.as_ref()
 	}
 
 	/// Get the new planner strategy for this context

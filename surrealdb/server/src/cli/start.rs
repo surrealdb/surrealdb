@@ -184,10 +184,7 @@ pub async fn init<
 	}: StartCommandArguments,
 ) -> Result<()> {
 	// Install the crypto provider before any TLS operations occur
-	if let Err(err) = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
-	{
-		warn!("Failed to install AWS LC RS crypto provider: {err}");
-	}
+	let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
 	// Check the path is valid
 	C::path_valid(&path)?;
 	// Check if we should output a banner

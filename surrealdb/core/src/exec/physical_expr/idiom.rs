@@ -9,7 +9,7 @@ use crate::catalog::providers::TableProvider;
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::function::MethodDescriptor;
 use crate::exec::physical_expr::recurse::value_hash;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
 use crate::exec::physical_part::{
 	PhysicalDestructurePart, PhysicalLookup, PhysicalPart, PhysicalRecurse,
 	PhysicalRecurseInstruction,
@@ -124,6 +124,12 @@ impl PhysicalExpr for IdiomExpr {
 					// Methods may require database context
 					return ContextLevel::Database;
 				}
+				PhysicalPart::ClosureFieldCall {
+					..
+				} => {
+					// Closure bodies may require database context
+					return ContextLevel::Database;
+				}
 				PhysicalPart::Recurse(_) => {
 					// Recursion requires database access
 					return ContextLevel::Database;
@@ -139,9 +145,17 @@ impl PhysicalExpr for IdiomExpr {
 						return ContextLevel::Database;
 					}
 				}
+				PhysicalPart::RepeatRecurse => {
+					// RepeatRecurse requires database context (recursion does graph traversal)
+					return ContextLevel::Database;
+				}
+				PhysicalPart::All => {
+					// All (.*) may trigger record fetch + computed field evaluation
+					// if applied to a RecordId, so conservatively require database context
+					return ContextLevel::Database;
+				}
 				// Simple parts that don't need database access
-				PhysicalPart::All
-				| PhysicalPart::Flatten
+				PhysicalPart::Flatten
 				| PhysicalPart::First
 				| PhysicalPart::Last
 				| PhysicalPart::Optional => {}
@@ -261,6 +275,11 @@ async fn evaluate_part(
 			args,
 		} => evaluate_method(value, descriptor, args, ctx).await,
 
+		PhysicalPart::ClosureFieldCall {
+			field,
+			args,
+		} => evaluate_closure_field_call(value, field, args, ctx).await,
+
 		PhysicalPart::Destructure(parts) => evaluate_destructure(value, parts, ctx).await,
 
 		PhysicalPart::Optional => {
@@ -271,6 +290,8 @@ async fn evaluate_part(
 		PhysicalPart::Lookup(lookup) => Ok(evaluate_lookup(value, lookup, ctx).await?),
 
 		PhysicalPart::Recurse(recurse) => evaluate_recurse(value, recurse, ctx).await,
+
+		PhysicalPart::RepeatRecurse => evaluate_repeat_recurse(value, ctx).await,
 	}
 }
 
@@ -287,27 +308,10 @@ pub(crate) async fn evaluate_field(
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
 		Value::RecordId(rid) => {
-			// Fetch the record from the database
-			let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
-			let txn = ctx.exec_ctx.txn();
-			let record = txn
-				.get_record(
-					db_ctx.ns_ctx.ns.namespace_id,
-					db_ctx.db.database_id,
-					&rid.table,
-					&rid.key,
-					None,
-				)
-				.await
-				.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
-
-			// Access field on fetched record
-			let fetched = record.data.as_ref();
-			if fetched.is_none() {
-				return Ok(Value::None);
-			}
-
-			// The record data is a Value, get the field from it
+			// Fetch the record with computed fields evaluated.
+			// This is necessary because computed fields (e.g. COMPUTED <~comment)
+			// are not physically stored and must be dynamically evaluated.
+			let fetched = fetch_record_with_computed_fields(rid, ctx).await?;
 			match fetched {
 				Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 				_ => Ok(Value::None),
@@ -477,6 +481,12 @@ async fn fetch_record_with_computed_fields(
 
 	let mut result = record.data.as_ref().clone();
 
+	// If the record doesn't exist (e.g. was deleted), return None early.
+	// Don't proceed to evaluate computed fields on a non-existent record.
+	if result.is_none() {
+		return Ok(Value::None);
+	}
+
 	// Get the table's field definitions to check for computed fields
 	let fields = txn
 		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, &rid.table, None)
@@ -639,6 +649,133 @@ async fn evaluate_method(
 	}
 }
 
+/// Closure field call evaluation.
+///
+/// When a method name is not found in the method registry at plan time,
+/// the planner creates a `ClosureFieldCall` part. At runtime, this
+/// accesses the named field on the value and, if it contains a closure,
+/// invokes it with the provided arguments.
+///
+/// This implements the "fallback function" pattern where `$obj.fnc()`
+/// first checks built-in methods (handled by `Method` part) and falls back
+/// to field access + closure invocation (this part).
+async fn evaluate_closure_field_call(
+	value: &Value,
+	field: &str,
+	args: &[Arc<dyn PhysicalExpr>],
+	ctx: EvalContext<'_>,
+) -> crate::expr::FlowResult<Value> {
+	use std::collections::HashMap;
+
+	use super::block::BlockPhysicalExpr;
+	use super::function::validate_return;
+	use crate::err::Error;
+	use crate::val::Closure;
+
+	// Get the field value from the object
+	let field_value = match value {
+		Value::Object(obj) => obj.get(field).cloned(),
+		_ => None,
+	};
+
+	// Check if the field contains a closure
+	let closure = match field_value {
+		Some(Value::Closure(c)) => c,
+		_ => {
+			return Err(Error::InvalidFunction {
+				name: field.to_string(),
+				message: "no such method found for the object type".to_string(),
+			}
+			.into());
+		}
+	};
+
+	// Evaluate all argument expressions
+	let mut evaluated_args = Vec::with_capacity(args.len());
+	for arg_expr in args {
+		evaluated_args.push(arg_expr.evaluate(ctx.clone()).await?);
+	}
+
+	// Invoke the closure (same logic as ClosureCallExec)
+	match closure.as_ref() {
+		Closure::Expr {
+			args: arg_spec,
+			returns,
+			body,
+			captures,
+		} => {
+			// Create isolated execution context with captured variables
+			let mut isolated_ctx = ctx.exec_ctx.clone();
+			for (name, value) in captures.clone() {
+				isolated_ctx = isolated_ctx.with_param(name, value);
+			}
+
+			// Check for missing required arguments
+			if arg_spec.len() > evaluated_args.len()
+				&& let Some((param, kind)) =
+					arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
+			{
+				return Err(Error::InvalidArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!(
+						"Expected a value of type '{}' for argument {}",
+						kind.to_sql(),
+						param.to_sql()
+					),
+				}
+				.into());
+			}
+
+			// Bind arguments to parameter names with type coercion
+			let mut local_params: HashMap<String, Value> = HashMap::new();
+			for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args.into_iter()) {
+				let coerced =
+					arg_value.coerce_to_kind(kind).map_err(|_| Error::InvalidArguments {
+						name: "ANONYMOUS".to_string(),
+						message: format!(
+							"Expected a value of type '{}' for argument {}",
+							kind.to_sql(),
+							param.to_sql()
+						),
+					})?;
+				local_params.insert(param.clone().into_string(), coerced);
+			}
+
+			// Add parameters to the execution context
+			for (name, value) in &local_params {
+				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
+			}
+
+			// Execute the closure body
+			let block_expr = BlockPhysicalExpr {
+				block: crate::expr::Block(vec![body.clone()]),
+			};
+			let eval_ctx = EvalContext {
+				exec_ctx: &isolated_ctx,
+				current_value: ctx.current_value,
+				local_params: Some(&local_params),
+				recursion_ctx: None,
+			};
+
+			let result = match block_expr.evaluate(eval_ctx).await {
+				Ok(v) => v,
+				Err(crate::expr::ControlFlow::Return(v)) => v,
+				Err(crate::expr::ControlFlow::Break) | Err(crate::expr::ControlFlow::Continue) => {
+					return Err(Error::InvalidControlFlow.into());
+				}
+				Err(e) => return Err(e),
+			};
+
+			// Coerce return value to declared type if specified
+			Ok(validate_return("ANONYMOUS", returns.as_ref(), result)?)
+		}
+		Closure::Builtin(_) => {
+			Err(anyhow::anyhow!("Builtin closures are not yet supported in the streaming executor")
+				.into())
+		}
+	}
+}
+
 /// Destructure evaluation - extract fields into a new object.
 async fn evaluate_destructure(
 	value: &Value,
@@ -667,11 +804,11 @@ async fn evaluate_destructure(
 						field,
 						path,
 					} => {
-						// Start with the field value and apply the path
-						let mut v = obj.get(field.as_str()).cloned().unwrap_or(Value::None);
-						for p in path {
-							v = Box::pin(evaluate_part(&v, p, ctx.clone())).await?;
-						}
+						// Evaluate the aliased path starting from the current value
+						// (not from obj.get(field)). The field name is just the output label.
+						// For example, `team_name: team.name` evaluates `team.name` on the
+						// current record and stores the result under key "team_name".
+						let v = evaluate_physical_path(value, path, ctx.clone()).await?;
 						result.insert(field.clone(), v);
 					}
 					PhysicalDestructurePart::Nested {
@@ -818,6 +955,22 @@ async fn evaluate_lookup_for_rid(
 		results.extend(batch.values);
 	}
 
+	// When extract_id is set, the scan used FullEdge mode for WHERE/SPLIT filtering
+	// but no explicit SELECT clause was present. Project results back to RecordIds.
+	if lookup.extract_id {
+		let results = results
+			.into_iter()
+			.filter_map(|v| match v {
+				Value::Object(ref obj) => {
+					obj.get("id").filter(|id| matches!(id, Value::RecordId(_))).cloned()
+				}
+				Value::RecordId(_) => Some(v),
+				_ => None,
+			})
+			.collect();
+		return Ok(Value::Array(results));
+	}
+
 	Ok(Value::Array(results.into()))
 }
 
@@ -933,6 +1086,25 @@ fn evaluate_recurse<'a>(
 		let system_limit = *IDIOM_RECURSION_LIMIT as u32;
 		let max_depth = recurse.max_depth.unwrap_or(system_limit).min(system_limit);
 
+		// When the path contains RepeatRecurse markers, use single-step evaluation.
+		// The tree is built recursively through RepeatRecurse callbacks, not by looping.
+		if recurse.has_repeat_recurse {
+			let rec_ctx = RecursionCtx {
+				path: &recurse.path,
+				min_depth: recurse.min_depth,
+				max_depth: Some(max_depth),
+				instruction: &recurse.instruction,
+				inclusive: recurse.inclusive,
+				depth: 0,
+			};
+			return evaluate_recurse_with_plan(
+				value,
+				&recurse.path,
+				ctx.with_recursion_ctx(rec_ctx),
+			)
+			.await;
+		}
+
 		match &recurse.instruction {
 			PhysicalRecurseInstruction::Default => {
 				evaluate_recurse_default(value, &recurse.path, recurse.min_depth, max_depth, ctx)
@@ -977,6 +1149,103 @@ fn evaluate_recurse<'a>(
 			}
 		}
 	})
+}
+
+/// Evaluate a recursion that contains RepeatRecurse markers.
+///
+/// This performs a single evaluation of the path on the current value.
+/// The actual recursion happens through RepeatRecurse callbacks within
+/// the path evaluation (e.g., inside Destructure aliased fields).
+///
+/// The recursion context is set in EvalContext so that RepeatRecurse
+/// handlers can re-invoke this function with incremented depth.
+fn evaluate_recurse_with_plan<'a>(
+	value: &'a Value,
+	path: &'a [PhysicalPart],
+	ctx: EvalContext<'a>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<Value>> + Send + 'a>>
+{
+	Box::pin(async move {
+		let rec_ctx = ctx.recursion_ctx.as_ref().expect("recursion context must be set");
+		let max_depth = rec_ctx.max_depth.unwrap_or(256);
+
+		// Check depth limit before evaluating
+		if rec_ctx.depth >= max_depth {
+			return Ok(value.clone());
+		}
+
+		// Check if the value is final (dead end)
+		if is_final(value) {
+			return Ok(clean_iteration(get_final(value)));
+		}
+
+		// Evaluate the path once on the current value.
+		// RepeatRecurse markers within the path will recursively call back
+		// into evaluate_recurse_with_plan via evaluate_repeat_recurse.
+		let value_ctx = ctx.with_value(value);
+		evaluate_physical_path(value, path, value_ctx).await
+	})
+}
+
+/// Handle the RepeatRecurse (@) marker during path evaluation.
+///
+/// This reads the recursion context from EvalContext and re-invokes
+/// the recursion evaluator on the current value. For Array values,
+/// each element is processed individually to build the recursive tree.
+fn evaluate_repeat_recurse<'a>(
+	value: &'a Value,
+	ctx: EvalContext<'a>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<Value>> + Send + 'a>>
+{
+	Box::pin(async move {
+		let rec_ctx = match &ctx.recursion_ctx {
+			Some(rc) => rc.clone(),
+			None => {
+				// RepeatRecurse outside recursion context is an error
+				return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+					crate::err::Error::Query {
+						message: "RepeatRecurse (@) used outside recursion context".to_string(),
+					}
+				)));
+			}
+		};
+
+		// Increment depth for the recursive call
+		let next_ctx = RecursionCtx {
+			depth: rec_ctx.depth + 1,
+			..rec_ctx
+		};
+
+		match value {
+			// For arrays, process each element individually and collect results
+			Value::Array(arr) => {
+				let mut results = Vec::with_capacity(arr.len());
+				for elem in arr.iter() {
+					let elem_ctx = ctx.with_recursion_ctx(next_ctx.clone());
+					let result = evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
+					// Filter out dead-end values
+					if !is_final(&result) {
+						results.push(result);
+					}
+				}
+				Ok(Value::Array(results.into()))
+			}
+			// For single values, recurse directly
+			_ => {
+				let elem_ctx = ctx.with_recursion_ctx(next_ctx.clone());
+				evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await
+			}
+		}
+	})
+}
+
+/// Get the final value for a dead-end in recursion.
+fn get_final(value: &Value) -> Value {
+	match value {
+		Value::Array(_) => Value::Array(crate::val::Array(vec![])),
+		Value::Null => Value::Null,
+		_ => Value::None,
+	}
 }
 
 /// Evaluate a path of PhysicalParts against a value.
@@ -1060,8 +1329,12 @@ async fn evaluate_recurse_default(
 
 		// Check termination conditions
 		if is_final(&next) || next == current {
-			// Reached a dead end or cycle
-			return if depth >= min_depth {
+			// Reached a dead end or cycle.
+			// Use `depth > min_depth` (not `>=`) because the current iteration
+			// produced a dead end, so we've only completed (depth - 1) successful
+			// traversals. At the exact min_depth boundary, hitting a dead end means
+			// we haven't fulfilled the minimum requirement.
+			return if depth > min_depth {
 				Ok(current)
 			} else {
 				Ok(Value::None)
@@ -1281,6 +1554,18 @@ async fn evaluate_recurse_shortest(
 		depth += 1;
 	}
 
-	// Target not found
-	Ok(Value::None)
+	// Target not found within max_depth.
+	// Return the deepest explored paths in path format (array of arrays),
+	// or NONE if no paths were explored beyond the start.
+	let remaining_paths: Vec<Value> = queue
+		.into_iter()
+		.filter(|(_, p)| !p.is_empty())
+		.map(|(_, p)| Value::Array(p.into()))
+		.collect();
+
+	if remaining_paths.is_empty() {
+		Ok(Value::None)
+	} else {
+		Ok(Value::Array(remaining_paths.into()))
+	}
 }

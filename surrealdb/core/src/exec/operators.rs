@@ -38,7 +38,7 @@ pub use fetch::Fetch;
 pub use filter::Filter;
 pub use foreach::ForeachPlan;
 pub use fulltext_scan::FullTextScan;
-pub use graph_edge_scan::{GraphEdgeScan, GraphScanOutput};
+pub use graph_edge_scan::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput};
 pub use ifelse::IfElsePlan;
 pub use index_scan::IndexScan;
 pub use info::{
@@ -49,7 +49,7 @@ pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
-pub use reference_scan::ReferenceScan;
+pub use reference_scan::{ReferenceScan, ReferenceScanOutput};
 pub use scan::Scan;
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;

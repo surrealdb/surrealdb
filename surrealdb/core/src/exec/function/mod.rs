@@ -12,6 +12,7 @@
 
 mod aggregate;
 mod builtin;
+mod index;
 mod macros;
 mod method;
 mod projection;
@@ -22,6 +23,7 @@ use std::fmt::Debug;
 
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
+pub use index::{IndexFunction, MatchContext, MatchInfo, MatchesContext};
 pub use method::{MethodDescriptor, MethodRegistry};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
@@ -51,6 +53,15 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// implementation returns the signature's return type.
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
 		Ok(self.signature().returns)
+	}
+
+	/// The minimum context level required to execute this function.
+	///
+	/// Functions that access database state (e.g., analyzers, custom functions)
+	/// should override this to return `ContextLevel::Database`.
+	/// The default is `Root` (no namespace/database context needed).
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		crate::exec::ContextLevel::Root
 	}
 
 	/// Whether this function is pure (no context needed).

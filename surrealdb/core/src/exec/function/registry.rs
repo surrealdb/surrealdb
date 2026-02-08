@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::method::{self, MethodDescriptor, MethodRegistry};
-use super::{AggregateFunction, ProjectionFunction, ScalarFunction, builtin};
+use super::{AggregateFunction, IndexFunction, ProjectionFunction, ScalarFunction, builtin};
 
 /// Registry of functions available during query execution.
 ///
@@ -12,6 +12,7 @@ use super::{AggregateFunction, ProjectionFunction, ScalarFunction, builtin};
 /// - Scalar functions (operate on individual values, return single value)
 /// - Aggregate functions (operate over groups of values)
 /// - Projection functions (produce field bindings for output objects)
+/// - Index functions (bound to WHERE clause predicates via index infrastructure)
 ///
 /// It is typically created once at startup with all built-in functions
 /// and then shared across execution contexts.
@@ -23,6 +24,8 @@ pub struct FunctionRegistry {
 	aggregates: HashMap<&'static str, Arc<dyn AggregateFunction>>,
 	/// Projection functions (e.g., type::field, type::fields)
 	projections: HashMap<&'static str, Arc<dyn ProjectionFunction>>,
+	/// Index functions (e.g., search::highlight, search::score, search::offsets)
+	index_functions: HashMap<&'static str, Arc<dyn IndexFunction>>,
 	/// Method registry for value dot-syntax method dispatch
 	methods: MethodRegistry,
 }
@@ -34,6 +37,7 @@ impl FunctionRegistry {
 			functions: HashMap::new(),
 			aggregates: HashMap::new(),
 			projections: HashMap::new(),
+			index_functions: HashMap::new(),
 			methods: MethodRegistry::default(),
 		}
 	}
@@ -166,6 +170,44 @@ impl FunctionRegistry {
 		&self,
 	) -> impl Iterator<Item = (&'static str, &Arc<dyn ProjectionFunction>)> {
 		self.projections.iter().map(|(k, v)| (*k, v))
+	}
+
+	// =========================================================================
+	// Index function methods
+	// =========================================================================
+
+	/// Register an index function in the registry.
+	pub fn register_index_function(&mut self, func: impl IndexFunction + 'static) {
+		let name = func.name();
+		self.index_functions.insert(name, Arc::new(func));
+	}
+
+	/// Register an index function wrapped in an Arc.
+	pub fn register_index_function_arc(&mut self, func: Arc<dyn IndexFunction>) {
+		let name = func.name();
+		self.index_functions.insert(name, func);
+	}
+
+	/// Look up an index function by name.
+	pub fn get_index_function(&self, name: &str) -> Option<&Arc<dyn IndexFunction>> {
+		self.index_functions.get(name)
+	}
+
+	/// Check if a function is registered as an index function.
+	pub fn is_index_function(&self, name: &str) -> bool {
+		self.index_functions.contains_key(name)
+	}
+
+	/// Get the number of registered index functions.
+	pub fn index_function_len(&self) -> usize {
+		self.index_functions.len()
+	}
+
+	/// Iterate over all registered index functions.
+	pub fn iter_index_functions(
+		&self,
+	) -> impl Iterator<Item = (&'static str, &Arc<dyn IndexFunction>)> {
+		self.index_functions.iter().map(|(k, v)| (*k, v))
 	}
 
 	// =========================================================================

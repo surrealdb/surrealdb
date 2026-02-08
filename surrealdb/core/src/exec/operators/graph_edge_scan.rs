@@ -4,6 +4,7 @@
 //! target edge tables. It is used to implement graph traversal idioms like
 //! `person:alice->knows->person`.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,7 +18,8 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, TableName, Value};
+use crate::kvs::KVKey;
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Batch size for collecting graph edges before yielding.
 const BATCH_SIZE: usize = 1000;
@@ -34,6 +36,20 @@ pub enum GraphScanOutput {
 	FullEdge,
 }
 
+/// Specification for an edge table to scan, optionally with ID range bounds.
+///
+/// When range bounds are present, the scan is restricted to edges whose IDs fall
+/// within the specified range instead of scanning the entire table.
+#[derive(Debug, Clone)]
+pub struct EdgeTableSpec {
+	/// The edge table name (e.g., `edge`, `knows`)
+	pub table: TableName,
+	/// Range start bound. When `Unbounded`, starts from the table prefix.
+	pub range_start: Bound<Arc<dyn PhysicalExpr>>,
+	/// Range end bound. When `Unbounded`, ends at the table suffix.
+	pub range_end: Bound<Arc<dyn PhysicalExpr>>,
+}
+
 /// Scans graph edges for a given source record.
 ///
 /// This operator takes a source expression (which should evaluate to one or more RecordIds),
@@ -47,9 +63,9 @@ pub struct GraphEdgeScan {
 	/// Direction of the edge traversal (In = `<-`, Out = `->`, Both = `<->`)
 	pub(crate) direction: LookupDirection,
 
-	/// Target edge table(s) to scan (e.g., `knows`, `follows`)
+	/// Target edge table(s) to scan, optionally with range bounds.
 	/// If empty, scans all edge tables in that direction.
-	pub(crate) edge_tables: Vec<TableName>,
+	pub(crate) edge_tables: Vec<EdgeTableSpec>,
 
 	/// What to output: EdgeId, TargetId, or FullEdge
 	pub(crate) output_mode: GraphScanOutput,
@@ -71,7 +87,7 @@ impl ExecOperator for GraphEdgeScan {
 		let tables = if self.edge_tables.is_empty() {
 			"*".to_string()
 		} else {
-			self.edge_tables.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
+			self.edge_tables.iter().map(|t| t.table.as_str()).collect::<Vec<_>>().join(", ")
 		};
 		vec![
 			("source".to_string(), self.source.to_sql()),
@@ -182,25 +198,109 @@ impl ExecOperator for GraphEdgeScan {
 							}
 						}
 					} else {
-						// Scan specific edge tables
-						for edge_table in &edge_tables {
-							let beg = crate::key::graph::ftprefix(
-								ns.namespace_id,
-								db.database_id,
-								&rid.table,
-								&rid.key,
-								dir,
-								edge_table,
-							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?;
+						// Scan specific edge tables, applying range bounds when present
+						for spec in &edge_tables {
+							let edge_table = &spec.table;
 
-							let end = crate::key::graph::ftsuffix(
-								ns.namespace_id,
-								db.database_id,
-								&rid.table,
-								&rid.key,
-								dir,
-								edge_table,
-							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?;
+							// Compute scan start key based on range start bound
+							let beg = match &spec.range_start {
+								Bound::Unbounded => {
+									crate::key::graph::ftprefix(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										edge_table,
+									).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?
+								}
+								Bound::Included(expr) => {
+									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+									let val = expr.evaluate(bound_ctx).await?;
+									let key = value_to_record_id_key(val);
+									crate::key::graph::new(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										&RecordId {
+											table: edge_table.clone(),
+											key,
+										},
+									).encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range start key: {}", e)))?
+								}
+								Bound::Excluded(expr) => {
+									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+									let val = expr.evaluate(bound_ctx).await?;
+									let key = value_to_record_id_key(val);
+									let mut k = crate::key::graph::new(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										&RecordId {
+											table: edge_table.clone(),
+											key,
+										},
+									).encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range start key: {}", e)))?;
+									k.push(0x00);
+									k
+								}
+							};
+
+							// Compute scan end key based on range end bound
+							let end = match &spec.range_end {
+								Bound::Unbounded => {
+									crate::key::graph::ftsuffix(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										edge_table,
+									).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?
+								}
+								Bound::Excluded(expr) => {
+									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+									let val = expr.evaluate(bound_ctx).await?;
+									let key = value_to_record_id_key(val);
+									crate::key::graph::new(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										&RecordId {
+											table: edge_table.clone(),
+											key,
+										},
+									).encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range end key: {}", e)))?
+								}
+								Bound::Included(expr) => {
+									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+									let val = expr.evaluate(bound_ctx).await?;
+									let key = value_to_record_id_key(val);
+									let mut k = crate::key::graph::new(
+										ns.namespace_id,
+										db.database_id,
+										&rid.table,
+										&rid.key,
+										dir,
+										&RecordId {
+											table: edge_table.clone(),
+											key,
+										},
+									).encode_key()
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range end key: {}", e)))?;
+									k.push(0x00);
+									k
+								}
+							};
 
 							let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
 							futures::pin_mut!(kv_stream);
@@ -289,6 +389,19 @@ async fn decode_graph_key(
 	}
 }
 
+/// Convert a `Value` to a `RecordIdKey` for use in graph key range construction.
+fn value_to_record_id_key(val: Value) -> RecordIdKey {
+	match val {
+		Value::Number(n) => RecordIdKey::Number(n.as_int()),
+		Value::String(s) => RecordIdKey::String(s),
+		Value::Uuid(u) => RecordIdKey::Uuid(u),
+		Value::Array(a) => RecordIdKey::Array(a),
+		Value::Object(o) => RecordIdKey::Object(o),
+		// For other types, convert to string representation
+		other => RecordIdKey::String(other.to_raw_string()),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -304,7 +417,18 @@ mod tests {
 				key: RecordIdKey::String("alice".to_string()),
 			}))),
 			direction: LookupDirection::Out,
-			edge_tables: vec!["knows".into(), "follows".into()],
+			edge_tables: vec![
+				EdgeTableSpec {
+					table: "knows".into(),
+					range_start: Bound::Unbounded,
+					range_end: Bound::Unbounded,
+				},
+				EdgeTableSpec {
+					table: "follows".into(),
+					range_start: Bound::Unbounded,
+					range_end: Bound::Unbounded,
+				},
+			],
 			output_mode: GraphScanOutput::TargetId,
 		};
 

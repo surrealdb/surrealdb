@@ -4,13 +4,14 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
-use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::cnf::{GENERATION_ALLOCATION_LIMIT, PROTECTED_PARAM_NAMES};
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
+use crate::expr::mock::Mock;
 use crate::iam::Action;
-use crate::val::Value;
+use crate::val::{Array, Value};
 
 /// Literal value - "foo", 42, true
 #[derive(Debug, Clone)]
@@ -190,5 +191,53 @@ impl PhysicalExpr for Param {
 impl ToSql for Param {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "${}", self.0)
+	}
+}
+
+/// Mock expression - |table:count| or |table:range|
+///
+/// Generates an array of RecordIds for testing purposes. Equivalent to
+/// the old executor's `Expr::Mock` compute path.
+#[derive(Debug, Clone)]
+pub struct MockExpr(pub(crate) Mock);
+
+#[async_trait]
+impl PhysicalExpr for MockExpr {
+	fn name(&self) -> &'static str {
+		"Mock"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Mock expressions produce constant test data, no context needed
+		crate::exec::ContextLevel::Root
+	}
+
+	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
+		let iter = self.0.clone().into_iter();
+		if iter
+			.size_hint()
+			.1
+			.map(|x| x.saturating_mul(std::mem::size_of::<Value>()) > *GENERATION_ALLOCATION_LIMIT)
+			.unwrap_or(true)
+		{
+			return Err(anyhow::Error::msg("Mock range exceeds allocation limit").into());
+		}
+		let record_ids = iter.map(Value::RecordId).collect();
+		Ok(Value::Array(Array(record_ids)))
+	}
+
+	fn references_current_value(&self) -> bool {
+		false
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Mock expressions are read-only constant generators
+		AccessMode::ReadOnly
+	}
+}
+
+impl ToSql for MockExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
 	}
 }

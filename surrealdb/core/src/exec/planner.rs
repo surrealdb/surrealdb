@@ -290,58 +290,9 @@ impl<'ctx> Planner<'ctx> {
 	/// when `AllReadOnlyStatements` strategy is active.
 	fn plan_non_ddl_dml_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			// Supported statements
 			Expr::Select(select) => self.plan_select(*select),
 			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
-
-			// INFO statements
-			Expr::Info(info) => {
-				use crate::expr::statements::info::InfoStatement;
-				match *info {
-					InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
-						structured,
-					}) as Arc<dyn ExecOperator>),
-					InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
-						structured,
-					}) as Arc<dyn ExecOperator>),
-					InfoStatement::Db(structured, version) => {
-						let version = version.map(|v| self.physical_expr(v)).transpose()?;
-						Ok(Arc::new(DatabaseInfoPlan {
-							structured,
-							version,
-						}) as Arc<dyn ExecOperator>)
-					}
-					InfoStatement::Tb(table, structured, version) => {
-						// Table names are identifiers that should be treated as strings
-						let table = self.physical_expr_as_name(table)?;
-						let version = version.map(|v| self.physical_expr(v)).transpose()?;
-						Ok(Arc::new(TableInfoPlan {
-							table,
-							structured,
-							version,
-						}) as Arc<dyn ExecOperator>)
-					}
-					InfoStatement::User(user, base, structured) => {
-						// User names are identifiers that should be treated as strings
-						let user = self.physical_expr_as_name(user)?;
-						Ok(Arc::new(UserInfoPlan {
-							user,
-							base,
-							structured,
-						}) as Arc<dyn ExecOperator>)
-					}
-					InfoStatement::Index(index, table, structured) => {
-						// Index and table names are identifiers that should be treated as strings
-						let index = self.physical_expr_as_name(index)?;
-						let table = self.physical_expr_as_name(table)?;
-						Ok(Arc::new(IndexInfoPlan {
-							index,
-							table,
-							structured,
-						}) as Arc<dyn ExecOperator>)
-					}
-				}
-			}
+			Expr::Info(info) => self.plan_info(*info),
 			Expr::Foreach(stmt) => Ok(Arc::new(ForeachPlan {
 				param: stmt.param.clone(),
 				range: stmt.range.clone(),
@@ -417,21 +368,12 @@ impl<'ctx> Planner<'ctx> {
 					inner: Some(inner),
 				}))
 			}
-			Expr::Throw(expr) => {
-				let inner = self.plan_expr(*expr)?;
-				Ok(Arc::new(ControlFlowPlan {
-					kind: ControlFlowKind::Throw,
-					inner: Some(inner),
-				}))
+			Expr::Throw(_) | Expr::Break | Expr::Continue => {
+				let phys_expr = self.physical_expr(expr)?;
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
 			}
-			Expr::Break => Ok(Arc::new(ControlFlowPlan {
-				kind: ControlFlowKind::Break,
-				inner: None,
-			})),
-			Expr::Continue => Ok(Arc::new(ControlFlowPlan {
-				kind: ControlFlowKind::Continue,
-				inner: None,
-			})),
 			Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
 				duration: sleep_stmt.duration,
 			})),
@@ -480,18 +422,25 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 
-			// Mock expressions generate test data - defer for now
-			Expr::Mock(_) => Err(Error::Unimplemented(
-				"Mock expressions not yet supported in execution plans".to_string(),
-			)),
+			// Mock expressions generate test data (arrays of RecordIds)
+			Expr::Mock(_) => {
+				let phys_expr = self.physical_expr(expr)?;
+				Ok(Arc::new(ExprPlan {
+					expr: phys_expr,
+				}) as Arc<dyn ExecOperator>)
+			}
 
-			// Postfix expressions (ranges, method calls)
+			// Postfix expressions (ranges, method calls, closure invocations)
 			Expr::Postfix {
+				ref op,
 				..
 			} => {
+				let is_call = matches!(op, crate::expr::operator::PostfixOperator::Call(_));
 				let phys_expr = self.physical_expr(expr)?;
-				// Validate that the expression doesn't require row context
-				if phys_expr.references_current_value() {
+				// Validate that the expression doesn't require row context.
+				// Skip this check for Call expressions: closures are values that
+				// don't need row context to be invoked (e.g. {||2}()).
+				if !is_call && phys_expr.references_current_value() {
 					return Err(Error::Unimplemented(
 						"Postfix expression references row context but no table specified"
 							.to_string(),
@@ -514,6 +463,62 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Rebuild(_)
 			| Expr::Alter(_) => {
 				unreachable!("DDL/DML statements should be handled in plan_expr")
+			}
+		}
+	}
+
+	// ========================================================================
+	// INFO Statement Planning
+	// ========================================================================
+
+	/// Plan an INFO statement into an operator tree.
+	fn plan_info(
+		&self,
+		info: crate::expr::statements::info::InfoStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		use crate::expr::statements::info::InfoStatement;
+		match info {
+			InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
+				structured,
+			}) as Arc<dyn ExecOperator>),
+			InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
+				structured,
+			}) as Arc<dyn ExecOperator>),
+			InfoStatement::Db(structured, version) => {
+				let version = version.map(|v| self.physical_expr(v)).transpose()?;
+				Ok(Arc::new(DatabaseInfoPlan {
+					structured,
+					version,
+				}) as Arc<dyn ExecOperator>)
+			}
+			InfoStatement::Tb(table, structured, version) => {
+				// Table names are identifiers that should be treated as strings
+				let table = self.physical_expr_as_name(table)?;
+				let version = version.map(|v| self.physical_expr(v)).transpose()?;
+				Ok(Arc::new(TableInfoPlan {
+					table,
+					structured,
+					version,
+				}) as Arc<dyn ExecOperator>)
+			}
+			InfoStatement::User(user, base, structured) => {
+				// User names are identifiers that should be treated as strings
+				let user = self.physical_expr_as_name(user)?;
+				Ok(Arc::new(UserInfoPlan {
+					user,
+					base,
+					structured,
+				}) as Arc<dyn ExecOperator>)
+			}
+			InfoStatement::Index(index, table, structured) => {
+				// Index and table names are identifiers that should be treated as strings
+				let index = self.physical_expr_as_name(index)?;
+				let table = self.physical_expr_as_name(table)?;
+				Ok(Arc::new(IndexInfoPlan {
+					index,
+					table,
+					structured,
+				}) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -653,6 +658,11 @@ fn expr_to_physical_expr_as_name(
 		return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
 	}
 
+	// Handle table name expressions (when parsed with table_as_field = false)
+	if let Expr::Table(name) = expr {
+		return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.to_string()))));
+	}
+
 	// Otherwise use normal conversion
 	expr_to_physical_expr(expr, ctx)
 }
@@ -663,9 +673,10 @@ pub(crate) fn expr_to_physical_expr(
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 	use crate::exec::physical_expr::{
 		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
-		ClosureExec, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral, ModelFunctionExec,
-		ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec, ScalarSubquery, SetLiteral,
-		SiloModuleExec, SurrealismModuleExec, UnaryOp, UserDefinedFunctionExec,
+		ClosureExec, ControlFlowExpr, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
+		MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
+		ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
+		UserDefinedFunctionExec,
 	};
 
 	match expr {
@@ -766,9 +777,7 @@ pub(crate) fn expr_to_physical_expr(
 		}
 		Expr::Table(table_name) => {
 			// Table name as a string value
-			Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(
-				table_name.as_str().to_string(),
-			))))
+			Ok(Arc::new(PhysicalLiteral(crate::val::Value::Table(table_name))))
 		}
 		Expr::FunctionCall(func_call) => {
 			let FunctionCall {
@@ -776,7 +785,15 @@ pub(crate) fn expr_to_physical_expr(
 				arguments,
 			} = *func_call;
 
-			// Function call - convert arguments to physical expressions
+			// Check for index functions first (they need raw AST args for match_ref extraction)
+			if let Function::Normal(ref name) = receiver {
+				let registry = ctx.function_registry();
+				if registry.is_index_function(name) {
+					return plan_index_function(name, arguments, registry, ctx);
+				}
+			}
+
+			// Convert all arguments to physical expressions
 			let mut phys_args = Vec::with_capacity(arguments.len());
 			for arg in arguments {
 				phys_args.push(expr_to_physical_expr(arg, ctx)?);
@@ -785,19 +802,9 @@ pub(crate) fn expr_to_physical_expr(
 			// Dispatch to appropriate PhysicalExpr type based on function variant
 			match receiver {
 				Function::Normal(name) => {
-					// Some functions need database context that the streaming executor
-					// doesn't properly provide yet - fall back to legacy compute for these
-					if name.starts_with("search::") {
-						return Err(Error::Unimplemented(format!(
-							"Function '{}' not yet supported in streaming executor",
-							name
-						)));
-					}
-
-					// Check if this is a projection function (type::field, type::fields)
 					let registry = ctx.function_registry();
 					if registry.is_projection(&name) {
-						// Get the projection function's required context
+						// Projection function (type::field, type::fields)
 						let func_ctx = registry
 							.get_projection(&name)
 							.map(|f| f.required_context())
@@ -808,11 +815,16 @@ pub(crate) fn expr_to_physical_expr(
 							func_required_context: func_ctx,
 						}))
 					} else {
-						// Regular scalar function
+						// Regular scalar function - use the function's declared
+						// required context level (defaults to Root for most functions)
+						let func_ctx = registry
+							.get(&name)
+							.map(|f| f.required_context())
+							.unwrap_or(crate::exec::ContextLevel::Root);
 						Ok(Arc::new(BuiltinFunctionExec {
 							name,
 							arguments: phys_args,
-							func_required_context: crate::exec::ContextLevel::Root,
+							func_required_context: func_ctx,
 						}))
 					}
 				}
@@ -887,16 +899,22 @@ pub(crate) fn expr_to_physical_expr(
 			}))
 		}
 
-		// Control flow expressions - cannot be used in expression context
-		Expr::Break => Err(Error::Unimplemented(
-			"BREAK cannot be used in expression context - only valid in loops".to_string(),
-		)),
-		Expr::Continue => Err(Error::Unimplemented(
-			"CONTINUE cannot be used in expression context - only valid in loops".to_string(),
-		)),
-		Expr::Return(_) => Err(Error::Unimplemented(
-			"RETURN cannot be used in expression context - only valid in functions".to_string(),
-		)),
+		// Control flow expressions - propagate as ControlFlow signals
+		Expr::Break => Ok(Arc::new(ControlFlowExpr {
+			kind: ControlFlowKind::Break,
+			inner: None,
+		})),
+		Expr::Continue => Ok(Arc::new(ControlFlowExpr {
+			kind: ControlFlowKind::Continue,
+			inner: None,
+		})),
+		Expr::Return(output_stmt) => {
+			let inner = expr_to_physical_expr(output_stmt.what, ctx)?;
+			Ok(Arc::new(ControlFlowExpr {
+				kind: ControlFlowKind::Return,
+				inner: Some(inner),
+			}))
+		}
 
 		// DDL statements - cannot be used in expression context
 		Expr::Define(_) => Err(Error::Unimplemented(
@@ -975,10 +993,7 @@ pub(crate) fn expr_to_physical_expr(
 			"EXPLAIN statements cannot be used in expression context".to_string(),
 		)),
 
-		// Value expressions - not yet implemented
-		Expr::Mock(_) => Err(Error::Unimplemented(
-			"Mock expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::Mock(mock) => Ok(Arc::new(MockExpr(mock))),
 		Expr::Block(block) => {
 			// Deferred planning: wrap the block without converting inner expressions.
 			// The BlockPhysicalExpr will plan and execute each expression at evaluation
@@ -987,9 +1002,13 @@ pub(crate) fn expr_to_physical_expr(
 				block: *block,
 			}))
 		}
-		Expr::Throw(_) => Err(Error::Unimplemented(
-			"THROW expressions not yet supported in execution plans".to_string(),
-		)),
+		Expr::Throw(expr) => {
+			let inner = expr_to_physical_expr(*expr, ctx)?;
+			Ok(Arc::new(ControlFlowExpr {
+				kind: ControlFlowKind::Throw,
+				inner: Some(inner),
+			}))
+		}
 
 		// DML subqueries - not yet implemented
 		Expr::Create(_) => Err(Error::Unimplemented(
@@ -1013,7 +1032,7 @@ pub(crate) fn expr_to_physical_expr(
 	}
 }
 
-/// Convert a RecordIdKeyLit to a RecordIdKey for range bounds
+/// Convert a RecordIdKeyLit to a RecordIdKey for record ID construction in execution plans.
 fn convert_record_key_lit(
 	key_lit: &crate::expr::record_id::RecordIdKeyLit,
 ) -> Result<crate::val::RecordIdKey, Error> {
@@ -1025,14 +1044,38 @@ fn convert_record_key_lit(
 		RecordIdKeyLit::String(s) => Ok(RecordIdKey::String(s.clone())),
 		RecordIdKeyLit::Uuid(u) => Ok(RecordIdKey::Uuid(*u)),
 		RecordIdKeyLit::Generate(generator) => Ok(generator.compute()),
-		RecordIdKeyLit::Array(_) => Err(Error::Unimplemented(
-			"Array record keys not yet supported in execution plans".to_string(),
-		)),
-		RecordIdKeyLit::Object(_) => Err(Error::Unimplemented(
-			"Object record keys not yet supported in execution plans".to_string(),
-		)),
+		RecordIdKeyLit::Array(exprs) => {
+			let mut values = Vec::with_capacity(exprs.len());
+			for expr in exprs {
+				let value = static_expr_to_value(expr)?;
+				values.push(value);
+			}
+			Ok(RecordIdKey::Array(crate::val::Array(values)))
+		}
+		RecordIdKeyLit::Object(entries) => {
+			let mut obj = crate::val::Object::default();
+			for entry in entries {
+				let value = static_expr_to_value(&entry.value)?;
+				obj.insert(entry.key.clone(), value);
+			}
+			Ok(RecordIdKey::Object(obj))
+		}
 		RecordIdKeyLit::Range(_) => Err(Error::Unimplemented(
 			"Nested range record keys not supported in execution plans".to_string(),
+		)),
+	}
+}
+
+/// Convert a static `Expr` to a `Value` at plan time.
+///
+/// This handles expressions that can be resolved without runtime context:
+/// literals, record IDs with literal keys, and `NONE`/`NULL`.
+fn static_expr_to_value(expr: &Expr) -> Result<crate::val::Value, Error> {
+	match expr {
+		Expr::Literal(lit) => literal_to_value(lit.clone()),
+		_ => Err(Error::Unimplemented(
+			"Dynamic expressions in record ID keys not yet supported in execution plans"
+				.to_string(),
 		)),
 	}
 }
@@ -1096,15 +1139,8 @@ fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Va
 						end,
 					}))
 				}
-				RecordIdKeyLit::Array(_) => {
-					return Err(Error::Unimplemented(
-						"Array record keys not yet supported in execution plans".to_string(),
-					));
-				}
-				RecordIdKeyLit::Object(_) => {
-					return Err(Error::Unimplemented(
-						"Object record keys not yet supported in execution plans".to_string(),
-					));
+				RecordIdKeyLit::Array(_) | RecordIdKeyLit::Object(_) => {
+					convert_record_key_lit(&rid_lit.key)?
 				}
 			};
 
@@ -1217,6 +1253,152 @@ fn contains_matches_in_or(expr: &Expr, inside_or: bool) -> bool {
 	}
 }
 
+// ============================================================================
+// Index Function Planning Helpers
+// ============================================================================
+
+/// Extract MATCHES clause information from a WHERE condition for index functions.
+///
+/// Walks the WHERE clause AST to find `BinaryOperator::Matches` expressions and
+/// builds a `MatchesContext` mapping match_ref numbers to their idiom/query pairs.
+fn extract_matches_context(cond: &Cond) -> crate::exec::function::MatchesContext {
+	let mut ctx = crate::exec::function::MatchesContext::new();
+	collect_matches(&cond.0, &mut ctx);
+	ctx
+}
+
+/// Recursively collect MATCHES operators from an expression tree.
+fn collect_matches(expr: &Expr, ctx: &mut crate::exec::function::MatchesContext) {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::Matches(matches_op),
+			right,
+		} => {
+			// Extract the idiom from the left side
+			if let Expr::Idiom(idiom) = left.as_ref() {
+				// Extract the query string from the right side
+				let query = match right.as_ref() {
+					Expr::Literal(Literal::String(s)) => s.clone(),
+					_ => return,
+				};
+
+				// Use the match_ref from the operator, defaulting to 0
+				let match_ref = matches_op.rf.unwrap_or(0);
+
+				ctx.insert(
+					match_ref,
+					crate::exec::function::MatchInfo {
+						idiom: idiom.clone(),
+						query,
+					},
+				);
+			}
+		}
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => {
+			// Recurse into AND/OR branches
+			collect_matches(left, ctx);
+			collect_matches(right, ctx);
+		}
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => collect_matches(inner, ctx),
+		_ => {}
+	}
+}
+
+/// Plan an index function call (search::highlight, search::score, search::offsets).
+///
+/// Extracts the match_ref argument from the raw AST args, resolves it against the
+/// MatchesContext from the WHERE clause, converts the remaining args to physical
+/// expressions, and creates an `IndexFunctionExec`.
+fn plan_index_function(
+	name: &str,
+	mut ast_args: Vec<Expr>,
+	registry: &std::sync::Arc<FunctionRegistry>,
+	ctx: &FrozenContext,
+) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+	use crate::exec::physical_expr::function::IndexFunctionExec;
+
+	let func = registry.get_index_function(name).ok_or_else(|| {
+		Error::Unimplemented(format!("Index function '{}' not found in registry", name))
+	})?;
+
+	let match_ref_idx = func.match_ref_arg_index();
+
+	// Extract the match_ref argument from AST (must be a literal integer)
+	if match_ref_idx >= ast_args.len() {
+		return Err(Error::Unimplemented(format!(
+			"Index function '{}' requires at least {} arguments",
+			name,
+			match_ref_idx + 1
+		)));
+	}
+
+	// Remove the match_ref arg from the AST args
+	let match_ref_ast = ast_args.remove(match_ref_idx);
+
+	// Extract the match_ref value from the AST literal
+	let match_ref = match match_ref_ast {
+		Expr::Literal(Literal::Integer(n)) => n as u8,
+		Expr::Literal(Literal::Float(n)) => n as u8,
+		_ => {
+			return Err(Error::Unimplemented(format!(
+				"Index function '{}': match_ref argument must be a literal integer",
+				name
+			)));
+		}
+	};
+
+	// Convert remaining AST args to physical expressions
+	let mut phys_args = Vec::with_capacity(ast_args.len());
+	for arg in ast_args {
+		phys_args.push(expr_to_physical_expr(arg, ctx)?);
+	}
+
+	// Look up the MatchesContext from the planning context
+	let matches_ctx = ctx.get_matches_context().ok_or_else(|| {
+		Error::Unimplemented(format!(
+			"Index function '{}': no MATCHES clause found in WHERE condition",
+			name
+		))
+	})?;
+
+	// Resolve the match_ref to a MatchContext
+	let match_ctx = matches_ctx
+		.resolve(match_ref, extract_table_from_context(ctx))
+		.map_err(|e| Error::Unimplemented(format!("Index function '{}': {}", name, e)))?;
+
+	let func_ctx = func.required_context();
+
+	Ok(Arc::new(IndexFunctionExec {
+		name: name.to_string(),
+		arguments: phys_args,
+		match_ctx,
+		func_required_context: func_ctx,
+	}))
+}
+
+/// Try to extract the primary table name from the frozen context.
+///
+/// Looks at the matches context for table info, falling back to a default.
+/// The table name is set in plan_select where the FROM clause is analyzed.
+fn extract_table_from_context(ctx: &FrozenContext) -> crate::val::TableName {
+	// This is populated by plan_select via set_matches_table
+	// Check if there's a table name stored in the matches context
+	if let Some(mc) = ctx.get_matches_context() {
+		if let Some(table) = mc.table() {
+			return table.clone();
+		}
+	}
+	crate::val::TableName::from("unknown".to_string())
+}
+
 /// Plan a SELECT statement
 ///
 /// The operator pipeline is built in this order:
@@ -1288,6 +1470,34 @@ fn plan_select(
 	// while `SELECT $this FROM table` should wrap in `{ this: ... }`.
 	let is_value_source = all_value_sources(&what);
 
+	// Extract the primary table name from FROM clause (needed for index function planning)
+	let primary_table = what.iter().find_map(|expr| {
+		if let Expr::Table(table_name) = expr {
+			Some(table_name.clone())
+		} else {
+			None
+		}
+	});
+
+	// Analyze WHERE clause for MATCHES operators used by index functions.
+	// If MATCHES clauses exist, create a child context with the MatchesContext
+	// so that index functions (search::highlight, etc.) can resolve their match_ref.
+	let planning_ctx: std::borrow::Cow<'_, FrozenContext> = if let Some(ref c) = cond {
+		let mut matches_ctx = extract_matches_context(c);
+		if !matches_ctx.is_empty() {
+			if let Some(ref table) = primary_table {
+				matches_ctx.set_table(table.clone());
+			}
+			let mut child = crate::ctx::Context::new(ctx);
+			child.set_matches_context(matches_ctx);
+			std::borrow::Cow::Owned(child.freeze())
+		} else {
+			std::borrow::Cow::Borrowed(ctx)
+		}
+	} else {
+		std::borrow::Cow::Borrowed(ctx)
+	};
+
 	// Build the source plan from `what` (FROM clause)
 	// Pass cond, order, and with for index selection in Scan operator
 	let source =
@@ -1307,7 +1517,8 @@ fn plan_select(
 	};
 
 	// Apply the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
-	let projected = plan_select_pipeline(source, Some(fields.clone()), config, ctx)?;
+	// Use the planning context (with MatchesContext) for expression planning
+	let projected = plan_select_pipeline(source, Some(fields.clone()), config, &planning_ctx)?;
 
 	// Apply FETCH if present - after projections so it can expand record IDs
 	// in computed fields like graph traversals
@@ -2481,13 +2692,29 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 			Ok(())
 		}
 		Expr::Closure(closure) => check_expr_for_forbidden_params(&closure.body),
+		Expr::Idiom(idiom) => {
+			// Idiom parts can contain expressions with parameters (e.g. $this.v)
+			for part in &idiom.0 {
+				match part {
+					crate::expr::Part::Start(expr)
+					| crate::expr::Part::Where(expr)
+					| crate::expr::Part::Value(expr) => {
+						check_expr_for_forbidden_params(expr)?;
+					}
+					crate::expr::Part::Method(_, args) => {
+						for arg in args {
+							check_expr_for_forbidden_params(arg)?;
+						}
+					}
+					_ => {}
+				}
+			}
+			Ok(())
+		}
 		// These don't contain nested expressions with params
-		Expr::Literal(_)
-		| Expr::Constant(_)
-		| Expr::Table(_)
-		| Expr::Idiom(_)
-		| Expr::Break
-		| Expr::Continue => Ok(()),
+		Expr::Literal(_) | Expr::Constant(_) | Expr::Table(_) | Expr::Break | Expr::Continue => {
+			Ok(())
+		}
 		// Other expressions that might contain nested params
 		_ => Ok(()),
 	}
@@ -2546,14 +2773,9 @@ fn plan_single_source(
 
 	match expr {
 		// Table name: SELECT * FROM users
-		Expr::Table(table_name) => {
+		Expr::Table(_) => {
 			// Convert table name to a literal string for the physical expression
-			let table_expr = expr_to_physical_expr(
-				Expr::Literal(crate::expr::literal::Literal::String(
-					table_name.as_str().to_string(),
-				)),
-				ctx,
-			)?;
+			let table_expr = expr_to_physical_expr(expr, ctx)?;
 			Ok(Arc::new(Scan {
 				source: table_expr,
 				version,
@@ -3159,18 +3381,117 @@ fn convert_idiom_to_physical_expr(
 }
 
 /// Convert idiom parts to physical parts.
+///
+/// When a `Part::Recurse` has no explicit inner path (no parentheses), all remaining
+/// parts after the recurse are absorbed as the recursion's inner path. This matches
+/// the legacy execution behavior in `Value::get()` where `path.next()` (all remaining
+/// parts) becomes the recursion path.
+///
+/// For example:
+/// - `person:alice.{..}->reports_to->person` produces `[Recurse(path=[Lookup])]`
+/// - `org:infrastructure.{..}.parent` produces `[Recurse(path=[Field("parent")])]`
+/// - `person:alice.{..}(->reports_to->person).name` produces `[Recurse(path=[Lookup]),
+///   Field("name")]`
 fn convert_parts_to_physical(
 	parts: &[Part],
 	ctx: &FrozenContext,
 ) -> Result<Vec<PhysicalPart>, Error> {
 	let mut physical_parts = Vec::with_capacity(parts.len());
 
-	for part in parts {
+	for (i, part) in parts.iter().enumerate() {
+		// When a Recurse has no explicit inner path, absorb all remaining parts
+		// as the recursion's inner path and make the Recurse the final physical part.
+		if let Part::Recurse(recurse, None, instruction) = part {
+			let (min_depth, max_depth) = match recurse {
+				crate::expr::part::Recurse::Fixed(n) => (*n, Some(*n)),
+				crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), *max),
+			};
+
+			// Absorb all remaining parts as the recursion's inner path
+			let remaining = &parts[i + 1..];
+			let path = convert_parts_to_physical(remaining, ctx)?;
+
+			let instr = convert_recurse_instruction(instruction, ctx)?;
+
+			let has_repeat_recurse = contains_repeat_recurse(&path);
+
+			physical_parts.push(PhysicalPart::Recurse(PhysicalRecurse {
+				min_depth,
+				max_depth,
+				path,
+				instruction: instr,
+				inclusive: matches!(
+					instruction,
+					Some(RecurseInstruction::Path {
+						inclusive: true,
+						..
+					}) | Some(RecurseInstruction::Collect {
+						inclusive: true,
+						..
+					}) | Some(RecurseInstruction::Shortest {
+						inclusive: true,
+						..
+					})
+				),
+				has_repeat_recurse,
+			}));
+
+			// All remaining parts have been absorbed; stop processing
+			break;
+		}
+
 		let physical_part = convert_single_part(part, ctx)?;
 		physical_parts.push(physical_part);
 	}
 
 	Ok(physical_parts)
+}
+
+/// Check if a slice of physical parts contains a RepeatRecurse marker at any nesting level.
+fn contains_repeat_recurse(parts: &[PhysicalPart]) -> bool {
+	for part in parts {
+		match part {
+			PhysicalPart::RepeatRecurse => return true,
+			PhysicalPart::Destructure(dest_parts) => {
+				for dp in dest_parts {
+					if let PhysicalDestructurePart::Aliased {
+						path,
+						..
+					} = dp
+					{
+						if contains_repeat_recurse(path) {
+							return true;
+						}
+					}
+					if let PhysicalDestructurePart::Nested {
+						parts: nested,
+						..
+					} = dp
+					{
+						// Check nested destructure fields for aliased paths with RepeatRecurse
+						for np in nested {
+							if let PhysicalDestructurePart::Aliased {
+								path,
+								..
+							} = np
+							{
+								if contains_repeat_recurse(path) {
+									return true;
+								}
+							}
+						}
+					}
+				}
+			}
+			PhysicalPart::Recurse(recurse) => {
+				if contains_repeat_recurse(&recurse.path) {
+					return true;
+				}
+			}
+			_ => {}
+		}
+	}
+	false
 }
 
 /// Convert a single Part to a PhysicalPart.
@@ -3200,14 +3521,23 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
 			}
 			let registry = ctx.function_registry();
-			let descriptor = registry
-				.get_method(name)
-				.ok_or_else(|| Error::Thrown(format!("Unknown method '{name}'")))?
-				.clone();
-			Ok(PhysicalPart::Method {
-				descriptor,
-				args: phys_args,
-			})
+			match registry.get_method(name) {
+				Some(descriptor) => Ok(PhysicalPart::Method {
+					descriptor: descriptor.clone(),
+					args: phys_args,
+				}),
+				None => {
+					// Method not found in registry -- fall back to field access + closure call.
+					// At runtime, the value's field with this name is accessed and invoked as a
+					// closure. This implements the "fallback function" pattern where
+					// `$obj.fnc()` tries built-in methods first and falls back to calling a
+					// closure stored in the object's `fnc` field.
+					Ok(PhysicalPart::ClosureFieldCall {
+						field: name.to_string(),
+						args: phys_args,
+					})
+				}
+			}
 		}
 
 		Part::Destructure(parts) => {
@@ -3244,10 +3574,18 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 					} => table.clone(),
 				})
 				.collect();
+			// When the scan fetches full records for WHERE/SPLIT filtering but
+			// there's no explicit SELECT clause, the result should be projected
+			// back to RecordIds.
+			let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
+			let needs_full_records =
+				needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
+			let extract_id = needs_full_records && !needs_full_pipeline;
 			Ok(PhysicalPart::Lookup(PhysicalLookup {
 				direction,
 				edge_tables,
 				plan,
+				extract_id,
 			}))
 		}
 
@@ -3264,6 +3602,7 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 			};
 
 			let instr = convert_recurse_instruction(instruction, ctx)?;
+			let has_repeat_recurse = contains_repeat_recurse(&path);
 
 			Ok(PhysicalPart::Recurse(PhysicalRecurse {
 				min_depth,
@@ -3283,6 +3622,7 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 						..
 					})
 				),
+				has_repeat_recurse,
 			}))
 		}
 
@@ -3293,10 +3633,10 @@ fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart,
 		}
 
 		Part::RepeatRecurse => {
-			// RepeatRecurse (@) is handled within recursion context
-			Err(Error::Query {
-				message: "RepeatRecurse should be handled within recursion context".to_string(),
-			})
+			// RepeatRecurse (@) is a marker that says "repeat the current recursion
+			// from here". Convert it to a physical part; the recursion evaluator
+			// will set up the recursion context so it can be evaluated properly.
+			Ok(PhysicalPart::RepeatRecurse)
 		}
 	}
 }
@@ -3362,6 +3702,47 @@ fn convert_recurse_instruction(
 /// This parameter is bound by `evaluate_lookup_for_rid` before executing the plan.
 pub(crate) const LOOKUP_SOURCE_PARAM: &str = "__lookup_source__";
 
+/// Convert a `RecordIdKeyLit` to an `Expr` for use in physical expression conversion.
+fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr, Error> {
+	use crate::expr::RecordIdKeyLit;
+	match lit {
+		RecordIdKeyLit::Number(n) => Ok(Expr::Literal(crate::expr::literal::Literal::Integer(*n))),
+		RecordIdKeyLit::String(s) => {
+			Ok(Expr::Literal(crate::expr::literal::Literal::String(s.clone())))
+		}
+		RecordIdKeyLit::Uuid(u) => Ok(Expr::Literal(crate::expr::literal::Literal::Uuid(*u))),
+		RecordIdKeyLit::Array(exprs) => {
+			Ok(Expr::Literal(crate::expr::literal::Literal::Array(exprs.clone())))
+		}
+		RecordIdKeyLit::Object(entries) => {
+			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
+		}
+		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => {
+			Err(Error::Unimplemented("Generated/range keys in graph range bounds".to_string()))
+		}
+	}
+}
+
+/// Convert a `Bound<RecordIdKeyLit>` to a `Bound<Arc<dyn PhysicalExpr>>` for edge range filtering.
+fn convert_range_bound(
+	bound: &std::ops::Bound<crate::expr::RecordIdKeyLit>,
+	ctx: &FrozenContext,
+) -> Result<std::ops::Bound<Arc<dyn crate::exec::PhysicalExpr>>, Error> {
+	match bound {
+		std::ops::Bound::Unbounded => Ok(std::ops::Bound::Unbounded),
+		std::ops::Bound::Included(lit) => {
+			let expr = key_lit_to_expr(lit)?;
+			let phys = expr_to_physical_expr(expr, ctx)?;
+			Ok(std::ops::Bound::Included(phys))
+		}
+		std::ops::Bound::Excluded(lit) => {
+			let expr = key_lit_to_expr(lit)?;
+			let phys = expr_to_physical_expr(expr, ctx)?;
+			Ok(std::ops::Bound::Excluded(phys))
+		}
+	}
+}
+
 /// Plan a Lookup operation, creating the operator tree.
 ///
 /// This function creates a plan for graph edge or reference traversals.
@@ -3372,7 +3753,9 @@ fn plan_lookup(
 	lookup: &crate::expr::lookup::Lookup,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	use crate::exec::operators::{GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan};
+	use crate::exec::operators::{
+		EdgeTableSpec, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan, ReferenceScanOutput,
+	};
 
 	// The source expression reads from a special parameter that will be bound at execution time.
 	// When evaluate_lookup_for_rid executes this plan, it creates an ExecutionContext with
@@ -3398,21 +3781,34 @@ fn plan_lookup(
 	// Create the base scan operator
 	let base_scan: Arc<dyn ExecOperator> = match &lookup.kind {
 		crate::expr::lookup::LookupKind::Graph(dir) => {
-			// Convert lookup subjects to table names
-			let edge_tables: Vec<_> = lookup
+			// Convert lookup subjects to table specs with optional range bounds
+			let edge_tables: Vec<EdgeTableSpec> = lookup
 				.what
 				.iter()
 				.map(|s| match s {
 					crate::expr::lookup::LookupSubject::Table {
 						table,
 						..
-					} => table.clone(),
+					} => Ok(EdgeTableSpec {
+						table: table.clone(),
+						range_start: std::ops::Bound::Unbounded,
+						range_end: std::ops::Bound::Unbounded,
+					}),
 					crate::expr::lookup::LookupSubject::Range {
 						table,
+						range,
 						..
-					} => table.clone(),
+					} => {
+						let range_start = convert_range_bound(&range.start, ctx)?;
+						let range_end = convert_range_bound(&range.end, ctx)?;
+						Ok(EdgeTableSpec {
+							table: table.clone(),
+							range_start,
+							range_end,
+						})
+					}
 				})
-				.collect();
+				.collect::<Result<Vec<_>, Error>>()?;
 
 			Arc::new(GraphEdgeScan {
 				source: source_expr,
@@ -3422,27 +3818,51 @@ fn plan_lookup(
 			})
 		}
 		crate::expr::lookup::LookupKind::Reference => {
-			// For references, we need the referencing table
-			let (referencing_table, referencing_field) = lookup
-				.what
-				.first()
-				.map(|s| match s {
-					crate::expr::lookup::LookupSubject::Table {
-						table,
-						referencing_field,
-					} => (table.clone(), referencing_field.clone()),
-					crate::expr::lookup::LookupSubject::Range {
-						table,
-						referencing_field,
-						..
-					} => (table.clone(), referencing_field.clone()),
-				})
-				.unwrap_or_else(|| ("unknown".into(), None));
+			// For references, extract referencing table, field, and optional range bounds.
+			// When `what` is empty, this is the wildcard `<~?` case -- scan all tables.
+			let (referencing_table, referencing_field, range_start, range_end) =
+				if let Some(subject) = lookup.what.first() {
+					match subject {
+						crate::expr::lookup::LookupSubject::Table {
+							table,
+							referencing_field,
+						} => (
+							Some(table.clone()),
+							referencing_field.clone(),
+							std::ops::Bound::Unbounded,
+							std::ops::Bound::Unbounded,
+						),
+						crate::expr::lookup::LookupSubject::Range {
+							table,
+							referencing_field,
+							range,
+						} => {
+							// Range bounds are converted here; validation that a referencing
+							// field is present happens at execution time in ReferenceScan
+							// to match the error format of the old executor.
+							let rs = convert_range_bound(&range.start, ctx)?;
+							let re = convert_range_bound(&range.end, ctx)?;
+							(Some(table.clone()), referencing_field.clone(), rs, re)
+						}
+					}
+				} else {
+					// Wildcard: `<~?` -- no specific table, scan all references
+					(None, None, std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
+				};
+
+			let ref_output_mode = if needs_full_records {
+				ReferenceScanOutput::FullRecord
+			} else {
+				ReferenceScanOutput::RecordId
+			};
 
 			Arc::new(ReferenceScan {
 				source: source_expr,
 				referencing_table,
 				referencing_field,
+				output_mode: ref_output_mode,
+				range_start,
+				range_end,
 			})
 		}
 	};

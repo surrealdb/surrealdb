@@ -108,7 +108,7 @@ fn validate_arg_count(
 }
 
 /// Validate and coerce return value to declared type.
-fn validate_return(
+pub(crate) fn validate_return(
 	func_name: &str,
 	return_kind: Option<&Kind>,
 	result: Value,
@@ -294,6 +294,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			exec_ctx: &isolated_ctx,
 			current_value: ctx.current_value,
 			local_params: Some(&local_params),
+			recursion_ctx: None,
 		};
 		let result = match block_expr.evaluate(eval_ctx).await {
 			Ok(v) => v,
@@ -1018,6 +1019,7 @@ impl PhysicalExpr for ClosureCallExec {
 					exec_ctx: &isolated_ctx,
 					current_value: ctx.current_value,
 					local_params: Some(&local_params),
+					recursion_ctx: None,
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {
@@ -1147,5 +1149,83 @@ impl ToSql for ProjectionFunctionExec {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(&self.name);
 		f.push_str("(...)");
+	}
+}
+
+// =============================================================================
+// Index Function Expression (search::highlight, search::score, search::offsets)
+// =============================================================================
+
+/// Index function expression - functions bound to WHERE clause predicates.
+///
+/// These functions reference a MATCHES clause in the WHERE condition via a
+/// match_ref number. The match_ref is resolved at plan time into a `MatchContext`
+/// that provides lazy access to the associated full-text index infrastructure.
+///
+/// The arguments stored here do NOT include the match_ref argument, which was
+/// extracted by the planner.
+#[derive(Debug)]
+pub struct IndexFunctionExec {
+	pub(crate) name: String,
+	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// Resolved MATCHES clause context with lazy index access.
+	pub(crate) match_ctx: Arc<crate::exec::function::MatchContext>,
+	/// The required context level for this function.
+	pub(crate) func_required_context: crate::exec::ContextLevel,
+}
+
+#[async_trait]
+impl PhysicalExpr for IndexFunctionExec {
+	fn name(&self) -> &'static str {
+		"IndexFunction"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		let args_ctx = args_required_context(&self.arguments);
+		args_ctx.max(self.func_required_context)
+	}
+
+	fn references_current_value(&self) -> bool {
+		// Index functions always reference the current document (for RecordId, etc.)
+		true
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		args_access_mode(&self.arguments)
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
+		// Look up the index function in the registry
+		let registry = ctx.exec_ctx.function_registry();
+		let func = registry.get_index_function(&self.name).ok_or_else(|| {
+			anyhow::anyhow!(
+				"Unknown index function '{}' - not found in function registry",
+				self.name
+			)
+		})?;
+
+		// Evaluate all arguments (match_ref was already extracted at plan time)
+		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// Invoke the index function with the resolved match context
+		Ok(func.invoke_async(&ctx, &self.match_ctx, args).await?)
+	}
+}
+
+impl ToSql for IndexFunctionExec {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.name);
+		f.push_str("(...)");
+	}
+}
+
+impl Clone for IndexFunctionExec {
+	fn clone(&self) -> Self {
+		Self {
+			name: self.name.clone(),
+			arguments: self.arguments.clone(),
+			match_ctx: self.match_ctx.clone(),
+			func_required_context: self.func_required_context,
+		}
 	}
 }

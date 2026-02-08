@@ -106,7 +106,6 @@ impl ExecOperator for Scan {
 
 			// Determine scan target: either a table name or a record ID
 			let (table_name, rid) = match table_value {
-				Value::String(s) => (TableName::from(s), None),
 				Value::Table(t) => (t, None),
 				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
 				Value::Array(arr) => {

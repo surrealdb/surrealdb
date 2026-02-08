@@ -3,37 +3,19 @@
 reason = "Test EXPLAIN with control flow statements (RETURN, THROW, BREAK, CONTINUE)"
 
 [[test.results]]
-# EXPLAIN RETURN with simple expression
-value = """\
-"ControlFlow [ctx: Rt] [kind: RETURN]
-└────> Expr [ctx: Rt] [expr: 'OK']
-""""
+value = '''"ControlFlow [ctx: Rt] [kind: RETURN]\n└────> Expr [ctx: Rt] [expr: 'OK']\n"'''
 
 [[test.results]]
-# EXPLAIN RETURN with arithmetic expression
-value = """\
-"ControlFlow [ctx: Rt] [kind: RETURN]
-└────> Expr [ctx: Rt] [expr: 1 + 2]
-""""
+value = ''''ControlFlow [ctx: Rt] [kind: RETURN]\n└────> Expr [ctx: Rt] [expr: 1 + 2]\n''''
 
 [[test.results]]
-# EXPLAIN THROW
-value = """\
-"ControlFlow [ctx: Rt] [kind: THROW]
-└────> Expr [ctx: Rt] [expr: 'error message']
-""""
+value = '''"Expr [ctx: Rt] [expr: THROW 'error message']\n"'''
 
 [[test.results]]
-# EXPLAIN BREAK
-value = """\
-"ControlFlow [ctx: Rt] [kind: BREAK]
-""""
+value = ''''Expr [ctx: Rt] [expr: BREAK]\n''''
 
 [[test.results]]
-# EXPLAIN CONTINUE
-value = """\
-"ControlFlow [ctx: Rt] [kind: CONTINUE]
-""""
+value = ''''Expr [ctx: Rt] [expr: CONTINUE]\n''''
 
 */
 

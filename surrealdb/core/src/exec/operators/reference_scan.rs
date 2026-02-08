@@ -4,21 +4,34 @@
 //! that reference a given source record. Unlike graph edges which are explicit
 //! relationships, references are field-level links tracked by the database.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use crate::catalog::providers::TableProvider;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, TableName, Value};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Batch size for collecting references before yielding.
 const BATCH_SIZE: usize = 1000;
+
+/// What kind of output the ReferenceScan should produce.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReferenceScanOutput {
+	/// Return only the referencing record IDs
+	#[default]
+	RecordId,
+	/// Return full referencing records (fetched from the datastore).
+	/// Required when downstream operators need field access (e.g. Sort, Split).
+	FullRecord,
+}
 
 /// Scans record references for a given target record.
 ///
@@ -32,12 +45,24 @@ pub struct ReferenceScan {
 	/// Source expression that evaluates to the target RecordId(s) being referenced
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 
-	/// The table that contains the referencing records (e.g., `post`)
-	pub(crate) referencing_table: TableName,
+	/// The table that contains the referencing records (e.g., `post`).
+	/// If None, scans ALL tables that reference the target (wildcard `<~?`).
+	pub(crate) referencing_table: Option<TableName>,
 
 	/// Optional: The specific field in the referencing table that holds the reference
 	/// If None, scans all fields that reference the target
 	pub(crate) referencing_field: Option<String>,
+
+	/// What to output: RecordId or FullRecord
+	pub(crate) output_mode: ReferenceScanOutput,
+
+	/// Range start bound for the referencing record IDs.
+	/// When `Unbounded`, starts from the field/table prefix.
+	pub(crate) range_start: Bound<Arc<dyn PhysicalExpr>>,
+
+	/// Range end bound for the referencing record IDs.
+	/// When `Unbounded`, ends at the field/table suffix.
+	pub(crate) range_end: Bound<Arc<dyn PhysicalExpr>>,
 }
 
 #[async_trait]
@@ -49,10 +74,24 @@ impl ExecOperator for ReferenceScan {
 	fn attrs(&self) -> Vec<(String, String)> {
 		let mut attrs = vec![
 			("source".to_string(), self.source.to_sql()),
-			("table".to_string(), self.referencing_table.as_str().to_string()),
+			(
+				"table".to_string(),
+				self.referencing_table
+					.as_ref()
+					.map(|t| t.as_str().to_string())
+					.unwrap_or_else(|| "?".to_string()),
+			),
 		];
 		if let Some(field) = &self.referencing_field {
 			attrs.push(("field".to_string(), field.clone()));
+		}
+		if self.output_mode == ReferenceScanOutput::FullRecord {
+			attrs.push(("output".to_string(), "full_record".to_string()));
+		}
+		if !matches!(self.range_start, Bound::Unbounded)
+			|| !matches!(self.range_end, Bound::Unbounded)
+		{
+			attrs.push(("range".to_string(), "bounded".to_string()));
 		}
 		attrs
 	}
@@ -72,6 +111,9 @@ impl ExecOperator for ReferenceScan {
 		let source_expr = Arc::clone(&self.source);
 		let referencing_table = self.referencing_table.clone();
 		let referencing_field = self.referencing_field.clone();
+		let output_mode = self.output_mode;
+		let range_start = self.range_start.clone();
+		let range_end = self.range_end.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -102,19 +144,139 @@ impl ExecOperator for ReferenceScan {
 				return;
 			}
 
+			// Check if we have range bounds -- ranges require a referencing_field
+			let has_range = !matches!(range_start, Bound::Unbounded)
+				|| !matches!(range_end, Bound::Unbounded);
+
+			if has_range && referencing_field.is_none() {
+				Err(ControlFlow::Err(anyhow::anyhow!(
+					"Cannot scan a specific range of record references without a referencing field"
+				)))?;
+			}
+
 			let mut batch = Vec::with_capacity(BATCH_SIZE);
 
 			// Scan references for each target record
 			for rid in &target_rids {
-				// Create the key range based on whether a specific field is specified
-				let (beg, end) = if let Some(ref field) = referencing_field {
-					// Scan references from a specific field
+				let (beg, end) = if has_range {
+					// Range-bounded scan: requires referencing_field and referencing_table
+					let table = referencing_table.as_ref()
+						.expect("Range-bounded reference scans require a referencing table");
+					let field = referencing_field.as_deref()
+						.expect("Range-bounded reference scans require a referencing field (validated above)");
+
+					// Compute scan start key based on range start bound
+					let beg = match &range_start {
+						Bound::Unbounded => {
+							crate::key::r#ref::ffprefix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?
+						}
+						Bound::Included(expr) => {
+							let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+							let val = expr.evaluate(bound_ctx).await?;
+							let fk = value_to_record_id_key(val);
+							crate::key::r#ref::refprefix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+								&fk,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create range start key: {}", e)))?
+						}
+						Bound::Excluded(expr) => {
+							let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+							let val = expr.evaluate(bound_ctx).await?;
+							let fk = value_to_record_id_key(val);
+							crate::key::r#ref::refsuffix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+								&fk,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create range start key: {}", e)))?
+						}
+					};
+
+					// Compute scan end key based on range end bound
+					let end = match &range_end {
+						Bound::Unbounded => {
+							crate::key::r#ref::ffsuffix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?
+						}
+						Bound::Excluded(expr) => {
+							let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+							let val = expr.evaluate(bound_ctx).await?;
+							let fk = value_to_record_id_key(val);
+							crate::key::r#ref::refprefix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+								&fk,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create range end key: {}", e)))?
+						}
+						Bound::Included(expr) => {
+							let bound_ctx = EvalContext::from_exec_ctx(&ctx);
+							let val = expr.evaluate(bound_ctx).await?;
+							let fk = value_to_record_id_key(val);
+							crate::key::r#ref::refsuffix(
+								ns.namespace_id,
+								db.database_id,
+								&rid.table,
+								&rid.key,
+								table,
+								field,
+								&fk,
+							).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create range end key: {}", e)))?
+						}
+					};
+
+					(beg, end)
+				} else if referencing_table.is_none() {
+					// Wildcard scan: scan ALL references for this record (any table, any field)
+					// This implements the `<~?` syntax.
+					let beg = crate::key::r#ref::prefix(
+						ns.namespace_id,
+						db.database_id,
+						&rid.table,
+						&rid.key,
+					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?;
+
+					let end = crate::key::r#ref::suffix(
+						ns.namespace_id,
+						db.database_id,
+						&rid.table,
+						&rid.key,
+					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?;
+
+					(beg, end)
+				} else if let Some(ref field) = referencing_field {
+					// Field-specific scan (no range bounds)
+					let table = referencing_table.as_ref().unwrap();
 					let beg = crate::key::r#ref::ffprefix(
 						ns.namespace_id,
 						db.database_id,
 						&rid.table,
 						&rid.key,
-						&referencing_table,
+						table,
 						field,
 					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?;
 
@@ -123,19 +285,20 @@ impl ExecOperator for ReferenceScan {
 						db.database_id,
 						&rid.table,
 						&rid.key,
-						&referencing_table,
+						table,
 						field,
 					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?;
 
 					(beg, end)
 				} else {
-					// Scan all references from the referencing table
+					// Scan all references from a specific referencing table (all fields)
+					let table = referencing_table.as_ref().unwrap();
 					let beg = crate::key::r#ref::ftprefix(
 						ns.namespace_id,
 						db.database_id,
 						&rid.table,
 						&rid.key,
-						&referencing_table,
+						table,
 					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?;
 
 					let end = crate::key::r#ref::ftsuffix(
@@ -143,7 +306,7 @@ impl ExecOperator for ReferenceScan {
 						db.database_id,
 						&rid.table,
 						&rid.key,
-						&referencing_table,
+						table,
 					).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?;
 
 					(beg, end)
@@ -168,7 +331,33 @@ impl ExecOperator for ReferenceScan {
 						key: decoded.fk.into_owned(),
 					};
 
-					batch.push(Value::RecordId(referencing_rid));
+					let value = match output_mode {
+						ReferenceScanOutput::RecordId => Value::RecordId(referencing_rid),
+						ReferenceScanOutput::FullRecord => {
+							// Fetch the full record from the datastore
+							let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+							let record = txn
+								.get_record(
+									db_ctx.ns_ctx.ns.namespace_id,
+									db_ctx.db.database_id,
+									&referencing_rid.table,
+									&referencing_rid.key,
+									None,
+								)
+								.await
+								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch record: {}", e)))?;
+
+							if record.data.as_ref().is_none() {
+								Value::None
+							} else {
+								let mut v = record.data.as_ref().clone();
+								v.def(&referencing_rid);
+								v
+							}
+						}
+					};
+
+					batch.push(value);
 
 					if batch.len() >= BATCH_SIZE {
 						yield ValueBatch { values: std::mem::take(&mut batch) };
@@ -187,6 +376,19 @@ impl ExecOperator for ReferenceScan {
 	}
 }
 
+/// Convert a `Value` to a `RecordIdKey` for use in reference key range construction.
+fn value_to_record_id_key(val: Value) -> RecordIdKey {
+	match val {
+		Value::Number(n) => RecordIdKey::Number(n.as_int()),
+		Value::String(s) => RecordIdKey::String(s),
+		Value::Uuid(u) => RecordIdKey::Uuid(u),
+		Value::Array(a) => RecordIdKey::Array(a),
+		Value::Object(o) => RecordIdKey::Object(o),
+		// For other types, convert to string representation
+		other => RecordIdKey::String(other.to_raw_string()),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -201,8 +403,11 @@ mod tests {
 				table: "person".into(),
 				key: RecordIdKey::String("alice".to_string()),
 			}))),
-			referencing_table: "post".into(),
+			referencing_table: Some("post".into()),
 			referencing_field: Some("author".to_string()),
+			output_mode: ReferenceScanOutput::RecordId,
+			range_start: Bound::Unbounded,
+			range_end: Bound::Unbounded,
 		};
 
 		assert_eq!(scan.name(), "ReferenceScan");
