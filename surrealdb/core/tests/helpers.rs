@@ -333,6 +333,11 @@ impl Test {
 		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
 	}
 
+	#[allow(dead_code)]
+	pub async fn new_sql(self, sql: &str) -> Result<Self> {
+		Self::new_ds(self.ds, sql).await
+	}
+
 	/// Creates a new instance of the `Self` struct with the given SQL query.
 	/// Arguments `sql` - A string slice representing the SQL query.
 	/// Panics if an error occurs.#[expect(dead_code)]
