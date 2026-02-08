@@ -105,7 +105,7 @@ async fn test_async_event_retry() -> Result<()> {
 		REMOVE EVENT throw_it ON person;
 	    DEFINE EVENT throw_it ON person ASYNC THEN {
 	    	CREATE blah;
-	    	THROW "This message will never show";
+	    	THROW "See you in the logs!";
 		};
 		CREATE |person:10| RETURN NONE;
 	"#;
