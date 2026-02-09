@@ -244,22 +244,26 @@ impl<'ctx> Planner<'ctx> {
 					arguments,
 				} = *func_call;
 
-				// Check for index functions first
-				if let Function::Normal(ref name) = receiver {
-					let registry = self.function_registry();
-					if registry.is_index_function(name) {
-						return self.plan_index_function(name, arguments);
-					}
-				}
-
-				let mut phys_args = Vec::with_capacity(arguments.len());
-				for arg in arguments {
-					phys_args.push(self.physical_expr(arg)?);
-				}
+				macro_rules! phys_args {
+					($($arg:expr),*) => {
+						{
+							let mut phys_args = Vec::with_capacity(arguments.len());
+							for arg in arguments {
+								phys_args.push(self.physical_expr(arg)?);
+							}
+							phys_args
+						}
+					};
+				};
 
 				match receiver {
 					Function::Normal(name) => {
 						let registry = self.function_registry();
+
+						if registry.is_index_function(&name) {
+							return self.plan_index_function(&name, arguments);
+						}
+
 						if registry.is_projection(&name) {
 							let func_ctx = registry
 								.get_projection(&name)
@@ -267,7 +271,7 @@ impl<'ctx> Planner<'ctx> {
 								.unwrap_or(crate::exec::ContextLevel::Database);
 							Ok(Arc::new(ProjectionFunctionExec {
 								name,
-								arguments: phys_args,
+								arguments: phys_args!(arguments),
 								func_required_context: func_ctx,
 							}))
 						} else {
@@ -277,27 +281,27 @@ impl<'ctx> Planner<'ctx> {
 								.unwrap_or(crate::exec::ContextLevel::Root);
 							Ok(Arc::new(BuiltinFunctionExec {
 								name,
-								arguments: phys_args,
+								arguments: phys_args!(arguments),
 								func_required_context: func_ctx,
 							}))
 						}
 					}
 					Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
 						name,
-						arguments: phys_args,
+						arguments: phys_args!(arguments),
 					})),
 					Function::Script(script) => Ok(Arc::new(JsFunctionExec {
 						script,
-						arguments: phys_args,
+						arguments: phys_args!(arguments),
 					})),
 					Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
 						model,
-						arguments: phys_args,
+						arguments: phys_args!(arguments),
 					})),
 					Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
 						module,
 						sub,
-						arguments: phys_args,
+						arguments: phys_args!(arguments),
 					})),
 					Function::Silo {
 						org,
@@ -313,7 +317,7 @@ impl<'ctx> Planner<'ctx> {
 						minor,
 						patch,
 						sub,
-						arguments: phys_args,
+						arguments: phys_args!(arguments),
 					})),
 				}
 			}
@@ -342,7 +346,7 @@ impl<'ctx> Planner<'ctx> {
 				}))
 			}
 			Expr::Select(select) => {
-				let plan = self.plan_select(*select)?;
+				let plan = self.plan_select_statement(*select)?;
 				Ok(Arc::new(ScalarSubquery {
 					plan,
 				}))
@@ -564,97 +568,22 @@ impl<'ctx> Planner<'ctx> {
 
 	fn plan_non_ddl_dml_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			Expr::Select(select) => self.plan_select(*select),
-			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
-			Expr::Info(info) => self.plan_info(*info),
-			Expr::Foreach(stmt) => {
-				let crate::expr::statements::ForeachStatement {
-					param,
-					range,
-					block,
-				} = *stmt;
-				Ok(Arc::new(ForeachPlan {
-					param,
-					range,
-					body: block,
-				}) as Arc<dyn ExecOperator>)
-			}
-			Expr::IfElse(stmt) => {
-				let crate::expr::statements::IfelseStatement {
-					exprs,
-					close,
-				} = *stmt;
-				Ok(Arc::new(IfElsePlan {
-					branches: exprs,
-					else_body: close,
-				}) as Arc<dyn ExecOperator>)
-			}
-			Expr::Block(block) => {
-				if block.0.is_empty() {
-					use crate::exec::physical_expr::Literal as PhysicalLiteral;
-					Ok(Arc::new(ExprPlan {
-						expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
-					}) as Arc<dyn ExecOperator>)
-				} else if block.0.len() == 1 {
-					self.plan_expr(block.0.into_iter().next().unwrap())
-				} else {
-					Ok(Arc::new(SequencePlan {
-						block: *block,
-					}) as Arc<dyn ExecOperator>)
-				}
-			}
-			Expr::FunctionCall(_) => {
-				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
-			Expr::Closure(_) => {
-				let closure_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: closure_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
-			Expr::Return(output_stmt) => {
-				let inner = self.plan_expr(output_stmt.what)?;
-
-				let inner = if let Some(fetchs) = output_stmt.fetch {
-					let mut fields = Vec::with_capacity(fetchs.len());
-					for fetch_item in fetchs {
-						let mut idioms = self.resolve_field_idioms(fetch_item.0)?;
-						fields.append(&mut idioms);
-					}
-					if fields.is_empty() {
-						inner
-					} else {
-						Arc::new(Fetch {
-							input: inner,
-							fields,
-						}) as Arc<dyn ExecOperator>
-					}
-				} else {
-					inner
-				};
-
-				Ok(Arc::new(ReturnPlan {
-					inner,
-				}))
-			}
-			Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
-				duration: sleep_stmt.duration,
-			})),
+			Expr::Select(select) => self.plan_select_statement(*select),
+			Expr::Let(let_stmt) => self.plan_let_statement(*let_stmt),
+			Expr::Info(info) => self.plan_info_statement(*info),
+			Expr::Foreach(stmt) => self.plan_foreach_statement(*stmt),
+			Expr::IfElse(stmt) => self.plan_if_else_statement(*stmt),
+			Expr::Block(block) => self.plan_block(*block),
+			Expr::Return(output_stmt) => self.plan_return_statement(*output_stmt),
+			Expr::Sleep(sleep_stmt) => self.plan_sleep_statement(*sleep_stmt),
 			Expr::Explain {
 				format,
 				statement,
-			} => {
-				let inner_plan = self.plan_expr(*statement)?;
-				Ok(Arc::new(ExplainPlan {
-					plan: inner_plan,
-					format,
-				}))
-			}
+			} => self.plan_explain_statement(format, *statement),
 
-			Expr::Literal(_)
+			expr @ (Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Constant(_)
 			| Expr::Prefix {
@@ -671,12 +600,7 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Mock(_)
 			| Expr::Throw(_)
 			| Expr::Break
-			| Expr::Continue => {
-				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
+			| Expr::Continue) => self.plan_expr_as_operator(expr),
 
 			Expr::Create(_)
 			| Expr::Update(_)
@@ -693,7 +617,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	fn plan_info(
+	fn plan_info_statement(
 		&self,
 		info: crate::expr::statements::info::InfoStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
@@ -739,6 +663,116 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 		}
+	}
+
+	fn plan_foreach_statement(
+		&self,
+		stmt: crate::expr::statements::ForeachStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let crate::expr::statements::ForeachStatement {
+			param,
+			range,
+			block,
+		} = stmt;
+		Ok(Arc::new(ForeachPlan {
+			param,
+			range,
+			body: block,
+		}) as Arc<dyn ExecOperator>)
+	}
+
+	fn plan_if_else_statement(
+		&self,
+		stmt: IfelseStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let IfelseStatement {
+			exprs,
+			close,
+		} = stmt;
+		Ok(Arc::new(IfElsePlan {
+			branches: exprs,
+			else_body: close,
+		}) as Arc<dyn ExecOperator>)
+	}
+
+	fn plan_block(
+		&self,
+		block: crate::expr::Block,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		if block.0.is_empty() {
+			use crate::exec::physical_expr::Literal as PhysicalLiteral;
+			Ok(Arc::new(ExprPlan {
+				expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
+			}) as Arc<dyn ExecOperator>)
+		} else if block.0.len() == 1 {
+			self.plan_expr(block.0.into_iter().next().unwrap())
+		} else {
+			Ok(Arc::new(SequencePlan {
+				block,
+			}) as Arc<dyn ExecOperator>)
+		}
+	}
+
+	fn plan_return_statement(
+		&self,
+		output_stmt: crate::expr::statements::OutputStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let inner = self.plan_expr(output_stmt.what)?;
+
+		let inner = if let Some(fetchs) = output_stmt.fetch {
+			let mut fields = Vec::with_capacity(fetchs.len());
+			for fetch_item in fetchs {
+				let mut idioms = self.resolve_field_idioms(fetch_item.0)?;
+				fields.append(&mut idioms);
+			}
+			if fields.is_empty() {
+				inner
+			} else {
+				Arc::new(Fetch {
+					input: inner,
+					fields,
+				}) as Arc<dyn ExecOperator>
+			}
+		} else {
+			inner
+		};
+
+		Ok(Arc::new(ReturnPlan {
+			inner,
+		}))
+	}
+
+	fn plan_sleep_statement(
+		&self,
+		sleep_stmt: crate::expr::statements::SleepStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		Ok(Arc::new(SleepPlan {
+			duration: sleep_stmt.duration,
+		}))
+	}
+
+	fn plan_explain_statement(
+		&self,
+		format: crate::expr::ExplainFormat,
+		statement: Expr,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let inner_plan = self.plan_expr(statement)?;
+		Ok(Arc::new(ExplainPlan {
+			plan: inner_plan,
+			format,
+		}))
+	}
+
+	/// Plan an expression by converting it to a physical expression and wrapping
+	/// it in an [`ExprPlan`] operator.
+	///
+	/// Used for expressions that don't need special operator-level planning
+	/// (literals, params, function calls, closures, etc.).
+	fn plan_expr_as_operator(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
+		let phys_expr = self.physical_expr(expr)?;
+		Ok(Arc::new(ExprPlan {
+			expr: phys_expr,
+		}) as Arc<dyn ExecOperator>)
 	}
 }
 

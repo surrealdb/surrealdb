@@ -44,7 +44,7 @@ pub(crate) struct SelectPipelineConfig {
 
 impl<'ctx> Planner<'ctx> {
 	/// Plan a SELECT statement.
-	pub(crate) fn plan_select(
+	pub(crate) fn plan_select_statement(
 		&self,
 		select: crate::expr::statements::SelectStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
@@ -331,7 +331,7 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 
-			Expr::Select(inner_select) => self.plan_select(*inner_select),
+			Expr::Select(inner_select) => self.plan_select_statement(*inner_select),
 
 			Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
 				let phys_expr = self.physical_expr(expr)?;
@@ -793,7 +793,7 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Convert a LET statement to an execution plan.
-	pub(crate) fn convert_let_statement(
+	pub(crate) fn plan_let_statement(
 		&self,
 		let_stmt: crate::expr::statements::SetStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
@@ -806,7 +806,7 @@ impl<'ctx> Planner<'ctx> {
 		} = let_stmt;
 
 		let value: Arc<dyn ExecOperator> = match what {
-			Expr::Select(select) => self.plan_select(*select)?,
+			Expr::Select(select) => self.plan_select_statement(*select)?,
 			Expr::Create(_) => {
 				return Err(Error::Unimplemented(
 					"CREATE statements in LET not yet supported in execution plans".to_string(),
