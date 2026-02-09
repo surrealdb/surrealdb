@@ -164,7 +164,8 @@ pub enum Category {
 	IndexHnswVec,
 	/// crate::key::index::hh                /*{ns}*{db}*{tb}+{ix}!hh{hash}
 	IndexHnswHashedVec,
-	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
+	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id} (Previously - discarded by
+	/// #6856) crate::key::index::ig                /*{ns}*{db}*{tb}+{ix}!ig{id}
 	IndexAppendings,
 	/// crate::key::index::ib                /*{ns}*{db}*{tb}+{ix}!ib{id}
 	IndexInvertedDocIds,
