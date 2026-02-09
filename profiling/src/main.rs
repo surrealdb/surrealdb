@@ -73,7 +73,10 @@ async fn main() -> Result<()> {
 
 	println!("Perfetto tracing enabled, writing to: {}", perfetto_path.display());
 
-	let mut results = db.query("SELECT * FROM person").await.context("Failed to query database")?;
+	let mut results = db
+		.query("SELECT * FROM person WHERE age = 21")
+		.await
+		.context("Failed to query database")?;
 
 	let _: Vec<Person> = results.take(0).context("Failed to take result")?;
 

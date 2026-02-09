@@ -137,7 +137,7 @@ impl ExecOperator for IndexScan {
 		// Clone for the async block
 		let index_ref = self.index_ref.clone();
 		let access = self.access.clone();
-		let direction = self.direction;
+		let _direction = self.direction;
 		let table_name = self.table_name.clone();
 		let ctx = ctx.clone();
 
@@ -297,8 +297,8 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Compound index access
-				(BTreeAccess::Compound { prefix, range }, is_unique) => {
+			// Compound index access
+			(BTreeAccess::Compound { prefix, range }, _is_unique) => {
 					use crate::key::index::Index;
 					use crate::val::Array;
 

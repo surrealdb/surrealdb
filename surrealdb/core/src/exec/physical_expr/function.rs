@@ -744,7 +744,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 			.await?;
 
 		// Validate return value if signature specifies a return type
-		validate_return(&fnc_name, signature.returns.as_ref(), result)
+		validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
 	}
 
 	#[cfg(not(feature = "surrealism"))]

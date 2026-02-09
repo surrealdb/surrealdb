@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use crate::catalog::providers::TableProvider;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::ContextLevel;
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
 use crate::val::{RecordId, Value};
 

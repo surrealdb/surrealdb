@@ -6,9 +6,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::exec::ExecOperator;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel};
+use crate::exec::{AccessMode, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
 use crate::idx::planner::ScanDirection;
 use crate::val::{RecordId, Value};
@@ -273,8 +272,7 @@ pub(crate) async fn evaluate_reference_lookup(
 			futures::pin_mut!(kv_stream);
 
 			while let Some(result) = kv_stream.next().await {
-				let key =
-					result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
+				let key = result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
 
 				let decoded = crate::key::r#ref::Ref::decode_key(&key)
 					.map_err(|e| anyhow::anyhow!("Failed to decode ref key: {}", e))?;

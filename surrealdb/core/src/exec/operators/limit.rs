@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -62,43 +63,90 @@ impl ExecOperator for Limit {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// Evaluate limit and offset expressions upfront
-		let eval_ctx = EvalContext::from_exec_ctx(ctx);
-
-		let limit_value = match &self.limit {
-			Some(expr) => {
-				let value =
-					futures::executor::block_on(expr.evaluate(eval_ctx.clone())).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
-					})?;
-				Some(coerce_to_usize(&value).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("LIMIT must be a non-negative integer: {}", e))
-				})?)
-			}
-			None => None,
-		};
-
-		let offset_value = match &self.offset {
-			Some(expr) => {
-				let value = futures::executor::block_on(expr.evaluate(eval_ctx)).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
-				})?;
-				coerce_to_usize(&value).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("START must be a non-negative integer: {}", e))
-				})?
-			}
-			None => 0,
-		};
-
-		// If limit is 0, return empty stream immediately
-		if limit_value == Some(0) {
-			return Ok(Box::pin(futures::stream::empty()));
-		}
-
 		let input_stream = self.input.execute(ctx)?;
 
-		// Create a stream that applies offset and limit
-		let limited = LimitStream::new(input_stream, offset_value, limit_value);
+		let limit_expr = self.limit.clone();
+		let offset_expr = self.offset.clone();
+		let ctx = ctx.clone();
+
+		let limited = async_stream::try_stream! {
+			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+
+			// Evaluate limit expression
+			let limit_value = match &limit_expr {
+				Some(expr) => {
+					let value = expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
+					})?;
+					Some(coerce_to_usize(&value).map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("LIMIT must be a non-negative integer: {}", e))
+					})?)
+				}
+				None => None,
+			};
+
+			// If limit is 0, produce no output
+			if limit_value == Some(0) {
+				return;
+			}
+
+			// Evaluate offset expression
+			let offset = match &offset_expr {
+				Some(expr) => {
+					let value = expr.evaluate(eval_ctx).await.map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
+					})?;
+					coerce_to_usize(&value).map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("START must be a non-negative integer: {}", e))
+					})?
+				}
+				None => 0,
+			};
+
+			let mut skipped = 0usize;
+			let mut emitted = 0usize;
+
+			futures::pin_mut!(input_stream);
+
+			while let Some(batch_result) = input_stream.next().await {
+				let batch = batch_result?;
+				let mut values = batch.values;
+
+				// Apply offset - skip values until we've skipped enough
+				if skipped < offset {
+					let to_skip = (offset - skipped).min(values.len());
+					skipped += to_skip;
+					if to_skip >= values.len() {
+						// Entire batch is within the offset window, skip it
+						continue;
+					}
+					// Remove the prefix in-place (single memmove, no allocation)
+					values.drain(..to_skip);
+				}
+
+				// Apply limit - only take as many as we need
+				if let Some(limit) = limit_value {
+					let remaining = limit.saturating_sub(emitted);
+					if values.len() > remaining {
+						values.truncate(remaining);
+					}
+				}
+
+				emitted += values.len();
+
+				// Only emit non-empty batches
+				if !values.is_empty() {
+					yield ValueBatch { values };
+				}
+
+				// Stop if we've hit the limit
+				if let Some(limit) = limit_value {
+					if emitted >= limit {
+						break;
+					}
+				}
+			}
+		};
 
 		Ok(Box::pin(limited))
 	}
@@ -120,103 +168,5 @@ fn coerce_to_usize(value: &crate::val::Value) -> Result<usize, String> {
 		}
 		Value::None | Value::Null => Ok(0),
 		_ => Err(format!("expected integer, got {:?}", value)),
-	}
-}
-
-/// A stream wrapper that applies offset and limit to batches
-struct LimitStream {
-	inner: ValueBatchStream,
-	offset: usize,
-	limit: Option<usize>,
-	/// How many values we've skipped so far
-	skipped: usize,
-	/// How many values we've emitted so far
-	emitted: usize,
-	/// Whether we're done (limit reached or inner stream exhausted)
-	done: bool,
-}
-
-impl LimitStream {
-	fn new(inner: ValueBatchStream, offset: usize, limit: Option<usize>) -> Self {
-		Self {
-			inner,
-			offset,
-			limit,
-			skipped: 0,
-			emitted: 0,
-			done: false,
-		}
-	}
-}
-
-impl futures::Stream for LimitStream {
-	type Item = Result<ValueBatch, ControlFlow>;
-
-	fn poll_next(
-		mut self: std::pin::Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-	) -> std::task::Poll<Option<Self::Item>> {
-		use std::task::Poll;
-
-		if self.done {
-			return Poll::Ready(None);
-		}
-
-		// Check if we've hit the limit
-		if let Some(limit) = self.limit
-			&& self.emitted >= limit
-		{
-			self.done = true;
-			return Poll::Ready(None);
-		}
-
-		// Poll the inner stream
-		let inner = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.inner) };
-		match inner.poll_next(cx) {
-			Poll::Ready(None) => {
-				self.done = true;
-				Poll::Ready(None)
-			}
-			Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
-			Poll::Ready(Some(Ok(batch))) => {
-				let mut values = batch.values;
-
-				// Apply offset - skip values until we've skipped enough
-				if self.skipped < self.offset {
-					let to_skip = (self.offset - self.skipped).min(values.len());
-					values = values.into_iter().skip(to_skip).collect();
-					self.skipped += to_skip;
-				}
-
-				// Apply limit - only take as many as we need
-				if let Some(limit) = self.limit {
-					let remaining = limit.saturating_sub(self.emitted);
-					if values.len() > remaining {
-						values.truncate(remaining);
-					}
-				}
-
-				self.emitted += values.len();
-
-				// Check if we've hit the limit
-				if let Some(limit) = self.limit
-					&& self.emitted >= limit
-				{
-					self.done = true;
-				}
-
-				// Only emit non-empty batches
-				if values.is_empty() {
-					// Need to continue polling
-					cx.waker().wake_by_ref();
-					Poll::Pending
-				} else {
-					Poll::Ready(Some(Ok(ValueBatch {
-						values,
-					})))
-				}
-			}
-			Poll::Pending => Poll::Pending,
-		}
 	}
 }

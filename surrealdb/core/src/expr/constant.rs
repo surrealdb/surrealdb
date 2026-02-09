@@ -1,4 +1,3 @@
-use anyhow::Result;
 use chrono::{TimeZone, Utc};
 use surrealdb_types::{SqlFormat, ToSql};
 

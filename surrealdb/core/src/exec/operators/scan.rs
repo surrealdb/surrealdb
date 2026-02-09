@@ -32,6 +32,26 @@ use crate::val::{RecordIdKey, TableName, Value};
 /// Batch size for collecting records before yielding.
 const BATCH_SIZE: usize = 1000;
 
+/// Check if a value passes the permission check.
+///
+/// Inlined at each call site so the `Allow`/`Deny` branches are pure synchronous
+/// code with zero async state-machine overhead. The `.await` only exists in the
+/// `Conditional` arm.
+macro_rules! check_perm {
+	($permission:expr, $value:expr, $ctx:expr) => {
+		match $permission {
+			PhysicalPermission::Allow => Ok::<bool, ControlFlow>(true),
+			PhysicalPermission::Deny => Ok(false),
+			PhysicalPermission::Conditional(expr) => {
+				let eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
+				expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
+					ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
+				})
+			}
+		}
+	};
+}
+
 /// Full table scan - iterates over all records in a table.
 ///
 /// Requires database-level context since it reads from a specific table
@@ -153,8 +173,8 @@ impl ExecOperator for Scan {
 				return;
 			}
 
-			// Lazy field state (initialized on first batch)
-			let mut field_state: Option<FieldState> = None;
+			// Eagerly initialize field state (computed fields + field permissions)
+			let field_state = build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 
 			match rid {
 				// === POINT LOOKUP (single record by ID) ===
@@ -171,10 +191,9 @@ impl ExecOperator for Scan {
 					let mut value = record.data.as_ref().clone();
 					value.def(&rid);
 
-					if check_permission(&select_permission, &value, &ctx).await? {
+					if check_perm!(&select_permission, &value, &ctx)? {
 						let mut batch = vec![value];
-						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
+						process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
 						yield ValueBatch { values: batch };
 					}
 				}
@@ -193,23 +212,22 @@ impl ExecOperator for Scan {
 					while let Some(result) = kv_stream.next().await {
 						let (key, val) = result
 							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-						let value = decode_record(&key, val)?;
-
-						if check_permission(&select_permission, &value, &ctx).await? {
-							batch.push(value);
-							if batch.len() >= BATCH_SIZE {
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
-								let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+						batch.push(decode_record(&key, val)?);
+						if batch.len() >= BATCH_SIZE {
+							filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
+							process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
+							let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+							if !ready.is_empty() {
 								yield ValueBatch { values: ready };
 							}
 						}
 					}
-
 					if !batch.is_empty() {
-						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
-						yield ValueBatch { values: batch };
+						filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
+						process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
+						if !batch.is_empty() {
+							yield ValueBatch { values: batch };
+						}
 					}
 				}
 
@@ -237,8 +255,7 @@ impl ExecOperator for Scan {
 							let mut stream = operator.execute(&ctx)?;
 							while let Some(batch_result) = stream.next().await {
 								let mut batch = batch_result?;
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch.values).await?;
+								process_batch(&ctx, &field_state, check_perms, &mut batch.values).await?;
 								yield batch;
 							}
 						}
@@ -249,8 +266,7 @@ impl ExecOperator for Scan {
 							let mut stream = ft_op.execute(&ctx)?;
 							while let Some(batch_result) = stream.next().await {
 								let mut batch = batch_result?;
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch.values).await?;
+								process_batch(&ctx, &field_state, check_perms, &mut batch.values).await?;
 								yield batch;
 							}
 						}
@@ -269,23 +285,22 @@ impl ExecOperator for Scan {
 							while let Some(result) = kv_stream.next().await {
 								let (key, val) = result
 									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-								let value = decode_record(&key, val)?;
-
-								if check_permission(&select_permission, &value, &ctx).await? {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-										process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
-										let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+								batch.push(decode_record(&key, val)?);
+								if batch.len() >= BATCH_SIZE {
+									filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
+									process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
+									let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
+									if !ready.is_empty() {
 										yield ValueBatch { values: ready };
 									}
 								}
 							}
-
 							if !batch.is_empty() {
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
-								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
-								yield ValueBatch { values: batch };
+								filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
+								process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
+								if !batch.is_empty() {
+									yield ValueBatch { values: batch };
+								}
 							}
 						}
 					}
@@ -312,15 +327,30 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 	}
 }
 
-/// Check if a value passes the permission check.
-async fn check_permission(
+/// Filter a batch of values in-place by table-level SELECT permission.
+///
+/// Returns immediately for `Allow` (the common case). For `Conditional`
+/// permissions, uses an in-place swap-remove pattern to avoid allocation.
+async fn filter_batch_by_permission(
+	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
-	value: &Value,
 	ctx: &ExecutionContext,
-) -> Result<bool, ControlFlow> {
-	check_permission_for_value(permission, value, ctx)
-		.await
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))
+) -> Result<(), ControlFlow> {
+	// Fast path: nothing to filter
+	if matches!(permission, PhysicalPermission::Allow) {
+		return Ok(());
+	}
+	let mut write_idx = 0;
+	for read_idx in 0..batch.len() {
+		if check_perm!(permission, &batch[read_idx], ctx)? {
+			if write_idx != read_idx {
+				batch.swap(write_idx, read_idx);
+			}
+			write_idx += 1;
+		}
+	}
+	batch.truncate(write_idx);
+	Ok(())
 }
 
 /// Compute the start key for a range scan.
@@ -385,7 +415,8 @@ fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 	// Inject the id field into the document
 	record.data.to_mut().def(&rid);
 
-	Ok(record.data.as_ref().clone())
+	// Take ownership of the value (zero-cost move for freshly deserialized Mutable data)
+	Ok(record.data.into_value())
 }
 
 /// Cached state for field processing (computed fields and permissions).
@@ -407,20 +438,6 @@ struct ComputedFieldDef {
 	expr: Arc<dyn PhysicalExpr>,
 	/// Optional type coercion
 	kind: Option<crate::expr::Kind>,
-}
-
-/// Ensure field state is initialized, building it if necessary.
-async fn ensure_field_state(
-	field_state: &mut Option<FieldState>,
-	ctx: &ExecutionContext,
-	table_name: &TableName,
-	check_perms: bool,
-	needed_fields: Option<&std::collections::HashSet<String>>,
-) -> Result<(), ControlFlow> {
-	if field_state.is_none() {
-		*field_state = Some(build_field_state(ctx, table_name, check_perms, needed_fields).await?);
-	}
-	Ok(())
 }
 
 /// Fetch field definitions and build the cached field state.

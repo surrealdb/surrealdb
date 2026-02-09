@@ -77,12 +77,8 @@ impl PhysicalExpr for RecursePart {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		let path_ctx = self
-			.path
-			.iter()
-			.map(|p| p.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root);
+		let path_ctx =
+			self.path.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root);
 
 		let instruction_ctx = match &self.instruction {
 			PhysicalRecurseInstruction::Default
@@ -114,12 +110,8 @@ impl PhysicalExpr for RecursePart {
 				inclusive: self.inclusive,
 				depth: 0,
 			};
-			return evaluate_recurse_with_plan(
-				&value,
-				&self.path,
-				ctx.with_recursion_ctx(rec_ctx),
-			)
-			.await;
+			return evaluate_recurse_with_plan(&value, &self.path, ctx.with_recursion_ctx(rec_ctx))
+				.await;
 		}
 
 		match &self.instruction {
@@ -328,8 +320,7 @@ fn evaluate_repeat_recurse<'a>(
 				let mut results = Vec::with_capacity(arr.len());
 				for elem in arr.iter() {
 					let elem_ctx = ctx.with_recursion_ctx(next_ctx.clone());
-					let result =
-						evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
+					let result = evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
 					// Filter out dead-end values
 					if !is_final(&result) {
 						results.push(result);
@@ -421,8 +412,7 @@ async fn evaluate_recurse_collect(
 		let mut next_frontier = Vec::new();
 
 		for value in frontier {
-			let result =
-				evaluate_physical_path(&value, path, ctx.with_value(&value)).await?;
+			let result = evaluate_physical_path(&value, path, ctx.with_value(&value)).await?;
 
 			// Process result (may be single value or array)
 			let values = match result {
@@ -482,8 +472,7 @@ async fn evaluate_recurse_path(
 		for current_path in active_paths {
 			let current_value = current_path.last().unwrap_or(start);
 			let result =
-				evaluate_physical_path(current_value, path, ctx.with_value(current_value))
-					.await?;
+				evaluate_physical_path(current_value, path, ctx.with_value(current_value)).await?;
 
 			let values = match result {
 				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
@@ -562,8 +551,7 @@ async fn evaluate_recurse_shortest(
 		for _ in 0..level_size {
 			let (current, current_path) = queue.pop_front().unwrap();
 
-			let result =
-				evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
+			let result = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
 
 			let values = match result {
 				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),

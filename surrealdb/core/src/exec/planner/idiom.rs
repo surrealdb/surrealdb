@@ -7,13 +7,13 @@ use std::sync::Arc;
 
 use super::Planner;
 use crate::err::Error;
+use crate::exec::PhysicalExpr;
 use crate::exec::parts::{
 	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, FieldPart, FirstPart,
 	FlattenPart, IndexPart, LastPart, LookupDirection, LookupPart, MethodPart, OptionalChainPart,
 	PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
 };
 use crate::exec::physical_expr::IdiomExpr;
-use crate::exec::PhysicalExpr;
 use crate::expr::part::{DestructurePart as AstDestructurePart, Part, RecurseInstruction};
 
 // ============================================================================
@@ -326,9 +326,7 @@ fn is_inclusive_recurse(instruction: &Option<RecurseInstruction>) -> bool {
 ///
 /// This is a planner-time transformation that replaces the runtime introspection
 /// that was previously done in `IdiomExpr`'s evaluation loop and `evaluate_physical_path`.
-fn insert_auto_flattens(
-	parts: Vec<Arc<dyn PhysicalExpr>>,
-) -> Vec<Arc<dyn PhysicalExpr>> {
+fn insert_auto_flattens(parts: Vec<Arc<dyn PhysicalExpr>>) -> Vec<Arc<dyn PhysicalExpr>> {
 	if parts.len() < 2 {
 		return parts;
 	}

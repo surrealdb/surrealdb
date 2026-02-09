@@ -189,7 +189,6 @@ impl<'a> IndexAnalyzer<'a> {
 							prefix_values.push(cond.value.clone());
 						} else if all_equality {
 							// First non-equality - becomes range condition
-							all_equality = false;
 							range_condition = Some((cond.op.clone(), cond.value.clone()));
 							// Stop - can't use columns after a range
 							break;

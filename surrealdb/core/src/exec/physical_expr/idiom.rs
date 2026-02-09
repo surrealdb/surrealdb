@@ -66,16 +66,10 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		let start_ctx = self
-			.start_expr
-			.as_ref()
-			.map_or(ContextLevel::Root, |e| e.required_context());
-		let parts_ctx = self
-			.parts
-			.iter()
-			.map(|p| p.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root);
+		let start_ctx =
+			self.start_expr.as_ref().map_or(ContextLevel::Root, |e| e.required_context());
+		let parts_ctx =
+			self.parts.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root);
 		start_ctx.max(parts_ctx)
 	}
 

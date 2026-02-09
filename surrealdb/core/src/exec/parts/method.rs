@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::function::MethodDescriptor;
-use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
 use crate::exec::physical_expr::function::validate_return;
+use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::{Closure, Value};
@@ -38,11 +38,7 @@ impl PhysicalExpr for MethodPart {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.args
-			.iter()
-			.map(|a| a.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root)
+		self.args.iter().map(|a| a.required_context()).max().unwrap_or(ContextLevel::Root)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
@@ -114,11 +110,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.args
-			.iter()
-			.map(|a| a.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root)
+		self.args.iter().map(|a| a.required_context()).max().unwrap_or(ContextLevel::Root)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
@@ -182,9 +174,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 
 				// Bind arguments to parameter names with type coercion
 				let mut local_params: HashMap<String, Value> = HashMap::new();
-				for ((param, kind), arg_value) in
-					arg_spec.iter().zip(evaluated_args.into_iter())
-				{
+				for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args.into_iter()) {
 					let coerced =
 						arg_value.coerce_to_kind(kind).map_err(|_| Error::InvalidArguments {
 							name: "ANONYMOUS".to_string(),

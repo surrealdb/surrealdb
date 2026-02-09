@@ -6,11 +6,11 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::evaluate_physical_path;
+use crate::catalog::providers::TableProvider;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
-use crate::catalog::providers::TableProvider;
 
 /// Destructure - extract fields into a new object `{ field1, field2: path }`.
 #[derive(Debug, Clone)]
@@ -187,8 +187,7 @@ async fn evaluate_destructure(
 						field: name,
 						parts,
 					} => {
-						let nested_value =
-							obj.get(name.as_str()).cloned().unwrap_or(Value::None);
+						let nested_value = obj.get(name.as_str()).cloned().unwrap_or(Value::None);
 						let v = Box::pin(evaluate_destructure(&nested_value, parts, ctx.clone()))
 							.await?;
 						result.insert(name.clone(), v);

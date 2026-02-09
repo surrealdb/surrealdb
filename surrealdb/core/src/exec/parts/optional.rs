@@ -20,7 +20,8 @@ use crate::val::Value;
 /// evaluating the tail. Otherwise evaluates the tail chain on the value.
 ///
 /// For multiple optionals like `a.?.b.?.c`, the planner nests:
-/// `[FieldPart("a"), OptionalChainPart { tail: [FieldPart("b"), OptionalChainPart { tail: [FieldPart("c")] }] }]`
+/// `[FieldPart("a"), OptionalChainPart { tail: [FieldPart("b"), OptionalChainPart { tail:
+/// [FieldPart("c")] }] }]`
 #[derive(Debug, Clone)]
 pub struct OptionalChainPart {
 	/// The remaining parts after the optional point.
@@ -35,11 +36,7 @@ impl PhysicalExpr for OptionalChainPart {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.tail
-			.iter()
-			.map(|p| p.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root)
+		self.tail.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
