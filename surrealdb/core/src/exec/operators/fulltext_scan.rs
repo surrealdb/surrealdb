@@ -89,7 +89,7 @@ impl ExecOperator for FullTextScan {
 			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
-			let txn = Arc::clone(ctx.txn());
+			let txn = ctx.txn();
 
 			// Get the FrozenContext and Options from the root context
 			let root = ctx.root();

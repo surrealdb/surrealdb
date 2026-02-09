@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::cnf::{GENERATION_ALLOCATION_LIMIT, PROTECTED_PARAM_NAMES};
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -117,15 +117,6 @@ impl PhysicalExpr for Param {
 			_ => {}
 		}
 
-		// Check protected/session parameters ($auth, $access, $token, $session)
-		// These are stored in the FrozenContext and are not user-modifiable
-		if PROTECTED_PARAM_NAMES.contains(&self.0.as_str()) {
-			if let Some(value) = ctx.exec_ctx.ctx().value(&self.0) {
-				return Ok(value.clone());
-			}
-			return Ok(Value::None);
-		}
-
 		// Check block-local parameters (they shadow global params)
 		if let Some(local_params) = ctx.local_params
 			&& let Some(value) = local_params.get(&self.0)
@@ -133,9 +124,10 @@ impl PhysicalExpr for Param {
 			return Ok(value.clone());
 		}
 
-		// Check execution context parameters
-		if let Some(v) = ctx.exec_ctx.params().get(self.0.as_str()) {
-			return Ok((**v).clone());
+		// FrozenContext handles scoped parameter lookup via parent-chain,
+		// including protected params ($auth, $access, $token, $session)
+		if let Some(v) = ctx.exec_ctx.value(&self.0) {
+			return Ok(v.clone());
 		}
 
 		// Try to fetch from database
@@ -145,7 +137,7 @@ impl PhysicalExpr for Param {
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
 
-			return Ok(self.fetch_db_param(ctx, txn, ns_id, db_id).await?);
+			return Ok(self.fetch_db_param(ctx, &txn, ns_id, db_id).await?);
 		}
 
 		// If no database context but we have options with ns/db set, look up by name
@@ -166,7 +158,7 @@ impl PhysicalExpr for Param {
 				let ns_id = db_def.namespace_id;
 				let db_id = db_def.database_id;
 
-				return Ok(self.fetch_db_param(ctx, txn, ns_id, db_id).await?);
+				return Ok(self.fetch_db_param(ctx, &txn, ns_id, db_id).await?);
 			}
 			// Database doesn't exist yet, param cannot be found
 			return Ok(Value::None);

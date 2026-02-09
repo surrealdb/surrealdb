@@ -1,9 +1,13 @@
 //! Hierarchical execution contexts for the stream executor.
 //!
 //! The context hierarchy provides type-safe access to resources at different levels:
-//! - `RootContext`: Always available, contains datastore, params, cancellation
-//! - `NamespaceContext`: Root + namespace definition + transaction
+//! - `RootContext`: Always available, wraps a FrozenContext with auth + session
+//! - `NamespaceContext`: Root + namespace definition
 //! - `DatabaseContext`: Namespace + database definition
+//!
+//! `FrozenContext` is the single source of truth for parameters, transactions,
+//! capabilities, and all legacy context fields. `RootContext` adds only the fields
+//! that are not trivially accessible from `FrozenContext` (auth, session info).
 //!
 //! Operators declare their minimum required context level via `ExecutionPlan::required_context()`,
 //! and the executor validates requirements before execution begins.
@@ -19,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
@@ -84,52 +88,47 @@ pub struct SessionInfo {
 
 /// Root-level context - always available.
 ///
-/// Contains resources that don't require a namespace or database selection:
-/// - Datastore access (optional, for root-level operations)
-/// - Query parameters
-/// - Cancellation token
-/// - Authentication context
+/// Wraps a `FrozenContext` (the single source of truth for params, txn,
+/// capabilities, etc.) and adds fields that are not trivially accessible
+/// from `FrozenContext`:
+/// - Authentication context (`Auth` struct, not a `Value`)
+/// - Session info (pre-extracted typed fields)
+/// - Datastore handle (for root-level operations)
+/// - Cancellation token (tokio-based, supplements FrozenContext's AtomicBool)
+/// - Legacy Options (for fallback to compute path)
 #[derive(Clone)]
 pub struct RootContext {
+	/// The underlying FrozenContext -- single source of truth for
+	/// params, txn, capabilities, and all legacy context fields.
+	pub ctx: FrozenContext,
+	/// Legacy Options for fallback to compute path when streaming executor
+	/// encounters unimplemented expressions.
+	/// Remove this when the streaming executor has full coverage.
+	pub options: Option<Options>,
 	/// The underlying datastore (optional - only needed for root-level operations
 	/// like INFO FOR ROOT, DEFINE USER ON ROOT, etc.)
 	///
 	/// Note: This is None when executing from a borrowed Datastore reference.
 	/// Root-level operations will need to handle this case.
 	pub datastore: Option<Arc<Datastore>>,
-	/// Query parameters ($param values)
-	pub params: Arc<Parameters>,
-	/// Cancellation token for cooperative cancellation
+	/// Cancellation token for cooperative cancellation in the streaming executor
 	pub cancellation: CancellationToken,
 	/// Authentication context for the current session
 	pub auth: Arc<Auth>,
 	/// Whether authentication is enabled on the datastore
 	pub auth_enabled: bool,
-	/// The transaction for this execution
-	pub txn: Arc<Transaction>,
 	/// Session information for context-aware functions
 	pub session: Option<Arc<SessionInfo>>,
-	/// Capabilities for the current session (network, functions, etc.)
-	pub capabilities: Option<Arc<Capabilities>>,
-	/// Legacy Options for fallback to compute path when streaming executor
-	/// encounters unimplemented expressions.
-	pub options: Option<Options>,
-	/// The FrozenContext from which this ExecutionContext was built.
-	/// Used for calling legacy compute methods without manual reconstruction.
-	pub ctx: FrozenContext,
 }
 
 impl std::fmt::Debug for RootContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("RootContext")
 			.field("datastore", &self.datastore.as_ref().map(|_| "<Datastore>"))
-			.field("params", &self.params)
 			.field("cancellation", &self.cancellation)
 			.field("auth", &self.auth)
 			.field("auth_enabled", &self.auth_enabled)
-			.field("txn", &"<Transaction>")
 			.field("session", &self.session)
-			.field("capabilities", &self.capabilities.as_ref().map(|_| "<Capabilities>"))
 			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
@@ -139,10 +138,9 @@ impl std::fmt::Debug for RootContext {
 ///
 /// Contains everything from RootContext plus:
 /// - Namespace definition
-/// - Transaction (created at namespace level)
 #[derive(Clone)]
 pub struct NamespaceContext {
-	/// Root context (datastore, params, cancellation)
+	/// Root context
 	pub root: RootContext,
 	/// The selected namespace definition
 	pub ns: Arc<NamespaceDefinition>,
@@ -160,14 +158,9 @@ impl NamespaceContext {
 		&self.ns.name
 	}
 
-	/// Get the transaction
-	pub fn txn(&self) -> &Arc<Transaction> {
-		&self.root.txn
-	}
-
-	/// Get the parameters
-	pub fn params(&self) -> &Parameters {
-		&self.root.params
+	/// Get the transaction (delegates to FrozenContext)
+	pub fn txn(&self) -> Arc<Transaction> {
+		self.root.ctx.tx()
 	}
 
 	/// Get the datastore (if available)
@@ -213,14 +206,9 @@ impl DatabaseContext {
 		&self.ns_ctx.ns
 	}
 
-	/// Get the transaction
-	pub fn txn(&self) -> &Transaction {
+	/// Get the transaction (delegates to FrozenContext)
+	pub fn txn(&self) -> Arc<Transaction> {
 		self.ns_ctx.txn()
-	}
-
-	/// Get the parameters
-	pub fn params(&self) -> &Parameters {
-		self.ns_ctx.params()
 	}
 
 	/// Get the datastore (if available)
@@ -287,18 +275,36 @@ impl ExecutionContext {
 		}
 	}
 
-	/// Get the transaction.
-	pub fn txn(&self) -> &Arc<Transaction> {
-		match self {
-			Self::Root(r) => &r.txn,
-			Self::Namespace(n) => &n.root.txn,
-			Self::Database(d) => &d.ns_ctx.root.txn,
-		}
+	/// Get the underlying FrozenContext.
+	///
+	/// This provides access to the FrozenContext which is the single source
+	/// of truth for parameters, transactions, capabilities, and all other
+	/// context fields. Used both by delegation methods and by operators that
+	/// need direct access to the legacy compute context.
+	pub fn ctx(&self) -> &FrozenContext {
+		&self.root().ctx
 	}
 
-	/// Get the parameters (always available).
-	pub fn params(&self) -> &Parameters {
-		&self.root().params
+	/// Get the transaction (delegates to FrozenContext).
+	pub fn txn(&self) -> Arc<Transaction> {
+		self.root().ctx.tx()
+	}
+
+	/// Look up a parameter value by name (delegates to FrozenContext).
+	///
+	/// This uses FrozenContext's parent-chain scoped lookup, which correctly
+	/// handles shadowing and protected parameter names ($auth, $session, etc.).
+	pub fn value(&self, key: &str) -> Option<&Value> {
+		self.root().ctx.value(key)
+	}
+
+	/// Collect all parameter values from the context chain into a HashMap.
+	///
+	/// This walks the FrozenContext parent chain and collects all values,
+	/// with child values taking precedence over parent values (shadowing).
+	/// Protected parameter names are excluded.
+	pub fn collect_params(&self) -> Parameters {
+		self.root().ctx.collect_params()
 	}
 
 	/// Get the datastore (if available).
@@ -365,64 +371,58 @@ impl ExecutionContext {
 		}
 	}
 
-	/// Create a new context with an additional parameter.
-	///
-	/// This is used by LET statements to add variables to the execution context.
-	/// The new parameter is added to the existing parameters map.
-	pub fn with_param(&self, name: impl Into<Cow<'static, str>>, value: Value) -> Self {
-		// Clone the current params and insert the new one
-		let mut new_params = (*self.root().params).clone();
-		new_params.insert(name.into(), Arc::new(value));
-		let new_params = Arc::new(new_params);
-
-		// Rebuild context with updated params
+	/// Rebuild this ExecutionContext with a new FrozenContext, preserving
+	/// ns/db definitions, auth, session, options, datastore, and cancellation.
+	fn with_new_ctx(&self, ctx: FrozenContext) -> Self {
 		match self {
 			Self::Root(r) => Self::Root(RootContext {
-				params: new_params,
+				ctx,
+				options: r.options.clone(),
 				datastore: r.datastore.clone(),
 				cancellation: r.cancellation.clone(),
 				auth: r.auth.clone(),
 				auth_enabled: r.auth_enabled,
-				txn: r.txn.clone(),
 				session: r.session.clone(),
-				capabilities: r.capabilities.clone(),
-				options: r.options.clone(),
-				ctx: r.ctx.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
-					params: new_params,
+					ctx,
+					options: n.root.options.clone(),
 					datastore: n.root.datastore.clone(),
 					cancellation: n.root.cancellation.clone(),
 					auth: n.root.auth.clone(),
 					auth_enabled: n.root.auth_enabled,
-					txn: n.root.txn.clone(),
 					session: n.root.session.clone(),
-					capabilities: n.root.capabilities.clone(),
-					options: n.root.options.clone(),
-					ctx: n.root.ctx.clone(),
 				},
 				ns: n.ns.clone(),
 			}),
 			Self::Database(d) => Self::Database(DatabaseContext {
 				ns_ctx: NamespaceContext {
 					root: RootContext {
-						params: new_params,
+						ctx,
+						options: d.ns_ctx.root.options.clone(),
 						datastore: d.ns_ctx.root.datastore.clone(),
 						cancellation: d.ns_ctx.root.cancellation.clone(),
 						auth: d.ns_ctx.root.auth.clone(),
 						auth_enabled: d.ns_ctx.root.auth_enabled,
-						txn: d.ns_ctx.root.txn.clone(),
 						session: d.ns_ctx.root.session.clone(),
-						capabilities: d.ns_ctx.root.capabilities.clone(),
-						options: d.ns_ctx.root.options.clone(),
-						ctx: d.ns_ctx.root.ctx.clone(),
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
 				db: d.db.clone(),
 			}),
 		}
+	}
+
+	/// Create a new context with an additional parameter.
+	///
+	/// This is used by LET statements to add variables to the execution context.
+	/// Creates a proper child FrozenContext, preserving the parent chain for
+	/// correct scoped parameter lookup and shadowing.
+	pub fn with_param(&self, name: impl Into<Cow<'static, str>>, value: Value) -> Self {
+		let mut child = Context::new(self.ctx());
+		child.add_value(name.into(), Arc::new(value));
+		self.with_new_ctx(child.freeze())
 	}
 
 	/// Create a new context at namespace level with the given namespace definition.
@@ -451,35 +451,12 @@ impl ExecutionContext {
 	/// Create a new context with a different transaction.
 	///
 	/// This is used by BEGIN statements to create a write transaction.
-	/// The new transaction replaces the existing one in the context.
+	/// The new transaction replaces the existing one in the context by
+	/// creating a child FrozenContext with the new transaction set.
 	pub fn with_transaction(&self, txn: Arc<Transaction>) -> Result<Self, Error> {
-		let new_root = RootContext {
-			txn,
-			datastore: self.root().datastore.clone(),
-			params: self.root().params.clone(),
-			cancellation: self.root().cancellation.clone(),
-			auth: self.root().auth.clone(),
-			auth_enabled: self.root().auth_enabled,
-			session: self.root().session.clone(),
-			capabilities: self.root().capabilities.clone(),
-			options: self.root().options.clone(),
-			ctx: self.root().ctx.clone(),
-		};
-
-		Ok(match self {
-			Self::Root(_) => Self::Root(new_root),
-			Self::Namespace(n) => Self::Namespace(NamespaceContext {
-				root: new_root,
-				ns: n.ns.clone(),
-			}),
-			Self::Database(d) => Self::Database(DatabaseContext {
-				ns_ctx: NamespaceContext {
-					root: new_root,
-					ns: d.ns_ctx.ns.clone(),
-				},
-				db: d.db.clone(),
-			}),
-		})
+		let mut child = Context::new(self.ctx());
+		child.set_transaction(txn);
+		Ok(self.with_new_ctx(child.freeze()))
 	}
 
 	/// Get the function registry.
@@ -496,9 +473,10 @@ impl ExecutionContext {
 		self.root().session.as_deref()
 	}
 
-	/// Get the capabilities (if available).
-	pub fn capabilities(&self) -> Option<&Capabilities> {
-		self.root().capabilities.as_deref()
+	/// Get the capabilities as an Arc (delegates to FrozenContext).
+	pub fn capabilities(&self) -> Arc<Capabilities> {
+		// FrozenContext always has capabilities (defaults to Capabilities::default())
+		self.root().ctx.get_capabilities()
 	}
 
 	/// Get the cancellation token.
@@ -521,14 +499,5 @@ impl ExecutionContext {
 		} else {
 			Ok(())
 		}
-	}
-
-	/// Get the underlying FrozenContext.
-	///
-	/// This provides access to the original FrozenContext from which this
-	/// ExecutionContext was built. Used for calling legacy compute methods
-	/// without manual reconstruction of the context.
-	pub fn ctx(&self) -> &FrozenContext {
-		&self.root().ctx
 	}
 }

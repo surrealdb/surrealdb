@@ -20,6 +20,7 @@ define_pure_function!(TypeBytes, "type::bytes", (value: Any) -> Any, crate::fnc:
 define_pure_function!(TypeDatetime, "type::datetime", (value: Any) -> Datetime, crate::fnc::r#type::datetime);
 define_pure_function!(TypeDecimal, "type::decimal", (value: Any) -> Decimal, crate::fnc::r#type::decimal);
 define_pure_function!(TypeDuration, "type::duration", (value: Any) -> Duration, crate::fnc::r#type::duration);
+define_pure_function!(TypeFile, "type::file", (bucket: String, key: String) -> Any, crate::fnc::r#type::file);
 define_pure_function!(TypeFloat, "type::float", (value: Any) -> Float, crate::fnc::r#type::float);
 define_pure_function!(TypeGeometry, "type::geometry", (value: Any) -> Any, crate::fnc::r#type::geometry);
 define_pure_function!(TypeInt, "type::int", (value: Any) -> Int, crate::fnc::r#type::int);
@@ -168,6 +169,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TypeDatetime,
 		TypeDecimal,
 		TypeDuration,
+		TypeFile,
 		TypeFloat,
 		TypeGeometry,
 		TypeInt,

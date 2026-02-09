@@ -233,7 +233,7 @@ pub(crate) async fn fetch_record(
 	let db_ctx = ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
 
 	// Read the record from the datastore
-	let txn = db_ctx.ns_ctx.root.txn.as_ref();
+	let txn = db_ctx.txn();
 	let key = crate::key::record::new(
 		db_ctx.ns_ctx.ns.namespace_id,
 		db_ctx.db.database_id,

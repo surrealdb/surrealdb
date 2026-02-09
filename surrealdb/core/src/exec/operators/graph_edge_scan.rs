@@ -116,7 +116,7 @@ impl ExecOperator for GraphEdgeScan {
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
-			let txn = Arc::clone(ctx.txn());
+			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 

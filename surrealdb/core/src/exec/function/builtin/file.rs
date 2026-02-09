@@ -42,10 +42,7 @@ impl<'a> StreamingBucketOps<'a> {
 	/// Creates a new StreamingBucketOps for the specified bucket.
 	async fn new(ctx: &'a EvalContext<'_>, bucket_name: &str) -> Result<Self> {
 		// Check experimental capability
-		let caps = ctx.capabilities().ok_or_else(|| Error::InvalidFunction {
-			name: "file::*".to_string(),
-			message: "No capabilities available".to_string(),
-		})?;
+		let caps = ctx.capabilities();
 		if !caps.allows_experimental(&ExperimentalTarget::Files) {
 			return Err(Error::InvalidFunction {
 				name: "file::*".to_string(),

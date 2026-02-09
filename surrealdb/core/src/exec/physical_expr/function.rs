@@ -245,9 +245,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		})?;
 
 		// 2. Check if function is allowed by capabilities
-		if let Some(caps) = ctx.capabilities()
-			&& !caps.allows_function_name(&func_name)
-		{
+		if !ctx.capabilities().allows_function_name(&func_name) {
 			return Err(Error::FunctionNotAllowed(func_name).into());
 		}
 
@@ -880,7 +878,7 @@ impl PhysicalExpr for ClosureExec {
 		use crate::val::Closure;
 
 		// Capture parameters from the context that are referenced in the closure body
-		let frozen_ctx = &ctx.exec_ctx.root().ctx;
+		let frozen_ctx = ctx.exec_ctx.ctx();
 		let captures = ParameterCapturePass::capture(frozen_ctx, &self.closure.body);
 
 		// Create a Value::Closure with the captured variables

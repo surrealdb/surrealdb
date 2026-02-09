@@ -143,7 +143,7 @@ impl ExecOperator for IndexScan {
 
 		let stream = async_stream::try_stream! {
 			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
-			let txn = Arc::clone(ctx.txn());
+			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 

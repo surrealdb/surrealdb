@@ -58,33 +58,10 @@ impl Iterator for ForeachIter {
 	}
 }
 
-/// Create a FrozenContext for planning that includes the loop variable.
+/// Get the Options and FrozenContext for legacy compute fallback with a loop variable.
 ///
-/// This creates a child context from the ExecutionContext's FrozenContext,
-/// which inherits sequences and other context fields, and adds the loop variable.
-fn create_loop_planning_context(
-	exec_ctx: &ExecutionContext,
-	param_name: &str,
-	param_value: &Value,
-) -> FrozenContext {
-	// Create a child context that inherits sequences and other context fields
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
-
-	// Add all current params from execution context
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-
-	// Add the loop variable
-	ctx.add_value(param_name.to_string(), Arc::new(param_value.clone()));
-
-	ctx.freeze()
-}
-
-/// Get the Options and create a FrozenContext for legacy compute fallback.
-///
-/// This creates a child context that includes the loop variable for proper
-/// evaluation in the legacy compute path.
+/// Creates a child context from the ExecutionContext's FrozenContext and adds
+/// the loop variable. The FrozenContext already has the correct params.
 fn get_legacy_context_with_param<'a>(
 	exec_ctx: &'a ExecutionContext,
 	param_name: &str,
@@ -94,10 +71,11 @@ fn get_legacy_context_with_param<'a>(
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
 
-	// Create a child context with the loop variable
-	let frozen = create_loop_planning_context(exec_ctx, param_name, param_value);
+	// Create a child context that adds the loop variable
+	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+	ctx.add_value(param_name.to_string(), Arc::new(param_value.clone()));
 
-	Ok((options, frozen))
+	Ok((options, ctx.freeze()))
 }
 
 /// Get the Options and FrozenContext for legacy compute fallback (without loop variable).
@@ -108,13 +86,7 @@ fn get_legacy_context(
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
 
-	// Create a child context that inherits sequences and other context fields
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-
-	Ok((options, ctx.freeze()))
+	Ok((options, exec_ctx.ctx().clone()))
 }
 
 #[async_trait]
@@ -251,14 +223,10 @@ async fn execute_foreach(
 /// falling back to legacy compute if unimplemented.
 /// This is used for the range expression before the loop starts.
 async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	// Create a planning context that inherits sequences and other fields
-	let mut planning_ctx = crate::ctx::Context::new(ctx.ctx());
-	for (name, value) in ctx.params().iter() {
-		planning_ctx.add_value(name.clone(), value.clone());
-	}
-	let frozen_ctx = planning_ctx.freeze();
+	// Use the FrozenContext directly for planning (it's the source of truth)
+	let frozen_ctx = ctx.ctx();
 
-	match try_plan_expr(expr.clone(), &frozen_ctx) {
+	match try_plan_expr(expr.clone(), frozen_ctx) {
 		Ok(plan) => {
 			// Execute the plan and collect the result
 			let stream = plan.execute(ctx)?;
@@ -288,8 +256,11 @@ async fn execute_body_expr(
 	param_name: &str,
 	param_value: &Value,
 ) -> crate::expr::FlowResult<Value> {
-	// Create a planning context that includes the loop variable
-	let frozen_ctx = create_loop_planning_context(ctx, param_name, param_value);
+	// The loop variable is already in the ExecutionContext's FrozenContext
+	// (added by with_param), so we can use it directly for planning.
+	// For the planning context, add the current loop value explicitly
+	// since it may have been updated by LET statements.
+	let frozen_ctx = ctx.ctx().clone();
 
 	match try_plan_expr(expr.clone(), &frozen_ctx) {
 		Ok(plan) => {

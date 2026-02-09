@@ -48,10 +48,7 @@ impl ScalarFunction for ApiInvoke {
 	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
 		Box::pin(async move {
 			// Check DefineApi experimental capability
-			let caps = ctx.capabilities().ok_or_else(|| Error::InvalidFunction {
-				name: "api::invoke".to_string(),
-				message: "No capabilities available".to_string(),
-			})?;
+			let caps = ctx.capabilities();
 			if !caps.allows_experimental(&ExperimentalTarget::DefineApi) {
 				return Err(Error::InvalidFunction {
 					name: "api::invoke".to_string(),

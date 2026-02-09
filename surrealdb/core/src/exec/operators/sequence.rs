@@ -43,21 +43,12 @@ pub struct SequencePlan {
 	pub block: Block,
 }
 
-/// Create a FrozenContext for planning that includes the current parameters.
+/// Get the FrozenContext for planning from the ExecutionContext.
 ///
-/// This creates a child context from the ExecutionContext's FrozenContext,
-/// which inherits sequences and other context fields needed for expression
-/// planning during block evaluation.
-fn create_planning_context(exec_ctx: &ExecutionContext) -> FrozenContext {
-	// Create a child context that inherits sequences and other context fields
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
-
-	// Add all current params from execution context (may shadow parent values)
-	for (name, value) in exec_ctx.params().iter() {
-		ctx.add_value(name.clone(), value.clone());
-	}
-
-	ctx.freeze()
+/// Since ExecutionContext's FrozenContext is the single source of truth
+/// for parameters and other context fields, we can use it directly.
+fn planning_context(exec_ctx: &ExecutionContext) -> &FrozenContext {
+	exec_ctx.ctx()
 }
 
 #[async_trait]
@@ -166,8 +157,8 @@ async fn execute_block_with_context(
 	let mut legacy_ctx: Option<FrozenContext> = None;
 
 	for expr in block.0.iter() {
-		// Create a frozen context for planning that includes current params
-		let frozen_ctx = create_planning_context(&current_ctx);
+		// Get the frozen context for planning (FrozenContext is the source of truth)
+		let frozen_ctx = planning_context(&current_ctx).clone();
 
 		// Try to plan the expression with current context
 		match try_plan_expr(expr.clone(), &frozen_ctx) {
@@ -234,32 +225,23 @@ async fn execute_block_with_context(
 
 /// Get the Options and FrozenContext for legacy compute fallback.
 ///
-/// This returns a reference to Options from the ExecutionContext and creates
-/// or reuses a FrozenContext for the legacy compute path. The FrozenContext
-/// is created as a child of the ExecutionContext's context to inherit
-/// sequences and other context fields.
+/// Since the ExecutionContext's FrozenContext is the single source of truth
+/// for parameters, we can use it directly without reconstruction.
 fn get_legacy_context<'a>(
 	exec_ctx: &'a ExecutionContext,
 	cached_ctx: &mut Option<FrozenContext>,
 ) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
-	// Get Options from ExecutionContext - required for fallback
 	let options = exec_ctx
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
 
-	// Create or reuse the FrozenContext
+	// Use or create a cached context for legacy compute
 	let frozen = if let Some(ctx) = cached_ctx.take() {
 		ctx
 	} else {
-		// Create a child context that inherits sequences and other context fields
-		let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
-		for (name, value) in exec_ctx.params().iter() {
-			ctx.add_value(name.clone(), value.clone());
-		}
-		ctx.freeze()
+		exec_ctx.ctx().clone()
 	};
 
-	// Store the context back for potential reuse
 	*cached_ctx = Some(frozen.clone());
 
 	Ok((options, frozen))

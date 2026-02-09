@@ -245,15 +245,13 @@ impl<'ctx> Planner<'ctx> {
 				} = *func_call;
 
 				macro_rules! phys_args {
-					($($arg:expr),*) => {
-						{
-							let mut phys_args = Vec::with_capacity(arguments.len());
-							for arg in arguments {
-								phys_args.push(self.physical_expr(arg)?);
-							}
-							phys_args
+					($($arg:expr),*) => {{
+						let mut phys_args = Vec::with_capacity(arguments.len());
+						for arg in arguments {
+							phys_args.push(self.physical_expr(arg)?);
 						}
-					};
+						phys_args
+					}};
 				};
 
 				match receiver {
@@ -695,10 +693,7 @@ impl<'ctx> Planner<'ctx> {
 		}) as Arc<dyn ExecOperator>)
 	}
 
-	fn plan_block(
-		&self,
-		block: crate::expr::Block,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	fn plan_block(&self, block: crate::expr::Block) -> Result<Arc<dyn ExecOperator>, Error> {
 		if block.0.is_empty() {
 			use crate::exec::physical_expr::Literal as PhysicalLiteral;
 			Ok(Arc::new(ExprPlan {

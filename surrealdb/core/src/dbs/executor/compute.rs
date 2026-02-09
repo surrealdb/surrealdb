@@ -178,34 +178,21 @@ impl ComputeExecutor {
 
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 		use crate::exec::context::{
-			DatabaseContext, ExecutionContext, NamespaceContext, Parameters, RootContext,
+			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
 		};
 
-		// Build parameters from the context values
-		// This collects all query parameters from the FrozenContext chain,
-		// excluding protected/system parameters (access, auth, token, session).
-		let params: Arc<Parameters> = Arc::new(self.ctx.collect_params());
-
-		// Extract session info from the FrozenContext
-		let session = self.extract_session_info();
-
-		// Get capabilities from the FrozenContext
-		let capabilities = Some(self.ctx.get_capabilities());
-
-		// Build the root context
+		// Build the root context.
+		// The FrozenContext is the single source of truth for params, txn,
+		// capabilities, and other context fields. We only extract auth and
+		// session info which are not trivially accessible from FrozenContext.
 		let root_ctx = RootContext {
+			ctx: self.ctx.clone(),
+			options: Some(self.opt.clone()),
 			datastore: None,
-			params,
 			cancellation: CancellationToken::new(),
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
-			txn: txn.clone(),
-			session,
-			capabilities,
-			// Include Options for fallback to legacy compute path
-			options: Some(self.opt.clone()),
-			// Include the FrozenContext for operators that need to call legacy compute methods
-			ctx: self.ctx.clone(),
+			session: self.extract_session_info(),
 		};
 
 		// Check what level of context we need

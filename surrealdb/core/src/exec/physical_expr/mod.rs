@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
-use crate::exec::context::{Parameters, SessionInfo};
+use crate::exec::context::SessionInfo;
 use crate::exec::physical_part::{PhysicalPart, PhysicalRecurseInstruction};
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
 use crate::expr::FlowResult;
@@ -146,14 +146,14 @@ impl<'a> EvalContext<'a> {
 	// Context accessors (shortcuts)
 	// =========================================================================
 
-	/// Get the transaction.
-	pub fn txn(&self) -> &Arc<Transaction> {
+	/// Get the transaction (delegates to FrozenContext).
+	pub fn txn(&self) -> Arc<Transaction> {
 		self.exec_ctx.txn()
 	}
 
-	/// Get the parameters.
-	pub fn params(&self) -> &Parameters {
-		self.exec_ctx.params()
+	/// Look up a parameter value by name (delegates to FrozenContext).
+	pub fn value(&self, key: &str) -> Option<&Value> {
+		self.exec_ctx.value(key)
 	}
 
 	/// Get the authentication context.
@@ -161,8 +161,8 @@ impl<'a> EvalContext<'a> {
 		self.exec_ctx.auth()
 	}
 
-	/// Get the capabilities (if available).
-	pub fn capabilities(&self) -> Option<&Capabilities> {
+	/// Get the capabilities as an Arc.
+	pub fn capabilities(&self) -> Arc<Capabilities> {
 		self.exec_ctx.capabilities()
 	}
 
@@ -180,13 +180,7 @@ impl<'a> EvalContext<'a> {
 		use crate::dbs::capabilities::NetTarget;
 		use crate::err::Error;
 
-		let capabilities = match self.capabilities() {
-			Some(cap) => cap,
-			None => {
-				// No capabilities means no restrictions
-				return Ok(());
-			}
-		};
+		let capabilities = self.capabilities();
 
 		// Check if the URL host is allowed
 		let host = url.host_str().ok_or_else(|| Error::InvalidUrl(url.to_string()))?;
@@ -209,23 +203,15 @@ impl<'a> EvalContext<'a> {
 	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
 		use crate::err::Error;
 
-		if let Some(caps) = self.capabilities()
-			&& !caps.allows_function_name(name)
-		{
+		if !self.capabilities().allows_function_name(name) {
 			return Err(Error::FunctionNotAllowed(name.to_string()).into());
 		}
 		Ok(())
 	}
 
-	/// Get a clone of the capabilities as an Arc.
-	///
-	/// Returns a default capabilities if none are available.
+	/// Get the capabilities as an Arc (cloned from FrozenContext).
 	pub fn get_capabilities(&self) -> Arc<Capabilities> {
-		self.exec_ctx
-			.root()
-			.capabilities
-			.clone()
-			.unwrap_or_else(|| Arc::new(Capabilities::default()))
+		self.exec_ctx.ctx().get_capabilities()
 	}
 }
 
