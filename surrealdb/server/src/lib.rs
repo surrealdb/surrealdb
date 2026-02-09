@@ -15,9 +15,6 @@
 #![deny(clippy::mem_forget)]
 
 #[macro_use]
-pub extern crate surrealdb_core;
-
-#[macro_use]
 extern crate tracing;
 
 mod cli;
@@ -39,7 +36,12 @@ use std::process::ExitCode;
 
 pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
+#[doc(inline)]
 pub use rpc::RpcState;
+#[doc(inline)]
+pub use surrealdb as sdk;
+/// Re-export `core` for convenience so embedders can `use surreal::core::...`.
+#[doc(inline)]
 pub use surrealdb_core as core;
 use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;

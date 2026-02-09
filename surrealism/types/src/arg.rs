@@ -1,7 +1,8 @@
 //! Wrapper type for serializable function arguments.
 //!
-//! This module provides [`SerializableArg`](crate::arg::SerializableArg), a newtype wrapper that bridges between
-//! types implementing [`surrealdb_types::SurrealValue`] and the serialization system.
+//! This module provides [`SerializableArg`](crate::arg::SerializableArg), a newtype wrapper that
+//! bridges between types implementing [`surrealdb_types::SurrealValue`] and the serialization
+//! system.
 
 use surrealdb_types::SurrealValue;
 

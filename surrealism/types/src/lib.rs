@@ -8,8 +8,10 @@
 //! in a way that can be implemented by any language that compiles to WebAssembly. It defines:
 //!
 //! - A binary serialization protocol ([`Serializable`](serialize::Serializable))
-//! - Memory transfer abstractions ([`Transfer`](transfer::Transfer), [`AsyncTransfer`](transfer::AsyncTransfer))
-//! - Memory management interfaces ([`MemoryController`](controller::MemoryController), [`AsyncMemoryController`](controller::AsyncMemoryController))
+//! - Memory transfer abstractions ([`Transfer`](transfer::Transfer),
+//!   [`AsyncTransfer`](transfer::AsyncTransfer))
+//! - Memory management interfaces ([`MemoryController`](controller::MemoryController),
+//!   [`AsyncMemoryController`](controller::AsyncMemoryController))
 //! - Function argument marshalling ([`Args`](args::Args))
 //!
 //! ## Feature Flags
@@ -42,7 +44,6 @@
 //!     String::receive(ptr.into(), controller).unwrap()
 //! }
 //! ```
-//!
 /// Wrapper type for function arguments that implement [`surrealdb_types::SurrealValue`].
 pub mod arg;
 
