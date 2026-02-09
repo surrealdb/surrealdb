@@ -5,8 +5,8 @@
 //! in-memory storage and local filesystem storage.
 //!
 //! The module is organized into:
-//! - [`BucketController`] - Controls bucket operations with permission checking
-//! - [`BucketsManager`] - Manages bucket connections and caching
+//! - `BucketController` - Controls bucket operations with permission checking
+//! - `BucketsManager` - Manages bucket connections and caching
 //! - [`store`] - Object store trait and implementations
 
 use std::sync::Arc;

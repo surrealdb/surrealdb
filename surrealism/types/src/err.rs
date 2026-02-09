@@ -1,6 +1,6 @@
 //! Error handling utilities for adding context to errors.
 //!
-//! This module provides the [`PrefixError`] trait, which extends [`Result`] and [`Option`]
+//! This module provides the [`PrefixError`](crate::err::PrefixError) trait, which extends [`Result`] and [`Option`]
 //! with a method to add contextual prefixes to error messages.
 
 use anyhow::Result;
