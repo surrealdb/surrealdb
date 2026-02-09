@@ -249,6 +249,7 @@ impl<'ctx> Planner<'ctx> {
 				omit: vec![],
 				is_value_source: false,
 				tempfiles: false,
+				filter_pushed: false,
 			};
 			self.plan_pipeline(base_scan, expr, config)
 		} else {

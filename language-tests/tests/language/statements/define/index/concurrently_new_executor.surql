@@ -34,7 +34,7 @@ value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: email = 'testA@surrealdb.com']\n       └────> Scan [ctx: Db] [source: `user.csv`]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: `user.csv`, predicate: email = 'testA@surrealdb.com']\n"'''
 
 [[test.results]]
 value = "[{ email: 'testA@surrealdb.com', id: `user.csv`:1 }, { email: 'testA@surrealdb.com', id: `user.csv`:2 }]"

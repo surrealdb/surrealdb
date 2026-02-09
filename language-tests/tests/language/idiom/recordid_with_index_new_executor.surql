@@ -23,16 +23,16 @@ value = "[{ id: test:{ val: 123 }, val: 456 }]"
 value = "[{ id: test:{ val: 123 }, val: 456 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: val = 456]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: val = 456]\n''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: id.val = 456]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: id.val = 456]\n''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: id.id().val = 456]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: id.id().val = 456]\n''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: record::id(id).val = 456]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: record::id(id).val = 456]\n''''
 
 */
 

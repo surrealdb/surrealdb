@@ -64,20 +64,34 @@ macro_rules! check_perm {
 ///
 /// When scanning a table, this operator can perform index selection based on
 /// the provided WHERE condition, ORDER BY clause, and WITH hints.
+///
+/// The optional `predicate`, `limit`, and `start` fields allow the planner to
+/// push the Filter, Limit, and Start operators down into the scan, reducing
+/// pipeline overhead and enabling early termination for `WHERE ... LIMIT`
+/// queries.
 #[derive(Debug, Clone)]
 pub struct Scan {
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional version timestamp for time-travel queries (VERSION clause)
 	pub(crate) version: Option<u64>,
-	/// Optional WHERE condition for index selection
+	/// Optional WHERE condition for index selection (AST form)
 	pub(crate) cond: Option<Cond>,
-	/// Optional ORDER BY for index selection
+	/// Optional ORDER BY for index selection and scan direction
 	pub(crate) order: Option<Ordering>,
 	/// Optional WITH INDEX/NOINDEX hints
 	pub(crate) with: Option<With>,
 	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
 	/// `None` means all fields are needed (SELECT *).
 	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
+	/// Compiled WHERE predicate pushed down from the Filter operator.
+	/// Applied after computed fields, before field-level permissions.
+	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
+	/// LIMIT expression pushed down from the Limit operator.
+	/// Maximum number of rows to return after filtering.
+	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
+	/// START offset expression pushed down from the Limit operator.
+	/// Number of rows to skip (after filtering) before emitting.
+	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 }
 
 #[async_trait]
@@ -87,7 +101,17 @@ impl ExecOperator for Scan {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		vec![("source".to_string(), self.source.to_sql())]
+		let mut attrs = vec![("source".to_string(), self.source.to_sql())];
+		if let Some(ref pred) = self.predicate {
+			attrs.push(("predicate".to_string(), pred.to_sql()));
+		}
+		if let Some(ref limit) = self.limit {
+			attrs.push(("limit".to_string(), limit.to_sql()));
+		}
+		if let Some(ref start) = self.start {
+			attrs.push(("offset".to_string(), start.to_sql()));
+		}
+		attrs
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -95,9 +119,19 @@ impl ExecOperator for Scan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but the source expression could contain a subquery containing a
-		// mutation.
-		self.source.access_mode()
+		// Scan is read-only, but the source expression or predicate could contain a subquery
+		// containing a mutation.
+		let mut mode = self.source.access_mode();
+		if let Some(ref pred) = self.predicate {
+			mode = mode.combine(pred.access_mode());
+		}
+		if let Some(ref limit) = self.limit {
+			mode = mode.combine(limit.access_mode());
+		}
+		if let Some(ref start) = self.start {
+			mode = mode.combine(start.access_mode());
+		}
+		mode
 	}
 
 	#[instrument(name = "Scan::execute", level = "trace", skip_all)]
@@ -118,6 +152,9 @@ impl ExecOperator for Scan {
 		let order = self.order.clone();
 		let with = self.with.clone();
 		let needed_fields = self.needed_fields.clone();
+		let predicate = self.predicate.clone();
+		let limit_expr = self.limit.clone();
+		let start_expr = self.start.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -145,6 +182,21 @@ impl ExecOperator for Scan {
 					return;
 				}
 			};
+
+			// Evaluate pushed-down LIMIT and START expressions
+			let limit_val: Option<usize> = match &limit_expr {
+				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+				None => None,
+			};
+			let start_val: usize = match &start_expr {
+				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+				None => 0,
+			};
+
+			// Early exit if limit is 0
+			if limit_val == Some(0) {
+				return;
+			}
 
 			// Check table existence and resolve SELECT permission
 			let table_def = txn
@@ -183,7 +235,20 @@ impl ExecOperator for Scan {
 			// (zero async overhead beyond the KV stream poll).
 			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
 				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty());
+				|| (check_perms && !field_state.field_permissions.is_empty())
+				|| predicate.is_some();
+
+			// Whether limit/start tracking is needed across batches
+			let has_limit = limit_val.is_some() || start_val > 0;
+
+			// For the pure fast path (no filter, no perms, no computed fields),
+			// we can push start+limit to the storage layer and skip decoding
+			// offset rows entirely.
+			let effective_storage_limit = if !needs_processing && has_limit {
+				limit_val.map(|l| start_val.saturating_add(l))
+			} else {
+				None
+			};
 
 			match rid {
 				// === POINT LOOKUP (single record by ID) ===
@@ -203,6 +268,13 @@ impl ExecOperator for Scan {
 					if check_perm!(&select_permission, &value, &ctx)? {
 						let mut batch = vec![value];
 						process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
+						// Apply predicate for point lookups
+						if let Some(ref pred) = predicate {
+							let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&batch[0]);
+							if !pred.evaluate(eval_ctx).await?.is_truthy() {
+								return;
+							}
+						}
 						yield ValueBatch { values: batch };
 					}
 				}
@@ -215,11 +287,13 @@ impl ExecOperator for Scan {
 					let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
 
 					let direction = determine_scan_direction(&order);
-					let kv_stream = txn.stream_keys_vals(beg..end, version, None, direction);
+					let kv_stream = txn.stream_keys_vals(beg..end, version, effective_storage_limit, direction);
 					let chunks = kv_stream.ready_chunks(BATCH_SIZE);
 					futures::pin_mut!(chunks);
 
 					if needs_processing {
+						let mut skipped = 0usize;
+						let mut emitted = 0usize;
 						while let Some(chunk) = chunks.next().await {
 							let mut batch = Vec::with_capacity(chunk.len());
 							for result in chunk {
@@ -227,13 +301,58 @@ impl ExecOperator for Scan {
 									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
 								batch.push(decode_record(&key, val)?);
 							}
-							filter_and_process_batch(&mut batch, &select_permission, &ctx, &field_state, check_perms).await?;
+							filter_and_process_batch(&mut batch, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
+							if has_limit && !batch.is_empty() {
+								// Apply start offset
+								if skipped < start_val {
+									let to_skip = (start_val - skipped).min(batch.len());
+									skipped += to_skip;
+									batch.drain(..to_skip);
+								}
+								// Apply limit
+								if let Some(limit) = limit_val {
+									let remaining = limit.saturating_sub(emitted);
+									if batch.len() > remaining {
+										batch.truncate(remaining);
+									}
+								}
+								emitted += batch.len();
+							}
 							if !batch.is_empty() {
 								yield ValueBatch { values: batch };
 							}
+							if limit_val.is_some_and(|l| emitted >= l) {
+								break;
+							}
+						}
+					} else if has_limit {
+						// Fast path with limit: skip before decode, stop early
+						let mut skipped = 0usize;
+						let mut emitted = 0usize;
+						while let Some(chunk) = chunks.next().await {
+							let mut batch = Vec::with_capacity(chunk.len());
+							for result in chunk {
+								let (key, val) = result
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+								if skipped < start_val {
+									skipped += 1;
+									continue; // Skip without decoding
+								}
+								if limit_val.is_some_and(|l| emitted >= l) {
+									break;
+								}
+								batch.push(decode_record(&key, val)?);
+								emitted += 1;
+							}
+							if !batch.is_empty() {
+								yield ValueBatch { values: batch };
+							}
+							if limit_val.is_some_and(|l| emitted >= l) {
+								break;
+							}
 						}
 					} else {
-						// Fast path: no permission filtering, no computed fields
+						// Fast path: no filtering, no limit
 						while let Some(chunk) = chunks.next().await {
 							let mut batch = Vec::with_capacity(chunk.len());
 							for result in chunk {
@@ -269,10 +388,32 @@ impl ExecOperator for Scan {
 						Some(AccessPath::BTreeScan { index_ref, access, direction }) if index_ref.cols.len() == 1 => {
 							let operator = IndexScan { index_ref, access, direction, table_name: table_name.clone() };
 							let mut stream = operator.execute(&ctx)?;
+							let mut skipped = 0usize;
+							let mut emitted = 0usize;
 							while let Some(batch_result) = stream.next().await {
 								let mut batch = batch_result?;
-								process_batch(&ctx, &field_state, check_perms, &mut batch.values).await?;
-								yield batch;
+								// Apply predicate as residual filter + computed fields
+								filter_and_process_batch(&mut batch.values, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
+								if has_limit && !batch.values.is_empty() {
+									if skipped < start_val {
+										let to_skip = (start_val - skipped).min(batch.values.len());
+										skipped += to_skip;
+										batch.values.drain(..to_skip);
+									}
+									if let Some(limit) = limit_val {
+										let remaining = limit.saturating_sub(emitted);
+										if batch.values.len() > remaining {
+											batch.values.truncate(remaining);
+										}
+									}
+									emitted += batch.values.len();
+								}
+								if !batch.values.is_empty() {
+									yield batch;
+								}
+								if limit_val.is_some_and(|l| emitted >= l) {
+									break;
+								}
 							}
 						}
 
@@ -280,10 +421,32 @@ impl ExecOperator for Scan {
 						Some(AccessPath::FullTextSearch { index_ref, query, operator }) => {
 							let ft_op = FullTextScan { index_ref, query, operator, table_name: table_name.clone() };
 							let mut stream = ft_op.execute(&ctx)?;
+							let mut skipped = 0usize;
+							let mut emitted = 0usize;
 							while let Some(batch_result) = stream.next().await {
 								let mut batch = batch_result?;
-								process_batch(&ctx, &field_state, check_perms, &mut batch.values).await?;
-								yield batch;
+								// Apply predicate as residual filter + computed fields
+								filter_and_process_batch(&mut batch.values, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
+								if has_limit && !batch.values.is_empty() {
+									if skipped < start_val {
+										let to_skip = (start_val - skipped).min(batch.values.len());
+										skipped += to_skip;
+										batch.values.drain(..to_skip);
+									}
+									if let Some(limit) = limit_val {
+										let remaining = limit.saturating_sub(emitted);
+										if batch.values.len() > remaining {
+											batch.values.truncate(remaining);
+										}
+									}
+									emitted += batch.values.len();
+								}
+								if !batch.values.is_empty() {
+									yield batch;
+								}
+								if limit_val.is_some_and(|l| emitted >= l) {
+									break;
+								}
 							}
 						}
 
@@ -292,11 +455,13 @@ impl ExecOperator for Scan {
 							let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
 							let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
 
-							let kv_stream = txn.stream_keys_vals(beg..end, version, None, direction);
+							let kv_stream = txn.stream_keys_vals(beg..end, version, effective_storage_limit, direction);
 							let chunks = kv_stream.ready_chunks(BATCH_SIZE);
 							futures::pin_mut!(chunks);
 
 							if needs_processing {
+								let mut skipped = 0usize;
+								let mut emitted = 0usize;
 								while let Some(chunk) = chunks.next().await {
 									let mut batch = Vec::with_capacity(chunk.len());
 									for result in chunk {
@@ -304,13 +469,55 @@ impl ExecOperator for Scan {
 											.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
 										batch.push(decode_record(&key, val)?);
 									}
-									filter_and_process_batch(&mut batch, &select_permission, &ctx, &field_state, check_perms).await?;
+									filter_and_process_batch(&mut batch, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
+									if has_limit && !batch.is_empty() {
+										if skipped < start_val {
+											let to_skip = (start_val - skipped).min(batch.len());
+											skipped += to_skip;
+											batch.drain(..to_skip);
+										}
+										if let Some(limit) = limit_val {
+											let remaining = limit.saturating_sub(emitted);
+											if batch.len() > remaining {
+												batch.truncate(remaining);
+											}
+										}
+										emitted += batch.len();
+									}
 									if !batch.is_empty() {
 										yield ValueBatch { values: batch };
 									}
+									if limit_val.is_some_and(|l| emitted >= l) {
+										break;
+									}
+								}
+							} else if has_limit {
+								// Fast path with limit: skip before decode, stop early
+								let mut skipped = 0usize;
+								let mut emitted = 0usize;
+								while let Some(chunk) = chunks.next().await {
+									let mut batch = Vec::with_capacity(chunk.len());
+									for result in chunk {
+										let (key, val) = result?;
+										if skipped < start_val {
+											skipped += 1;
+											continue; // Skip without decoding
+										}
+										if limit_val.is_some_and(|l| emitted >= l) {
+											break;
+										}
+										batch.push(decode_record(&key, val)?);
+										emitted += 1;
+									}
+									if !batch.is_empty() {
+										yield ValueBatch { values: batch };
+									}
+									if limit_val.is_some_and(|l| emitted >= l) {
+										break;
+									}
 								}
 							} else {
-								// Fast path: no permission filtering, no computed fields
+								// Fast path: no filtering, no limit
 								while let Some(chunk) = chunks.next().await {
 									let mut batch = Vec::with_capacity(chunk.len());
 									for result in chunk {
@@ -348,12 +555,13 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 /// Combined single-pass filter and process for a batch of decoded values.
 ///
 /// Performs table-level permission filtering, computed field evaluation,
-/// and field-level permission filtering in a single iteration over the batch.
-/// Records that fail the table-level permission check are skipped entirely,
-/// avoiding wasted compute on records that will be filtered out.
+/// WHERE predicate filtering, and field-level permission filtering in a
+/// single iteration over the batch. Records that fail any check are skipped
+/// entirely, avoiding wasted compute on records that will be filtered out.
 async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
+	predicate: Option<&Arc<dyn PhysicalExpr>>,
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	check_perms: bool,
@@ -369,8 +577,15 @@ async fn filter_and_process_batch(
 		if write_idx != read_idx {
 			batch.swap(write_idx, read_idx);
 		}
-		// Process in-place: computed fields + field permissions
+		// Process in-place: computed fields first (predicate may reference them)
 		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
+		// Apply WHERE predicate (after computed fields, before field perms)
+		if let Some(pred) = predicate {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&batch[write_idx]);
+			if !pred.evaluate(eval_ctx).await?.is_truthy() {
+				continue;
+			}
+		}
 		if check_perms {
 			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
 		}
@@ -423,6 +638,35 @@ fn range_end_key(
 			key.push(0x00);
 			Ok(key)
 		}
+	}
+}
+
+/// Evaluate a limit or start expression to a usize value.
+async fn eval_limit_expr(
+	expr: &dyn PhysicalExpr,
+	ctx: &ExecutionContext,
+) -> Result<usize, ControlFlow> {
+	let eval_ctx = EvalContext::from_exec_ctx(ctx);
+	let value = expr
+		.evaluate(eval_ctx)
+		.await
+		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT/START: {e}")))?;
+	match &value {
+		Value::Number(n) => {
+			let i = (*n).to_int();
+			if i >= 0 {
+				Ok(i as usize)
+			} else {
+				Err(ControlFlow::Err(anyhow::anyhow!(
+					"LIMIT/START must be a non-negative integer, got {i}"
+				)))
+			}
+		}
+		Value::None | Value::Null => Ok(0),
+		_ => Err(ControlFlow::Err(anyhow::anyhow!(
+			"LIMIT/START must be an integer, got {:?}",
+			value
+		))),
 	}
 }
 
@@ -697,6 +941,9 @@ mod tests {
 				None
 			},
 			needed_fields: None,
+			predicate: None,
+			limit: None,
+			start: None,
 		}
 	}
 

@@ -15,7 +15,7 @@ value = "{ id: test:1, num: 123 }"
 value = "[{ id: test:1, num: 123 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: num = 123]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: num = 123]\n''''
 
 [env]
 namespace = "test"

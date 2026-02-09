@@ -9,19 +9,19 @@ value = "NONE"
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com']\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com']\n"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: 'domain.com' INSIDE email]\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: 'domain.com' INSIDE email]\n"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com']\n       └────> Scan [ctx: Db] [source: test]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com']\n"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"

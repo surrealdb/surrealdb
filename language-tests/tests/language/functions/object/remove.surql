@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function object::remove(). '9' cannot be used as a key. Please use a string instead."
+error = "Incorrect arguments for function remove(). '9' cannot be used as a key. Please use a string instead."
 
 [[test.results]]
 value = "{ b: 'ten', c: 11 }"

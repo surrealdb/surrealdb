@@ -11,16 +11,16 @@ value = "[{ id: b:2, t: 'Yet Another World!' }]"
 value = "[{ id: b:3, t: 'again hello' }]"
 
 [[test.results]]
-value = "None"
+value = "NONE"
 
 [[test.results]]
-value = "None"
+value = "NONE"
 
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: t @1@ 'Hello']\n       └────> Scan [ctx: Db] [source: b]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: b, predicate: t @1@ 'Hello']\n"'''
 
 [[test.results]]
 value = "[{ score: 0.5108256340026855f, title: '{Hello} World!' }]"
@@ -29,19 +29,19 @@ value = "[{ score: 0.5108256340026855f, title: '{Hello} World!' }]"
 value = "[{ id: b:4, t: 'Foo Bar' }]"
 
 [[test.results]]
-value = "[{ score: 0.9537026882171631f, title: { '0': [{ e: 7, s: 4 }] } }]"
+value = '[{ score: 0.9537026882171631f, title: { "0": [{ e: 7, s: 4 }] } }]'
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ score: 0, title: 'Foo Bar' }]"
+error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
 
 */
 

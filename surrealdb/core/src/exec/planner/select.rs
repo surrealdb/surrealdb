@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use super::Planner;
 use super::util::{
-	all_value_sources, check_forbidden_group_by_params, contains_knn_operator,
-	contains_non_indexable_matches, derive_field_name, extract_matches_context, extract_version,
-	get_effective_limit_literal, idiom_to_field_name, idiom_to_field_path,
+	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params,
+	contains_knn_operator, contains_non_indexable_matches, derive_field_name,
+	extract_matches_context, extract_version, get_effective_limit_literal, idiom_to_field_name,
+	idiom_to_field_path,
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
@@ -40,6 +41,10 @@ pub(crate) struct SelectPipelineConfig {
 	pub omit: Vec<Expr>,
 	pub is_value_source: bool,
 	pub tempfiles: bool,
+	/// True when the WHERE predicate has been pushed into the Scan operator.
+	/// Currently informational; the actual guard is `cond: None` in the config.
+	#[allow(dead_code)]
+	pub filter_pushed: bool,
 }
 
 impl<'ctx> Planner<'ctx> {
@@ -117,6 +122,10 @@ impl<'ctx> Planner<'ctx> {
 				std::borrow::Cow::Borrowed(self.ctx)
 			};
 
+		// Create the planning planner early so we can compile the predicate
+		// before creating sources (needed for filter pushdown into Scan).
+		let planning_planner = Planner::new(&planning_ctx);
+
 		// Compute which fields are needed by the query for selective computed field evaluation
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
@@ -127,37 +136,94 @@ impl<'ctx> Planner<'ctx> {
 			split.as_ref(),
 		);
 
-		let source = self.plan_sources(
+		// Determine if the source will be a single Scan operator.
+		// Filter pushdown: always push the WHERE predicate into Scan when
+		// the source is a single Scan. The cond (AST) stays for index selection.
+		let source_is_single_scan = what.len() == 1
+			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. })
+			|| (what.len() == 1
+				&& matches!(&what[0], Expr::Param(p) if {
+					matches!(self.ctx.value(p.as_str()), Some(crate::val::Value::Table(_)))
+				}));
+
+		// Compile predicate for pushdown into Scan
+		let scan_predicate = if source_is_single_scan {
+			cond.as_ref().map(|c| planning_planner.physical_expr(c.0.clone())).transpose()?
+		} else {
+			None
+		};
+
+		// Determine limit pushdown eligibility:
+		// No SPLIT, no GROUP BY, and ORDER BY must be scan-compatible (or absent).
+		// WHERE does NOT block limit pushdown since the filter is inside Scan.
+		let push_limit = source_is_single_scan
+			&& limit.is_some()
+			&& can_push_limit_to_scan(&split, &group, &order);
+
+		// Compile limit/start for pushdown
+		let (scan_limit, scan_start) = if push_limit {
+			(
+				limit.as_ref().map(|l| planning_planner.physical_expr(l.0.clone())).transpose()?,
+				start.as_ref().map(|s| planning_planner.physical_expr(s.0.clone())).transpose()?,
+			)
+		} else {
+			(None, None)
+		};
+
+		let source = planning_planner.plan_sources(
 			what,
 			version,
 			cond.as_ref(),
 			order.as_ref(),
 			with.as_ref(),
 			needed_fields,
+			scan_predicate,
+			scan_limit,
+			scan_start,
 		)?;
 
+		// Build pipeline config. When pushdown is active, clear the corresponding
+		// fields so plan_pipeline does not create redundant operators.
+		let filter_pushed = source_is_single_scan && cond.is_some();
 		let config = SelectPipelineConfig {
-			cond,
+			cond: if source_is_single_scan {
+				None
+			} else {
+				cond
+			},
 			split,
 			group,
-			order,
-			limit,
-			start,
+			// Clear order when limit is pushed and order matches scan direction
+			// (Sort would be redundant since Scan already scans in the right order)
+			order: if push_limit {
+				None
+			} else {
+				order
+			},
+			limit: if push_limit {
+				None
+			} else {
+				limit
+			},
+			start: if push_limit {
+				None
+			} else {
+				start
+			},
 			omit,
 			is_value_source,
 			tempfiles,
+			filter_pushed,
 		};
 
-		// Use the planning context (with MatchesContext) for expression planning
-		let planning_planner = Planner::new(&planning_ctx);
 		let projected = planning_planner.plan_pipeline(source, Some(fields), config)?;
 
-		let fetched = self.plan_fetch(fetch, projected)?;
+		let fetched = planning_planner.plan_fetch(fetch, projected)?;
 
 		let timed = match timeout {
 			Expr::Literal(Literal::None) => fetched,
 			timeout_expr => {
-				let timeout_phys = self.physical_expr(timeout_expr)?;
+				let timeout_phys = planning_planner.physical_expr(timeout_expr)?;
 				Arc::new(Timeout {
 					input: fetched,
 					timeout: Some(timeout_phys),
@@ -192,6 +258,7 @@ impl<'ctx> Planner<'ctx> {
 			omit,
 			is_value_source,
 			tempfiles,
+			filter_pushed: _,
 		} = config;
 
 		let filtered = if let Some(cond) = cond {
@@ -282,6 +349,7 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan the FROM sources — handles multiple targets with Union.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn plan_sources(
 		&self,
 		what: Vec<Expr>,
@@ -290,6 +358,9 @@ impl<'ctx> Planner<'ctx> {
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
 		needed_fields: Option<std::collections::HashSet<String>>,
+		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		if what.is_empty() {
 			return Err(Error::Query {
@@ -299,7 +370,17 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut source_plans = Vec::with_capacity(what.len());
 		for expr in what {
-			let plan = self.plan_source(expr, version, cond, order, with, needed_fields.clone())?;
+			let plan = self.plan_source(
+				expr,
+				version,
+				cond,
+				order,
+				with,
+				needed_fields.clone(),
+				scan_predicate.clone(),
+				scan_limit.clone(),
+				scan_start.clone(),
+			)?;
 			source_plans.push(plan);
 		}
 
@@ -313,6 +394,7 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan a single FROM source.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn plan_source(
 		&self,
 		expr: Expr,
@@ -321,6 +403,9 @@ impl<'ctx> Planner<'ctx> {
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
 		needed_fields: Option<std::collections::HashSet<String>>,
+		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::val::Value;
 
@@ -334,6 +419,9 @@ impl<'ctx> Planner<'ctx> {
 					order: order.cloned(),
 					with: with.cloned(),
 					needed_fields,
+					predicate: scan_predicate,
+					limit: scan_limit,
+					start: scan_start,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -348,6 +436,9 @@ impl<'ctx> Planner<'ctx> {
 					order: None,
 					with: None,
 					needed_fields,
+					predicate: None,
+					limit: None,
+					start: None,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -370,6 +461,9 @@ impl<'ctx> Planner<'ctx> {
 						order: order.cloned(),
 						with: with.cloned(),
 						needed_fields,
+						predicate: scan_predicate,
+						limit: scan_limit,
+						start: scan_start,
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
@@ -381,6 +475,9 @@ impl<'ctx> Planner<'ctx> {
 						order: None,
 						with: None,
 						needed_fields,
+						predicate: None,
+						limit: None,
+						start: None,
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
@@ -400,6 +497,9 @@ impl<'ctx> Planner<'ctx> {
 					order: order.cloned(),
 					with: with.cloned(),
 					needed_fields,
+					predicate: scan_predicate,
+					limit: scan_limit,
+					start: scan_start,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -414,6 +514,9 @@ impl<'ctx> Planner<'ctx> {
 					order: order.cloned(),
 					with: with.cloned(),
 					needed_fields,
+					predicate: scan_predicate,
+					limit: scan_limit,
+					start: scan_start,
 				}) as Arc<dyn ExecOperator>)
 			}
 

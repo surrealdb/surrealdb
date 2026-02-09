@@ -440,6 +440,42 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 }
 
 // ============================================================================
+// Pushdown Eligibility
+// ============================================================================
+
+/// Check if ORDER BY is compatible with the natural KV scan direction.
+///
+/// Returns `true` when ORDER BY is absent, or is exactly `id ASC` or `id DESC`
+/// with no COLLATE/NUMERIC modifiers. In these cases the scan already produces
+/// rows in the requested order and no separate Sort operator is needed.
+pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Ordering>) -> bool {
+	use crate::expr::order::Ordering;
+	match order {
+		None => true,
+		Some(Ordering::Random) => false,
+		Some(Ordering::Order(list)) => {
+			list.0.len() == 1 && list.0[0].value.is_id() && !list.0[0].collate && !list.0[0].numeric
+		}
+	}
+}
+
+/// Check if LIMIT/START can be pushed down into the Scan operator.
+///
+/// This is safe when no pipeline operator between Scan and Limit changes
+/// row cardinality. Note that WHERE does NOT block pushdown because the
+/// filter predicate is also pushed into Scan.
+pub(super) fn can_push_limit_to_scan(
+	split: &Option<crate::expr::split::Splits>,
+	group: &Option<crate::expr::group::Groups>,
+	order: &Option<crate::expr::order::Ordering>,
+) -> bool {
+	if split.is_some() || group.is_some() {
+		return false;
+	}
+	order_is_scan_compatible(order)
+}
+
+// ============================================================================
 // LIMIT Helpers
 // ============================================================================
 

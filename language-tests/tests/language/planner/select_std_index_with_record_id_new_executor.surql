@@ -11,7 +11,7 @@ value = "[{ id: t:[3, o:1] }]"
 value = "[{ id: t:[3, o:1] }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: id[1] = o:1 AND b = 2025]\n       └────> Scan [ctx: Db] [source: t]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: id[1] = o:1 AND b = 2025]\n''''
 
 [[test.results]]
 value = "[{ id: t:[4, o:2] }]"
@@ -20,7 +20,7 @@ value = "[{ id: t:[4, o:2] }]"
 value = "[{ id: t:[4, o:2] }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: id[1] = o:2 AND b > 2022]\n       └────> Scan [ctx: Db] [source: t]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: id[1] = o:2 AND b > 2022]\n''''
 
 */
 

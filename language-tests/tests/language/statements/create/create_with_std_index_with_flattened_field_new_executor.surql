@@ -11,10 +11,10 @@ value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }]"
 value = "[{ id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: marks.*.mark = 40]\n       └────> Scan [ctx: Db] [source: student]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.mark = 40]\n''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: 40 INSIDE marks.*.mark]\n       └────> Scan [ctx: Db] [source: student]\n"'''
+value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: student, predicate: 40 INSIDE marks.*.mark]\n''''
 
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"

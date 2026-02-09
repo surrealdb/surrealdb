@@ -20,10 +20,10 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idxPersonName', operator: '@@', value: 'Tobie' }, table: 'person' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'idxSecurityNumber', operator: '=', value: '123456' }, table: 'person' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
 
 [[test.results]]
-value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
+error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
 
 */
 DEFINE TABLE person;

@@ -11,7 +11,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Filter [ctx: Db] [predicate: content @1@ 'Hello Bãr']\n       └────> Scan [ctx: Db] [source: blog]\n"'''
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: blog, predicate: content @1@ 'Hello Bãr']\n"'''
 
 [[test.results]]
 value = "[{ content: ['<em>Hello</em> World!', 'Be Bop', 'Foo <em>Bãr</em>'], id: blog:1 }]"

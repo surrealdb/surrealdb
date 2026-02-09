@@ -366,6 +366,9 @@ mod tests {
 			order: None,
 			with: None,
 			needed_fields: None,
+			predicate: None,
+			limit: None,
+			start: None,
 		});
 
 		let fetch = Fetch {
