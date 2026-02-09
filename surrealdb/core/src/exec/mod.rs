@@ -53,6 +53,7 @@ pub(crate) mod function;
 pub(crate) mod index;
 pub(crate) mod operators;
 pub(crate) mod permission;
+pub(crate) mod parts;
 pub(crate) mod physical_expr;
 pub(crate) mod physical_part;
 pub(crate) mod planner;

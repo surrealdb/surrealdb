@@ -1,8 +1,8 @@
 //! Physical representation of idiom parts for streaming execution.
 //!
-//! This module defines `PhysicalPart`, the physical execution equivalent of `expr::Part`.
-//! Each part variant is designed for efficient evaluation within the streaming execution
-//! context, without using the legacy `compute()` methods.
+//! DEPRECATED: This module is superseded by `crate::exec::parts`. It is kept temporarily
+//! for backward compatibility but all types are now dead code.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 

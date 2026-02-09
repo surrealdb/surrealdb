@@ -1,16 +1,20 @@
 //! Idiom and part conversion for the planner.
 //!
-//! Converts SurrealQL idiom AST nodes to physical parts for runtime evaluation.
+//! Converts SurrealQL idiom AST nodes to physical part expressions for runtime evaluation.
+//! Each part is an `Arc<dyn PhysicalExpr>` that reads its input from `ctx.current_value`.
 
 use std::sync::Arc;
 
 use super::Planner;
 use crate::err::Error;
-use crate::exec::physical_expr::IdiomExpr;
-use crate::exec::physical_part::{
-	PhysicalDestructurePart, PhysicalPart, PhysicalRecurse, PhysicalRecurseInstruction,
+use crate::exec::parts::{
+	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, FieldPart, FirstPart,
+	FlattenPart, IndexPart, LastPart, LookupDirection, LookupPart, MethodPart, OptionalChainPart,
+	PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
 };
-use crate::expr::part::{DestructurePart, Part, RecurseInstruction};
+use crate::exec::physical_expr::IdiomExpr;
+use crate::exec::PhysicalExpr;
+use crate::expr::part::{DestructurePart as AstDestructurePart, Part, RecurseInstruction};
 
 // ============================================================================
 // impl Planner — Idiom Conversion
@@ -24,7 +28,7 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn convert_idiom(
 		&self,
 		idiom: crate::expr::idiom::Idiom,
-	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+	) -> Result<Arc<dyn PhysicalExpr>, Error> {
 		use surrealdb_types::ToSql;
 
 		// Pre-compute the display string before consuming the idiom's parts
@@ -45,15 +49,23 @@ impl<'ctx> Planner<'ctx> {
 		Ok(Arc::new(IdiomExpr::new(display, None, physical_parts)))
 	}
 
-	/// Convert idiom parts to physical parts.
+	/// Convert idiom parts to physical part expressions.
 	///
 	/// When a `Part::Recurse` has no explicit inner path, all remaining parts
 	/// after the recurse are absorbed as the recursion's inner path.
-	pub(crate) fn convert_parts(&self, parts: Vec<Part>) -> Result<Vec<PhysicalPart>, Error> {
-		let mut physical_parts = Vec::with_capacity(parts.len());
+	///
+	/// This function also handles two planner-time responsibilities:
+	/// 1. Inserts `FlattenPart` between consecutive `LookupPart`/`WherePart` pairs.
+	/// 2. Wraps remaining parts in `OptionalChainPart` when encountering `Part::Optional`.
+	pub(crate) fn convert_parts(
+		&self,
+		parts: Vec<Part>,
+	) -> Result<Vec<Arc<dyn PhysicalExpr>>, Error> {
+		let mut converted = Vec::with_capacity(parts.len());
 		let mut iter = parts.into_iter();
 
 		while let Some(part) = iter.next() {
+			// Handle implicit recursion (Recurse with no inner path absorbs remaining parts)
 			if let Part::Recurse(recurse, None, instruction) = part {
 				let (min_depth, max_depth) = match recurse {
 					crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
@@ -61,51 +73,77 @@ impl<'ctx> Planner<'ctx> {
 				};
 
 				let remaining: Vec<Part> = iter.collect();
+				let has_repeat_recurse = ast_contains_repeat_recurse(&remaining);
 				let path = self.convert_parts(remaining)?;
 				let inclusive = is_inclusive_recurse(&instruction);
 				let instr = self.convert_recurse_instruction(instruction)?;
-				let has_repeat_recurse = contains_repeat_recurse(&path);
 
-				physical_parts.push(PhysicalPart::Recurse(PhysicalRecurse {
+				converted.push(Arc::new(RecursePart {
 					min_depth,
 					max_depth,
 					path,
 					instruction: instr,
 					inclusive,
 					has_repeat_recurse,
-				}));
+				}) as Arc<dyn PhysicalExpr>);
 
 				break;
 			}
 
+			// Handle optional chaining -- wrap all remaining parts in OptionalChainPart
+			if matches!(part, Part::Optional) {
+				let remaining: Vec<Part> = iter.collect();
+				let tail = self.convert_parts(remaining)?;
+				converted.push(Arc::new(OptionalChainPart {
+					tail,
+				}) as Arc<dyn PhysicalExpr>);
+				break;
+			}
+
 			let physical_part = self.convert_part(part)?;
-			physical_parts.push(physical_part);
+			converted.push(physical_part);
 		}
 
-		Ok(physical_parts)
+		// Insert FlattenPart between consecutive Lookup and Lookup/Where pairs.
+		// This is a planner-time responsibility that replaces the runtime introspection
+		// that was previously done in IdiomExpr's evaluation loop.
+		let converted = insert_auto_flattens(converted);
+
+		Ok(converted)
 	}
 
-	/// Convert a single `Part` to a `PhysicalPart`.
-	pub(crate) fn convert_part(&self, part: Part) -> Result<PhysicalPart, Error> {
-		use crate::exec::physical_part::{LookupDirection, PhysicalLookup};
-
+	/// Convert a single `Part` to an `Arc<dyn PhysicalExpr>`.
+	pub(crate) fn convert_part(&self, part: Part) -> Result<Arc<dyn PhysicalExpr>, Error> {
 		match part {
-			Part::Field(name) => Ok(PhysicalPart::Field(name)),
+			Part::Field(name) => Ok(Arc::new(FieldPart {
+				name,
+			})),
 
 			Part::Value(expr) => {
 				let phys_expr = self.physical_expr(expr)?;
-				Ok(PhysicalPart::Index(phys_expr))
+				Ok(Arc::new(IndexPart {
+					expr: phys_expr,
+				}))
 			}
 
-			Part::All => Ok(PhysicalPart::All),
-			Part::Flatten => Ok(PhysicalPart::Flatten),
-			Part::First => Ok(PhysicalPart::First),
-			Part::Last => Ok(PhysicalPart::Last),
-			Part::Optional => Ok(PhysicalPart::Optional),
+			Part::All => Ok(Arc::new(AllPart)),
+			Part::Flatten => Ok(Arc::new(FlattenPart)),
+			Part::First => Ok(Arc::new(FirstPart)),
+			Part::Last => Ok(Arc::new(LastPart)),
+
+			Part::Optional => {
+				// Standalone optional without remaining parts -- should not happen
+				// normally because convert_parts handles it, but handle gracefully.
+				Ok(Arc::new(OptionalChainPart {
+					tail: vec![],
+				}))
+			}
 
 			Part::Where(expr) => {
 				let phys_expr = self.physical_expr(expr)?;
-				Ok(PhysicalPart::Where(phys_expr))
+				Ok(Arc::new(WherePart {
+					predicate: phys_expr,
+				}))
 			}
 
 			Part::Method(name, args) => {
@@ -115,20 +153,22 @@ impl<'ctx> Planner<'ctx> {
 				}
 				let registry = self.function_registry();
 				match registry.get_method(&name) {
-					Some(descriptor) => Ok(PhysicalPart::Method {
+					Some(descriptor) => Ok(Arc::new(MethodPart {
 						descriptor: descriptor.clone(),
 						args: phys_args,
-					}),
-					None => Ok(PhysicalPart::ClosureFieldCall {
+					})),
+					None => Ok(Arc::new(ClosureFieldCallPart {
 						field: name,
 						args: phys_args,
-					}),
+					})),
 				}
 			}
 
 			Part::Destructure(parts) => {
-				let phys_parts = self.convert_destructure(parts)?;
-				Ok(PhysicalPart::Destructure(phys_parts))
+				let fields = self.convert_destructure(parts)?;
+				Ok(Arc::new(DestructurePart {
+					fields,
+				}))
 			}
 
 			Part::Start(_) => Err(Error::Unimplemented(
@@ -160,7 +200,7 @@ impl<'ctx> Planner<'ctx> {
 					needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
 				let extract_id = needs_full_records && !needs_full_pipeline;
 				let plan = self.plan_lookup(lookup)?;
-				Ok(PhysicalPart::Lookup(PhysicalLookup {
+				Ok(Arc::new(LookupPart {
 					direction,
 					edge_tables,
 					plan,
@@ -174,17 +214,18 @@ impl<'ctx> Planner<'ctx> {
 					crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
 				};
 
-				let path = if let Some(p) = inner_path {
-					self.convert_parts(p.0)?
+				let (path, has_repeat_recurse) = if let Some(p) = inner_path {
+					let has_rr = ast_contains_repeat_recurse(&p.0);
+					let converted = self.convert_parts(p.0)?;
+					(converted, has_rr)
 				} else {
-					vec![]
+					(vec![], false)
 				};
 
 				let inclusive = is_inclusive_recurse(&instruction);
 				let instr = self.convert_recurse_instruction(instruction)?;
-				let has_repeat_recurse = contains_repeat_recurse(&path);
 
-				Ok(PhysicalPart::Recurse(PhysicalRecurse {
+				Ok(Arc::new(RecursePart {
 					min_depth,
 					max_depth,
 					path,
@@ -194,42 +235,44 @@ impl<'ctx> Planner<'ctx> {
 				}))
 			}
 
-			Part::Doc => Ok(PhysicalPart::Field("id".to_string())),
+			Part::Doc => Ok(Arc::new(FieldPart {
+				name: "id".to_string(),
+			})),
 
-			Part::RepeatRecurse => Ok(PhysicalPart::RepeatRecurse),
+			Part::RepeatRecurse => Ok(Arc::new(RepeatRecursePart)),
 		}
 	}
 
-	/// Convert destructure parts to physical destructure parts.
+	/// Convert destructure parts to physical destructure fields.
 	pub(crate) fn convert_destructure(
 		&self,
-		parts: Vec<DestructurePart>,
-	) -> Result<Vec<PhysicalDestructurePart>, Error> {
-		let mut physical_parts = Vec::with_capacity(parts.len());
+		parts: Vec<AstDestructurePart>,
+	) -> Result<Vec<DestructureField>, Error> {
+		let mut fields = Vec::with_capacity(parts.len());
 
 		for part in parts {
-			let phys_part = match part {
-				DestructurePart::All(field) => PhysicalDestructurePart::All(field),
-				DestructurePart::Field(field) => PhysicalDestructurePart::Field(field),
-				DestructurePart::Aliased(field, idiom) => {
+			let field = match part {
+				AstDestructurePart::All(name) => DestructureField::All(name),
+				AstDestructurePart::Field(name) => DestructureField::Field(name),
+				AstDestructurePart::Aliased(name, idiom) => {
 					let path = self.convert_parts(idiom.0)?;
-					PhysicalDestructurePart::Aliased {
-						field,
+					DestructureField::Aliased {
+						field: name,
 						path,
 					}
 				}
-				DestructurePart::Destructure(field, nested) => {
-					let nested_parts = self.convert_destructure(nested)?;
-					PhysicalDestructurePart::Nested {
-						field,
-						parts: nested_parts,
+				AstDestructurePart::Destructure(name, nested) => {
+					let nested_fields = self.convert_destructure(nested)?;
+					DestructureField::Nested {
+						field: name,
+						parts: nested_fields,
 					}
 				}
 			};
-			physical_parts.push(phys_part);
+			fields.push(field);
 		}
 
-		Ok(physical_parts)
+		Ok(fields)
 	}
 
 	/// Convert a `RecurseInstruction` to a `PhysicalRecurseInstruction`.
@@ -279,34 +322,50 @@ fn is_inclusive_recurse(instruction: &Option<RecurseInstruction>) -> bool {
 	)
 }
 
-/// Check if a slice of physical parts contains a `RepeatRecurse` marker at any nesting level.
-pub(super) fn contains_repeat_recurse(parts: &[PhysicalPart]) -> bool {
+/// Insert `FlattenPart` between consecutive `LookupPart` and `LookupPart`/`WherePart` pairs.
+///
+/// This is a planner-time transformation that replaces the runtime introspection
+/// that was previously done in `IdiomExpr`'s evaluation loop and `evaluate_physical_path`.
+fn insert_auto_flattens(
+	parts: Vec<Arc<dyn PhysicalExpr>>,
+) -> Vec<Arc<dyn PhysicalExpr>> {
+	if parts.len() < 2 {
+		return parts;
+	}
+
+	let mut result = Vec::with_capacity(parts.len() * 2);
+	for i in 0..parts.len() {
+		result.push(parts[i].clone());
+		if parts[i].name() == "Lookup" {
+			if let Some(next) = parts.get(i + 1) {
+				if next.name() == "Lookup" || next.name() == "Where" {
+					result.push(Arc::new(FlattenPart) as Arc<dyn PhysicalExpr>);
+				}
+			}
+		}
+	}
+	result
+}
+
+/// Check if a slice of AST parts contains a `RepeatRecurse` marker at any nesting level.
+///
+/// This operates on the AST representation (before conversion to PhysicalExpr)
+/// so it has full access to the part structure without needing downcasting.
+fn ast_contains_repeat_recurse(parts: &[Part]) -> bool {
 	for part in parts {
 		match part {
-			PhysicalPart::RepeatRecurse => return true,
-			PhysicalPart::Destructure(dest_parts) => {
+			Part::RepeatRecurse => return true,
+			Part::Destructure(dest_parts) => {
 				for dp in dest_parts {
-					if let PhysicalDestructurePart::Aliased {
-						path,
-						..
-					} = dp
-					{
-						if contains_repeat_recurse(path) {
+					if let AstDestructurePart::Aliased(_, idiom) = dp {
+						if ast_contains_repeat_recurse(&idiom.0) {
 							return true;
 						}
 					}
-					if let PhysicalDestructurePart::Nested {
-						parts: nested,
-						..
-					} = dp
-					{
+					if let AstDestructurePart::Destructure(_, nested) = dp {
 						for np in nested {
-							if let PhysicalDestructurePart::Aliased {
-								path,
-								..
-							} = np
-							{
-								if contains_repeat_recurse(path) {
+							if let AstDestructurePart::Aliased(_, idiom) = np {
+								if ast_contains_repeat_recurse(&idiom.0) {
 									return true;
 								}
 							}
@@ -314,8 +373,8 @@ pub(super) fn contains_repeat_recurse(parts: &[PhysicalPart]) -> bool {
 					}
 				}
 			}
-			PhysicalPart::Recurse(recurse) => {
-				if contains_repeat_recurse(&recurse.path) {
+			Part::Recurse(_, Some(inner_path), _) => {
+				if ast_contains_repeat_recurse(&inner_path.0) {
 					return true;
 				}
 			}

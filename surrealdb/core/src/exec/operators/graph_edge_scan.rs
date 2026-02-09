@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
-use crate::exec::physical_part::LookupDirection;
+use crate::exec::parts::LookupDirection;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	PhysicalExpr, ValueBatch, ValueBatchStream,

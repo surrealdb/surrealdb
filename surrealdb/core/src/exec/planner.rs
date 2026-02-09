@@ -251,7 +251,7 @@ impl<'ctx> Planner<'ctx> {
 							phys_args.push(self.physical_expr(arg)?);
 						}
 						phys_args
-					}};
+					}}
 				};
 
 				match receiver {

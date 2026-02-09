@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::physical_part::{PhysicalPart, PhysicalRecurseInstruction};
+use crate::exec::parts::PhysicalRecurseInstruction;
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
@@ -23,7 +23,6 @@ pub(crate) mod function;
 mod idiom;
 mod literal;
 mod ops;
-mod recurse;
 mod subquery;
 
 // Re-export all expression types for external use
@@ -49,7 +48,7 @@ pub(crate) use subquery::ScalarSubquery;
 #[derive(Clone, Copy)]
 pub struct RecursionCtx<'a> {
 	/// The recursion's inner path (containing Destructure with RepeatRecurse)
-	pub path: &'a [PhysicalPart],
+	pub path: &'a [Arc<dyn PhysicalExpr>],
 	/// Minimum recursion depth
 	pub min_depth: u32,
 	/// Maximum recursion depth (None = system limit)
@@ -367,33 +366,18 @@ mod tests {
 	}
 
 	// =========================================================================
-	// PhysicalPart Tests
-	// =========================================================================
-
-	#[test]
-	fn test_physical_part_is_simple() {
-		use crate::exec::physical_part::PhysicalPart;
-
-		assert!(PhysicalPart::Field("test".to_string()).is_simple());
-		assert!(PhysicalPart::All.is_simple());
-		assert!(PhysicalPart::First.is_simple());
-		assert!(PhysicalPart::Last.is_simple());
-		assert!(PhysicalPart::Flatten.is_simple());
-		assert!(PhysicalPart::Optional.is_simple());
-	}
-
-	// =========================================================================
 	// IdiomExpr Tests
 	// =========================================================================
 
 	#[test]
-	fn test_idiom_expr_is_simple() {
-		use crate::exec::physical_part::PhysicalPart;
+	fn test_idiom_expr_simple_identifier() {
+		use crate::exec::parts::FieldPart;
 
-		let parts = vec![PhysicalPart::Field("test".to_string())];
+		let parts: Vec<Arc<dyn PhysicalExpr>> =
+			vec![Arc::new(FieldPart { name: "test".to_string() })];
 		let expr = IdiomExpr::new("test".to_string(), None, parts);
 
-		assert!(expr.is_simple());
+		assert!(expr.is_simple_identifier());
 	}
 
 	// =========================================================================
@@ -402,7 +386,7 @@ mod tests {
 
 	#[test]
 	fn test_value_hash_consistency() {
-		use crate::exec::physical_expr::recurse::value_hash;
+		use crate::exec::parts::recurse::value_hash;
 
 		let v1 = Value::Number(Number::Int(42));
 		let v2 = Value::Number(Number::Int(42));

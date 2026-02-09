@@ -12,7 +12,7 @@ use crate::exec::operators::{
 	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
 	ReferenceScanOutput, SortDirection,
 };
-use crate::exec::physical_part::LookupDirection;
+use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
 use crate::expr::{Expr, Literal};
 
