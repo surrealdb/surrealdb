@@ -395,7 +395,7 @@ impl ExecOperator for IndexScan {
 					}
 
 					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						yield ValueBatch { values: j };
 					}
 				}
 

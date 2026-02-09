@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, KVValue, impl_kv_key_storekey};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::{RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]

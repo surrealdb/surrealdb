@@ -1,7 +1,5 @@
 //! Field access part -- `foo` in `obj.foo`.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -9,7 +7,7 @@ use super::fetch_record_with_computed_fields;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::FlowResult;
-use crate::val::{RecordId, Value};
+use crate::val::Value;
 
 /// Simple field access on an object - `foo`.
 ///
