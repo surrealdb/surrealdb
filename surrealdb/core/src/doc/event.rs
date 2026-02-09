@@ -168,7 +168,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: FrozenContext,
 		opt: Options,
-		lh: Option<LeaseHandler>,
+		lh: Option<&LeaseHandler>,
 		ev: &EventDefinition,
 		doc: &CursorDoc,
 	) -> Result<()> {
@@ -191,8 +191,8 @@ impl Document {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub struct AsyncEventRecord {
-	/// Number of processing attempts already made; incremented before each run and
-	/// compared against the event retry limit.
+	/// Number of processing attempts already recorded; incremented when a failed
+	/// run is requeued and compared against the event retry limit.
 	attempt: u16,
 	/// Async event nesting depth for this record (0 for top-level); used to enforce max_depth.
 	event_depth: u16,
@@ -358,8 +358,15 @@ impl AsyncEventRecord {
 
 		// Producer
 		for (k, v) in res {
-			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
-			sender.send(event_context).await?;
+			match AsyncEventContext::new(ds, lh.cloned(), k, v) {
+				Ok(event_context) => {
+					sender.send(event_context).await?;
+				}
+				Err(e) => {
+					// Log and skip this entry so other events can still be processed.
+					error!("Unexpected Error while processing event: {e}");
+				}
+			};
 			if let Some(lh) = lh {
 				lh.try_maintain_lease().await?
 			}
@@ -394,94 +401,119 @@ impl AsyncEventRecord {
 }
 
 struct AsyncEventContext {
-	ctx: Context,
+	ctx: Option<Context>,
 	opt: Options,
 	tf: TransactionFactory,
 	sequences: Sequences,
 	lh: Option<LeaseHandler>,
 	k: Key,
-	v: Val,
+	v: Option<Val>,
 }
 
 impl AsyncEventContext {
 	fn new(ds: &Datastore, lh: Option<LeaseHandler>, k: Key, v: Val) -> Result<Self> {
 		Ok(Self {
-			ctx: ds.setup_ctx()?,
+			ctx: Some(ds.setup_ctx()?),
 			opt: ds.setup_options(&Session::default()),
 			tf: ds.transaction_factory().clone(),
 			sequences: ds.sequences().clone(),
 			lh,
 			k,
-			v,
+			v: Some(v),
 		})
 	}
 
-	async fn run_event_checked(self, stk: &mut Stk) {
-		if let Err(e) = self.run_event(stk).await {
-			error!("Error while processing an event: {e}");
+	async fn run_event_checked(mut self, stk: &mut Stk) {
+		if let Some(ctx) = self.ctx.take()
+			&& let Some(v) = self.v.take()
+			&& let Err(e) = self.run_event(stk, ctx, v).await
+		{
+			error!("Unexpected error while processing an event. Error: {e} - Key: {:?}", self.k);
 		}
 	}
 
-	async fn run_event(mut self, stk: &mut Stk) -> Result<()> {
-		// Process each event in its own write transaction.
-		let tx = self.tf.transaction(Write, LockType::Optimistic, self.sequences.clone()).await?;
-		self.ctx.set_transaction(Arc::new(tx));
-		let ctx = self.ctx.freeze();
-		let eq = EventQueue::decode_key(&self.k)?;
-		let mut ev = AsyncEventRecord::kv_decode_value(self.v)?;
-		// Count this attempt before processing so retries are bounded.
-		ev.attempt += 1;
-		let ev = ev;
+	async fn new_write_tx(&self) -> Result<Transaction> {
+		self.tf.transaction(Write, LockType::Optimistic, self.sequences.clone()).await
+	}
+
+	async fn run_event(&mut self, stk: &mut Stk, mut ctx: Context, v: Val) -> Result<()> {
+		let tx = self.new_write_tx().await?;
+		ctx.set_transaction(Arc::new(tx));
+		let ctx = ctx.freeze();
 		let tx = ctx.tx();
-		match Self::process_event(stk, &ctx, &self.opt, self.lh, &eq, &ev).await {
+		let eq = EventQueue::decode_key(&self.k)?;
+		let mut ev = AsyncEventRecord::kv_decode_value(v)?;
+		match Self::process_event(stk, &ctx, &self.opt, self.lh.as_ref(), &eq, &ev).await {
 			Ok(_) => {
-				catch!(tx, tx.del(&self.k).await);
+				// Event processed successfully, delete the event from the queue.
+				catch!(tx, tx.del(&eq).await);
+				if let Err(e) = tx.commit().await {
+					// If the commit fails, requeue the event and commit that update.
+					tx.cancel().await?;
+					let tx = self.new_write_tx().await?;
+					return Self::retry_attempt(tx, e, &eq, &mut ev).await;
+				}
+				Ok(())
 			}
 			Err(e) => {
-				let se: Option<&Error> = e.downcast_ref();
-				if matches!(
-					se,
-					Some(Error::EvNamespaceMismatch(..))
-						| Some(Error::EvDatabaseMismatch(..))
-						| Some(Error::EvReachMaxDepth(..))
-				) {
-					// This error is final, we won't retry. The namespace or the
-					// database has been recreated.
-					warn!("Event processing failed: {se:?}");
-					catch!(tx, tx.del(&self.k).await);
-				} else {
-					catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
+				// Cancel the processing transaction so partial side effects are rolled back.
+				// Requeue or delete in a fresh transaction based on the error type.
+				tx.cancel().await?;
+				if let Some(final_error) = Self::is_final_error(&e).await? {
+					let tx = self.new_write_tx().await?;
+					return Self::final_error(tx, &eq, final_error).await;
 				}
+				let tx = self.new_write_tx().await?;
+				Self::retry_attempt(tx, e, &eq, &mut ev).await
 			}
 		}
-		if let Err(e) = tx.commit().await {
-			// If the commit fails, requeue the event and commit that update.
-			tx.cancel().await?;
-			let tx =
-				self.tf.transaction(Write, LockType::Optimistic, self.sequences.clone()).await?;
-			catch!(tx, Self::retry_event(&tx, e, &eq, &ev).await);
-			tx.commit().await?;
-		}
-		Ok(())
 	}
 
 	/// Update or remove the queued event based on the retry policy.
-	async fn retry_event(
-		tx: &Transaction,
+	async fn retry_attempt(
+		tx: Transaction,
 		e: anyhow::Error,
 		eq: &EventQueue<'_>,
-		ev: &AsyncEventRecord,
+		ev: &mut AsyncEventRecord,
 	) -> Result<()> {
-		// `attempt` is incremented before processing; `retry` counts retries, so requeue while
+		// `attempt` is incremented when requeuing; `retry` counts retries, so requeue while
 		// attempt <= retry.
+		ev.attempt += 1;
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied.
-			tx.set(eq, ev, None).await?;
+			catch!(tx, tx.set(eq, ev, None).await);
 		} else {
-			warn!("Final error after processing the event `{}` {} times: {e}", eq.ev, ev.attempt);
-			tx.del(eq).await?;
+			warn!(
+				"Final error after processing the event `{}` on table {} {} times: {e}",
+				eq.ev, ev.event_definition.target_table, ev.attempt
+			);
+			catch!(tx, tx.del(eq).await);
 		}
+		catch!(tx, tx.commit().await);
+		Ok(())
+	}
+
+	async fn is_final_error(e: &anyhow::Error) -> Result<Option<&Error>> {
+		// Check if the error is final
+		let se: Option<&Error> = e.downcast_ref();
+		if matches!(
+			se,
+			Some(Error::EvNamespaceMismatch(..))
+				| Some(Error::EvDatabaseMismatch(..))
+				| Some(Error::EvReachMaxDepth(..))
+		) {
+			Ok(se)
+		} else {
+			Ok(None)
+		}
+	}
+
+	async fn final_error(tx: Transaction, eq: &EventQueue<'_>, e: &Error) -> Result<()> {
+		// The error is final, we log the final error message and remove the event from the queue
+		warn!("Event processing failed: {:?}", e);
+		catch!(tx, tx.del(eq).await);
+		catch!(tx, tx.commit().await);
 		Ok(())
 	}
 
@@ -490,7 +522,7 @@ impl AsyncEventContext {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		lh: Option<LeaseHandler>,
+		lh: Option<&LeaseHandler>,
 		eq: &EventQueue<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
