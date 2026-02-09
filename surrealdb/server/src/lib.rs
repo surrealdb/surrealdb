@@ -1,6 +1,14 @@
 //! Library entrypoints for embedding SurrealDB server inside another Rust application.
 //! Exposes the same init() used by the `surreal` binary so external apps can
 //! start SurrealDB within their own `main()`.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to SemVer and its API is
+//! free to change and break code even between patch versions. If you are looking for a stable
+//! interface to the SurrealDB library please have a look at
+//! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
+//! </section>
 
 // Temporarily allow deprecated items until version 3.0 for backward compatibility
 #![allow(deprecated)]
