@@ -178,6 +178,13 @@ impl ExecOperator for Scan {
 			// Eagerly initialize field state (computed fields + field permissions)
 			let field_state = build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 
+			// Pre-compute whether any post-decode processing is needed.
+			// When false, the scan loop can skip filter/process calls entirely
+			// (zero async overhead beyond the KV stream poll).
+			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
+				|| !field_state.computed_fields.is_empty()
+				|| (check_perms && !field_state.field_permissions.is_empty());
+
 			match rid {
 				// === POINT LOOKUP (single record by ID) ===
 				Some(rid) if !matches!(rid.key, RecordIdKey::Range(_)) => {
@@ -208,26 +215,31 @@ impl ExecOperator for Scan {
 					let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
 
 					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
-					futures::pin_mut!(kv_stream);
+					let chunks = kv_stream.ready_chunks(BATCH_SIZE);
+					futures::pin_mut!(chunks);
 
-					let mut batch = Vec::with_capacity(BATCH_SIZE);
-					while let Some(result) = kv_stream.next().await {
-						let (key, val) = result
-							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-						batch.push(decode_record(&key, val)?);
-						if batch.len() >= BATCH_SIZE {
-							filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
-							process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
-							let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
-							if !ready.is_empty() {
-								yield ValueBatch { values: ready };
+					if needs_processing {
+						while let Some(chunk) = chunks.next().await {
+							let mut batch = Vec::with_capacity(chunk.len());
+							for result in chunk {
+								let (key, val) = result
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+								batch.push(decode_record(&key, val)?);
+							}
+							filter_and_process_batch(&mut batch, &select_permission, &ctx, &field_state, check_perms).await?;
+							if !batch.is_empty() {
+								yield ValueBatch { values: batch };
 							}
 						}
-					}
-					if !batch.is_empty() {
-						filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
-						process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
-						if !batch.is_empty() {
+					} else {
+						// Fast path: no permission filtering, no computed fields
+						while let Some(chunk) = chunks.next().await {
+							let mut batch = Vec::with_capacity(chunk.len());
+							for result in chunk {
+								let (key, val) = result
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+								batch.push(decode_record(&key, val)?);
+							}
 							yield ValueBatch { values: batch };
 						}
 					}
@@ -235,7 +247,6 @@ impl ExecOperator for Scan {
 
 				// === TABLE SCAN (with optional index selection) ===
 				None => {
-					eprintln!("Scan::execute: with = {:?}", with);
 					// Determine if we should use an index
 					let access_path = if matches!(&with, Some(With::NoIndex)) {
 						None
@@ -250,8 +261,6 @@ impl ExecOperator for Scan {
 						let direction = determine_scan_direction(&order);
 						Some(select_access_path(table_name.clone(), candidates, with.as_ref(), direction))
 					};
-
-					eprintln!("Scan::execute: access_path = {:?}", access_path);
 
 					match access_path {
 						// B-tree index scan (single-column only)
@@ -284,26 +293,31 @@ impl ExecOperator for Scan {
 								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
 
 							let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
-							futures::pin_mut!(kv_stream);
+							let chunks = kv_stream.ready_chunks(BATCH_SIZE);
+							futures::pin_mut!(chunks);
 
-							let mut batch = Vec::with_capacity(BATCH_SIZE);
-							while let Some(result) = kv_stream.next().await {
-								let (key, val) = result
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-								batch.push(decode_record(&key, val)?);
-								if batch.len() >= BATCH_SIZE {
-									filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
-									process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
-									let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
-									if !ready.is_empty() {
-										yield ValueBatch { values: ready };
+							if needs_processing {
+								while let Some(chunk) = chunks.next().await {
+									let mut batch = Vec::with_capacity(chunk.len());
+									for result in chunk {
+										let (key, val) = result
+											.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+										batch.push(decode_record(&key, val)?);
+									}
+									filter_and_process_batch(&mut batch, &select_permission, &ctx, &field_state, check_perms).await?;
+									if !batch.is_empty() {
+										yield ValueBatch { values: batch };
 									}
 								}
-							}
-							if !batch.is_empty() {
-								filter_batch_by_permission(&mut batch, &select_permission, &ctx).await?;
-								process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
-								if !batch.is_empty() {
+							} else {
+								// Fast path: no permission filtering, no computed fields
+								while let Some(chunk) = chunks.next().await {
+									let mut batch = Vec::with_capacity(chunk.len());
+									for result in chunk {
+										let (key, val) = result
+											.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+										batch.push(decode_record(&key, val)?);
+									}
 									yield ValueBatch { values: batch };
 								}
 							}
@@ -332,27 +346,36 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 	}
 }
 
-/// Filter a batch of values in-place by table-level SELECT permission.
+/// Combined single-pass filter and process for a batch of decoded values.
 ///
-/// Returns immediately for `Allow` (the common case). For `Conditional`
-/// permissions, uses an in-place swap-remove pattern to avoid allocation.
-async fn filter_batch_by_permission(
+/// Performs table-level permission filtering, computed field evaluation,
+/// and field-level permission filtering in a single iteration over the batch.
+/// Records that fail the table-level permission check are skipped entirely,
+/// avoiding wasted compute on records that will be filtered out.
+async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
 	ctx: &ExecutionContext,
+	state: &FieldState,
+	check_perms: bool,
 ) -> Result<(), ControlFlow> {
-	// Fast path: nothing to filter
-	if matches!(permission, PhysicalPermission::Allow) {
-		return Ok(());
-	}
+	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
 	let mut write_idx = 0;
 	for read_idx in 0..batch.len() {
-		if check_perm!(permission, &batch[read_idx], ctx)? {
-			if write_idx != read_idx {
-				batch.swap(write_idx, read_idx);
-			}
-			write_idx += 1;
+		// Check table-level permission (skip if Allow)
+		if needs_perm_filter && !check_perm!(permission, &batch[read_idx], ctx)? {
+			continue;
 		}
+		// Move to write position
+		if write_idx != read_idx {
+			batch.swap(write_idx, read_idx);
+		}
+		// Process in-place: computed fields + field permissions
+		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
+		if check_perms {
+			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
+		}
+		write_idx += 1;
 	}
 	batch.truncate(write_idx);
 	Ok(())
@@ -405,6 +428,7 @@ fn range_end_key(
 }
 
 /// Decode a record from its key and value bytes.
+#[inline]
 fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 	let decoded_key = crate::key::record::RecordKey::decode_key(key)
 		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode record key: {e}")))?;
