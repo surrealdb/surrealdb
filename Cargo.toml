@@ -189,7 +189,7 @@ rstest = "0.26.1"
 serial_test = "3.3.1"
 temp-dir = "0.1.16"
 test-log = "0.2.19"
-time = "0.3.45"
+time = "0.3.47"
 tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 
