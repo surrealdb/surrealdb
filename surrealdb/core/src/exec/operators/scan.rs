@@ -207,14 +207,15 @@ impl ExecOperator for Scan {
 					}
 				}
 
-				// === RANGE SCAN (record ID with range key) ===
-				Some(rid) => {
+			// === RANGE SCAN (record ID with range key) ===
+			Some(rid) => {
 					let RecordIdKey::Range(range) = &rid.key else { unreachable!() };
 
 					let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
 					let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
 
-					let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+					let direction = determine_scan_direction(&order);
+					let kv_stream = txn.stream_keys_vals(beg..end, version, None, direction);
 					let chunks = kv_stream.ready_chunks(BATCH_SIZE);
 					futures::pin_mut!(chunks);
 
@@ -247,6 +248,8 @@ impl ExecOperator for Scan {
 
 				// === TABLE SCAN (with optional index selection) ===
 				None => {
+					let direction = determine_scan_direction(&order);
+
 					// Determine if we should use an index
 					let access_path = if matches!(&with, Some(With::NoIndex)) {
 						None
@@ -258,7 +261,6 @@ impl ExecOperator for Scan {
 
 						let analyzer = IndexAnalyzer::new(&table_name, indexes, with.as_ref());
 						let candidates = analyzer.analyze(cond.as_ref(), order.as_ref());
-						let direction = determine_scan_direction(&order);
 						Some(select_access_path(table_name.clone(), candidates, with.as_ref(), direction))
 					};
 
@@ -287,12 +289,10 @@ impl ExecOperator for Scan {
 
 						// Fall back to table scan (NOINDEX, compound indexes, KNN, etc.)
 						_ => {
-							let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)
-								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}")))?;
-							let end = record::suffix(ns.namespace_id, db.database_id, &table_name)
-								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}")))?;
+							let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
+							let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
 
-							let kv_stream = txn.stream_keys_vals(beg..end, version, None, ScanDirection::Forward);
+							let kv_stream = txn.stream_keys_vals(beg..end, version, None, direction);
 							let chunks = kv_stream.ready_chunks(BATCH_SIZE);
 							futures::pin_mut!(chunks);
 
@@ -314,8 +314,7 @@ impl ExecOperator for Scan {
 								while let Some(chunk) = chunks.next().await {
 									let mut batch = Vec::with_capacity(chunk.len());
 									for result in chunk {
-										let (key, val) = result
-											.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+										let (key, val) = result?;
 										batch.push(decode_record(&key, val)?);
 									}
 									yield ValueBatch { values: batch };

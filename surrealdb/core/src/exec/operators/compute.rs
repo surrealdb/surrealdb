@@ -143,16 +143,6 @@ impl Compute {
 			fields,
 		}
 	}
-
-	/// Check if this Compute operator has any fields to compute.
-	pub fn is_empty(&self) -> bool {
-		self.fields.is_empty()
-	}
-
-	/// Get the number of fields being computed.
-	pub fn len(&self) -> usize {
-		self.fields.len()
-	}
 }
 
 #[cfg(test)]

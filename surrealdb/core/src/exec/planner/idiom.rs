@@ -181,20 +181,6 @@ impl<'ctx> Planner<'ctx> {
 					crate::expr::lookup::LookupKind::Graph(dir) => LookupDirection::from(dir),
 					crate::expr::lookup::LookupKind::Reference => LookupDirection::Reference,
 				};
-				let edge_tables: Vec<_> = lookup
-					.what
-					.iter()
-					.map(|s| match s {
-						crate::expr::lookup::LookupSubject::Table {
-							table,
-							..
-						} => table.clone(),
-						crate::expr::lookup::LookupSubject::Range {
-							table,
-							..
-						} => table.clone(),
-					})
-					.collect();
 				let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
 				let needs_full_records =
 					needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
@@ -202,7 +188,6 @@ impl<'ctx> Planner<'ctx> {
 				let plan = self.plan_lookup(lookup)?;
 				Ok(Arc::new(LookupPart {
 					direction,
-					edge_tables,
 					plan,
 					extract_id,
 				}))

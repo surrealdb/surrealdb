@@ -10,7 +10,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
-use crate::exec::index::access_path::{BTreeAccess, IndexRef, RangeBound};
+use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::{
 	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
 };
@@ -137,7 +137,6 @@ impl ExecOperator for IndexScan {
 		// Clone for the async block
 		let index_ref = self.index_ref.clone();
 		let access = self.access.clone();
-		let _direction = self.direction;
 		let table_name = self.table_name.clone();
 		let ctx = ctx.clone();
 

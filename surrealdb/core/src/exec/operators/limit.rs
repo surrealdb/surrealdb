@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
+	PhysicalExpr, ValueBatchStream, instrument_stream,
 };
 use crate::expr::ControlFlow;
 

@@ -83,11 +83,6 @@ impl FieldSelection {
 			has_explicit_alias: false,
 		}
 	}
-
-	/// Get the display name for this field (for debugging/attrs).
-	pub fn display_name(&self) -> String {
-		self.output_path.to_string()
-	}
 }
 
 /// Project operator - selects and transforms fields from input records.
@@ -439,22 +434,6 @@ impl SelectProject {
 		Self {
 			input,
 			projections,
-		}
-	}
-
-	/// Create a SelectProject that includes all fields.
-	pub fn all(input: Arc<dyn ExecOperator>) -> Self {
-		Self {
-			input,
-			projections: vec![Projection::All],
-		}
-	}
-
-	/// Create a SelectProject with specific field includes.
-	pub fn include_fields(input: Arc<dyn ExecOperator>, fields: Vec<String>) -> Self {
-		Self {
-			input,
-			projections: fields.into_iter().map(Projection::Include).collect(),
 		}
 	}
 }

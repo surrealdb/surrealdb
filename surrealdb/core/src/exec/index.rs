@@ -30,5 +30,4 @@ pub(crate) mod access_path;
 pub(crate) mod analysis;
 pub(crate) mod iterator;
 
-pub use access_path::{AccessPath, BTreeAccess, RangeBound};
-pub use analysis::{IndexAnalyzer, IndexCandidate};
+pub use analysis::IndexCandidate;

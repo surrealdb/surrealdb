@@ -9,7 +9,6 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
-use crate::idx::planner::ScanDirection;
 use crate::val::{RecordId, Value};
 
 /// Direction for lookup operations.
@@ -50,10 +49,6 @@ impl From<&crate::expr::Dir> for LookupDirection {
 pub struct LookupPart {
 	/// The direction of the lookup (In, Out, Both for graph; Reference for <~)
 	pub direction: LookupDirection,
-
-	/// The edge/reference tables to scan (e.g., `knows`, `follows`)
-	/// Empty means scan all tables in that direction.
-	pub edge_tables: Vec<crate::val::TableName>,
 
 	/// The pre-planned operator tree for executing the lookup.
 	/// This includes GraphEdgeScan/ReferenceScan + optional Filter, Sort, Limit, Project.
@@ -199,91 +194,6 @@ async fn evaluate_lookup_for_rid(
 			})
 			.collect();
 		return Ok(Value::Array(results));
-	}
-
-	Ok(Value::Array(results.into()))
-}
-
-/// Perform reference lookup (<~) for a specific RecordId.
-///
-/// Reference lookups find all records that reference the given record ID
-/// through a specific field. This is the inverse of a record link.
-pub(crate) async fn evaluate_reference_lookup(
-	rid: &RecordId,
-	lookup: &LookupPart,
-	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
-	// Get database context
-	let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
-	let txn = ctx.exec_ctx.txn();
-	let ns = &db_ctx.ns_ctx.ns;
-	let db = &db_ctx.db;
-
-	let mut results = Vec::new();
-
-	// For reference lookups, edge_tables contains the referencing tables
-	// If empty, we need to scan all references
-	if lookup.edge_tables.is_empty() {
-		// Scan all references to this record
-		let beg = crate::key::r#ref::prefix(ns.namespace_id, db.database_id, &rid.table, &rid.key)
-			.map_err(|e| anyhow::anyhow!("Failed to create prefix: {}", e))?;
-
-		let end = crate::key::r#ref::suffix(ns.namespace_id, db.database_id, &rid.table, &rid.key)
-			.map_err(|e| anyhow::anyhow!("Failed to create suffix: {}", e))?;
-
-		let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
-		futures::pin_mut!(kv_stream);
-
-		while let Some(result) = kv_stream.next().await {
-			let key = result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
-
-			// Decode the reference key to get the referencing record ID
-			let decoded = crate::key::r#ref::Ref::decode_key(&key)
-				.map_err(|e| anyhow::anyhow!("Failed to decode ref key: {}", e))?;
-
-			let referencing_rid = RecordId {
-				table: decoded.ft.into_owned(),
-				key: decoded.fk.into_owned(),
-			};
-			results.push(Value::RecordId(referencing_rid));
-		}
-	} else {
-		// Scan references from specific tables
-		for ref_table in &lookup.edge_tables {
-			let beg = crate::key::r#ref::ftprefix(
-				ns.namespace_id,
-				db.database_id,
-				&rid.table,
-				&rid.key,
-				ref_table.as_str(),
-			)
-			.map_err(|e| anyhow::anyhow!("Failed to create prefix: {}", e))?;
-
-			let end = crate::key::r#ref::ftsuffix(
-				ns.namespace_id,
-				db.database_id,
-				&rid.table,
-				&rid.key,
-				ref_table.as_str(),
-			)
-			.map_err(|e| anyhow::anyhow!("Failed to create suffix: {}", e))?;
-
-			let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
-			futures::pin_mut!(kv_stream);
-
-			while let Some(result) = kv_stream.next().await {
-				let key = result.map_err(|e| anyhow::anyhow!("Failed to scan reference: {}", e))?;
-
-				let decoded = crate::key::r#ref::Ref::decode_key(&key)
-					.map_err(|e| anyhow::anyhow!("Failed to decode ref key: {}", e))?;
-
-				let referencing_rid = RecordId {
-					table: decoded.ft.into_owned(),
-					key: decoded.fk.into_owned(),
-				};
-				results.push(Value::RecordId(referencing_rid));
-			}
-		}
 	}
 
 	Ok(Value::Array(results.into()))

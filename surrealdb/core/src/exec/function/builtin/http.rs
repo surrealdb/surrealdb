@@ -7,7 +7,9 @@ use anyhow::Result;
 
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
-use crate::val::{Object, Value};
+#[cfg(feature = "http")]
+use crate::val::Object;
+use crate::val::Value;
 use crate::{define_async_function, register_functions};
 
 // =========================================================================
@@ -19,6 +21,7 @@ async fn http_disabled() -> Result<Value> {
 	Err(anyhow::anyhow!(crate::err::Error::HttpDisabled))
 }
 
+#[cfg(feature = "http")]
 fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	match args.first() {
 		Some(Value::String(s)) => Ok(s.clone()),
@@ -36,6 +39,7 @@ fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	}
 }
 
+#[cfg(feature = "http")]
 fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	match args.get(index) {
 		Some(Value::Object(o)) => Ok(o.clone()),
@@ -47,6 +51,7 @@ fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	}
 }
 
+#[cfg(feature = "http")]
 fn extract_body(args: &[Value], index: usize) -> Option<Value> {
 	args.get(index).cloned()
 }

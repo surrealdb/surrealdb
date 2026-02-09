@@ -9,10 +9,4 @@ pub mod count;
 pub mod fulltext;
 pub mod hnsw;
 
-pub use btree::{
-	IndexEqualIterator, IndexRangeIterator, IndexUnionIterator, UniqueEqualIterator,
-	UniqueRangeIterator,
-};
-pub use count::CountIterator;
-pub use fulltext::FullTextIterator;
-pub use hnsw::KnnIterator;
+pub use btree::{IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator};

@@ -66,29 +66,6 @@ impl SortKey {
 			numeric: false,
 		}
 	}
-
-	/// Create a SortKey from a simple field name.
-	pub fn from_field(name: impl Into<String>) -> Self {
-		Self::new(FieldPath::field(name))
-	}
-
-	/// Set the sort direction to descending.
-	pub fn desc(mut self) -> Self {
-		self.direction = SortDirection::Desc;
-		self
-	}
-
-	/// Enable collation-aware string comparison.
-	pub fn with_collate(mut self) -> Self {
-		self.collate = true;
-		self
-	}
-
-	/// Enable numeric string comparison.
-	pub fn with_numeric(mut self) -> Self {
-		self.numeric = true;
-		self
-	}
 }
 
 /// Compare two sort key values, respecting collate and numeric modes.

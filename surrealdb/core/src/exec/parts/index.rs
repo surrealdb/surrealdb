@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
 

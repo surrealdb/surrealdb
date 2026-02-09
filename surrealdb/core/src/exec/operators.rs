@@ -44,7 +44,6 @@ pub use index_scan::IndexScan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
-pub use knn_scan::KnnScan;
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};

@@ -8,9 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
 use crate::expr::ControlFlow;
