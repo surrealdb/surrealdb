@@ -54,6 +54,9 @@ pub struct Scan {
 	pub(crate) order: Option<Ordering>,
 	/// Optional WITH INDEX/NOINDEX hints
 	pub(crate) with: Option<With>,
+	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
+	/// `None` means all fields are needed (SELECT *).
+	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
 }
 
 #[async_trait]
@@ -92,6 +95,7 @@ impl ExecOperator for Scan {
 		let cond = self.cond.clone();
 		let order = self.order.clone();
 		let with = self.with.clone();
+		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -169,7 +173,7 @@ impl ExecOperator for Scan {
 
 					if check_permission(&select_permission, &value, &ctx).await? {
 						let mut batch = vec![value];
-						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
 						yield ValueBatch { values: batch };
 					}
@@ -194,7 +198,7 @@ impl ExecOperator for Scan {
 						if check_permission(&select_permission, &value, &ctx).await? {
 							batch.push(value);
 							if batch.len() >= BATCH_SIZE {
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
 								let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
 								yield ValueBatch { values: ready };
@@ -203,7 +207,7 @@ impl ExecOperator for Scan {
 					}
 
 					if !batch.is_empty() {
-						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+						ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 						process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
 						yield ValueBatch { values: batch };
 					}
@@ -232,7 +236,10 @@ impl ExecOperator for Scan {
 							let operator = IndexScan { index_ref, access, direction, table_name: table_name.clone() };
 							let mut stream = operator.execute(&ctx)?;
 							while let Some(batch_result) = stream.next().await {
-								yield batch_result?;
+								let mut batch = batch_result?;
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
+								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch.values).await?;
+								yield batch;
 							}
 						}
 
@@ -241,7 +248,10 @@ impl ExecOperator for Scan {
 							let ft_op = FullTextScan { index_ref, query, operator, table_name: table_name.clone() };
 							let mut stream = ft_op.execute(&ctx)?;
 							while let Some(batch_result) = stream.next().await {
-								yield batch_result?;
+								let mut batch = batch_result?;
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
+								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch.values).await?;
+								yield batch;
 							}
 						}
 
@@ -264,7 +274,7 @@ impl ExecOperator for Scan {
 								if check_permission(&select_permission, &value, &ctx).await? {
 									batch.push(value);
 									if batch.len() >= BATCH_SIZE {
-										ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+										ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 										process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
 										let ready = std::mem::replace(&mut batch, Vec::with_capacity(BATCH_SIZE));
 										yield ValueBatch { values: ready };
@@ -273,7 +283,7 @@ impl ExecOperator for Scan {
 							}
 
 							if !batch.is_empty() {
-								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms).await?;
+								ensure_field_state(&mut field_state, &ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 								process_batch(&ctx, field_state.as_ref().unwrap(), check_perms, &mut batch).await?;
 								yield ValueBatch { values: batch };
 							}
@@ -405,9 +415,10 @@ async fn ensure_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,
 	check_perms: bool,
+	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<(), ControlFlow> {
 	if field_state.is_none() {
-		*field_state = Some(build_field_state(ctx, table_name, check_perms).await?);
+		*field_state = Some(build_field_state(ctx, table_name, check_perms, needed_fields).await?);
 	}
 	Ok(())
 }
@@ -417,6 +428,7 @@ async fn build_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,
 	check_perms: bool,
+	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
 	let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
 	let txn = ctx.txn();
@@ -426,24 +438,71 @@ async fn build_field_state(
 		.await
 		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get field definitions: {}", e)))?;
 
-	// Build computed fields
-	let mut computed_fields = Vec::new();
+	// Collect computed fields and their dependency metadata
+	let mut raw_computed: Vec<(
+		String,
+		Arc<dyn PhysicalExpr>,
+		Option<crate::expr::Kind>,
+		Vec<String>,
+	)> = Vec::new();
+	let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
+
 	for fd in field_defs.iter() {
 		if let Some(ref expr) = fd.computed {
+			let field_name = fd.name.to_raw_string();
+
+			// Get deps: use stored deps, or extract on the fly for legacy fields
+			let deps = if let Some(ref cd) = fd.computed_deps {
+				crate::expr::computed_deps::ComputedDeps {
+					fields: cd.fields.clone(),
+					is_complete: cd.is_complete,
+				}
+			} else {
+				crate::expr::computed_deps::extract_computed_deps(expr)
+			};
+
+			dep_map.insert(field_name.clone(), deps.clone());
+
 			let physical_expr = expr_to_physical_expr(expr.clone(), ctx.ctx()).map_err(|e| {
 				ControlFlow::Err(anyhow::anyhow!(
 					"Computed field '{}' has unsupported expression: {}",
-					fd.name.to_raw_string(),
+					field_name,
 					e
 				))
 			})?;
 
-			computed_fields.push(ComputedFieldDef {
-				field_name: fd.name.to_raw_string(),
-				expr: physical_expr,
-				kind: fd.field_kind.clone(),
-			});
+			raw_computed.push((field_name, physical_expr, fd.field_kind.clone(), deps.fields));
 		}
+	}
+
+	// Determine which computed fields are actually needed
+	let needed_computed = if let Some(needed) = needed_fields {
+		crate::expr::computed_deps::resolve_required_computed_fields(needed, &dep_map)
+	} else {
+		// SELECT * -- compute all
+		None
+	};
+
+	// Filter to only needed computed fields
+	let filtered: Vec<_> = if let Some(ref required) = needed_computed {
+		raw_computed.into_iter().filter(|(name, _, _, _)| required.contains(name)).collect()
+	} else {
+		raw_computed
+	};
+
+	// Topologically sort for correct evaluation order
+	let topo_input: Vec<(String, Vec<String>)> =
+		filtered.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
+	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
+
+	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
+	for idx in sorted_indices {
+		let (field_name, expr, kind, _) = &filtered[idx];
+		computed_fields.push(ComputedFieldDef {
+			field_name: field_name.clone(),
+			expr: Arc::clone(expr),
+			kind: kind.clone(),
+		});
 	}
 
 	// Build field permissions
@@ -591,6 +650,7 @@ mod tests {
 			} else {
 				None
 			},
+			needed_fields: None,
 		}
 	}
 

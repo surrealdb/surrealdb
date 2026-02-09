@@ -19,7 +19,24 @@ pub(crate) enum DefineDefault {
 	Set(Expr),
 }
 
-#[revisioned(revision = 2)]
+/// Dependency metadata for a computed field.
+///
+/// Tracks which same-table fields a computed expression references, and whether
+/// the static analysis was able to fully determine all dependencies.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct ComputedDeps {
+	/// Known same-table field names this computed field depends on.
+	pub fields: Vec<String>,
+	/// Whether static analysis could fully determine all dependencies.
+	///
+	/// When `false`, the expression contains opaque constructs (subqueries, params,
+	/// graph traversals, etc.) that could access arbitrary fields at runtime.
+	/// If such a field is needed by a query, ALL computed fields must be evaluated.
+	pub is_complete: bool,
+}
+
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
@@ -45,13 +62,23 @@ pub struct FieldDefinition {
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
+
+	/// Pre-computed dependency metadata for computed fields.
+	/// `None` for non-computed fields or legacy definitions (pre-revision 3).
+	/// When `None` on a computed field, deps are extracted on-the-fly at query time.
+	#[revision(start = 3, default_fn = "default_computed_deps")]
+	pub(crate) computed_deps: Option<ComputedDeps>,
 }
 
-// This was pushed in after the first beta, so we need to add auth_limit to structs in a
-// non-breaking way
 impl FieldDefinition {
+	// This was pushed in after the first beta, so we need to add auth_limit to structs in a
+	// non-breaking way
 	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
 		Ok(AuthLimit::new_no_limit())
+	}
+
+	fn default_computed_deps(_revision: u16) -> Result<Option<ComputedDeps>, revision::Error> {
+		Ok(None)
 	}
 }
 impl_kv_value_revisioned!(FieldDefinition);

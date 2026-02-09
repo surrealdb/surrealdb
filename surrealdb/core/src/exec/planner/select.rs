@@ -117,8 +117,24 @@ impl<'ctx> Planner<'ctx> {
 				std::borrow::Cow::Borrowed(self.ctx)
 			};
 
-		let source =
-			self.plan_sources(what, version, cond.as_ref(), order.as_ref(), with.as_ref())?;
+		// Compute which fields are needed by the query for selective computed field evaluation
+		let needed_fields = Self::extract_needed_fields(
+			&fields,
+			&omit,
+			cond.as_ref(),
+			order.as_ref(),
+			group.as_ref(),
+			split.as_ref(),
+		);
+
+		let source = self.plan_sources(
+			what,
+			version,
+			cond.as_ref(),
+			order.as_ref(),
+			with.as_ref(),
+			needed_fields.clone(),
+		)?;
 
 		let config = SelectPipelineConfig {
 			cond,
@@ -273,6 +289,7 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
+		needed_fields: Option<std::collections::HashSet<String>>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		if what.is_empty() {
 			return Err(Error::Query {
@@ -282,7 +299,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut source_plans = Vec::with_capacity(what.len());
 		for expr in what {
-			let plan = self.plan_source(expr, version, cond, order, with)?;
+			let plan = self.plan_source(expr, version, cond, order, with, needed_fields.clone())?;
 			source_plans.push(plan);
 		}
 
@@ -303,6 +320,7 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
+		needed_fields: Option<std::collections::HashSet<String>>,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::val::Value;
 
@@ -315,6 +333,7 @@ impl<'ctx> Planner<'ctx> {
 					cond: cond.cloned(),
 					order: order.cloned(),
 					with: with.cloned(),
+					needed_fields,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -328,6 +347,7 @@ impl<'ctx> Planner<'ctx> {
 					cond: None,
 					order: None,
 					with: None,
+					needed_fields,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -349,6 +369,7 @@ impl<'ctx> Planner<'ctx> {
 						cond: cond.cloned(),
 						order: order.cloned(),
 						with: with.cloned(),
+						needed_fields: needed_fields.clone(),
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
@@ -359,6 +380,7 @@ impl<'ctx> Planner<'ctx> {
 						cond: None,
 						order: None,
 						with: None,
+						needed_fields,
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
@@ -377,6 +399,7 @@ impl<'ctx> Planner<'ctx> {
 					cond: cond.cloned(),
 					order: order.cloned(),
 					with: with.cloned(),
+					needed_fields,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -390,6 +413,7 @@ impl<'ctx> Planner<'ctx> {
 					cond: cond.cloned(),
 					order: order.cloned(),
 					with: with.cloned(),
+					needed_fields,
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -968,6 +992,133 @@ impl<'ctx> Planner<'ctx> {
 				"OMIT/FETCH with computed expressions not yet supported in execution plans"
 					.to_string(),
 			)),
+		}
+	}
+
+	/// Extract the set of field names needed by a SELECT statement.
+	///
+	/// Returns `None` if all fields are needed (SELECT *, wildcard present, or
+	/// opaque expressions prevent static analysis). Returns `Some(set)` with
+	/// the root field names needed by projections, WHERE, ORDER, GROUP, SPLIT.
+	pub(crate) fn extract_needed_fields(
+		fields: &Fields,
+		omit: &[Expr],
+		cond: Option<&Cond>,
+		order: Option<&crate::expr::order::Ordering>,
+		group: Option<&crate::expr::group::Groups>,
+		split: Option<&crate::expr::split::Splits>,
+	) -> Option<std::collections::HashSet<String>> {
+		use crate::expr::Part;
+		use crate::expr::visit::{Visit, Visitor};
+
+		// Check for SELECT * (wildcard) -- need all fields
+		match fields {
+			Fields::Select(field_list) => {
+				if field_list.iter().any(|f| matches!(f, Field::All)) {
+					return None;
+				}
+			}
+			Fields::Value(_) => {
+				// SELECT VALUE expr -- still selective
+			}
+		}
+
+		/// Visitor that collects root field names from idioms and detects opaque expressions.
+		struct NeededFieldExtractor {
+			fields: std::collections::HashSet<String>,
+			has_opaque: bool,
+		}
+
+		impl Visitor for NeededFieldExtractor {
+			type Error = std::convert::Infallible;
+
+			fn visit_idiom(&mut self, idiom: &crate::expr::Idiom) -> Result<(), Self::Error> {
+				if let Some(Part::Field(name)) = idiom.0.first() {
+					self.fields.insert(name.clone());
+				}
+				// Walk nested parts for embedded expressions
+				for p in idiom.0.iter() {
+					self.visit_part(p)?;
+				}
+				Ok(())
+			}
+
+			fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+				match expr {
+					// Parameters could reference any field
+					Expr::Param(_) => {
+						self.has_opaque = true;
+					}
+					_ => {
+						expr.visit(self)?;
+					}
+				}
+				Ok(())
+			}
+		}
+
+		let mut extractor = NeededFieldExtractor {
+			fields: std::collections::HashSet::new(),
+			has_opaque: false,
+		};
+
+		// Walk projection expressions
+		match fields {
+			Fields::Value(selector) => {
+				let _ = extractor.visit_expr(&selector.expr);
+			}
+			Fields::Select(field_list) => {
+				for field in field_list {
+					if let Field::Single(selector) = field {
+						let _ = extractor.visit_expr(&selector.expr);
+						if let Some(alias) = &selector.alias {
+							let _ = extractor.visit_idiom(alias);
+						}
+					}
+				}
+			}
+		}
+
+		// Walk OMIT fields (they may reference computed fields that need evaluation)
+		for expr in omit {
+			let _ = extractor.visit_expr(expr);
+		}
+
+		// Walk WHERE condition
+		if let Some(cond) = cond {
+			let _ = extractor.visit_expr(&cond.0);
+		}
+
+		// Walk ORDER BY
+		if let Some(ordering) = order {
+			match ordering {
+				crate::expr::order::Ordering::Random => {}
+				crate::expr::order::Ordering::Order(order_list) => {
+					for order in order_list.iter() {
+						let _ = extractor.visit_idiom(&order.value);
+					}
+				}
+			}
+		}
+
+		// Walk GROUP BY
+		if let Some(groups) = group {
+			for group in groups.0.iter() {
+				let _ = extractor.visit_idiom(&group.0);
+			}
+		}
+
+		// Walk SPLIT
+		if let Some(splits) = split {
+			for split in splits.iter() {
+				let _ = extractor.visit_idiom(&split.0);
+			}
+		}
+
+		if extractor.has_opaque {
+			None
+		} else {
+			Some(extractor.fields)
 		}
 	}
 }

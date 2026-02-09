@@ -89,6 +89,15 @@ impl DefineFieldStatement {
 			.catch_return()?
 			.cast_to()?;
 
+		// Extract computed field dependencies if this is a computed field.
+		let computed_deps = self.computed.as_ref().map(|expr| {
+			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
+			catalog::ComputedDeps {
+				fields: deps.fields,
+				is_complete: deps.is_complete,
+			}
+		});
+
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			table: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into(),
@@ -109,6 +118,7 @@ impl DefineFieldStatement {
 			comment,
 			reference: self.reference.clone(),
 			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
+			computed_deps,
 		})
 	}
 
@@ -132,6 +142,9 @@ impl DefineFieldStatement {
 
 		// Validate computed options
 		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
+
+		// Validate computed field dependencies for cycles
+		self.validate_computed_cycles(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
 		self.validate_reference_options(&definition)?;
@@ -365,6 +378,119 @@ impl DefineFieldStatement {
 						definition.name.to_sql(),
 						field.name.to_sql()
 					));
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Validate that defining this computed field does not create a dependency cycle.
+	///
+	/// Builds a dependency graph from all existing computed fields on the table plus
+	/// the field being defined, then runs iterative DFS to detect cycles.
+	/// Only checks same-table dependencies (cross-table cycles are future work).
+	pub(crate) async fn validate_computed_cycles(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		txn: Arc<Transaction>,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		// Only relevant for computed fields
+		if definition.computed.is_none() {
+			return Ok(());
+		}
+
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
+		let field_name = definition.name.to_raw_string();
+
+		// Build adjacency list: field_name -> list of computed field dependencies.
+		// We use the stored computed_deps when available, falling back to on-the-fly
+		// extraction for legacy fields (computed_deps = None).
+		// BTreeMap ensures deterministic iteration order for consistent cycle error messages.
+		let mut graph: std::collections::BTreeMap<String, Vec<String>> =
+			std::collections::BTreeMap::new();
+
+		for fd in fields.iter() {
+			if fd.computed.is_none() {
+				continue;
+			}
+			let name = fd.name.to_raw_string();
+			// Skip the field being (re)defined -- we'll use the new definition below
+			if name == field_name {
+				continue;
+			}
+			let deps = if let Some(ref cd) = fd.computed_deps {
+				cd.fields.clone()
+			} else if let Some(ref expr) = fd.computed {
+				// Legacy field without stored deps: extract on the fly
+				crate::expr::computed_deps::extract_computed_deps(expr).fields
+			} else {
+				Vec::new()
+			};
+			graph.insert(name, deps);
+		}
+
+		// Insert/replace the field being defined with its freshly-extracted deps
+		let new_deps =
+			definition.computed_deps.as_ref().map(|cd| cd.fields.clone()).unwrap_or_default();
+		graph.insert(field_name.clone(), new_deps);
+
+		// Iterative DFS cycle detection.
+		// States: 0 = unvisited, 1 = in current path, 2 = fully visited
+		let mut state: std::collections::BTreeMap<&str, u8> = std::collections::BTreeMap::new();
+		for key in graph.keys() {
+			state.insert(key.as_str(), 0);
+		}
+
+		// For each unvisited node, run DFS
+		for start in graph.keys() {
+			if state.get(start.as_str()) == Some(&2) {
+				continue;
+			}
+
+			// Stack holds (node, index_into_neighbors)
+			let mut stack: Vec<(&str, usize)> = vec![(start.as_str(), 0)];
+			// Track the path for error reporting
+			let mut path: Vec<&str> = vec![start.as_str()];
+			state.insert(start.as_str(), 1);
+
+			while let Some((node, idx)) = stack.last_mut() {
+				let neighbors = graph.get(*node).map(|v| v.as_slice()).unwrap_or(&[]);
+				if *idx < neighbors.len() {
+					let neighbor = neighbors[*idx].as_str();
+					*idx += 1;
+
+					// Only check neighbors that are computed fields (in the graph)
+					if !graph.contains_key(neighbor) {
+						continue;
+					}
+
+					match state.get(neighbor) {
+						Some(1) => {
+							// Found a cycle! Build the cycle path for the error message.
+							let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
+							let cycle: Vec<String> =
+								path[cycle_start..].iter().map(|s| s.to_string()).collect();
+							let cycle_str = format!("{} -> {}", cycle.join(" -> "), neighbor);
+							bail!(Error::ComputedFieldCycle(cycle_str));
+						}
+						Some(0) | None => {
+							// Unvisited: push onto stack
+							state.insert(neighbor, 1);
+							path.push(neighbor);
+							stack.push((neighbor, 0));
+						}
+						_ => {
+							// Already fully visited (state 2), skip
+						}
+					}
+				} else {
+					// Done with this node's neighbors
+					state.insert(node, 2);
+					path.pop();
+					stack.pop();
 				}
 			}
 		}

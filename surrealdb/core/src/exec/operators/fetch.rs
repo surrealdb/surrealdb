@@ -365,6 +365,7 @@ mod tests {
 			cond: None,
 			order: None,
 			with: None,
+			needed_fields: None,
 		});
 
 		let fetch = Fetch {

@@ -12,6 +12,7 @@ pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytesize;
 pub(crate) mod changefeed;
+pub mod computed_deps;
 pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;

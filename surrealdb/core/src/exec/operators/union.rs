@@ -10,11 +10,16 @@ use crate::exec::{
 
 /// Union operator - combines results from multiple execution plans.
 ///
-/// Fetches from all inputs in parallel but returns results in order:
-/// all results from input 0, then all from input 1, etc.
+/// Executes inputs strictly sequentially: all results from input 0, then all
+/// from input 1, etc. Each input's stream is only constructed once the previous
+/// input has been fully consumed.
 ///
-/// This is used for `SELECT * FROM a, b, c` which should fetch from a, b, and c
-/// in parallel, but return results in order a → b → c.
+/// Sequential execution is required because branches may contain mutations
+/// (e.g., UPDATE) and executing them in parallel would break atomicity
+/// guarantees.
+///
+/// This is used for `SELECT * FROM a, b, c` which fetches from a, b, and c
+/// in sequence, returning results in order a → b → c.
 #[derive(Debug, Clone)]
 pub struct Union {
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
@@ -42,30 +47,51 @@ impl ExecOperator for Union {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		if self.inputs.is_empty() {
-			// Empty union returns empty stream
 			return Ok(Box::pin(stream::empty()));
 		}
 
 		if self.inputs.len() == 1 {
-			// Single input - just delegate
 			return self.inputs[0].execute(ctx);
 		}
 
-		// Execute all inputs and collect their streams
-		// Each input produces a stream of batches
-		let mut input_streams = Vec::with_capacity(self.inputs.len());
-		for input in &self.inputs {
-			input_streams.push(input.execute(ctx)?);
-		}
+		// Execute inputs lazily and sequentially. Each input's stream is only
+		// constructed after the previous input has been fully consumed. This
+		// ensures that mutations in one branch complete before the next branch
+		// begins, preserving atomicity guarantees.
+		let inputs = self.inputs.clone();
+		let ctx = ctx.clone();
 
-		// Chain all streams together in order
-		// This preserves the ordering: all from input 0, then all from input 1, etc.
-		//
-		// Note: While this chains sequentially for output ordering, the streams
-		// themselves can be executing in parallel internally. For true parallel
-		// execution with buffering, we'd use FuturesOrdered or similar.
-		// For now, we use the simpler sequential chain approach.
-		let combined = stream::iter(input_streams).flatten();
+		let combined = stream::unfold(
+			(inputs, ctx, 0usize, Option::<ValueBatchStream>::None),
+			|(inputs, ctx, mut idx, mut current)| async move {
+				loop {
+					// Poll the current stream if we have one
+					let item = match &mut current {
+						Some(stream) => stream.next().await,
+						None => None,
+					};
+
+					if let Some(item) = item {
+						return Some((item, (inputs, ctx, idx, current)));
+					}
+
+					// Current stream is exhausted (or there was none) — start
+					// the next input. Only now do we call execute(), ensuring
+					// the previous branch has been fully drained first.
+					if idx >= inputs.len() {
+						return None;
+					}
+
+					let i = idx;
+					idx += 1;
+
+					match inputs[i].execute(&ctx) {
+						Ok(stream) => current = Some(stream),
+						Err(e) => return Some((Err(e), (inputs, ctx, idx, None))),
+					}
+				}
+			},
+		);
 
 		Ok(Box::pin(combined))
 	}

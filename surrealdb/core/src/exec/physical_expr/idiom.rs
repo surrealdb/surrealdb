@@ -504,12 +504,51 @@ async fn fetch_record_with_computed_fields(
 			let rid_arc = std::sync::Arc::new(rid.clone());
 			let fields_clone = fields.clone();
 
+			// Collect computed fields with their deps for topological sorting
+			let computed_with_deps: Vec<(String, Vec<String>)> = fields_clone
+				.iter()
+				.filter(|fd| fd.computed.is_some())
+				.map(|fd| {
+					let name = fd.name.to_raw_string();
+					let deps = if let Some(ref cd) = fd.computed_deps {
+						cd.fields.clone()
+					} else if let Some(ref expr) = fd.computed {
+						crate::expr::computed_deps::extract_computed_deps(expr).fields
+					} else {
+						Vec::new()
+					};
+					(name, deps)
+				})
+				.collect();
+
+			let sorted_indices =
+				crate::expr::computed_deps::topological_sort_computed_fields(&computed_with_deps);
+
+			// Build a map from field name to index in the original fields_clone
+			let computed_fields_ordered: Vec<_> = {
+				let name_to_fd: std::collections::HashMap<
+					String,
+					&crate::catalog::FieldDefinition,
+				> = fields_clone
+					.iter()
+					.filter(|fd| fd.computed.is_some())
+					.map(|fd| (fd.name.to_raw_string(), fd))
+					.collect();
+				sorted_indices
+					.iter()
+					.filter_map(|&idx| {
+						let (ref name, _) = computed_with_deps[idx];
+						name_to_fd.get(name.as_str()).copied()
+					})
+					.collect()
+			};
+
 			// Use TreeStack for stack management during recursive computation
 			let mut stack = TreeStack::new();
 			result = stack
 				.enter(|stk| async move {
 					let mut doc_value = result;
-					for fd in fields_clone.iter() {
+					for fd in computed_fields_ordered {
 						if let Some(computed) = &fd.computed {
 							// Evaluate the computed expression using the legacy compute method
 							// The document context is the current result value

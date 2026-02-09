@@ -1143,6 +1143,10 @@ pub(crate) enum Error {
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
 
+	/// Cyclic dependency detected among computed fields
+	#[error("Cyclic dependency detected among computed fields: {0}")]
+	ComputedFieldCycle(String),
+
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` keyword on the `id` field.")]
 	IdFieldKeywordConflict(String),
