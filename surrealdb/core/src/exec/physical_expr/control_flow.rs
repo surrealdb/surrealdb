@@ -12,11 +12,34 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
-use crate::exec::operators::ControlFlowKind;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::val::Value;
+
+/// The kind of control flow operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlFlowKind {
+	/// RETURN - exit from block/function with a value
+	Return,
+	/// THROW - raise an error
+	Throw,
+	/// BREAK - exit from loop
+	Break,
+	/// CONTINUE - skip to next loop iteration
+	Continue,
+}
+
+impl std::fmt::Display for ControlFlowKind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			ControlFlowKind::Return => write!(f, "RETURN"),
+			ControlFlowKind::Throw => write!(f, "THROW"),
+			ControlFlowKind::Break => write!(f, "BREAK"),
+			ControlFlowKind::Continue => write!(f, "CONTINUE"),
+		}
+	}
+}
 
 /// Control flow expression - BREAK, CONTINUE, THROW, RETURN.
 ///

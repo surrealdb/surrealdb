@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::bail;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::cnf::{GENERATION_ALLOCATION_LIMIT, PROTECTED_PARAM_NAMES};
 use crate::err::Error;
 use crate::exec::AccessMode;
@@ -11,6 +13,7 @@ use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
 use crate::expr::mock::Mock;
 use crate::iam::Action;
+use crate::kvs::Transaction;
 use crate::val::{Array, Value};
 
 /// Literal value - "foo", 42, true
@@ -51,11 +54,6 @@ impl ToSql for Literal {
 /// Parameter reference - $foo
 #[derive(Debug, Clone)]
 pub struct Param(pub(crate) String);
-
-use std::sync::Arc;
-
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::Transaction;
 
 impl Param {
 	/// Fetch a parameter from the database and check permissions.

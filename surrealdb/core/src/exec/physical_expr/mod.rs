@@ -15,6 +15,31 @@ use crate::iam::Auth;
 use crate::kvs::Transaction;
 use crate::val::Value;
 
+mod block;
+mod collections;
+mod conditional;
+mod control_flow;
+pub(crate) mod function;
+mod idiom;
+mod literal;
+mod ops;
+mod recurse;
+mod subquery;
+
+// Re-export all expression types for external use
+pub(crate) use block::BlockPhysicalExpr;
+pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
+pub(crate) use conditional::IfElseExpr;
+pub(crate) use control_flow::{ControlFlowExpr, ControlFlowKind};
+pub(crate) use function::{
+	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
+	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
+};
+pub(crate) use idiom::IdiomExpr;
+pub(crate) use literal::{Literal, MockExpr, Param};
+pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
+pub(crate) use subquery::ScalarSubquery;
+
 /// Context for recursive tree-building via RepeatRecurse (@).
 ///
 /// When a recursion path contains RepeatRecurse markers (e.g., in destructure
@@ -256,32 +281,6 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 	}
 }
 
-// Submodules
-mod block;
-mod collections;
-mod conditional;
-mod control_flow;
-pub(crate) mod function;
-mod idiom;
-mod literal;
-mod ops;
-mod recurse;
-mod subquery;
-
-// Re-export all expression types for external use
-pub(crate) use block::BlockPhysicalExpr;
-pub(crate) use collections::{ArrayLiteral, ObjectLiteral, SetLiteral};
-pub(crate) use conditional::IfElseExpr;
-pub(crate) use control_flow::ControlFlowExpr;
-pub(crate) use function::{
-	BuiltinFunctionExec, ClosureCallExec, ClosureExec, JsFunctionExec, ModelFunctionExec,
-	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
-};
-pub(crate) use idiom::IdiomExpr;
-pub(crate) use literal::{Literal, MockExpr, Param};
-pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
-pub(crate) use subquery::ScalarSubquery;
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -404,12 +403,9 @@ mod tests {
 	#[test]
 	fn test_idiom_expr_is_simple() {
 		use crate::exec::physical_part::PhysicalPart;
-		use crate::expr::Idiom;
-		use crate::expr::part::Part;
 
-		let idiom = Idiom(vec![Part::Field("test".to_string())]);
 		let parts = vec![PhysicalPart::Field("test".to_string())];
-		let expr = IdiomExpr::new(idiom, None, parts);
+		let expr = IdiomExpr::new("test".to_string(), None, parts);
 
 		assert!(expr.is_simple());
 	}

@@ -58,108 +58,43 @@
 //!     ▼
 //! Timeout (TIMEOUT)
 //! ```
-//!
-//! # Unimplemented Features
-//!
-//! The following features return `Error::Unimplemented` and are tracked for future work:
-//!
-//! ## DML Subqueries (in expression context)
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | `CREATE` | CREATE subqueries in expressions |
-//! | `UPDATE` | UPDATE subqueries in expressions |
-//! | `UPSERT` | UPSERT subqueries in expressions |
-//! | `DELETE` | DELETE subqueries in expressions |
-//! | `INSERT` | INSERT subqueries in expressions |
-//! | `RELATE` | RELATE subqueries in expressions |
-//!
-//! ## DDL Statements (in expression context)
-//!
-//! | Feature | Description |
-//! |---------|-------------|
-//! | `DEFINE` | Schema definition statements |
-//! | `REMOVE` | Schema removal statements |
-//! | `REBUILD` | Index rebuild statements |
-//! | `ALTER` | Schema alteration statements |
+
+mod aggregate;
+mod idiom;
+mod select;
+mod source;
+mod util;
 
 use std::sync::Arc;
 
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
+// Re-exports for external callers
+pub(crate) use self::source::LOOKUP_SOURCE_PARAM;
+use self::util::literal_to_value;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
 use crate::err::Error;
 use crate::exec::ExecOperator;
-use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::function::FunctionRegistry;
-#[cfg(storage)]
-use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, AggregateExprInfo, AggregateField, ControlFlowKind, ControlFlowPlan,
-	DatabaseInfoPlan, ExplainPlan, ExprPlan, ExtractedAggregate, Fetch, FieldSelection, Filter,
-	ForeachPlan, IfElsePlan, IndexInfoPlan, LetPlan, Limit, NamespaceInfoPlan, OrderByField,
-	Project, ProjectValue, RandomShuffle, RootInfoPlan, Scan, SequencePlan, SleepPlan, Sort,
-	SortDirection, SortTopK, SourceExpr, Split, TableInfoPlan, Timeout, Union, UnwrapExactlyOne,
-	UserInfoPlan, aggregate_field_name,
+	DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, ForeachPlan, IfElsePlan, IndexInfoPlan,
+	NamespaceInfoPlan, ReturnPlan, RootInfoPlan, SequencePlan, SleepPlan, TableInfoPlan,
+	UserInfoPlan,
 };
-use crate::expr::field::{Field, Fields};
+use crate::exec::physical_expr::ControlFlowKind;
 use crate::expr::statements::IfelseStatement;
-use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{BinaryOperator, Cond, Expr, Function, FunctionCall, Idiom, Literal};
-
-// ============================================================================
-// Planner Struct
-// ============================================================================
+use crate::expr::{Expr, Function, FunctionCall};
 
 /// Query planner that converts logical expressions to physical execution plans.
 ///
 /// The `Planner` holds shared resources (context, function registry) to avoid
-/// passing them through every function call. This improves code clarity and
-/// reduces parameter lists throughout the planning process.
+/// passing them through every function call. Methods on `Planner` are spread
+/// across submodules:
 ///
-/// # Usage
-///
-/// ```ignore
-/// let planner = Planner::new(&ctx);
-/// let plan = planner.plan(expr)?;
-/// ```
-///
-/// # Architecture
-///
-/// The planner converts SurrealQL AST nodes (`Expr`) into physical execution
-/// plans (`Arc<dyn ExecOperator>`). The conversion process:
-///
-/// 1. **Top-level statements** (SELECT, LET, INFO, etc.) become operator trees
-/// 2. **Expressions** (literals, function calls, idioms) become `PhysicalExpr`
-/// 3. **SELECT pipelines** follow: Source → Filter → Split → Aggregate → Sort → Limit → Project
-///
-/// # Limitations
-///
-/// The following features are not yet implemented in the streaming executor:
-///
-/// ## DML Subqueries
-/// - CREATE, UPDATE, UPSERT, DELETE, INSERT, RELATE subqueries
-///
-/// ## SELECT Clauses
-/// - `SELECT ... EXPLAIN` (query plan output)
-/// - `SELECT ... WITH` (index hints)
-/// - `SELECT *` with GROUP BY
-///
-/// ## Control Flow (in expression context)
-/// - BREAK, CONTINUE, RETURN statements
-/// - FOR loops
-///
-/// ## DDL Statements (in expression context)
-/// - DEFINE, REMOVE, REBUILD, ALTER statements
-///
-/// ## Data Types
-/// - Array and object record keys
-/// - Set literals in USE statements
-/// - Mock expressions
-///
-/// ## Functions
-/// - `search::*` function family
-/// - Nested aggregate functions
+/// - [`select`] — SELECT pipeline planning
+/// - [`aggregate`] — GROUP BY and aggregate extraction
+/// - [`idiom`] — Idiom-to-physical-part conversion
+/// - [`source`] — Lookup, index function, and source planning
+/// - [`util`] — Pure utility functions
 pub struct Planner<'ctx> {
 	/// The frozen context containing query parameters, capabilities, and session info.
 	ctx: &'ctx FrozenContext,
@@ -169,20 +104,11 @@ pub struct Planner<'ctx> {
 
 impl<'ctx> Planner<'ctx> {
 	/// Create a new planner with the given context.
-	///
-	/// The function registry is cached from the context for efficient lookups
-	/// during aggregate function detection.
 	pub fn new(ctx: &'ctx FrozenContext) -> Self {
 		Self {
 			ctx,
 			function_registry: ctx.function_registry(),
 		}
-	}
-
-	/// Get the underlying frozen context.
-	#[inline]
-	pub fn ctx(&self) -> &'ctx FrozenContext {
-		self.ctx
 	}
 
 	/// Get the function registry.
@@ -191,20 +117,20 @@ impl<'ctx> Planner<'ctx> {
 		self.function_registry
 	}
 
+	// ========================================================================
+	// Top-Level Planning
+	// ========================================================================
+
 	/// Plan an expression, converting it to an executable operator tree.
 	///
-	/// This is the main entry point for the planner. It handles all top-level
-	/// statement types (SELECT, LET, INFO, etc.) and converts them to physical
-	/// execution plans.
-	///
-	/// # Errors
-	///
-	/// Returns `Error::Unimplemented` for statements not yet supported in the
-	/// streaming executor.
+	/// This is the main entry point for the planner.
 	pub fn plan(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Delegate to the internal planning logic
 		self.plan_expr(expr)
 	}
+
+	// ========================================================================
+	// Expression-to-PhysicalExpr Conversion
+	// ========================================================================
 
 	/// Convert an expression to a physical expression.
 	///
@@ -212,19 +138,373 @@ impl<'ctx> Planner<'ctx> {
 	/// This is used for expressions within operators (e.g., WHERE predicates,
 	/// SELECT field expressions, ORDER BY expressions).
 	pub fn physical_expr(&self, expr: Expr) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		expr_to_physical_expr(expr, self.ctx)
+		use crate::exec::physical_expr::{
+			ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
+			ClosureExec, ControlFlowExpr, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
+			MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
+			ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
+			UserDefinedFunctionExec,
+		};
+
+		match expr {
+			Expr::Literal(crate::expr::literal::Literal::Array(elements)) => {
+				let mut phys_elements = Vec::with_capacity(elements.len());
+				for elem in elements {
+					phys_elements.push(self.physical_expr(elem)?);
+				}
+				Ok(Arc::new(ArrayLiteral {
+					elements: phys_elements,
+				}))
+			}
+			Expr::Literal(crate::expr::literal::Literal::Object(entries)) => {
+				let mut phys_entries = Vec::with_capacity(entries.len());
+				for entry in entries {
+					let value = self.physical_expr(entry.value)?;
+					phys_entries.push((entry.key, value));
+				}
+				Ok(Arc::new(ObjectLiteral {
+					entries: phys_entries,
+				}))
+			}
+			Expr::Literal(crate::expr::literal::Literal::Set(elements)) => {
+				let mut phys_elements = Vec::with_capacity(elements.len());
+				for elem in elements {
+					phys_elements.push(self.physical_expr(elem)?);
+				}
+				Ok(Arc::new(SetLiteral {
+					elements: phys_elements,
+				}))
+			}
+			Expr::Literal(lit) => {
+				let value = literal_to_value(lit)?;
+				Ok(Arc::new(PhysicalLiteral(value)))
+			}
+			Expr::Param(param) => Ok(Arc::new(Param(param.as_str().to_string()))),
+			Expr::Idiom(idiom) => self.convert_idiom(idiom),
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				let left_phys = self.physical_expr(*left)?;
+				let right_phys = self.physical_expr(*right)?;
+				Ok(Arc::new(BinaryOp {
+					left: left_phys,
+					op,
+					right: right_phys,
+				}))
+			}
+			Expr::Constant(constant) => {
+				let value = constant.compute();
+				Ok(Arc::new(PhysicalLiteral(value)))
+			}
+			Expr::Prefix {
+				op,
+				expr,
+			} => {
+				let inner = self.physical_expr(*expr)?;
+				Ok(Arc::new(UnaryOp {
+					op,
+					expr: inner,
+				}))
+			}
+			Expr::Postfix {
+				op,
+				expr,
+			} => {
+				use crate::expr::operator::PostfixOperator;
+
+				match op {
+					PostfixOperator::Call(args) => {
+						let target = self.physical_expr(*expr)?;
+						let mut phys_args = Vec::with_capacity(args.len());
+						for arg in args {
+							phys_args.push(self.physical_expr(arg)?);
+						}
+						Ok(Arc::new(ClosureCallExec {
+							target,
+							arguments: phys_args,
+						}))
+					}
+					_ => {
+						let inner = self.physical_expr(*expr)?;
+						Ok(Arc::new(PostfixOp {
+							op,
+							expr: inner,
+						}))
+					}
+				}
+			}
+			Expr::Table(table_name) => {
+				Ok(Arc::new(PhysicalLiteral(crate::val::Value::Table(table_name))))
+			}
+			Expr::FunctionCall(func_call) => {
+				let FunctionCall {
+					receiver,
+					arguments,
+				} = *func_call;
+
+				// Check for index functions first
+				if let Function::Normal(ref name) = receiver {
+					let registry = self.function_registry();
+					if registry.is_index_function(name) {
+						return self.plan_index_function(name, arguments);
+					}
+				}
+
+				let mut phys_args = Vec::with_capacity(arguments.len());
+				for arg in arguments {
+					phys_args.push(self.physical_expr(arg)?);
+				}
+
+				match receiver {
+					Function::Normal(name) => {
+						let registry = self.function_registry();
+						if registry.is_projection(&name) {
+							let func_ctx = registry
+								.get_projection(&name)
+								.map(|f| f.required_context())
+								.unwrap_or(crate::exec::ContextLevel::Database);
+							Ok(Arc::new(ProjectionFunctionExec {
+								name,
+								arguments: phys_args,
+								func_required_context: func_ctx,
+							}))
+						} else {
+							let func_ctx = registry
+								.get(&name)
+								.map(|f| f.required_context())
+								.unwrap_or(crate::exec::ContextLevel::Root);
+							Ok(Arc::new(BuiltinFunctionExec {
+								name,
+								arguments: phys_args,
+								func_required_context: func_ctx,
+							}))
+						}
+					}
+					Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
+						name,
+						arguments: phys_args,
+					})),
+					Function::Script(script) => Ok(Arc::new(JsFunctionExec {
+						script,
+						arguments: phys_args,
+					})),
+					Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
+						model,
+						arguments: phys_args,
+					})),
+					Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
+						module,
+						sub,
+						arguments: phys_args,
+					})),
+					Function::Silo {
+						org,
+						pkg,
+						major,
+						minor,
+						patch,
+						sub,
+					} => Ok(Arc::new(SiloModuleExec {
+						org,
+						pkg,
+						major,
+						minor,
+						patch,
+						sub,
+						arguments: phys_args,
+					})),
+				}
+			}
+			Expr::Closure(closure) => Ok(Arc::new(ClosureExec {
+				closure: *closure,
+			})),
+			Expr::IfElse(ifelse) => {
+				let IfelseStatement {
+					exprs,
+					close,
+				} = *ifelse;
+				let mut branches = Vec::with_capacity(exprs.len());
+				for (condition, body) in exprs {
+					let cond_phys = self.physical_expr(condition)?;
+					let body_phys = self.physical_expr(body)?;
+					branches.push((cond_phys, body_phys));
+				}
+				let otherwise = if let Some(else_expr) = close {
+					Some(self.physical_expr(else_expr)?)
+				} else {
+					None
+				};
+				Ok(Arc::new(IfElseExpr {
+					branches,
+					otherwise,
+				}))
+			}
+			Expr::Select(select) => {
+				let plan = self.plan_select(*select)?;
+				Ok(Arc::new(ScalarSubquery {
+					plan,
+				}))
+			}
+
+			// Control flow
+			Expr::Break => Ok(Arc::new(ControlFlowExpr {
+				kind: ControlFlowKind::Break,
+				inner: None,
+			})),
+			Expr::Continue => Ok(Arc::new(ControlFlowExpr {
+				kind: ControlFlowKind::Continue,
+				inner: None,
+			})),
+			Expr::Return(output_stmt) => {
+				let inner = self.physical_expr(output_stmt.what)?;
+				Ok(Arc::new(ControlFlowExpr {
+					kind: ControlFlowKind::Return,
+					inner: Some(inner),
+				}))
+			}
+
+			// DDL — cannot be used in expression context
+			Expr::Define(_) => Err(Error::Unimplemented(
+				"DEFINE statements cannot be used in expression context".to_string(),
+			)),
+			Expr::Remove(_) => Err(Error::Unimplemented(
+				"REMOVE statements cannot be used in expression context".to_string(),
+			)),
+			Expr::Rebuild(_) => Err(Error::Unimplemented(
+				"REBUILD statements cannot be used in expression context".to_string(),
+			)),
+			Expr::Alter(_) => Err(Error::Unimplemented(
+				"ALTER statements cannot be used in expression context".to_string(),
+			)),
+
+			// INFO sub-expressions (e.g. `(INFO FOR DATABASE).analyzers`)
+			Expr::Info(info) => {
+				use crate::exec::operators::RootInfoPlan;
+				use crate::expr::statements::info::InfoStatement;
+
+				let plan: Arc<dyn ExecOperator> = match *info {
+					InfoStatement::Root(structured) => Arc::new(RootInfoPlan {
+						structured,
+					}),
+					InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan {
+						structured,
+					}),
+					InfoStatement::Db(structured, version) => {
+						let version = version.map(|v| self.physical_expr(v)).transpose()?;
+						Arc::new(DatabaseInfoPlan {
+							structured,
+							version,
+						})
+					}
+					InfoStatement::Tb(table, structured, version) => {
+						let table = self.physical_expr_as_name(table)?;
+						let version = version.map(|v| self.physical_expr(v)).transpose()?;
+						Arc::new(TableInfoPlan {
+							table,
+							structured,
+							version,
+						})
+					}
+					InfoStatement::User(user, base, structured) => {
+						let user = self.physical_expr_as_name(user)?;
+						Arc::new(UserInfoPlan {
+							user,
+							base,
+							structured,
+						})
+					}
+					InfoStatement::Index(index, table, structured) => {
+						let index = self.physical_expr_as_name(index)?;
+						let table = self.physical_expr_as_name(table)?;
+						Arc::new(IndexInfoPlan {
+							index,
+							table,
+							structured,
+						})
+					}
+				};
+				Ok(Arc::new(crate::exec::physical_expr::ScalarSubquery {
+					plan,
+				}))
+			}
+			Expr::Foreach(_) => Err(Error::Unimplemented(
+				"FOR loops cannot be used in expression context".to_string(),
+			)),
+			Expr::Sleep(_) => Err(Error::Unimplemented(
+				"SLEEP statements cannot be used in expression context".to_string(),
+			)),
+			Expr::Let(_) => Err(Error::Unimplemented(
+				"LET statements cannot be used in expression context".to_string(),
+			)),
+			Expr::Explain {
+				..
+			} => Err(Error::Unimplemented(
+				"EXPLAIN statements cannot be used in expression context".to_string(),
+			)),
+
+			Expr::Mock(mock) => Ok(Arc::new(MockExpr(mock))),
+			Expr::Block(block) => Ok(Arc::new(BlockPhysicalExpr {
+				block: *block,
+			})),
+			Expr::Throw(expr) => {
+				let inner = self.physical_expr(*expr)?;
+				Ok(Arc::new(ControlFlowExpr {
+					kind: ControlFlowKind::Throw,
+					inner: Some(inner),
+				}))
+			}
+
+			// DML subqueries — not yet implemented
+			Expr::Create(_) => Err(Error::Unimplemented(
+				"CREATE subqueries not yet supported in execution plans".to_string(),
+			)),
+			Expr::Update(_) => Err(Error::Unimplemented(
+				"UPDATE subqueries not yet supported in execution plans".to_string(),
+			)),
+			Expr::Upsert(_) => Err(Error::Unimplemented(
+				"UPSERT subqueries not yet supported in execution plans".to_string(),
+			)),
+			Expr::Delete(_) => Err(Error::Unimplemented(
+				"DELETE subqueries not yet supported in execution plans".to_string(),
+			)),
+			Expr::Relate(_) => Err(Error::Unimplemented(
+				"RELATE subqueries not yet supported in execution plans".to_string(),
+			)),
+			Expr::Insert(_) => Err(Error::Unimplemented(
+				"INSERT subqueries not yet supported in execution plans".to_string(),
+			)),
+		}
 	}
 
 	/// Convert an expression to a physical expression, treating simple identifiers as strings.
 	///
-	/// This is used for expressions like `INFO FOR USER test` where `test` is a name
-	/// that should be treated as a string literal, not an undefined variable.
+	/// Used for `INFO FOR USER test` where `test` is a name, not a variable.
 	pub fn physical_expr_as_name(
 		&self,
 		expr: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		expr_to_physical_expr_as_name(expr, self.ctx)
+		use crate::exec::physical_expr::Literal as PhysicalLiteral;
+		use crate::expr::part::Part;
+
+		if let Expr::Idiom(ref idiom) = expr
+			&& idiom.0.len() == 1
+			&& let Part::Field(name) = &idiom.0[0]
+		{
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
+		}
+
+		if let Expr::Table(name) = expr {
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.to_string()))));
+		}
+
+		self.physical_expr(expr)
 	}
+
+	// ========================================================================
+	// Internal Planning
+	// ========================================================================
 
 	/// When `AllReadOnlyStatements` strategy is active, convert `Error::Unimplemented`
 	/// into `Error::Query` so it becomes a hard error instead of a silent fallback.
@@ -242,10 +522,9 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// Internal method to plan an expression.
 	fn plan_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			// DML statements - always fall back to old executor regardless of strategy
+			// DML — always fall back to old executor
 			Expr::Create(_) => Err(Error::Unimplemented(
 				"CREATE statements not yet supported in execution plans".to_string(),
 			)),
@@ -265,7 +544,7 @@ impl<'ctx> Planner<'ctx> {
 				"RELATE statements not yet supported in execution plans".to_string(),
 			)),
 
-			// DDL statements - always fall back to old executor regardless of strategy
+			// DDL — always fall back to old executor
 			Expr::Define(_) => Err(Error::Unimplemented(
 				"DEFINE statements not yet supported in execution plans".to_string(),
 			)),
@@ -279,54 +558,52 @@ impl<'ctx> Planner<'ctx> {
 				"ALTER statements not yet supported in execution plans".to_string(),
 			)),
 
-			// All other statements: wrapped with require_planned so that in
-			// AllReadOnlyStatements mode, Unimplemented becomes a hard error.
 			other => self.require_planned(self.plan_non_ddl_dml_expr(other)),
 		}
 	}
 
-	/// Plan a non-DDL/DML expression. Returns `Error::Unimplemented` for features
-	/// not yet supported, which will be converted to `Error::Query` by `require_planned`
-	/// when `AllReadOnlyStatements` strategy is active.
 	fn plan_non_ddl_dml_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
 			Expr::Select(select) => self.plan_select(*select),
 			Expr::Let(let_stmt) => self.convert_let_statement(*let_stmt),
 			Expr::Info(info) => self.plan_info(*info),
-			Expr::Foreach(stmt) => Ok(Arc::new(ForeachPlan {
-				param: stmt.param.clone(),
-				range: stmt.range.clone(),
-				body: stmt.block.clone(),
-			}) as Arc<dyn ExecOperator>),
-			Expr::IfElse(stmt) => Ok(Arc::new(IfElsePlan {
-				branches: stmt.exprs.clone(),
-				else_body: stmt.close.clone(),
-			}) as Arc<dyn ExecOperator>),
+			Expr::Foreach(stmt) => {
+				let crate::expr::statements::ForeachStatement {
+					param,
+					range,
+					block,
+				} = *stmt;
+				Ok(Arc::new(ForeachPlan {
+					param,
+					range,
+					body: block,
+				}) as Arc<dyn ExecOperator>)
+			}
+			Expr::IfElse(stmt) => {
+				let crate::expr::statements::IfelseStatement {
+					exprs,
+					close,
+				} = *stmt;
+				Ok(Arc::new(IfElsePlan {
+					branches: exprs,
+					else_body: close,
+				}) as Arc<dyn ExecOperator>)
+			}
 			Expr::Block(block) => {
-				// Deferred planning: wrap the block without converting inner expressions.
-				// The SequencePlan will plan and execute each expression at runtime,
-				// allowing LET bindings to inform subsequent expression planning.
 				if block.0.is_empty() {
-					// Empty block returns NONE immediately
 					use crate::exec::physical_expr::Literal as PhysicalLiteral;
 					Ok(Arc::new(ExprPlan {
 						expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
 					}) as Arc<dyn ExecOperator>)
 				} else if block.0.len() == 1 {
-					// Single statement - plan directly without wrapper
 					self.plan_expr(block.0.into_iter().next().unwrap())
 				} else {
-					// Multiple statements - use SequencePlan with deferred planning
 					Ok(Arc::new(SequencePlan {
 						block: *block,
 					}) as Arc<dyn ExecOperator>)
 				}
 			}
 			Expr::FunctionCall(_) => {
-				// Function calls are value expressions - convert to physical expression.
-				// Note: we intentionally do NOT check references_current_value() here.
-				// Functions like type::field() gracefully return NONE when evaluated
-				// without row context, so this should not be a planning-time error.
 				let phys_expr = self.physical_expr(expr)?;
 				Ok(Arc::new(ExprPlan {
 					expr: phys_expr,
@@ -334,21 +611,17 @@ impl<'ctx> Planner<'ctx> {
 			}
 			Expr::Closure(_) => {
 				let closure_expr = self.physical_expr(expr)?;
-
 				Ok(Arc::new(ExprPlan {
 					expr: closure_expr,
 				}) as Arc<dyn ExecOperator>)
 			}
 			Expr::Return(output_stmt) => {
-				// Plan the inner expression
 				let inner = self.plan_expr(output_stmt.what)?;
 
-				// Wrap with Fetch operator if FETCH clause is present
 				let inner = if let Some(fetchs) = output_stmt.fetch {
-					// Resolve fetch expressions to idioms
 					let mut fields = Vec::with_capacity(fetchs.len());
 					for fetch_item in fetchs {
-						let mut idioms = resolve_field_expr_to_idioms(fetch_item.0, self.ctx)?;
+						let mut idioms = self.resolve_field_idioms(fetch_item.0)?;
 						fields.append(&mut idioms);
 					}
 					if fields.is_empty() {
@@ -363,16 +636,9 @@ impl<'ctx> Planner<'ctx> {
 					inner
 				};
 
-				Ok(Arc::new(ControlFlowPlan {
-					kind: ControlFlowKind::Return,
-					inner: Some(inner),
+				Ok(Arc::new(ReturnPlan {
+					inner,
 				}))
-			}
-			Expr::Throw(_) | Expr::Break | Expr::Continue => {
-				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
 			}
 			Expr::Sleep(sleep_stmt) => Ok(Arc::new(SleepPlan {
 				duration: sleep_stmt.duration,
@@ -381,16 +647,13 @@ impl<'ctx> Planner<'ctx> {
 				format,
 				statement,
 			} => {
-				// Plan the inner statement
 				let inner_plan = self.plan_expr(*statement)?;
-				// Wrap it in an ExplainPlan operator
 				Ok(Arc::new(ExplainPlan {
 					plan: inner_plan,
 					format,
 				}))
 			}
 
-			// Value expressions - evaluate in scalar context and return result
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Constant(_)
@@ -400,58 +663,21 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Binary {
 				..
 			}
-			| Expr::Table(_) => {
-				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
-
-			// Idiom expressions require row context, so they need special handling
-			Expr::Idiom(_) => {
-				let phys_expr = self.physical_expr(expr)?;
-				// Idioms always reference current_value, so this will be an error for top-level
-				if phys_expr.references_current_value() {
-					return Err(Error::Unimplemented(
-						"Field expressions require a FROM clause to provide row context"
-							.to_string(),
-					));
-				}
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
-
-			// Mock expressions generate test data (arrays of RecordIds)
-			Expr::Mock(_) => {
-				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(ExprPlan {
-					expr: phys_expr,
-				}) as Arc<dyn ExecOperator>)
-			}
-
-			// Postfix expressions (ranges, method calls, closure invocations)
-			Expr::Postfix {
-				ref op,
+			| Expr::Postfix {
 				..
-			} => {
-				let is_call = matches!(op, crate::expr::operator::PostfixOperator::Call(_));
+			}
+			| Expr::Table(_)
+			| Expr::Idiom(_)
+			| Expr::Mock(_)
+			| Expr::Throw(_)
+			| Expr::Break
+			| Expr::Continue => {
 				let phys_expr = self.physical_expr(expr)?;
-				// Validate that the expression doesn't require row context.
-				// Skip this check for Call expressions: closures are values that
-				// don't need row context to be invoked (e.g. {||2}()).
-				if !is_call && phys_expr.references_current_value() {
-					return Err(Error::Unimplemented(
-						"Postfix expression references row context but no table specified"
-							.to_string(),
-					));
-				}
 				Ok(Arc::new(ExprPlan {
 					expr: phys_expr,
 				}) as Arc<dyn ExecOperator>)
 			}
 
-			// DDL/DML should never reach here - handled by plan_expr
 			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Upsert(_)
@@ -467,11 +693,6 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	// ========================================================================
-	// INFO Statement Planning
-	// ========================================================================
-
-	/// Plan an INFO statement into an operator tree.
 	fn plan_info(
 		&self,
 		info: crate::expr::statements::info::InfoStatement,
@@ -492,7 +713,6 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Tb(table, structured, version) => {
-				// Table names are identifiers that should be treated as strings
 				let table = self.physical_expr_as_name(table)?;
 				let version = version.map(|v| self.physical_expr(v)).transpose()?;
 				Ok(Arc::new(TableInfoPlan {
@@ -502,7 +722,6 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::User(user, base, structured) => {
-				// User names are identifiers that should be treated as strings
 				let user = self.physical_expr_as_name(user)?;
 				Ok(Arc::new(UserInfoPlan {
 					user,
@@ -511,7 +730,6 @@ impl<'ctx> Planner<'ctx> {
 				}) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Index(index, table, structured) => {
-				// Index and table names are identifiers that should be treated as strings
 				let index = self.physical_expr_as_name(index)?;
 				let table = self.physical_expr_as_name(table)?;
 				Ok(Arc::new(IndexInfoPlan {
@@ -522,3427 +740,40 @@ impl<'ctx> Planner<'ctx> {
 			}
 		}
 	}
-
-	// ========================================================================
-	// SELECT Statement Planning
-	// ========================================================================
-
-	/// Plan a SELECT statement into an operator tree.
-	///
-	/// The operator pipeline is built in this order:
-	/// 1. Scan/Union (source from FROM clause)
-	/// 2. Filter (WHERE)
-	/// 3. Split (SPLIT BY)
-	/// 4. Aggregate (GROUP BY)
-	/// 5. Sort (ORDER BY)
-	/// 6. Limit (LIMIT/START)
-	/// 7. Fetch (FETCH)
-	/// 8. Project (SELECT fields) or ProjectValue (SELECT VALUE)
-	/// 9. Timeout (TIMEOUT)
-	fn plan_select(
-		&self,
-		select: crate::expr::statements::SelectStatement,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Delegate to free function during migration
-		plan_select(select, self.ctx)
-	}
-
-	// ========================================================================
-	// LET Statement Planning
-	// ========================================================================
-
-	/// Convert a LET statement to an execution plan.
-	fn convert_let_statement(
-		&self,
-		let_stmt: crate::expr::statements::SetStatement,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// Delegate to free function during migration
-		convert_let_statement(let_stmt, self.ctx)
-	}
 }
 
 // ============================================================================
-// Select Pipeline Configuration
+// Public API Wrappers
 // ============================================================================
-
-/// Configuration for the SELECT pipeline.
-///
-/// This struct bundles together all the optional clauses from a SELECT statement
-/// that affect the pipeline: WHERE, SPLIT BY, GROUP BY, ORDER BY, LIMIT, START,
-/// and OMIT. Using a struct reduces the parameter count for `plan_select_pipeline`
-/// from 12 parameters to 4 (source, fields, config, ctx).
-///
-/// # Example
-///
-/// ```ignore
-/// let config = SelectPipelineConfig {
-///     cond: select.cond,
-///     split: select.split,
-///     group: select.group,
-///     order: select.order,
-///     limit: select.limit,
-///     start: select.start,
-///     omit: select.omit,
-///     is_value_source: all_value_sources(&select.what),
-///     tempfiles: select.tempfiles,
-/// };
-/// let plan = plan_select_pipeline(source, Some(fields), config, ctx)?;
-/// ```
-#[derive(Debug, Default)]
-pub(crate) struct SelectPipelineConfig {
-	/// WHERE clause predicate
-	pub cond: Option<crate::expr::cond::Cond>,
-	/// SPLIT BY clause fields
-	pub split: Option<crate::expr::split::Splits>,
-	/// GROUP BY clause fields
-	pub group: Option<crate::expr::group::Groups>,
-	/// ORDER BY clause fields
-	pub order: Option<crate::expr::order::Ordering>,
-	/// LIMIT clause expression
-	pub limit: Option<crate::expr::limit::Limit>,
-	/// START clause expression (offset)
-	pub start: Option<crate::expr::start::Start>,
-	/// OMIT clause fields
-	pub omit: Vec<Expr>,
-	/// Whether the source is a value (array, primitive) vs record (table, record ID).
-	/// This affects projection behavior for `$this` references.
-	pub is_value_source: bool,
-	/// Whether to use disk-based sorting (TEMPFILES hint)
-	pub tempfiles: bool,
-}
-
-impl SelectPipelineConfig {
-	/// Create a new config from a SELECT statement.
-	pub fn from_select(
-		select: &crate::expr::statements::SelectStatement,
-		is_value_source: bool,
-	) -> Self {
-		Self {
-			cond: select.cond.clone(),
-			split: select.split.clone(),
-			group: select.group.clone(),
-			order: select.order.clone(),
-			limit: select.limit.clone(),
-			start: select.start.clone(),
-			omit: select.omit.clone(),
-			is_value_source,
-			tempfiles: select.tempfiles,
-		}
-	}
-}
-
-// ============================================================================
-// Legacy Free Functions (for backwards compatibility during migration)
-// ============================================================================
-
-/// Convert an expression to a physical expression, treating simple identifiers as string literals.
-///
-/// This is used for expressions like `INFO FOR USER test` where `test` is a name
-/// that should be treated as a string literal, not an undefined variable.
-///
-/// For simple identifiers (idioms with a single Field part), returns a string literal.
-/// For all other expressions, uses the normal conversion.
-fn expr_to_physical_expr_as_name(
-	expr: Expr,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	use crate::exec::physical_expr::Literal as PhysicalLiteral;
-	use crate::expr::part::Part;
-
-	// Check if this is a simple identifier (idiom with single Field part)
-	if let Expr::Idiom(ref idiom) = expr
-		&& idiom.0.len() == 1
-		&& let Part::Field(name) = &idiom.0[0]
-	{
-		// Convert simple identifier to string literal
-		return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
-	}
-
-	// Handle table name expressions (when parsed with table_as_field = false)
-	if let Expr::Table(name) = expr {
-		return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.to_string()))));
-	}
-
-	// Otherwise use normal conversion
-	expr_to_physical_expr(expr, ctx)
-}
-
-pub(crate) fn expr_to_physical_expr(
-	expr: Expr,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
-		ClosureExec, ControlFlowExpr, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
-		MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
-		ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
-		UserDefinedFunctionExec,
-	};
-
-	match expr {
-		Expr::Literal(crate::expr::literal::Literal::Array(elements)) => {
-			// Array literal - convert each element to a physical expression
-			let mut phys_elements = Vec::with_capacity(elements.len());
-			for elem in elements {
-				phys_elements.push(expr_to_physical_expr(elem, ctx)?);
-			}
-			Ok(Arc::new(ArrayLiteral {
-				elements: phys_elements,
-			}))
-		}
-		Expr::Literal(crate::expr::literal::Literal::Object(entries)) => {
-			// Object literal - convert each entry to a physical expression
-			let mut phys_entries = Vec::with_capacity(entries.len());
-			for entry in entries {
-				let value = expr_to_physical_expr(entry.value, ctx)?;
-				phys_entries.push((entry.key, value));
-			}
-			Ok(Arc::new(ObjectLiteral {
-				entries: phys_entries,
-			}))
-		}
-		Expr::Literal(crate::expr::literal::Literal::Set(elements)) => {
-			// Set literal - convert each element to a physical expression
-			let mut phys_elements = Vec::with_capacity(elements.len());
-			for elem in elements {
-				phys_elements.push(expr_to_physical_expr(elem, ctx)?);
-			}
-			Ok(Arc::new(SetLiteral {
-				elements: phys_elements,
-			}))
-		}
-		Expr::Literal(lit) => {
-			// Convert the logical Literal to a physical Value
-			let value = literal_to_value(lit)?;
-			Ok(Arc::new(PhysicalLiteral(value)))
-		}
-		Expr::Param(param) => Ok(Arc::new(Param(param.as_str().to_string()))),
-		Expr::Idiom(idiom) => convert_idiom_to_physical_expr(&idiom, ctx),
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			let left_phys = expr_to_physical_expr(*left, ctx)?;
-			let right_phys = expr_to_physical_expr(*right, ctx)?;
-			Ok(Arc::new(BinaryOp {
-				left: left_phys,
-				op,
-				right: right_phys,
-			}))
-		}
-		Expr::Constant(constant) => {
-			// Convert constant to its computed value
-			let value = constant.compute();
-			Ok(Arc::new(PhysicalLiteral(value)))
-		}
-		Expr::Prefix {
-			op,
-			expr,
-		} => {
-			let inner = expr_to_physical_expr(*expr, ctx)?;
-			Ok(Arc::new(UnaryOp {
-				op,
-				expr: inner,
-			}))
-		}
-		Expr::Postfix {
-			op,
-			expr,
-		} => {
-			use crate::expr::operator::PostfixOperator;
-
-			match op {
-				PostfixOperator::Call(args) => {
-					// Closure call - convert target and arguments to physical expressions
-					let target = expr_to_physical_expr(*expr, ctx)?;
-					let mut phys_args = Vec::with_capacity(args.len());
-					for arg in args {
-						phys_args.push(expr_to_physical_expr(arg, ctx)?);
-					}
-					Ok(Arc::new(ClosureCallExec {
-						target,
-						arguments: phys_args,
-					}))
-				}
-				_ => {
-					// Other postfix operators (Range, RangeSkip, MethodCall)
-					let inner = expr_to_physical_expr(*expr, ctx)?;
-					Ok(Arc::new(PostfixOp {
-						op,
-						expr: inner,
-					}))
-				}
-			}
-		}
-		Expr::Table(table_name) => {
-			// Table name as a string value
-			Ok(Arc::new(PhysicalLiteral(crate::val::Value::Table(table_name))))
-		}
-		Expr::FunctionCall(func_call) => {
-			let FunctionCall {
-				receiver,
-				arguments,
-			} = *func_call;
-
-			// Check for index functions first (they need raw AST args for match_ref extraction)
-			if let Function::Normal(ref name) = receiver {
-				let registry = ctx.function_registry();
-				if registry.is_index_function(name) {
-					return plan_index_function(name, arguments, registry, ctx);
-				}
-			}
-
-			// Convert all arguments to physical expressions
-			let mut phys_args = Vec::with_capacity(arguments.len());
-			for arg in arguments {
-				phys_args.push(expr_to_physical_expr(arg, ctx)?);
-			}
-
-			// Dispatch to appropriate PhysicalExpr type based on function variant
-			match receiver {
-				Function::Normal(name) => {
-					let registry = ctx.function_registry();
-					if registry.is_projection(&name) {
-						// Projection function (type::field, type::fields)
-						let func_ctx = registry
-							.get_projection(&name)
-							.map(|f| f.required_context())
-							.unwrap_or(crate::exec::ContextLevel::Database);
-						Ok(Arc::new(ProjectionFunctionExec {
-							name,
-							arguments: phys_args,
-							func_required_context: func_ctx,
-						}))
-					} else {
-						// Regular scalar function - use the function's declared
-						// required context level (defaults to Root for most functions)
-						let func_ctx = registry
-							.get(&name)
-							.map(|f| f.required_context())
-							.unwrap_or(crate::exec::ContextLevel::Root);
-						Ok(Arc::new(BuiltinFunctionExec {
-							name,
-							arguments: phys_args,
-							func_required_context: func_ctx,
-						}))
-					}
-				}
-				Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
-					name,
-					arguments: phys_args,
-				})),
-				Function::Script(script) => Ok(Arc::new(JsFunctionExec {
-					script,
-					arguments: phys_args,
-				})),
-				Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
-					model,
-					arguments: phys_args,
-				})),
-				Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
-					module,
-					sub,
-					arguments: phys_args,
-				})),
-				Function::Silo {
-					org,
-					pkg,
-					major,
-					minor,
-					patch,
-					sub,
-				} => Ok(Arc::new(SiloModuleExec {
-					org,
-					pkg,
-					major,
-					minor,
-					patch,
-					sub,
-					arguments: phys_args,
-				})),
-			}
-		}
-		Expr::Closure(closure) => {
-			// Closure expression - wrap in physical expression
-			Ok(Arc::new(ClosureExec {
-				closure: *closure,
-			}))
-		}
-		Expr::IfElse(ifelse) => {
-			let IfelseStatement {
-				exprs,
-				close,
-			} = *ifelse;
-			// IF/THEN/ELSE expression - convert all branches
-			let mut branches = Vec::with_capacity(exprs.len());
-			for (condition, body) in exprs {
-				let cond_phys = expr_to_physical_expr(condition, ctx)?;
-				let body_phys = expr_to_physical_expr(body, ctx)?;
-				branches.push((cond_phys, body_phys));
-			}
-			let otherwise = if let Some(else_expr) = close {
-				Some(expr_to_physical_expr(else_expr, ctx)?)
-			} else {
-				None
-			};
-			Ok(Arc::new(IfElseExpr {
-				branches,
-				otherwise,
-			}))
-		}
-		Expr::Select(select) => {
-			// Scalar subquery - plan the SELECT and wrap in ScalarSubquery
-			let plan = plan_select(*select, ctx)?;
-			Ok(Arc::new(ScalarSubquery {
-				plan,
-			}))
-		}
-
-		// Control flow expressions - propagate as ControlFlow signals
-		Expr::Break => Ok(Arc::new(ControlFlowExpr {
-			kind: ControlFlowKind::Break,
-			inner: None,
-		})),
-		Expr::Continue => Ok(Arc::new(ControlFlowExpr {
-			kind: ControlFlowKind::Continue,
-			inner: None,
-		})),
-		Expr::Return(output_stmt) => {
-			let inner = expr_to_physical_expr(output_stmt.what, ctx)?;
-			Ok(Arc::new(ControlFlowExpr {
-				kind: ControlFlowKind::Return,
-				inner: Some(inner),
-			}))
-		}
-
-		// DDL statements - cannot be used in expression context
-		Expr::Define(_) => Err(Error::Unimplemented(
-			"DEFINE statements cannot be used in expression context".to_string(),
-		)),
-		Expr::Remove(_) => Err(Error::Unimplemented(
-			"REMOVE statements cannot be used in expression context".to_string(),
-		)),
-		Expr::Rebuild(_) => Err(Error::Unimplemented(
-			"REBUILD statements cannot be used in expression context".to_string(),
-		)),
-		Expr::Alter(_) => Err(Error::Unimplemented(
-			"ALTER statements cannot be used in expression context".to_string(),
-		)),
-
-		// INFO statements used as sub-expressions, e.g. `(INFO FOR DATABASE).analyzers`
-		Expr::Info(info) => {
-			use crate::expr::statements::info::InfoStatement;
-			let plan: Arc<dyn ExecOperator> = match *info {
-				InfoStatement::Root(structured) => Arc::new(RootInfoPlan {
-					structured,
-				}),
-				InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan {
-					structured,
-				}),
-				InfoStatement::Db(structured, version) => {
-					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
-					Arc::new(DatabaseInfoPlan {
-						structured,
-						version,
-					})
-				}
-				InfoStatement::Tb(table, structured, version) => {
-					let table = expr_to_physical_expr_as_name(table, ctx)?;
-					let version = version.map(|v| expr_to_physical_expr(v, ctx)).transpose()?;
-					Arc::new(TableInfoPlan {
-						table,
-						structured,
-						version,
-					})
-				}
-				InfoStatement::User(user, base, structured) => {
-					let user = expr_to_physical_expr_as_name(user, ctx)?;
-					Arc::new(UserInfoPlan {
-						user,
-						base,
-						structured,
-					})
-				}
-				InfoStatement::Index(index, table, structured) => {
-					let index = expr_to_physical_expr_as_name(index, ctx)?;
-					let table = expr_to_physical_expr_as_name(table, ctx)?;
-					Arc::new(IndexInfoPlan {
-						index,
-						table,
-						structured,
-					})
-				}
-			};
-			Ok(Arc::new(ScalarSubquery {
-				plan,
-			}))
-		}
-		Expr::Foreach(_) => {
-			Err(Error::Unimplemented("FOR loops cannot be used in expression context".to_string()))
-		}
-		Expr::Sleep(_) => Err(Error::Unimplemented(
-			"SLEEP statements cannot be used in expression context".to_string(),
-		)),
-		Expr::Let(_) => Err(Error::Unimplemented(
-			"LET statements cannot be used in expression context".to_string(),
-		)),
-		Expr::Explain {
-			..
-		} => Err(Error::Unimplemented(
-			"EXPLAIN statements cannot be used in expression context".to_string(),
-		)),
-
-		Expr::Mock(mock) => Ok(Arc::new(MockExpr(mock))),
-		Expr::Block(block) => {
-			// Deferred planning: wrap the block without converting inner expressions.
-			// The BlockPhysicalExpr will plan and execute each expression at evaluation
-			// time, allowing LET bindings to inform subsequent expression planning.
-			Ok(Arc::new(BlockPhysicalExpr {
-				block: *block,
-			}))
-		}
-		Expr::Throw(expr) => {
-			let inner = expr_to_physical_expr(*expr, ctx)?;
-			Ok(Arc::new(ControlFlowExpr {
-				kind: ControlFlowKind::Throw,
-				inner: Some(inner),
-			}))
-		}
-
-		// DML subqueries - not yet implemented
-		Expr::Create(_) => Err(Error::Unimplemented(
-			"CREATE subqueries not yet supported in execution plans".to_string(),
-		)),
-		Expr::Update(_) => Err(Error::Unimplemented(
-			"UPDATE subqueries not yet supported in execution plans".to_string(),
-		)),
-		Expr::Upsert(_) => Err(Error::Unimplemented(
-			"UPSERT subqueries not yet supported in execution plans".to_string(),
-		)),
-		Expr::Delete(_) => Err(Error::Unimplemented(
-			"DELETE subqueries not yet supported in execution plans".to_string(),
-		)),
-		Expr::Relate(_) => Err(Error::Unimplemented(
-			"RELATE subqueries not yet supported in execution plans".to_string(),
-		)),
-		Expr::Insert(_) => Err(Error::Unimplemented(
-			"INSERT subqueries not yet supported in execution plans".to_string(),
-		)),
-	}
-}
-
-/// Convert a RecordIdKeyLit to a RecordIdKey for record ID construction in execution plans.
-fn convert_record_key_lit(
-	key_lit: &crate::expr::record_id::RecordIdKeyLit,
-) -> Result<crate::val::RecordIdKey, Error> {
-	use crate::expr::record_id::RecordIdKeyLit;
-	use crate::val::RecordIdKey;
-
-	match key_lit {
-		RecordIdKeyLit::Number(n) => Ok(RecordIdKey::Number(*n)),
-		RecordIdKeyLit::String(s) => Ok(RecordIdKey::String(s.clone())),
-		RecordIdKeyLit::Uuid(u) => Ok(RecordIdKey::Uuid(*u)),
-		RecordIdKeyLit::Generate(generator) => Ok(generator.compute()),
-		RecordIdKeyLit::Array(exprs) => {
-			let mut values = Vec::with_capacity(exprs.len());
-			for expr in exprs {
-				let value = static_expr_to_value(expr)?;
-				values.push(value);
-			}
-			Ok(RecordIdKey::Array(crate::val::Array(values)))
-		}
-		RecordIdKeyLit::Object(entries) => {
-			let mut obj = crate::val::Object::default();
-			for entry in entries {
-				let value = static_expr_to_value(&entry.value)?;
-				obj.insert(entry.key.clone(), value);
-			}
-			Ok(RecordIdKey::Object(obj))
-		}
-		RecordIdKeyLit::Range(_) => Err(Error::Unimplemented(
-			"Nested range record keys not supported in execution plans".to_string(),
-		)),
-	}
-}
-
-/// Convert a static `Expr` to a `Value` at plan time.
-///
-/// This handles expressions that can be resolved without runtime context:
-/// literals, record IDs with literal keys, and `NONE`/`NULL`.
-fn static_expr_to_value(expr: &Expr) -> Result<crate::val::Value, Error> {
-	match expr {
-		Expr::Literal(lit) => literal_to_value(lit.clone()),
-		_ => Err(Error::Unimplemented(
-			"Dynamic expressions in record ID keys not yet supported in execution plans"
-				.to_string(),
-		)),
-	}
-}
-
-/// Convert a Literal to a Value for static (non-computed) cases
-/// This is used for USE statement expressions which must be static
-fn literal_to_value(lit: crate::expr::literal::Literal) -> Result<crate::val::Value, Error> {
-	use crate::expr::literal::Literal;
-	use crate::val::{Number, Range, Value};
-
-	match lit {
-		Literal::None => Ok(Value::None),
-		Literal::Null => Ok(Value::Null),
-		Literal::UnboundedRange => Ok(Value::Range(Box::new(Range::unbounded()))),
-		Literal::Bool(x) => Ok(Value::Bool(x)),
-		Literal::Float(x) => Ok(Value::Number(Number::Float(x))),
-		Literal::Integer(i) => Ok(Value::Number(Number::Int(i))),
-		Literal::Decimal(d) => Ok(Value::Number(Number::Decimal(d))),
-		Literal::String(s) => Ok(Value::String(s)),
-		Literal::Bytes(b) => Ok(Value::Bytes(b)),
-		Literal::Regex(r) => Ok(Value::Regex(r)),
-		Literal::Duration(d) => Ok(Value::Duration(d)),
-		Literal::Datetime(dt) => Ok(Value::Datetime(dt)),
-		Literal::Uuid(u) => Ok(Value::Uuid(u)),
-		Literal::Geometry(g) => Ok(Value::Geometry(g)),
-		Literal::File(f) => Ok(Value::File(f)),
-		// RecordId literals - convert to RecordId value for Scan operator
-		Literal::RecordId(rid_lit) => {
-			use std::ops::Bound;
-
-			use crate::expr::record_id::RecordIdKeyLit;
-			use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
-
-			let key = match &rid_lit.key {
-				RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
-				RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
-				RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
-				RecordIdKeyLit::Generate(generator) => generator.compute(),
-				RecordIdKeyLit::Range(range_lit) => {
-					// Convert RecordIdKeyRangeLit to RecordIdKeyRange
-					let start = match &range_lit.start {
-						Bound::Unbounded => Bound::Unbounded,
-						Bound::Included(key_lit) => {
-							Bound::Included(convert_record_key_lit(key_lit)?)
-						}
-						Bound::Excluded(key_lit) => {
-							Bound::Excluded(convert_record_key_lit(key_lit)?)
-						}
-					};
-					let end = match &range_lit.end {
-						Bound::Unbounded => Bound::Unbounded,
-						Bound::Included(key_lit) => {
-							Bound::Included(convert_record_key_lit(key_lit)?)
-						}
-						Bound::Excluded(key_lit) => {
-							Bound::Excluded(convert_record_key_lit(key_lit)?)
-						}
-					};
-					RecordIdKey::Range(Box::new(RecordIdKeyRange {
-						start,
-						end,
-					}))
-				}
-				RecordIdKeyLit::Array(_) | RecordIdKeyLit::Object(_) => {
-					convert_record_key_lit(&rid_lit.key)?
-				}
-			};
-
-			Ok(Value::RecordId(RecordId {
-				table: rid_lit.table,
-				key,
-			}))
-		}
-		Literal::Array(_) => Err(Error::Unimplemented(
-			"Array literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Set(_) => Err(Error::Unimplemented(
-			"Set literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Object(_) => Err(Error::Unimplemented(
-			"Object literals in USE statements not yet supported".to_string(),
-		)),
-	}
-}
 
 /// Plan an expression into an executable operator tree.
 ///
-/// This is the main entry point for the planner. It delegates to `Planner::plan()`
-/// which handles all top-level statement types.
-///
-/// When `ComputeOnly` strategy is active, immediately returns `Error::Unimplemented`
-/// to skip the new planner entirely.
-///
-/// # Errors
-///
-/// Returns `Error::Unimplemented` for statements not yet supported in the
-/// streaming executor (or all statements when `ComputeOnly`).
+/// This is the main entry point for the planner, delegating to `Planner::plan()`.
+/// Returns `Error::Unimplemented` when `ComputeOnly` strategy is active.
 pub(crate) fn try_plan_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
-	// ComputeOnly: skip the new planner entirely
 	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {
 		return Err(Error::Unimplemented("ComputeOnly strategy: skipping new planner".to_string()));
 	}
 	Planner::new(ctx).plan(expr)
 }
 
-/// Check if an expression contains KNN (vector search) operators.
+/// Convert an expression to a physical expression.
 ///
-/// KNN operators require special index infrastructure to evaluate. The streaming
-/// executor doesn't support KNN yet, so we need to fall back to the old execution path.
-/// Note: MATCHES (full-text search) is now supported via FullTextScan operator.
-fn contains_knn_operator(expr: &Expr) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			// Check for KNN operators only (MATCHES is now supported)
-			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
-				return true;
-			}
-			// Recursively check children
-			contains_knn_operator(left) || contains_knn_operator(right)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => contains_knn_operator(inner),
-		// For other expression types, no KNN operators
-		_ => false,
-	}
-}
-
-/// Check if an expression contains MATCHES operators that cannot be indexed.
-///
-/// MATCHES operators can be indexed via FullTextScan when they're at the top level
-/// or combined with AND. However, when MATCHES is inside an OR branch, the index
-/// analyzer cannot use an index for it, so we would need to evaluate MATCHES at
-/// runtime - which the streaming executor doesn't support.
-///
-/// Returns true if MATCHES appears within an OR subtree.
-fn contains_non_indexable_matches(expr: &Expr) -> bool {
-	contains_matches_in_or(expr, false)
-}
-
-/// Helper function to track if we're inside an OR branch while looking for MATCHES.
-fn contains_matches_in_or(expr: &Expr, inside_or: bool) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			// If we're inside an OR and find MATCHES, that's non-indexable
-			if inside_or && matches!(op, BinaryOperator::Matches(_)) {
-				return true;
-			}
-
-			// For OR, mark that we're inside an OR branch
-			let new_inside_or = inside_or || matches!(op, BinaryOperator::Or);
-
-			// Recursively check children
-			contains_matches_in_or(left, new_inside_or)
-				|| contains_matches_in_or(right, new_inside_or)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => contains_matches_in_or(inner, inside_or),
-		// For other expression types, no MATCHES operators
-		_ => false,
-	}
-}
-
-// ============================================================================
-// Index Function Planning Helpers
-// ============================================================================
-
-/// Extract MATCHES clause information from a WHERE condition for index functions.
-///
-/// Walks the WHERE clause AST to find `BinaryOperator::Matches` expressions and
-/// builds a `MatchesContext` mapping match_ref numbers to their idiom/query pairs.
-fn extract_matches_context(cond: &Cond) -> crate::exec::function::MatchesContext {
-	let mut ctx = crate::exec::function::MatchesContext::new();
-	collect_matches(&cond.0, &mut ctx);
-	ctx
-}
-
-/// Recursively collect MATCHES operators from an expression tree.
-fn collect_matches(expr: &Expr, ctx: &mut crate::exec::function::MatchesContext) {
-	match expr {
-		Expr::Binary {
-			left,
-			op: BinaryOperator::Matches(matches_op),
-			right,
-		} => {
-			// Extract the idiom from the left side
-			if let Expr::Idiom(idiom) = left.as_ref() {
-				// Extract the query string from the right side
-				let query = match right.as_ref() {
-					Expr::Literal(Literal::String(s)) => s.clone(),
-					_ => return,
-				};
-
-				// Use the match_ref from the operator, defaulting to 0
-				let match_ref = matches_op.rf.unwrap_or(0);
-
-				ctx.insert(
-					match_ref,
-					crate::exec::function::MatchInfo {
-						idiom: idiom.clone(),
-						query,
-					},
-				);
-			}
-		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			// Recurse into AND/OR branches
-			collect_matches(left, ctx);
-			collect_matches(right, ctx);
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => collect_matches(inner, ctx),
-		_ => {}
-	}
-}
-
-/// Plan an index function call (search::highlight, search::score, search::offsets).
-///
-/// Extracts the match_ref argument from the raw AST args, resolves it against the
-/// MatchesContext from the WHERE clause, converts the remaining args to physical
-/// expressions, and creates an `IndexFunctionExec`.
-fn plan_index_function(
-	name: &str,
-	mut ast_args: Vec<Expr>,
-	registry: &std::sync::Arc<FunctionRegistry>,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	use crate::exec::physical_expr::function::IndexFunctionExec;
-
-	let func = registry.get_index_function(name).ok_or_else(|| {
-		Error::Unimplemented(format!("Index function '{}' not found in registry", name))
-	})?;
-
-	let match_ref_idx = func.match_ref_arg_index();
-
-	// Extract the match_ref argument from AST (must be a literal integer)
-	if match_ref_idx >= ast_args.len() {
-		return Err(Error::Unimplemented(format!(
-			"Index function '{}' requires at least {} arguments",
-			name,
-			match_ref_idx + 1
-		)));
-	}
-
-	// Remove the match_ref arg from the AST args
-	let match_ref_ast = ast_args.remove(match_ref_idx);
-
-	// Extract the match_ref value from the AST literal
-	let match_ref = match match_ref_ast {
-		Expr::Literal(Literal::Integer(n)) => n as u8,
-		Expr::Literal(Literal::Float(n)) => n as u8,
-		_ => {
-			return Err(Error::Unimplemented(format!(
-				"Index function '{}': match_ref argument must be a literal integer",
-				name
-			)));
-		}
-	};
-
-	// Convert remaining AST args to physical expressions
-	let mut phys_args = Vec::with_capacity(ast_args.len());
-	for arg in ast_args {
-		phys_args.push(expr_to_physical_expr(arg, ctx)?);
-	}
-
-	// Look up the MatchesContext from the planning context
-	let matches_ctx = ctx.get_matches_context().ok_or_else(|| {
-		Error::Unimplemented(format!(
-			"Index function '{}': no MATCHES clause found in WHERE condition",
-			name
-		))
-	})?;
-
-	// Resolve the match_ref to a MatchContext
-	let match_ctx = matches_ctx
-		.resolve(match_ref, extract_table_from_context(ctx))
-		.map_err(|e| Error::Unimplemented(format!("Index function '{}': {}", name, e)))?;
-
-	let func_ctx = func.required_context();
-
-	Ok(Arc::new(IndexFunctionExec {
-		name: name.to_string(),
-		arguments: phys_args,
-		match_ctx,
-		func_required_context: func_ctx,
-	}))
-}
-
-/// Try to extract the primary table name from the frozen context.
-///
-/// Looks at the matches context for table info, falling back to a default.
-/// The table name is set in plan_select where the FROM clause is analyzed.
-fn extract_table_from_context(ctx: &FrozenContext) -> crate::val::TableName {
-	// This is populated by plan_select via set_matches_table
-	// Check if there's a table name stored in the matches context
-	if let Some(mc) = ctx.get_matches_context() {
-		if let Some(table) = mc.table() {
-			return table.clone();
-		}
-	}
-	crate::val::TableName::from("unknown".to_string())
-}
-
-/// Plan a SELECT statement
-///
-/// The operator pipeline is built in this order:
-/// 1. Scan/Union (source from FROM clause)
-/// 2. Filter (WHERE)
-/// 3. Split (SPLIT BY)
-/// 4. Aggregate (GROUP BY)
-/// 5. Sort (ORDER BY)
-/// 6. Limit (LIMIT/START)
-/// 7. Fetch (FETCH)
-/// 8. Project (SELECT fields) or ProjectValue (SELECT VALUE)
-/// 9. Timeout (TIMEOUT)
-fn plan_select(
-	select: crate::expr::statements::SelectStatement,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	let crate::expr::statements::SelectStatement {
-		mut fields,
-		omit,
-		only,
-		what,
-		with,
-		cond,
-		split,
-		group,
-		order,
-		limit,
-		start,
-		fetch,
-		version,
-		timeout,
-		explain,
-		tempfiles,
-	} = select;
-
-	// EXPLAIN clause (query explain output)
-	if explain.is_some() {
-		return Err(Error::Unimplemented(
-			"SELECT ... EXPLAIN not yet supported in execution plans".to_string(),
-		));
-	}
-
-	// Check for KNN operators in WHERE clause - these require index executor
-	// context that the streaming pipeline doesn't yet support. Fall back to old path.
-	// Note: MATCHES (full-text search) is now supported via FullTextScan operator.
-	if let Some(ref c) = cond {
-		if contains_knn_operator(&c.0) {
-			return Err(Error::Unimplemented(
-				"WHERE clause with KNN operators not yet supported in streaming executor"
-					.to_string(),
-			));
-		}
-		// Check for MATCHES operators within OR conditions - these cannot be indexed
-		// because the index analyzer doesn't support OR across different index types.
-		// The streaming executor can't evaluate MATCHES at runtime, so fall back.
-		if contains_non_indexable_matches(&c.0) {
-			return Err(Error::Unimplemented(
-				"WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
-					.to_string(),
-			));
-		}
-	}
-
-	// Extract VERSION timestamp if present (for time-travel queries)
-	let version = extract_version(version)?;
-
-	// Check if all sources are "value sources" (arrays, primitives) before consuming `what`.
-	// This affects projection behavior: `SELECT $this FROM [1,2,3]` should return raw values,
-	// while `SELECT $this FROM table` should wrap in `{ this: ... }`.
-	let is_value_source = all_value_sources(&what);
-
-	// Extract the primary table name from FROM clause (needed for index function planning)
-	let primary_table = what.iter().find_map(|expr| {
-		if let Expr::Table(table_name) = expr {
-			Some(table_name.clone())
-		} else {
-			None
-		}
-	});
-
-	// Analyze WHERE clause for MATCHES operators used by index functions.
-	// If MATCHES clauses exist, create a child context with the MatchesContext
-	// so that index functions (search::highlight, etc.) can resolve their match_ref.
-	let planning_ctx: std::borrow::Cow<'_, FrozenContext> = if let Some(ref c) = cond {
-		let mut matches_ctx = extract_matches_context(c);
-		if !matches_ctx.is_empty() {
-			if let Some(ref table) = primary_table {
-				matches_ctx.set_table(table.clone());
-			}
-			let mut child = crate::ctx::Context::new(ctx);
-			child.set_matches_context(matches_ctx);
-			std::borrow::Cow::Owned(child.freeze())
-		} else {
-			std::borrow::Cow::Borrowed(ctx)
-		}
-	} else {
-		std::borrow::Cow::Borrowed(ctx)
-	};
-
-	// Build the source plan from `what` (FROM clause)
-	// Pass cond, order, and with for index selection in Scan operator
-	let source =
-		plan_select_sources(what, version, cond.as_ref(), order.as_ref(), with.as_ref(), ctx)?;
-
-	// Build pipeline configuration
-	let config = SelectPipelineConfig {
-		cond,
-		split,
-		group,
-		order,
-		limit,
-		start,
-		omit,
-		is_value_source,
-		tempfiles,
-	};
-
-	// Apply the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
-	// Use the planning context (with MatchesContext) for expression planning
-	let projected = plan_select_pipeline(source, Some(fields.clone()), config, &planning_ctx)?;
-
-	// Apply FETCH if present - after projections so it can expand record IDs
-	// in computed fields like graph traversals
-	let fetched = plan_fetch(fetch, projected, ctx)?;
-
-	// Apply TIMEOUT if present (timeout is always Expr but may be Literal::None)
-	let timed = match timeout {
-		Expr::Literal(Literal::None) => fetched,
-		timeout_expr => {
-			let timeout_phys = expr_to_physical_expr(timeout_expr, ctx)?;
-			Arc::new(Timeout {
-				input: fetched,
-				timeout: Some(timeout_phys),
-			}) as Arc<dyn ExecOperator>
-		}
-	};
-
-	// Apply ONLY clause - unwrap single result or return NONE/error
-	// - Table sources (Scan) return NONE when no results (e.g., WHERE matches nothing)
-	// - Value sources (arrays) error when no results (e.g., empty array)
-	if only {
-		Ok(Arc::new(UnwrapExactlyOne {
-			input: timed,
-			none_on_empty: !is_value_source,
-		}))
-	} else {
-		Ok(timed)
-	}
-}
-
-/// Plan the SELECT pipeline after the source is determined.
-///
-/// This applies the standard query pipeline: Filter -> Split -> Aggregate -> Sort -> Limit ->
-/// Project. Used by both `plan_select` and `plan_lookup` to share the common operator chain.
-///
-/// # Parameters
-///
-/// - `source`: The already-planned source operator (Scan, GraphEdgeScan, Union, etc.)
-/// - `fields`: Optional fields for projection. If None, passes through all fields.
-/// - `config`: Pipeline configuration (WHERE, SPLIT, GROUP, ORDER, LIMIT, START, OMIT, etc.)
-/// - `ctx`: The frozen context
-fn plan_select_pipeline(
-	source: Arc<dyn ExecOperator>,
-	fields: Option<Fields>,
-	config: SelectPipelineConfig,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	// Destructure config for easier access
-	let SelectPipelineConfig {
-		cond,
-		split,
-		group,
-		order,
-		limit,
-		start,
-		omit,
-		is_value_source,
-		tempfiles,
-	} = config;
-
-	// Apply WHERE clause if present
-	let filtered = if let Some(cond) = cond {
-		let predicate = expr_to_physical_expr(cond.0, ctx)?;
-		Arc::new(Filter {
-			input: source,
-			predicate,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		source
-	};
-
-	// Apply SPLIT BY if present
-	let split_op = if let Some(splits) = split {
-		let idioms: Vec<_> = splits.into_iter().map(|s| s.0).collect();
-		Arc::new(Split {
-			input: filtered,
-			idioms,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		filtered
-	};
-
-	// Get fields or use default (SELECT *)
-	let fields = fields.unwrap_or_else(Fields::all);
-
-	// Apply GROUP BY if present
-	let (grouped, skip_projections) = if let Some(groups) = group {
-		let group_by: Vec<_> = groups.0.into_iter().map(|g| g.0).collect();
-
-		// Validate: $this and $parent are invalid in GROUP BY context
-		check_forbidden_group_by_params(&fields)?;
-
-		// Build aggregate fields and group-by expressions from the SELECT expression
-		let (aggregates, group_by_exprs) =
-			plan_aggregation_with_group_exprs(&fields, &group_by, ctx)?;
-
-		// For GROUP BY, the Aggregate operator handles projections internally
-		(
-			Arc::new(Aggregate {
-				input: split_op,
-				group_by,
-				group_by_exprs,
-				aggregates,
-			}) as Arc<dyn ExecOperator>,
-			true,
-		)
-	} else {
-		(split_op, false)
-	};
-
-	// Apply ORDER BY if present
-	let (sorted, sort_only_omits) = if let Some(ref order) = order {
-		if skip_projections {
-			// GROUP BY present - use legacy approach (Aggregate handles expressions)
-			(plan_sort(grouped, order, &start, &limit, tempfiles, ctx)?, vec![])
-		} else {
-			// No GROUP BY - use consolidated approach
-			plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles, ctx)?
-		}
-	} else {
-		(grouped, vec![])
-	};
-
-	// Apply LIMIT/START if present
-	let limited = if limit.is_some() || start.is_some() {
-		let limit_expr = if let Some(ref limit) = limit {
-			Some(expr_to_physical_expr(limit.0.clone(), ctx)?)
-		} else {
-			None
-		};
-		let offset_expr = if let Some(ref start) = start {
-			Some(expr_to_physical_expr(start.0.clone(), ctx)?)
-		} else {
-			None
-		};
-		Arc::new(Limit {
-			input: sorted,
-			limit: limit_expr,
-			offset: offset_expr,
-		}) as Arc<dyn ExecOperator>
-	} else {
-		sorted
-	};
-
-	// Combine user-specified OMIT with sort-only computed fields
-	let mut all_omit = omit;
-	for field_name in sort_only_omits {
-		all_omit.push(Expr::Idiom(Idiom::field(field_name)));
-	}
-
-	// Apply projections (SELECT fields or SELECT VALUE)
-	// Skip if GROUP BY is present (handled by Aggregate operator)
-	let projected = if skip_projections {
-		// GROUP BY case - skip projections but apply OMIT if needed
-		if !all_omit.is_empty() {
-			let omit_fields = plan_omit_fields(all_omit, ctx)?;
-			Arc::new(Project {
-				input: limited,
-				fields: vec![],
-				omit: omit_fields,
-				include_all: true,
-			}) as Arc<dyn ExecOperator>
-		} else {
-			limited
-		}
-	} else {
-		plan_projections(&fields, &all_omit, limited, ctx, is_value_source)?
-	};
-
-	Ok(projected)
-}
-
-/// Check if a source expression represents a "value source" (array, primitive)
-/// as opposed to a "record source" (table, record ID).
-///
-/// Value sources should use raw value projection for `SELECT $this`,
-/// while record sources should wrap in `{ this: ... }`.
-fn is_value_source_expr(expr: &Expr) -> bool {
-	match expr {
-		// Array literals are value sources - elements are iterated directly
-		Expr::Literal(Literal::Array(_)) => true,
-		// String, number, etc. are value sources
-		Expr::Literal(Literal::String(_))
-		| Expr::Literal(Literal::Integer(_))
-		| Expr::Literal(Literal::Float(_))
-		| Expr::Literal(Literal::Decimal(_))
-		| Expr::Literal(Literal::Bool(_))
-		| Expr::Literal(Literal::None)
-		| Expr::Literal(Literal::Null) => true,
-		// Tables are record sources
-		Expr::Table(_) => false,
-		// Record IDs are record sources
-		Expr::Literal(Literal::RecordId(_)) => false,
-		// Parameters might be anything - conservatively treat as record source
-		// unless we can resolve them at planning time
-		Expr::Param(_) => false,
-		// Subqueries return records
-		Expr::Select(_) => false,
-		// Other expressions - conservatively treat as record source
-		_ => false,
-	}
-}
-
-/// Check if ALL source expressions are value sources.
-fn all_value_sources(sources: &[Expr]) -> bool {
-	!sources.is_empty() && sources.iter().all(is_value_source_expr)
-}
-
-/// Plan projections (SELECT fields or SELECT VALUE)
-///
-/// This handles:
-/// - `SELECT *` - pass through without projection
-/// - `SELECT * OMIT field` - use Project with empty fields and omit populated
-/// - `SELECT VALUE expr` - use ProjectValue operator
-/// - `SELECT field1, field2` - use Project operator
-/// - `SELECT field1, *, field2`
-///
-/// When `is_value_source` is true (source is array/primitive), single `$this` or `$param`
-/// projections without explicit aliases use ProjectValue (raw values) instead of Project.
-fn plan_projections(
-	fields: &Fields,
-	omit: &[Expr],
-	input: Arc<dyn ExecOperator>,
-	ctx: &FrozenContext,
-	is_value_source: bool,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	match fields {
-		// SELECT VALUE expr - return raw values (OMIT doesn't make sense here)
-		Fields::Value(selector) => {
-			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-			Ok(Arc::new(ProjectValue {
-				input,
-				expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// SELECT field1, field2, ... or SELECT *
-		Fields::Select(field_list) => {
-			// Check if this is just SELECT * (all fields, no specific fields)
-			let is_select_all =
-				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
-
-			if is_select_all {
-				// SELECT * - use Project operator to handle RecordId dereferencing
-				// and apply OMIT if present
-				let omit_fields = if !omit.is_empty() {
-					plan_omit_fields(omit.to_vec(), ctx)?
-				} else {
-					vec![]
-				};
-				return Ok(Arc::new(Project {
-					input,
-					fields: vec![], // No specific fields - pass through
-					omit: omit_fields,
-					include_all: true,
-				}) as Arc<dyn ExecOperator>);
-			}
-
-			// Check for wildcards mixed with specific fields
-			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-			// Special case: For value sources (arrays, primitives), a single `$this` or `$param`
-			// without an explicit alias should return raw values (like SELECT VALUE).
-			// This matches legacy behavior where `SELECT $this FROM [1,2,3]` returns `[1,2,3]`.
-			if is_value_source
-				&& !has_wildcard
-				&& field_list.len() == 1
-				&& let Some(Field::Single(selector)) = field_list.first()
-			{
-				// Check if it's a bare parameter reference without alias
-				if selector.alias.is_none()
-					&& let Expr::Param(_) = &selector.expr
-				{
-					// Use ProjectValue to return raw values
-					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-					return Ok(Arc::new(ProjectValue {
-						input,
-						expr,
-					}) as Arc<dyn ExecOperator>);
-				}
-			}
-
-			// Build field selections for specific fields (skip wildcards)
-			let mut field_selections = Vec::with_capacity(field_list.len());
-
-			for field in field_list {
-				if let Field::Single(selector) = field {
-					// Convert expression to physical
-					let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-
-					// Determine the output name and whether it's an explicit alias
-					let field_selection = if let Some(alias) = &selector.alias {
-						// User provided explicit alias - use it
-						let output_name = idiom_to_field_name(alias);
-						FieldSelection::with_alias(output_name, expr)
-					} else {
-						// No alias - derive output path from expression
-						// For idioms with graph traversals, this creates nested output
-						match &selector.expr {
-							Expr::Idiom(idiom) => {
-								let output_path = idiom_to_field_path(idiom);
-								FieldSelection::from_field_path(output_path, expr)
-							}
-							_ => {
-								// Non-idiom expressions use flat field name
-								let output_name = derive_field_name(&selector.expr);
-								FieldSelection::new(output_name, expr)
-							}
-						}
-					};
-
-					field_selections.push(field_selection);
-				}
-				// Skip Field::All - handled by include_all flag
-			}
-
-			// Handle OMIT if present
-			let omit_fields = if !omit.is_empty() {
-				plan_omit_fields(omit.to_vec(), ctx)?
-			} else {
-				vec![]
-			};
-
-			Ok(Arc::new(Project {
-				input,
-				fields: field_selections,
-				omit: omit_fields,
-				include_all: has_wildcard,
-			}) as Arc<dyn ExecOperator>)
-		}
-	}
-}
-
-/// Plan OMIT fields - convert expressions to idioms
-fn plan_omit_fields(
-	omit: Vec<Expr>,
-	ctx: &FrozenContext,
-) -> Result<Vec<crate::expr::idiom::Idiom>, Error> {
-	let mut fields = Vec::with_capacity(omit.len());
-
-	for expr in omit {
-		let mut idioms = resolve_field_expr_to_idioms(expr, ctx)?;
-		fields.append(&mut idioms);
-	}
-
-	Ok(fields)
-}
-
-/// Resolve a single field expression (from OMIT or FETCH) to one or more idioms.
-///
-/// Handles the common expression types that appear in OMIT and FETCH clauses:
-/// - `Expr::Idiom` - direct field reference
-/// - `Expr::Param` - parameter that resolves to a string field name
-/// - `Expr::FunctionCall(type::field)` - single dynamic field
-/// - `Expr::FunctionCall(type::fields)` - multiple dynamic fields
-///
-/// Returns `Error::Unimplemented` for `type::field`/`type::fields` calls with
-/// arguments that cannot be trivially resolved at plan time, causing fallback
-/// to the legacy execution path.
-fn resolve_field_expr_to_idioms(expr: Expr, ctx: &FrozenContext) -> Result<Vec<Idiom>, Error> {
-	match expr {
-		Expr::Idiom(idiom) => Ok(vec![idiom]),
-		Expr::Param(ref param) => {
-			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
-			let s = value.clone().coerce_to::<String>().map_err(|_| Error::InvalidFetch {
-				value: value.into_literal(),
-			})?;
-			let idiom: Idiom = crate::syn::idiom(&s)
-				.map_err(|_| Error::InvalidFetch {
-					value: expr,
-				})?
-				.into();
-			Ok(vec![idiom])
-		}
-		Expr::FunctionCall(ref call) => match &call.receiver {
-			Function::Normal(name) if name == "type::field" => {
-				let arg = call.arguments.first().ok_or_else(|| {
-					Error::Unimplemented(
-						"type::field in OMIT/FETCH requires an argument".to_string(),
-					)
-				})?;
-				let s = resolve_expr_to_string(arg, ctx)?;
-				let idiom: Idiom = crate::syn::idiom(&s)
-					.map_err(|e| {
-						Error::Unimplemented(format!("Failed to parse field path '{}': {}", s, e))
-					})?
-					.into();
-				Ok(vec![idiom])
-			}
-			Function::Normal(name) if name == "type::fields" => {
-				let arg = call.arguments.first().ok_or_else(|| {
-					Error::Unimplemented(
-						"type::fields in OMIT/FETCH requires an argument".to_string(),
-					)
-				})?;
-				let strings = resolve_expr_to_string_array(arg, ctx)?;
-				let mut idioms = Vec::with_capacity(strings.len());
-				for s in strings {
-					let idiom: Idiom = crate::syn::idiom(&s)
-						.map_err(|e| {
-							Error::Unimplemented(format!(
-								"Failed to parse field path '{}': {}",
-								s, e
-							))
-						})?
-						.into();
-					idioms.push(idiom);
-				}
-				Ok(idioms)
-			}
-			_ => Err(Error::InvalidFetch {
-				value: expr,
-			}),
-		},
-		other => Err(Error::InvalidFetch {
-			value: other,
-		}),
-	}
-}
-
-/// Resolve a simple expression to a string value at plan time.
-///
-/// Handles string literals and parameters that resolve to strings.
-/// Returns `Error::Unimplemented` for complex expressions that cannot
-/// be resolved at plan time.
-fn resolve_expr_to_string(expr: &Expr, ctx: &FrozenContext) -> Result<String, Error> {
-	match expr {
-		Expr::Literal(Literal::String(s)) => Ok(s.clone()),
-		Expr::Param(param) => {
-			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
-			value.coerce_to::<String>().map_err(|_| {
-				Error::Unimplemented("OMIT/FETCH parameter did not resolve to a string".to_string())
-			})
-		}
-		_ => Err(Error::Unimplemented(
-			"OMIT/FETCH with computed expressions not yet supported in execution plans".to_string(),
-		)),
-	}
-}
-
-/// Resolve a simple expression to an array of strings at plan time.
-///
-/// Handles array literals (of strings/params) and parameters that resolve
-/// to arrays of strings. Returns `Error::Unimplemented` for complex expressions.
-fn resolve_expr_to_string_array(expr: &Expr, ctx: &FrozenContext) -> Result<Vec<String>, Error> {
-	match expr {
-		Expr::Literal(Literal::Array(items)) => {
-			items.iter().map(|item| resolve_expr_to_string(item, ctx)).collect()
-		}
-		Expr::Param(param) => {
-			let value = ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
-			value.coerce_to::<Vec<String>>().map_err(|_| {
-				Error::Unimplemented(
-					"OMIT/FETCH parameter did not resolve to an array of strings".to_string(),
-				)
-			})
-		}
-		_ => Err(Error::Unimplemented(
-			"OMIT/FETCH with computed expressions not yet supported in execution plans".to_string(),
-		)),
-	}
-}
-
-/// Derive a field name from an expression for projection output
-fn derive_field_name(expr: &Expr) -> String {
-	match expr {
-		// Simple field reference - extract the raw field name
-		Expr::Idiom(idiom) => idiom_to_field_name(idiom),
-		// Parameter reference - use the parameter name (without $)
-		// e.g., $this -> "this", $parent -> "parent"
-		Expr::Param(param) => param.as_str().to_string(),
-		// Function call - use the function's idiom representation (name without arguments)
-		Expr::FunctionCall(call) => {
-			let idiom: crate::expr::idiom::Idiom = call.receiver.to_idiom();
-			idiom_to_field_name(&idiom)
-		}
-		// For other expressions, use the SQL representation
-		_ => {
-			use surrealdb_types::ToSql;
-			expr.to_sql()
-		}
-	}
-}
-
-/// Extract a field name from an idiom, preferring raw names for simple idioms.
-///
-/// This mirrors the legacy behavior where the idiom is simplified (removing
-/// Destructure, All, Where, etc.) before deriving the field name.
-///
-/// For graph traversal aliases like `->(bought AS purchases)`, the alias is used.
-fn idiom_to_field_name(idiom: &crate::expr::idiom::Idiom) -> String {
-	use surrealdb_types::ToSql;
-
-	use crate::expr::part::Part;
-
-	// Check for graph traversal alias first
-	// For expressions like `->(bought AS purchases)`, use the alias as the field name
-	for part in idiom.0.iter() {
-		if let Part::Lookup(lookup) = part
-			&& let Some(alias) = &lookup.alias
-		{
-			// Recursively extract field name from alias
-			return idiom_to_field_name(alias);
-		}
-	}
-
-	// Simplify the idiom first - this removes Destructure, All, Where, etc.
-	// and keeps only Field, Start, and Lookup parts
-	let simplified = idiom.simplify();
-
-	// For simple single-part idioms, use the raw field name
-	if simplified.len() == 1
-		&& let Some(Part::Field(name)) = simplified.first()
-	{
-		return name.clone();
-	}
-	// For complex idioms, use the SQL representation of the simplified idiom
-	simplified.to_sql()
-}
-
-/// Extract a field path from an idiom for nested output construction.
-///
-/// For graph traversals without aliases, this returns a path that splits by Lookup parts
-/// to create nested output structure. For example, `->reports_to->person` becomes
-/// Returns a `FieldPath` for the given idiom.
-///
-/// For idioms with aliases or without Lookup parts, returns a simple field path.
-/// For idioms with unaliased graph traversals like `->reports_to->person`,
-/// returns a FieldPath with Lookup parts for proper nested output.
-fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPath {
-	use surrealdb_types::ToSql;
-
-	use crate::expr::part::Part;
-
-	// Check for graph traversal alias first - if any Lookup has an alias, use flat output
-	for part in idiom.0.iter() {
-		if let Part::Lookup(lookup) = part
-			&& lookup.alias.is_some()
-		{
-			// Has explicit alias - use flat output (single field name)
-			return FieldPath::field(idiom_to_field_name(idiom));
-		}
-	}
-
-	// Check if this idiom contains any Lookup parts (graph traversals)
-	let has_lookups = idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
-
-	if !has_lookups {
-		// No graph traversals - use standard field name (which handles dot-separated paths)
-		let name = idiom_to_field_name(idiom);
-		if name.contains('.') && !name.contains(['[', '(', ' ']) {
-			return FieldPath(
-				name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect(),
-			);
-		}
-		return FieldPath::field(name);
-	}
-
-	// Has Lookup parts without aliases - split into nested path
-	// Each Lookup part becomes a FieldPathPart::Lookup, fields become FieldPathPart::Field
-	let mut parts = Vec::new();
-
-	for part in idiom.0.iter() {
-		match part {
-			Part::Lookup(lookup) => {
-				// Add the lookup as its own path component
-				// Use to_sql() to get the full representation including any subquery clauses
-				// (ORDER BY, WHERE, GROUP BY, LIMIT, etc.)
-				let lookup_key = lookup.to_sql();
-				parts.push(FieldPathPart::Lookup(lookup_key));
-			}
-			Part::Field(name) => {
-				// Regular field - add as Field part
-				parts.push(FieldPathPart::Field(name.clone()));
-			}
-			// Skip other parts (Destructure, All, Where, etc.) for path construction
-			// These affect evaluation but not the output field structure
-			_ => {}
-		}
-	}
-
-	// If no path was built (shouldn't happen), fall back to flat name
-	if parts.is_empty() {
-		return FieldPath::field(idiom.to_sql());
-	}
-
-	FieldPath(parts)
-}
-
-/// Plan FETCH clause
-fn plan_fetch(
-	fetch: Option<crate::expr::fetch::Fetchs>,
-	input: Arc<dyn ExecOperator>,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	let Some(fetchs) = fetch else {
-		return Ok(input);
-	};
-
-	// Convert fetch expressions to idioms
-	let mut fields = Vec::with_capacity(fetchs.len());
-	for fetch_item in fetchs {
-		let mut idioms = resolve_field_expr_to_idioms(fetch_item.0, ctx)?;
-		fields.append(&mut idioms);
-	}
-
-	Ok(Arc::new(Fetch {
-		input,
-		fields,
-	}) as Arc<dyn ExecOperator>)
-}
-
-/// Plan aggregation fields from SELECT expression and GROUP BY.
-///
-/// This extracts:
-/// - Group-by keys (passed through unchanged)
-/// - Aggregate functions (detected via the function registry)
-/// - Other expressions (evaluated with the first value in the group)
-///
-/// Also returns the physical expressions for computing group keys.
-/// GROUP BY aliases are expanded to their actual expressions.
-fn plan_aggregation_with_group_exprs(
-	fields: &Fields,
-	group_by: &[crate::expr::idiom::Idiom],
-	ctx: &FrozenContext,
-) -> Result<(Vec<AggregateField>, Vec<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-	use surrealdb_types::ToSql;
-
-	// Get the function registry from the context
-	let registry = ctx.function_registry();
-
-	// Build a map of alias -> expression from the SELECT fields
-	// This allows us to expand GROUP BY aliases to actual expressions
-	let mut alias_to_expr: std::collections::HashMap<String, Expr> =
-		std::collections::HashMap::new();
-	match fields {
-		Fields::Value(selector) => {
-			if let Some(alias) = &selector.alias {
-				alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
-			}
-		}
-		Fields::Select(field_list) => {
-			for field in field_list {
-				if let Field::Single(selector) = field
-					&& let Some(alias) = &selector.alias
-				{
-					alias_to_expr.insert(alias.to_sql(), selector.expr.clone());
-				}
-			}
-		}
-	}
-
-	// Build group-by expressions, expanding aliases where needed
-	let mut group_by_exprs = Vec::with_capacity(group_by.len());
-	for idiom in group_by {
-		let idiom_str = idiom.to_sql();
-		// Check if this idiom is an alias for a SELECT expression
-		let expr = if let Some(select_expr) = alias_to_expr.get(&idiom_str) {
-			// Alias found - use the actual expression
-			select_expr.clone()
-		} else {
-			// Not an alias - use the idiom directly
-			Expr::Idiom(idiom.clone())
-		};
-		let physical_expr = expr_to_physical_expr(expr, ctx)?;
-		group_by_exprs.push(physical_expr);
-	}
-
-	match fields {
-		// SELECT VALUE with GROUP BY - the VALUE expression may contain aggregates
-		Fields::Value(selector) => {
-			// Check if the VALUE expression is a group-by key
-			let group_key_index =
-				find_group_key_index(&selector.expr, selector.alias.as_ref(), group_by);
-			let is_group_key = group_key_index.is_some();
-
-			let (aggregate_expr_info, fallback_expr) = if is_group_key {
-				// Group-by key - no aggregate, no fallback expr needed
-				(None, None)
-			} else {
-				// Try to extract aggregate function info
-				extract_aggregate_info(&selector.expr, &registry, ctx)?
-			};
-
-			// For VALUE, we use an empty name since the result isn't wrapped in an object
-			Ok((
-				vec![AggregateField::new(
-					String::new(),
-					is_group_key,
-					group_key_index,
-					aggregate_expr_info,
-					fallback_expr,
-				)],
-				group_by_exprs,
-			))
-		}
-
-		// SELECT field1, field2, ... with GROUP BY
-		Fields::Select(field_list) => {
-			let mut aggregates = Vec::with_capacity(field_list.len());
-
-			for field in field_list {
-				match field {
-					Field::All => {
-						// SELECT * with GROUP BY doesn't make sense
-						return Err(Error::Query {
-							message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
-								.to_string(),
-						});
-					}
-					Field::Single(selector) => {
-						// Determine the output name
-						let output_name = if let Some(alias) = &selector.alias {
-							idiom_to_field_name(alias)
-						} else {
-							derive_field_name(&selector.expr)
-						};
-
-						// Check if this is a group-by key
-						let group_key_index =
-							find_group_key_index(&selector.expr, selector.alias.as_ref(), group_by);
-						let is_group_key = group_key_index.is_some();
-
-						let (aggregate_expr_info, fallback_expr) = if is_group_key {
-							// Group-by key - no aggregate, no fallback expr needed
-							(None, None)
-						} else {
-							// Try to extract aggregate function info
-							extract_aggregate_info(&selector.expr, &registry, ctx)?
-						};
-
-						aggregates.push(AggregateField::new(
-							output_name,
-							is_group_key,
-							group_key_index,
-							aggregate_expr_info,
-							fallback_expr,
-						));
-					}
-				}
-			}
-
-			Ok((aggregates, group_by_exprs))
-		}
-	}
-}
-
-/// Find the index of the group-by key for an expression.
-///
-/// Returns the index if:
-/// 1. The expression is a simple idiom that matches a group-by idiom
-/// 2. The expression has an alias that matches a group-by idiom
-fn find_group_key_index(
-	expr: &Expr,
-	alias: Option<&Idiom>,
-	group_by: &[crate::expr::idiom::Idiom],
-) -> Option<usize> {
-	use surrealdb_types::ToSql;
-
-	// Check if the expression itself is a simple idiom that matches
-	if let Expr::Idiom(idiom) = expr
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql())
-	{
-		return Some(idx);
-	}
-
-	// Check if the alias matches a group-by idiom
-	// This handles cases like `time::year(time) AS year` with `GROUP BY year`
-	if let Some(alias) = alias
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql())
-	{
-		return Some(idx);
-	}
-
-	None
-}
-
-// ============================================================================
-// Aggregate Extraction using MutVisitor
-// ============================================================================
-
-/// Visitor that extracts aggregate functions from an expression.
-///
-/// Walks the expression tree, finds all aggregate function calls, and replaces
-/// them with synthetic field references (`_a0`, `_a1`, etc.). The extracted
-/// aggregates are stored in the visitor for later processing.
-///
-/// Supports multiple aggregates in a single expression (e.g., `SUM(a) + AVG(a)`).
-struct AggregateExtractor<'a> {
-	/// The function registry to look up aggregate functions.
-	registry: &'a crate::exec::function::FunctionRegistry,
-	/// Extracted aggregates with their function names and calls.
-	aggregates: Vec<(String, FunctionCall)>,
-	/// Counter for generating unique synthetic field names.
-	aggregate_count: usize,
-	/// Track if we're inside an aggregate's arguments (to detect nesting).
-	inside_aggregate: bool,
-	/// Error encountered during traversal (nested aggregates).
-	error: Option<Error>,
-}
-
-impl<'a> AggregateExtractor<'a> {
-	fn new(registry: &'a crate::exec::function::FunctionRegistry) -> Self {
-		Self {
-			registry,
-			aggregates: Vec::new(),
-			aggregate_count: 0,
-			inside_aggregate: false,
-			error: None,
-		}
-	}
-
-	/// Check if an expression directly contains an aggregate function call at the top level.
-	/// Used to determine if array::distinct should be treated as an aggregate or scalar.
-	fn contains_aggregate_call(&self, expr: &Expr) -> bool {
-		if let Expr::FunctionCall(func_call) = expr
-			&& let Function::Normal(name) = &func_call.receiver
-		{
-			return self.registry.get_aggregate(name.as_str()).is_some();
-		}
-		false
-	}
-}
-
-impl MutVisitor for AggregateExtractor<'_> {
-	type Error = std::convert::Infallible;
-
-	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
-		// Don't continue if we've already encountered an error
-		if self.error.is_some() {
-			return Ok(());
-		}
-
-		// Check if this is an aggregate function call that we need to replace
-		// Note: We handle FunctionCall here because after visiting, we need to
-		// replace the entire Expr, not just the FunctionCall inside it
-		if let Expr::FunctionCall(func_call) = expr
-			&& let Function::Normal(name) = &func_call.receiver
-		{
-			// Special handling for array::distinct:
-			// - When its argument is another aggregate function, treat it as a scalar (e.g.,
-			//   array::distinct(array::group(name)) - array::distinct is scalar)
-			// - When its argument is NOT an aggregate function, treat it as an aggregate (e.g.,
-			//   array::distinct(name) - array::distinct collects unique values)
-			if name.as_str() == "array::distinct"
-				&& !func_call.arguments.is_empty()
-				&& self.contains_aggregate_call(&func_call.arguments[0])
-			{
-				// Argument contains an aggregate - treat array::distinct as scalar
-				// Just visit children to process the nested aggregate
-				return expr.visit_mut(self);
-			}
-			// Fall through to normal aggregate handling
-
-			if self.registry.get_aggregate(name.as_str()).is_some() {
-				// Found an aggregate function
-				if self.inside_aggregate {
-					// Nested aggregates are not allowed
-					self.error = Some(Error::Query {
-						message: "Nested aggregate functions are not supported".to_string(),
-					});
-					return Ok(());
-				}
-
-				// Visit arguments to check for nested aggregates
-				self.inside_aggregate = true;
-				for arg in &mut func_call.arguments {
-					arg.visit_mut(self)?;
-				}
-				self.inside_aggregate = false;
-
-				// Check if visiting arguments found an error
-				if self.error.is_some() {
-					return Ok(());
-				}
-
-				// Store this aggregate and replace with field reference
-				let field_name = aggregate_field_name(self.aggregate_count);
-				self.aggregates.push((name.clone(), func_call.as_ref().clone()));
-				self.aggregate_count += 1;
-
-				// Replace the aggregate with a field reference idiom
-				*expr = Expr::Idiom(Idiom::field(field_name));
-				return Ok(());
-			}
-		}
-
-		// Continue visiting children for non-aggregate expressions
-		expr.visit_mut(self)
-	}
-
-	// Override visit_mut_function_call to ensure arguments go through visit_mut_expr.
-	// This is critical for detecting aggregates nested inside scalar functions
-	// (e.g., `array::distinct(array::group(name))`). By calling visit_mut_expr
-	// directly, we ensure aggregate detection and replacement happens properly.
-	fn visit_mut_function_call(&mut self, f: &mut FunctionCall) -> Result<(), Self::Error> {
-		if self.error.is_some() {
-			return Ok(());
-		}
-
-		// Visit all arguments through visit_mut_expr to ensure aggregate detection
-		// Note: We don't handle aggregates here - that's done in visit_mut_expr
-		// which can replace the entire Expr
-		for arg in &mut f.arguments {
-			self.visit_mut_expr(arg)?;
-		}
-		Ok(())
-	}
-
-	// Override to prevent descending into subqueries
-	// (aggregates in subqueries belong to a different context)
-	fn visit_mut_select(
-		&mut self,
-		_s: &mut crate::expr::statements::SelectStatement,
-	) -> Result<(), Self::Error> {
-		// Don't visit into SELECT subqueries - they have their own aggregate context
-		Ok(())
-	}
-
-	fn visit_mut_create(
-		&mut self,
-		_s: &mut crate::expr::statements::CreateStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-
-	fn visit_mut_update(
-		&mut self,
-		_s: &mut crate::expr::statements::UpdateStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-
-	fn visit_mut_delete(
-		&mut self,
-		_s: &mut crate::expr::statements::DeleteStatement,
-	) -> Result<(), Self::Error> {
-		Ok(())
-	}
-}
-
-/// Extract aggregate function information from an expression.
-///
-/// Uses the MutVisitor pattern to walk the expression tree and find all
-/// aggregate functions. Supports:
-/// - Direct aggregate calls: `math::mean(v)`
-/// - Nested expressions: `math::mean(v) + 1`
-/// - Multiple aggregates: `SUM(a) + AVG(a)`
-///
-/// If no aggregates are found, uses implicit `array::group` aggregation
-/// (SurrealDB's default GROUP BY behavior for non-aggregate fields).
-fn extract_aggregate_info(
-	expr: &Expr,
-	registry: &crate::exec::function::FunctionRegistry,
-	ctx: &FrozenContext,
-) -> Result<(Option<AggregateExprInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
-	// Clone the expression for mutation
-	let mut expr_clone = expr.clone();
-
-	// Run the extractor - must call visit_mut_expr directly, not visit_mut,
-	// so that our override is called first (otherwise VisitMut dispatches
-	// to visit_mut_function_call for FunctionCall expressions)
-	let mut extractor = AggregateExtractor::new(registry);
-	let _ = extractor.visit_mut_expr(&mut expr_clone);
-
-	// Check for errors (nested aggregates)
-	if let Some(err) = extractor.error {
-		return Err(err);
-	}
-
-	if extractor.aggregates.is_empty() {
-		// No aggregates found - use implicit array::group aggregation
-		// This collects all values into an array (SurrealDB's default GROUP BY behavior)
-		let argument_expr = expr_to_physical_expr(expr.clone(), ctx)?;
-		let array_group = registry
-			.get_aggregate("array::group")
-			.expect("array::group should always be registered")
-			.clone();
-		return Ok((
-			Some(AggregateExprInfo {
-				aggregates: vec![ExtractedAggregate {
-					function: array_group,
-					argument_expr,
-					extra_args: vec![],
-				}],
-				post_expr: None,
-			}),
-			None,
-		));
-	}
-
-	// Convert extracted aggregates to ExtractedAggregate structs
-	let extracted_aggregates = extractor
-		.aggregates
-		.into_iter()
-		.map(|(name, call)| {
-			// Special handling for count: count() vs count(expr)
-			// - count() with no arguments counts all rows (uses Count)
-			// - count(expr) with arguments counts truthy values (uses CountField)
-			let func = if name.as_str() == "count" {
-				registry.get_count_aggregate(!call.arguments.is_empty())
-			} else {
-				registry.get_aggregate(&name).expect("aggregate function should exist").clone()
-			};
-
-			// Extract the argument expression
-			let argument_expr = if call.arguments.is_empty() {
-				expr_to_physical_expr(Expr::Literal(Literal::None), ctx)
-			} else {
-				expr_to_physical_expr(call.arguments[0].clone(), ctx)
-			}?;
-
-			// Extract extra arguments (for functions like array::join)
-			let extra_args = if call.arguments.len() > 1 {
-				call.arguments[1..]
-					.iter()
-					.map(|arg| expr_to_physical_expr(arg.clone(), ctx))
-					.collect::<Result<Vec<_>, _>>()?
-			} else {
-				vec![]
-			};
-
-			Ok(ExtractedAggregate {
-				function: func,
-				argument_expr,
-				extra_args,
-			})
-		})
-		.collect::<Result<Vec<_>, Error>>()?;
-
-	// Determine if we need a post-expression
-	// If it's a direct single aggregate (the transformed expr is just `_a0`),
-	// we don't need a post-expression
-	let is_direct_single_aggregate = extracted_aggregates.len() == 1 && {
-		use surrealdb_types::ToSql;
-		matches!(&expr_clone, Expr::Idiom(i) if i.to_sql() == "_a0")
-	};
-
-	let post_expr = if is_direct_single_aggregate {
-		None
-	} else {
-		// Convert the transformed expression (with _a0, _a1 references)
-		Some(expr_to_physical_expr(expr_clone, ctx)?)
-	};
-
-	Ok((
-		Some(AggregateExprInfo {
-			aggregates: extracted_aggregates,
-			post_expr,
-		}),
-		None,
-	))
-}
-
-/// Extract version timestamp from VERSION clause expression.
-/// Currently only supports literal Datetime values.
-fn extract_version(version_expr: Expr) -> Result<Option<u64>, Error> {
-	match version_expr {
-		Expr::Literal(Literal::None) => Ok(None),
-		Expr::Literal(Literal::Datetime(dt)) => {
-			let stamp = dt.to_version_stamp().map_err(|e| Error::Query {
-				message: format!("Invalid VERSION timestamp: {}", e),
-			})?;
-			Ok(Some(stamp))
-		}
-		_ => Err(Error::Query {
-			message: "VERSION clause only supports literal datetime values in execution plans"
-				.to_string(),
-		}),
-	}
-}
-
-/// Check if an expression contains `$this` or `$parent` parameters.
-/// These are invalid in GROUP BY context since there's no single document to reference.
-fn check_forbidden_group_by_params(fields: &Fields) -> Result<(), Error> {
-	match fields {
-		Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
-		Fields::Select(field_list) => {
-			for field in field_list {
-				match field {
-					Field::All => {}
-					Field::Single(selector) => {
-						check_expr_for_forbidden_params(&selector.expr)?;
-					}
-				}
-			}
-			Ok(())
-		}
-	}
-}
-
-/// Recursively check an expression for `$this` or `$parent` parameters.
-fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
-	match expr {
-		Expr::Param(param) => {
-			let name = param.as_str();
-			if name == "this" || name == "self" {
-				return Err(Error::Query {
-					message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
-				});
-			}
-			if name == "parent" {
-				return Err(Error::Query {
-					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
-				});
-			}
-			Ok(())
-		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			check_expr_for_forbidden_params(left)?;
-			check_expr_for_forbidden_params(right)
-		}
-		Expr::Prefix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::Postfix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::FunctionCall(fc) => {
-			for arg in &fc.arguments {
-				check_expr_for_forbidden_params(arg)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Array(elements)) => {
-			for elem in elements {
-				check_expr_for_forbidden_params(elem)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Object(entries)) => {
-			for entry in entries {
-				check_expr_for_forbidden_params(&entry.value)?;
-			}
-			Ok(())
-		}
-		Expr::Select(select) => {
-			// Check fields in subqueries
-			match &select.fields {
-				Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
-				Fields::Select(field_list) => {
-					for field in field_list {
-						if let Field::Single(selector) = field {
-							check_expr_for_forbidden_params(&selector.expr)?;
-						}
-					}
-					Ok(())
-				}
-			}
-		}
-		Expr::Block(block) => {
-			for stmt in &block.0 {
-				check_expr_for_forbidden_params(stmt)?;
-			}
-			Ok(())
-		}
-		Expr::IfElse(ifelse) => {
-			for (cond, body) in &ifelse.exprs {
-				check_expr_for_forbidden_params(cond)?;
-				check_expr_for_forbidden_params(body)?;
-			}
-			if let Some(close) = &ifelse.close {
-				check_expr_for_forbidden_params(close)?;
-			}
-			Ok(())
-		}
-		Expr::Closure(closure) => check_expr_for_forbidden_params(&closure.body),
-		Expr::Idiom(idiom) => {
-			// Idiom parts can contain expressions with parameters (e.g. $this.v)
-			for part in &idiom.0 {
-				match part {
-					crate::expr::Part::Start(expr)
-					| crate::expr::Part::Where(expr)
-					| crate::expr::Part::Value(expr) => {
-						check_expr_for_forbidden_params(expr)?;
-					}
-					crate::expr::Part::Method(_, args) => {
-						for arg in args {
-							check_expr_for_forbidden_params(arg)?;
-						}
-					}
-					_ => {}
-				}
-			}
-			Ok(())
-		}
-		// These don't contain nested expressions with params
-		Expr::Literal(_) | Expr::Constant(_) | Expr::Table(_) | Expr::Break | Expr::Continue => {
-			Ok(())
-		}
-		// Other expressions that might contain nested params
-		_ => Ok(()),
-	}
-}
-
-/// Plan the FROM sources - handles multiple targets with Union
-///
-/// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
-/// The `cond`, `order`, and `with` parameters are passed to Scan for index selection.
-fn plan_select_sources(
-	what: Vec<Expr>,
-	version: Option<u64>,
-	cond: Option<&Cond>,
-	order: Option<&crate::expr::order::Ordering>,
-	with: Option<&crate::expr::with::With>,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	if what.is_empty() {
-		return Err(Error::Query {
-			message: "SELECT requires at least one source".to_string(),
-		});
-	}
-
-	// Convert each source to a plan
-	let mut source_plans = Vec::with_capacity(what.len());
-	for expr in what {
-		let plan = plan_single_source(expr, version, cond, order, with, ctx)?;
-		source_plans.push(plan);
-	}
-
-	// If multiple sources, wrap in Union; otherwise just return the single source
-	if source_plans.len() == 1 {
-		Ok(source_plans.pop().unwrap())
-	} else {
-		Ok(Arc::new(Union {
-			inputs: source_plans,
-		}))
-	}
-}
-
-/// Plan a single FROM source (table or record ID)
-///
-/// The `version` parameter is an optional timestamp for time-travel queries (VERSION clause).
-/// The `cond`, `order`, and `with` parameters are passed to Scan for index selection.
-/// Scan handles KV store sources: table names, record IDs (point or range).
-/// SourceExpr handles value sources: arrays, scalars, computed expressions.
-fn plan_single_source(
+/// Thin wrapper that constructs a `Planner` and calls `physical_expr`. External
+/// callers that plan multiple expressions should construct a `Planner` directly.
+pub(crate) fn expr_to_physical_expr(
 	expr: Expr,
-	version: Option<u64>,
-	cond: Option<&Cond>,
-	order: Option<&crate::expr::order::Ordering>,
-	with: Option<&crate::expr::with::With>,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	use crate::val::Value;
-
-	match expr {
-		// Table name: SELECT * FROM users
-		Expr::Table(_) => {
-			// Convert table name to a literal string for the physical expression
-			let table_expr = expr_to_physical_expr(expr, ctx)?;
-			Ok(Arc::new(Scan {
-				source: table_expr,
-				version,
-				cond: cond.cloned(),
-				order: order.cloned(),
-				with: with.cloned(),
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Record ID literal: SELECT * FROM users:123
-		// Scan handles record IDs internally via ScanTarget::RecordId
-		// No index selection needed for point lookups
-		Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
-			// Convert the record ID literal to an expression that Scan can evaluate
-			// Scan will handle point lookups and range scans internally
-			let table_expr = expr_to_physical_expr(
-				Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)),
-				ctx,
-			)?;
-			Ok(Arc::new(Scan {
-				source: table_expr,
-				version,
-				cond: None, // No index selection for record IDs
-				order: None,
-				with: None,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Subquery: SELECT * FROM (SELECT * FROM table)
-		Expr::Select(inner_select) => {
-			// Recursively plan the inner SELECT
-			plan_select(*inner_select, ctx)
-		}
-
-		// Array literal: SELECT * FROM [1, 2, 3]
-		Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
-			// Convert to SourceExpr which will unnest the array elements
-			let phys_expr = expr_to_physical_expr(expr, ctx)?;
-			Ok(Arc::new(SourceExpr {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Parameter: SELECT * FROM $param
-		// Inspect the parameter value to determine if it's a KV source or value source
-		Expr::Param(param) => {
-			match ctx.value(param.as_str()) {
-				Some(Value::Table(_)) => {
-					// Table source → Scan with index selection
-					let table_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
-					Ok(Arc::new(Scan {
-						source: table_expr,
-						version,
-						cond: cond.cloned(),
-						order: order.cloned(),
-						with: with.cloned(),
-					}) as Arc<dyn ExecOperator>)
-				}
-				Some(Value::RecordId(_)) => {
-					// Record ID source → Scan without index selection
-					let table_expr = expr_to_physical_expr(Expr::Param(param.clone()), ctx)?;
-					Ok(Arc::new(Scan {
-						source: table_expr,
-						version,
-						cond: None,
-						order: None,
-						with: None,
-					}) as Arc<dyn ExecOperator>)
-				}
-				Some(_) | None => {
-					// Array, scalar, subquery, etc. → SourceExpr
-					let phys_expr = expr_to_physical_expr(Expr::Param(param), ctx)?;
-					Ok(Arc::new(SourceExpr {
-						expr: phys_expr,
-					}) as Arc<dyn ExecOperator>)
-				}
-			}
-		}
-
-		// Function calls may evaluate to a table name at runtime (e.g. type::table('person')),
-		// so route through Scan which handles Value::Table → table scan dynamically.
-		Expr::FunctionCall(_) => {
-			let source_expr = expr_to_physical_expr(expr, ctx)?;
-			Ok(Arc::new(Scan {
-				source: source_expr,
-				version,
-				cond: cond.cloned(),
-				order: order.cloned(),
-				with: with.cloned(),
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Postfix expressions (e.g. closure calls like $param('n')) may also evaluate
-		// to a table name at runtime, so route through Scan.
-		Expr::Postfix {
-			..
-		} => {
-			let source_expr = expr_to_physical_expr(expr, ctx)?;
-			Ok(Arc::new(Scan {
-				source: source_expr,
-				version,
-				cond: cond.cloned(),
-				order: order.cloned(),
-				with: with.cloned(),
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		// Other expressions (strings, objects, etc.) → SourceExpr
-		other => {
-			let phys_expr = expr_to_physical_expr(other, ctx)?;
-			Ok(Arc::new(SourceExpr {
-				expr: phys_expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-	}
-}
-
-/// Convert a LET statement to an execution plan
-fn convert_let_statement(
-	let_stmt: crate::expr::statements::SetStatement,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	let crate::expr::statements::SetStatement {
-		name,
-		what,
-		kind: _,
-	} = let_stmt;
-
-	// Determine if the expression is a query or scalar
-	let value: Arc<dyn ExecOperator> = match what {
-		// SELECT produces a stream that gets collected into an array
-		Expr::Select(select) => plan_select(*select, ctx)?,
-
-		// DML statements in LET are not yet supported
-		Expr::Create(_) => {
-			return Err(Error::Unimplemented(
-				"CREATE statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-		Expr::Update(_) => {
-			return Err(Error::Unimplemented(
-				"UPDATE statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-		Expr::Upsert(_) => {
-			return Err(Error::Unimplemented(
-				"UPSERT statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-		Expr::Delete(_) => {
-			return Err(Error::Unimplemented(
-				"DELETE statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-		Expr::Insert(_) => {
-			return Err(Error::Unimplemented(
-				"INSERT statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-		Expr::Relate(_) => {
-			return Err(Error::Unimplemented(
-				"RELATE statements in LET not yet supported in execution plans".to_string(),
-			));
-		}
-
-		// Everything else is a scalar expression - wrap in ExprPlan
-		other => {
-			let expr = expr_to_physical_expr(other, ctx)?;
-
-			// Validate: LET expressions can't reference current row
-			if expr.references_current_value() {
-				return Err(Error::Query {
-					message: "LET expression cannot reference current row context".to_string(),
-				});
-			}
-
-			Arc::new(ExprPlan {
-				expr,
-			}) as Arc<dyn ExecOperator>
-		}
-	};
-
-	Ok(Arc::new(LetPlan {
-		name,
-		value,
-	}) as Arc<dyn ExecOperator>)
-}
-
-/// Plan ORDER BY clause by selecting the appropriate sort operator.
-///
-/// This function chooses the optimal sort operator based on query characteristics:
-/// - `RandomShuffle`: for ORDER BY RAND()
-/// - `ExternalSort`: when TEMPFILES is specified (disk-based sorting)
-/// - `SortTopK`: when limit is small (heap-based top-k selection)
-/// - `Sort`: default full in-memory sort with parallel sorting
-fn plan_sort(
-	input: Arc<dyn ExecOperator>,
-	order: &crate::expr::order::Ordering,
-	start: &Option<crate::expr::start::Start>,
-	limit: &Option<crate::expr::limit::Limit>,
-	#[allow(unused)] tempfiles: bool,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	use crate::expr::order::Ordering;
-
-	match order {
-		Ordering::Random => {
-			// ORDER BY RAND() - use RandomShuffle operator
-			// Try to get effective limit if both start and limit are literals
-			let effective_limit = get_effective_limit_literal(start, limit);
-			Ok(Arc::new(RandomShuffle {
-				input,
-				limit: effective_limit,
-			}) as Arc<dyn ExecOperator>)
-		}
-		Ordering::Order(order_list) => {
-			// Convert order list to OrderByField vec
-			let order_by = convert_order_list(order_list, ctx)?;
-
-			// Check if we should use ExternalSort (TEMPFILES specified)
-			#[cfg(storage)]
-			if tempfiles && let Some(temp_dir) = ctx.temporary_directory() {
-				return Ok(Arc::new(ExternalSort {
-					input,
-					order_by,
-					temp_dir: temp_dir.to_path_buf(),
-				}) as Arc<dyn ExecOperator>);
-			}
-
-			// Check if we should use SortTopK (small limit)
-			if let Some(effective_limit) = get_effective_limit_literal(start, limit)
-				&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
-			{
-				return Ok(Arc::new(SortTopK {
-					input,
-					order_by,
-					limit: effective_limit,
-				}) as Arc<dyn ExecOperator>);
-			}
-
-			// Default: full in-memory sort with parallel sorting
-			Ok(Arc::new(Sort {
-				input,
-				order_by,
-			}) as Arc<dyn ExecOperator>)
-		}
-	}
-}
-
-/// Convert an OrderList to a Vec of OrderByField.
-fn convert_order_list(
-	order_list: &crate::expr::order::OrderList,
-	ctx: &FrozenContext,
-) -> Result<Vec<OrderByField>, Error> {
-	let mut fields = Vec::with_capacity(order_list.len());
-	for order_field in order_list.iter() {
-		// Convert idiom to physical expression
-		let expr: Arc<dyn crate::exec::PhysicalExpr> =
-			convert_idiom_to_physical_expr(&order_field.value, ctx)?;
-
-		let direction = if order_field.direction {
-			SortDirection::Asc
-		} else {
-			SortDirection::Desc
-		};
-
-		fields.push(OrderByField {
-			expr,
-			direction,
-			collate: order_field.collate,
-			numeric: order_field.numeric,
-		});
-	}
-	Ok(fields)
-}
-
-/// Try to get the effective limit (start + limit) if both are literals.
-///
-/// Returns None if either value is not a literal or cannot be evaluated at plan time.
-fn get_effective_limit_literal(
-	start: &Option<crate::expr::start::Start>,
-	limit: &Option<crate::expr::limit::Limit>,
-) -> Option<usize> {
-	// Get limit value if it's a literal
-	let limit_val = limit.as_ref().and_then(|l| match &l.0 {
-		Expr::Literal(Literal::Integer(n)) if *n >= 0 => Some(*n as usize),
-		Expr::Literal(Literal::Float(n)) if *n >= 0.0 => Some(*n as usize),
-		_ => None,
-	})?;
-
-	// Get start value if it's a literal (default to 0)
-	let start_val = start
-		.as_ref()
-		.map(|s| match &s.0 {
-			Expr::Literal(Literal::Integer(n)) if *n >= 0 => Some(*n as usize),
-			Expr::Literal(Literal::Float(n)) if *n >= 0.0 => Some(*n as usize),
-			_ => None,
-		})
-		.unwrap_or(Some(0))?;
-
-	Some(start_val + limit_val)
-}
-
-// ============================================================================
-// Consolidated Expression Evaluation Support
-// ============================================================================
-
-use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
-use crate::exec::operators::{Compute, Projection, SelectProject, SortByKey, SortKey};
-
-/// Plan ORDER BY with consolidated expression evaluation.
-///
-/// This is the new approach that:
-/// 1. Resolves ORDER BY aliases to SELECT expressions
-/// 2. Tries to convert idioms to `FieldPath` for direct extraction
-/// 3. Falls back to Compute operator for complex expressions
-/// 4. Uses SortByKey with FieldPath for efficient nested field sorting
-///
-/// Returns a tuple of:
-/// - The input operator wrapped with Compute (if needed) and Sort
-/// - A list of synthetic field names that were computed only for sorting (for OMIT)
-pub(crate) fn plan_sort_consolidated(
-	input: Arc<dyn ExecOperator>,
-	order: &crate::expr::order::Ordering,
-	fields: &Fields,
-	start: &Option<crate::expr::start::Start>,
-	limit: &Option<crate::expr::limit::Limit>,
-	#[allow(unused)] tempfiles: bool,
-	ctx: &FrozenContext,
-) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
-	use crate::expr::order::Ordering;
-	use crate::expr::part::Part;
-
-	match order {
-		Ordering::Random => {
-			// ORDER BY RAND() - use RandomShuffle operator (no expression eval needed)
-			let effective_limit = get_effective_limit_literal(start, limit);
-			Ok((
-				Arc::new(RandomShuffle {
-					input,
-					limit: effective_limit,
-				}) as Arc<dyn ExecOperator>,
-				vec![],
-			))
-		}
-		Ordering::Order(order_list) => {
-			// Build expression registry to collect expressions that need computation
-			let mut registry = ExpressionRegistry::new();
-			let mut sort_keys = Vec::with_capacity(order_list.len());
-			// Track fields computed only for sorting (not in SELECT) - need OMIT
-			let mut sort_only_fields: Vec<String> = Vec::new();
-
-			// Process each ORDER BY field
-			for order_field in order_list.iter() {
-				let idiom = &order_field.value;
-
-				// Try to resolve as a SELECT alias first
-				let field_path = if let Some((resolved_expr, alias)) =
-					resolve_order_by_alias(idiom, fields)
-				{
-					// ORDER BY references a SELECT alias - use the underlying expression
-					match &resolved_expr {
-						Expr::Idiom(inner_idiom) => {
-							// Check if this idiom has graph traversals (Lookups)
-							// Graph traversals require evaluation - can't extract directly
-							let has_lookups =
-								inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
-
-							if has_lookups {
-								// Graph traversal - must compute before sorting
-								let name = registry.register(
-									&resolved_expr,
-									ComputePoint::BeforeSort,
-									Some(alias.clone()),
-									ctx,
-								)?;
-								FieldPath::field(name)
-							} else {
-								// Simple field access - try to convert to FieldPath
-								match FieldPath::try_from(inner_idiom) {
-									Ok(path) => path,
-									Err(_) => {
-										// Complex idiom - register for computation
-										let name = registry.register(
-											&resolved_expr,
-											ComputePoint::BeforeSort,
-											Some(alias.clone()),
-											ctx,
-										)?;
-										FieldPath::field(name)
-									}
-								}
-							}
-						}
-						_ => {
-							// Non-idiom expression (function call, etc.) - register for computation
-							let name = registry.register(
-								&resolved_expr,
-								ComputePoint::BeforeSort,
-								Some(alias.clone()),
-								ctx,
-							)?;
-							FieldPath::field(name)
-						}
-					}
-				} else {
-					// Not an alias - try direct conversion to FieldPath
-					match FieldPath::try_from(idiom) {
-						Ok(path) => path,
-						Err(_) => {
-							// Complex idiom (graph traversal, etc.) - register for computation
-							let expr = Expr::Idiom(idiom.clone());
-							let name =
-								registry.register(&expr, ComputePoint::BeforeSort, None, ctx)?;
-							// Track that this field wasn't in SELECT - needs OMIT
-							sort_only_fields.push(name.clone());
-							FieldPath::field(name)
-						}
-					}
-				};
-
-				// Build SortKey with FieldPath
-				let direction = if order_field.direction {
-					SortDirection::Asc
-				} else {
-					SortDirection::Desc
-				};
-
-				let mut key = SortKey::new(field_path);
-				key.direction = direction;
-				key.collate = order_field.collate;
-				key.numeric = order_field.numeric;
-				sort_keys.push(key);
-			}
-
-			// Insert Compute operator if there are expressions to compute
-			let computed = if registry.has_expressions_for_point(ComputePoint::BeforeSort) {
-				let compute_fields = registry.get_expressions_for_point(ComputePoint::BeforeSort);
-				Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
-			} else {
-				input
-			};
-
-			// Check if we should use SortTopK (small limit) - only if no complex expressions
-			// For now, always use SortByKey for consolidated approach
-			// TODO: Add SortTopKByKey for optimized top-k with pre-computed fields
-
-			// Create SortByKey operator
-			Ok((
-				Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
-				sort_only_fields,
-			))
-		}
-	}
-}
-
-/// Plan SELECT projections with consolidated approach.
-///
-/// This version uses SelectProject when expressions have been pre-computed,
-/// avoiding duplicate evaluation.
-#[allow(dead_code)] // Used for future expansion
-pub(crate) fn plan_projections_consolidated(
-	input: Arc<dyn ExecOperator>,
-	fields: &Fields,
-	omit: &[Expr],
-	computed_fields: &[(String, String)], // (internal_name, output_name) pairs
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	match fields {
-		// SELECT VALUE - still needs expression evaluation (not consolidated yet)
-		Fields::Value(selector) => {
-			if !omit.is_empty() {
-				return Err(Error::Query {
-					message: "OMIT clause with SELECT VALUE not supported".to_string(),
-				});
-			}
-			let expr = expr_to_physical_expr(selector.expr.clone(), ctx)?;
-			Ok(Arc::new(ProjectValue {
-				input,
-				expr,
-			}) as Arc<dyn ExecOperator>)
-		}
-
-		Fields::Select(field_list) => {
-			// Check if this is just SELECT * (all fields, no specific fields)
-			let is_select_all =
-				field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
-
-			if is_select_all {
-				// SELECT * - use SelectProject to handle RecordId dereferencing
-				// and apply OMIT if present
-				let omit_names: Vec<String> = omit
-					.iter()
-					.filter_map(|e| {
-						if let Expr::Idiom(idiom) = e {
-							Some(idiom_to_field_name(idiom))
-						} else {
-							None
-						}
-					})
-					.collect();
-				let projections: Vec<Projection> = std::iter::once(Projection::All)
-					.chain(omit_names.into_iter().map(Projection::Omit))
-					.collect();
-				return Ok(
-					Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>
-				);
-			}
-
-			// Build projections
-			let mut projections = Vec::with_capacity(field_list.len());
-			let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-			if has_wildcard {
-				projections.push(Projection::All);
-			}
-
-			for field in field_list {
-				match field {
-					Field::All => {
-						// Already handled above
-					}
-					Field::Single(selector) => {
-						// Determine output name
-						let output_name = if let Some(alias) = &selector.alias {
-							idiom_to_field_name(alias)
-						} else {
-							derive_field_name(&selector.expr)
-						};
-
-						// Check if this field was pre-computed
-						let maybe_computed =
-							computed_fields.iter().find(|(_, out)| out == &output_name);
-
-						if let Some((internal_name, _)) = maybe_computed {
-							if internal_name != &output_name {
-								// Need to rename from internal to output
-								projections.push(Projection::Rename {
-									from: internal_name.clone(),
-									to: output_name,
-								});
-							} else {
-								// Names match - just include
-								projections.push(Projection::Include(output_name));
-							}
-						} else {
-							// Not pre-computed - include by output name
-							// (for simple fields that don't need computation)
-							projections.push(Projection::Include(output_name));
-						}
-					}
-				}
-			}
-
-			// Apply OMIT
-			if !omit.is_empty() {
-				for e in omit {
-					if let Expr::Idiom(idiom) = e {
-						projections.push(Projection::Omit(idiom_to_field_name(idiom)));
-					}
-				}
-			}
-
-			Ok(Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>)
-		}
-	}
-}
-
-// ============================================================================
-// Idiom Conversion Functions
-// ============================================================================
-
-use crate::exec::physical_expr::IdiomExpr;
-use crate::exec::physical_part::{
-	LookupDirection, PhysicalDestructurePart, PhysicalLookup, PhysicalPart, PhysicalRecurse,
-	PhysicalRecurseInstruction,
-};
-use crate::expr::part::{DestructurePart, Part, RecurseInstruction};
-
-/// Convert an idiom to a physical expression.
-///
-/// All idioms are converted to `IdiomExpr` which handles runtime type checking
-/// (e.g., fetching records when accessing fields on RecordIds).
-///
-/// If the first part is `Part::Start(expr)`, the expression is converted to a
-/// physical expression and stored as the start expression on `IdiomExpr`. The
-/// remaining parts are converted normally. At evaluation time, the start
-/// expression is evaluated first to produce the base value.
-fn convert_idiom_to_physical_expr(
-	idiom: &crate::expr::idiom::Idiom,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	// Check if the first part is a Start expression (e.g. `(INFO FOR KV).namespaces`)
-	if let Some(Part::Start(expr)) = idiom.0.first() {
-		let start_phys = expr_to_physical_expr(expr.clone(), ctx)?;
-		let remaining_parts = convert_parts_to_physical(&idiom.0[1..], ctx)?;
-		return Ok(Arc::new(IdiomExpr::new(idiom.clone(), Some(start_phys), remaining_parts)));
-	}
-
-	// Normal path: no start expression, convert all parts
-	let physical_parts = convert_parts_to_physical(&idiom.0, ctx)?;
-	Ok(Arc::new(IdiomExpr::new(idiom.clone(), None, physical_parts)))
+	Planner::new(ctx).physical_expr(expr)
 }
 
-/// Convert idiom parts to physical parts.
-///
-/// When a `Part::Recurse` has no explicit inner path (no parentheses), all remaining
-/// parts after the recurse are absorbed as the recursion's inner path. This matches
-/// the legacy execution behavior in `Value::get()` where `path.next()` (all remaining
-/// parts) becomes the recursion path.
-///
-/// For example:
-/// - `person:alice.{..}->reports_to->person` produces `[Recurse(path=[Lookup])]`
-/// - `org:infrastructure.{..}.parent` produces `[Recurse(path=[Field("parent")])]`
-/// - `person:alice.{..}(->reports_to->person).name` produces `[Recurse(path=[Lookup]),
-///   Field("name")]`
-fn convert_parts_to_physical(
-	parts: &[Part],
-	ctx: &FrozenContext,
-) -> Result<Vec<PhysicalPart>, Error> {
-	let mut physical_parts = Vec::with_capacity(parts.len());
-
-	for (i, part) in parts.iter().enumerate() {
-		// When a Recurse has no explicit inner path, absorb all remaining parts
-		// as the recursion's inner path and make the Recurse the final physical part.
-		if let Part::Recurse(recurse, None, instruction) = part {
-			let (min_depth, max_depth) = match recurse {
-				crate::expr::part::Recurse::Fixed(n) => (*n, Some(*n)),
-				crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), *max),
-			};
-
-			// Absorb all remaining parts as the recursion's inner path
-			let remaining = &parts[i + 1..];
-			let path = convert_parts_to_physical(remaining, ctx)?;
-
-			let instr = convert_recurse_instruction(instruction, ctx)?;
-
-			let has_repeat_recurse = contains_repeat_recurse(&path);
-
-			physical_parts.push(PhysicalPart::Recurse(PhysicalRecurse {
-				min_depth,
-				max_depth,
-				path,
-				instruction: instr,
-				inclusive: matches!(
-					instruction,
-					Some(RecurseInstruction::Path {
-						inclusive: true,
-						..
-					}) | Some(RecurseInstruction::Collect {
-						inclusive: true,
-						..
-					}) | Some(RecurseInstruction::Shortest {
-						inclusive: true,
-						..
-					})
-				),
-				has_repeat_recurse,
-			}));
-
-			// All remaining parts have been absorbed; stop processing
-			break;
-		}
-
-		let physical_part = convert_single_part(part, ctx)?;
-		physical_parts.push(physical_part);
-	}
-
-	Ok(physical_parts)
-}
-
-/// Check if a slice of physical parts contains a RepeatRecurse marker at any nesting level.
-fn contains_repeat_recurse(parts: &[PhysicalPart]) -> bool {
-	for part in parts {
-		match part {
-			PhysicalPart::RepeatRecurse => return true,
-			PhysicalPart::Destructure(dest_parts) => {
-				for dp in dest_parts {
-					if let PhysicalDestructurePart::Aliased {
-						path,
-						..
-					} = dp
-					{
-						if contains_repeat_recurse(path) {
-							return true;
-						}
-					}
-					if let PhysicalDestructurePart::Nested {
-						parts: nested,
-						..
-					} = dp
-					{
-						// Check nested destructure fields for aliased paths with RepeatRecurse
-						for np in nested {
-							if let PhysicalDestructurePart::Aliased {
-								path,
-								..
-							} = np
-							{
-								if contains_repeat_recurse(path) {
-									return true;
-								}
-							}
-						}
-					}
-				}
-			}
-			PhysicalPart::Recurse(recurse) => {
-				if contains_repeat_recurse(&recurse.path) {
-					return true;
-				}
-			}
-			_ => {}
-		}
-	}
-	false
-}
-
-/// Convert a single Part to a PhysicalPart.
-fn convert_single_part(part: &Part, ctx: &FrozenContext) -> Result<PhysicalPart, Error> {
-	match part {
-		Part::Field(name) => Ok(PhysicalPart::Field(name.clone())),
-
-		Part::Value(expr) => {
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
-			Ok(PhysicalPart::Index(phys_expr))
-		}
-
-		Part::All => Ok(PhysicalPart::All),
-		Part::Flatten => Ok(PhysicalPart::Flatten),
-		Part::First => Ok(PhysicalPart::First),
-		Part::Last => Ok(PhysicalPart::Last),
-		Part::Optional => Ok(PhysicalPart::Optional),
-
-		Part::Where(expr) => {
-			let phys_expr = expr_to_physical_expr(expr.clone(), ctx)?;
-			Ok(PhysicalPart::Where(phys_expr))
-		}
-
-		Part::Method(name, args) => {
-			let mut phys_args = Vec::with_capacity(args.len());
-			for arg in args {
-				phys_args.push(expr_to_physical_expr(arg.clone(), ctx)?);
-			}
-			let registry = ctx.function_registry();
-			match registry.get_method(name) {
-				Some(descriptor) => Ok(PhysicalPart::Method {
-					descriptor: descriptor.clone(),
-					args: phys_args,
-				}),
-				None => {
-					// Method not found in registry -- fall back to field access + closure call.
-					// At runtime, the value's field with this name is accessed and invoked as a
-					// closure. This implements the "fallback function" pattern where
-					// `$obj.fnc()` tries built-in methods first and falls back to calling a
-					// closure stored in the object's `fnc` field.
-					Ok(PhysicalPart::ClosureFieldCall {
-						field: name.to_string(),
-						args: phys_args,
-					})
-				}
-			}
-		}
-
-		Part::Destructure(parts) => {
-			let phys_parts = convert_destructure_parts(parts, ctx)?;
-			Ok(PhysicalPart::Destructure(phys_parts))
-		}
-
-		Part::Start(_) => {
-			// Start parts are handled at the idiom level, not as individual parts
-			Err(Error::Unimplemented(
-				"Start parts should be handled at the idiom level".to_string(),
-			))
-		}
-
-		Part::Lookup(lookup) => {
-			// Lookups need special handling - create a plan
-			let plan = plan_lookup(lookup, ctx)?;
-			let direction = match &lookup.kind {
-				crate::expr::lookup::LookupKind::Graph(dir) => LookupDirection::from(dir),
-				crate::expr::lookup::LookupKind::Reference => LookupDirection::Reference,
-			};
-			// Extract edge tables from the lookup subjects
-			let edge_tables: Vec<_> = lookup
-				.what
-				.iter()
-				.map(|s| match s {
-					crate::expr::lookup::LookupSubject::Table {
-						table,
-						..
-					} => table.clone(),
-					crate::expr::lookup::LookupSubject::Range {
-						table,
-						..
-					} => table.clone(),
-				})
-				.collect();
-			// When the scan fetches full records for WHERE/SPLIT filtering but
-			// there's no explicit SELECT clause, the result should be projected
-			// back to RecordIds.
-			let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
-			let needs_full_records =
-				needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
-			let extract_id = needs_full_records && !needs_full_pipeline;
-			Ok(PhysicalPart::Lookup(PhysicalLookup {
-				direction,
-				edge_tables,
-				plan,
-				extract_id,
-			}))
-		}
-
-		Part::Recurse(recurse, inner_path, instruction) => {
-			let (min_depth, max_depth) = match recurse {
-				crate::expr::part::Recurse::Fixed(n) => (*n, Some(*n)),
-				crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), *max),
-			};
-
-			let path = if let Some(p) = inner_path {
-				convert_parts_to_physical(&p.0, ctx)?
-			} else {
-				vec![]
-			};
-
-			let instr = convert_recurse_instruction(instruction, ctx)?;
-			let has_repeat_recurse = contains_repeat_recurse(&path);
-
-			Ok(PhysicalPart::Recurse(PhysicalRecurse {
-				min_depth,
-				max_depth,
-				path,
-				instruction: instr,
-				inclusive: matches!(
-					instruction,
-					Some(RecurseInstruction::Path {
-						inclusive: true,
-						..
-					}) | Some(RecurseInstruction::Collect {
-						inclusive: true,
-						..
-					}) | Some(RecurseInstruction::Shortest {
-						inclusive: true,
-						..
-					})
-				),
-				has_repeat_recurse,
-			}))
-		}
-
-		Part::Doc => {
-			// Doc ($) refers to the document, which is the current value
-			// This should be handled at the idiom level
-			Ok(PhysicalPart::Field("id".to_string()))
-		}
-
-		Part::RepeatRecurse => {
-			// RepeatRecurse (@) is a marker that says "repeat the current recursion
-			// from here". Convert it to a physical part; the recursion evaluator
-			// will set up the recursion context so it can be evaluated properly.
-			Ok(PhysicalPart::RepeatRecurse)
-		}
-	}
-}
-
-/// Convert destructure parts to physical destructure parts.
-fn convert_destructure_parts(
-	parts: &[DestructurePart],
-	ctx: &FrozenContext,
-) -> Result<Vec<PhysicalDestructurePart>, Error> {
-	let mut physical_parts = Vec::with_capacity(parts.len());
-
-	for part in parts {
-		let phys_part = match part {
-			DestructurePart::All(field) => PhysicalDestructurePart::All(field.clone()),
-			DestructurePart::Field(field) => PhysicalDestructurePart::Field(field.clone()),
-			DestructurePart::Aliased(field, idiom) => {
-				let path = convert_parts_to_physical(&idiom.0, ctx)?;
-				PhysicalDestructurePart::Aliased {
-					field: field.clone(),
-					path,
-				}
-			}
-			DestructurePart::Destructure(field, nested) => {
-				let nested_parts = convert_destructure_parts(nested, ctx)?;
-				PhysicalDestructurePart::Nested {
-					field: field.clone(),
-					parts: nested_parts,
-				}
-			}
-		};
-		physical_parts.push(phys_part);
-	}
-
-	Ok(physical_parts)
-}
-
-/// Convert a RecurseInstruction to a PhysicalRecurseInstruction.
-fn convert_recurse_instruction(
-	instruction: &Option<RecurseInstruction>,
-	ctx: &FrozenContext,
-) -> Result<PhysicalRecurseInstruction, Error> {
-	match instruction {
-		None => Ok(PhysicalRecurseInstruction::Default),
-		Some(RecurseInstruction::Collect {
-			..
-		}) => Ok(PhysicalRecurseInstruction::Collect),
-		Some(RecurseInstruction::Path {
-			..
-		}) => Ok(PhysicalRecurseInstruction::Path),
-		Some(RecurseInstruction::Shortest {
-			expects,
-			..
-		}) => {
-			let target = expr_to_physical_expr(expects.clone(), ctx)?;
-			Ok(PhysicalRecurseInstruction::Shortest {
-				target,
-			})
-		}
-	}
-}
-
-/// Special parameter name for passing the lookup source at execution time.
-/// This parameter is bound by `evaluate_lookup_for_rid` before executing the plan.
-pub(crate) const LOOKUP_SOURCE_PARAM: &str = "__lookup_source__";
-
-/// Convert a `RecordIdKeyLit` to an `Expr` for use in physical expression conversion.
-fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr, Error> {
-	use crate::expr::RecordIdKeyLit;
-	match lit {
-		RecordIdKeyLit::Number(n) => Ok(Expr::Literal(crate::expr::literal::Literal::Integer(*n))),
-		RecordIdKeyLit::String(s) => {
-			Ok(Expr::Literal(crate::expr::literal::Literal::String(s.clone())))
-		}
-		RecordIdKeyLit::Uuid(u) => Ok(Expr::Literal(crate::expr::literal::Literal::Uuid(*u))),
-		RecordIdKeyLit::Array(exprs) => {
-			Ok(Expr::Literal(crate::expr::literal::Literal::Array(exprs.clone())))
-		}
-		RecordIdKeyLit::Object(entries) => {
-			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
-		}
-		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => {
-			Err(Error::Unimplemented("Generated/range keys in graph range bounds".to_string()))
-		}
-	}
-}
-
-/// Convert a `Bound<RecordIdKeyLit>` to a `Bound<Arc<dyn PhysicalExpr>>` for edge range filtering.
-fn convert_range_bound(
-	bound: &std::ops::Bound<crate::expr::RecordIdKeyLit>,
-	ctx: &FrozenContext,
-) -> Result<std::ops::Bound<Arc<dyn crate::exec::PhysicalExpr>>, Error> {
-	match bound {
-		std::ops::Bound::Unbounded => Ok(std::ops::Bound::Unbounded),
-		std::ops::Bound::Included(lit) => {
-			let expr = key_lit_to_expr(lit)?;
-			let phys = expr_to_physical_expr(expr, ctx)?;
-			Ok(std::ops::Bound::Included(phys))
-		}
-		std::ops::Bound::Excluded(lit) => {
-			let expr = key_lit_to_expr(lit)?;
-			let phys = expr_to_physical_expr(expr, ctx)?;
-			Ok(std::ops::Bound::Excluded(phys))
-		}
-	}
-}
-
-/// Plan a Lookup operation, creating the operator tree.
-///
-/// This function creates a plan for graph edge or reference traversals.
-/// For simple lookups (no subquery clauses), it returns target IDs directly.
-/// For complex lookups (GROUP BY, explicit fields, etc.), it uses `plan_select_pipeline`
-/// to apply the standard query operators (Filter, Split, Aggregate, Sort, Limit, Project).
-fn plan_lookup(
-	lookup: &crate::expr::lookup::Lookup,
-	ctx: &FrozenContext,
-) -> Result<Arc<dyn ExecOperator>, Error> {
-	use crate::exec::operators::{
-		EdgeTableSpec, GraphEdgeScan, GraphScanOutput, Limit, ReferenceScan, ReferenceScanOutput,
-	};
-
-	// The source expression reads from a special parameter that will be bound at execution time.
-	// When evaluate_lookup_for_rid executes this plan, it creates an ExecutionContext with
-	// __lookup_source__ set to the actual RecordId.
-	let source_expr: Arc<dyn crate::exec::PhysicalExpr> =
-		Arc::new(crate::exec::physical_expr::Param(LOOKUP_SOURCE_PARAM.into()));
-
-	// Determine if we need the full pipeline with projection/aggregation
-	// Use the pipeline when:
-	// - There's an explicit SELECT clause (expr)
-	// - There's GROUP BY (needs aggregation)
-	// For simple lookups (just filter/sort/limit), we can skip projection
-	let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
-
-	// Determine the output mode based on whether we need full edge records
-	let needs_full_records = needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
-	let output_mode = if needs_full_records {
-		GraphScanOutput::FullEdge
-	} else {
-		GraphScanOutput::TargetId
-	};
-
-	// Create the base scan operator
-	let base_scan: Arc<dyn ExecOperator> = match &lookup.kind {
-		crate::expr::lookup::LookupKind::Graph(dir) => {
-			// Convert lookup subjects to table specs with optional range bounds
-			let edge_tables: Vec<EdgeTableSpec> = lookup
-				.what
-				.iter()
-				.map(|s| match s {
-					crate::expr::lookup::LookupSubject::Table {
-						table,
-						..
-					} => Ok(EdgeTableSpec {
-						table: table.clone(),
-						range_start: std::ops::Bound::Unbounded,
-						range_end: std::ops::Bound::Unbounded,
-					}),
-					crate::expr::lookup::LookupSubject::Range {
-						table,
-						range,
-						..
-					} => {
-						let range_start = convert_range_bound(&range.start, ctx)?;
-						let range_end = convert_range_bound(&range.end, ctx)?;
-						Ok(EdgeTableSpec {
-							table: table.clone(),
-							range_start,
-							range_end,
-						})
-					}
-				})
-				.collect::<Result<Vec<_>, Error>>()?;
-
-			Arc::new(GraphEdgeScan {
-				source: source_expr,
-				direction: LookupDirection::from(dir),
-				edge_tables,
-				output_mode,
-			})
-		}
-		crate::expr::lookup::LookupKind::Reference => {
-			// For references, extract referencing table, field, and optional range bounds.
-			// When `what` is empty, this is the wildcard `<~?` case -- scan all tables.
-			let (referencing_table, referencing_field, range_start, range_end) =
-				if let Some(subject) = lookup.what.first() {
-					match subject {
-						crate::expr::lookup::LookupSubject::Table {
-							table,
-							referencing_field,
-						} => (
-							Some(table.clone()),
-							referencing_field.clone(),
-							std::ops::Bound::Unbounded,
-							std::ops::Bound::Unbounded,
-						),
-						crate::expr::lookup::LookupSubject::Range {
-							table,
-							referencing_field,
-							range,
-						} => {
-							// Range bounds are converted here; validation that a referencing
-							// field is present happens at execution time in ReferenceScan
-							// to match the error format of the old executor.
-							let rs = convert_range_bound(&range.start, ctx)?;
-							let re = convert_range_bound(&range.end, ctx)?;
-							(Some(table.clone()), referencing_field.clone(), rs, re)
-						}
-					}
-				} else {
-					// Wildcard: `<~?` -- no specific table, scan all references
-					(None, None, std::ops::Bound::Unbounded, std::ops::Bound::Unbounded)
-				};
-
-			let ref_output_mode = if needs_full_records {
-				ReferenceScanOutput::FullRecord
-			} else {
-				ReferenceScanOutput::RecordId
-			};
-
-			Arc::new(ReferenceScan {
-				source: source_expr,
-				referencing_table,
-				referencing_field,
-				output_mode: ref_output_mode,
-				range_start,
-				range_end,
-			})
-		}
-	};
-
-	if needs_full_pipeline {
-		// Use the shared pipeline: Filter -> Split -> Aggregate -> Sort -> Limit -> Project
-		// This enables full support for subquery clauses like GROUP BY
-		let config = SelectPipelineConfig {
-			cond: lookup.cond.clone(),
-			split: lookup.split.clone(),
-			group: lookup.group.clone(),
-			order: lookup.order.clone(),
-			limit: lookup.limit.clone(),
-			start: lookup.start.clone(),
-			omit: vec![],           // No OMIT for lookups
-			is_value_source: false, // Lookups are not value sources
-			tempfiles: false,       // No TEMPFILES for lookups
-		};
-		plan_select_pipeline(base_scan, lookup.expr.clone(), config, ctx)
-	} else {
-		// Simple lookup without projection - apply filter/split/sort/limit manually
-		// This preserves the original behavior of returning target IDs or filtered edges
-
-		// Apply filter if present
-		let filtered: Arc<dyn ExecOperator> = if let Some(cond) = &lookup.cond {
-			let predicate = expr_to_physical_expr(cond.0.clone(), ctx)?;
-			Arc::new(Filter {
-				input: base_scan,
-				predicate,
-			})
-		} else {
-			base_scan
-		};
-
-		// Apply split if SPLIT is present
-		let split_op: Arc<dyn ExecOperator> = if let Some(splits) = &lookup.split {
-			Arc::new(crate::exec::operators::Split {
-				input: filtered,
-				idioms: splits.0.iter().map(|s| s.0.clone()).collect(),
-			})
-		} else {
-			filtered
-		};
-
-		// Apply sort if ORDER BY is present
-		let sorted: Arc<dyn ExecOperator> =
-			if let Some(crate::expr::order::Ordering::Order(order_list)) = &lookup.order {
-				let order_by = convert_order_list(order_list, ctx)?;
-				Arc::new(crate::exec::operators::Sort {
-					input: split_op,
-					order_by,
-				})
-			} else {
-				split_op
-			};
-
-		// Apply limit if present
-		let limited: Arc<dyn ExecOperator> = if lookup.limit.is_some() || lookup.start.is_some() {
-			let limit_expr = lookup
-				.limit
-				.as_ref()
-				.map(|l| expr_to_physical_expr(l.0.clone(), ctx))
-				.transpose()?;
-			let offset_expr = lookup
-				.start
-				.as_ref()
-				.map(|s| expr_to_physical_expr(s.0.clone(), ctx))
-				.transpose()?;
-			Arc::new(Limit {
-				input: sorted,
-				limit: limit_expr,
-				offset: offset_expr,
-			})
-		} else {
-			sorted
-		};
-
-		Ok(limited)
-	}
-}
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod planner_tests {
@@ -3966,7 +797,6 @@ mod planner_tests {
 
 	#[test]
 	fn test_planner_creates_scalar_plan() {
-		// Test a simple literal
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
 		let ctx = Arc::new(Context::background());

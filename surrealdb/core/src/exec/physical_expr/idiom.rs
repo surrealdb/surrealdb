@@ -15,7 +15,6 @@ use crate::exec::physical_part::{
 	PhysicalRecurseInstruction,
 };
 use crate::exec::{AccessMode, CombineAccessModes};
-use crate::expr::Idiom;
 use crate::idx::planner::ScanDirection;
 use crate::val::{RecordId, Value};
 
@@ -35,8 +34,8 @@ use crate::val::{RecordId, Value};
 /// For simple idioms (only Field and basic index parts), use the simpler `Field` type.
 #[derive(Debug, Clone)]
 pub struct IdiomExpr {
-	/// The original idiom for display/debugging
-	pub(crate) idiom: Idiom,
+	/// Pre-formatted SQL representation for display/debugging
+	pub(crate) display: String,
 	/// Optional start expression that provides the base value for the idiom.
 	/// When present, this expression is evaluated first and its result is used
 	/// as the base value instead of `ctx.current_value`.
@@ -47,14 +46,14 @@ pub struct IdiomExpr {
 }
 
 impl IdiomExpr {
-	/// Create a new IdiomExpr with the given idiom and physical parts.
+	/// Create a new IdiomExpr with a display string and physical parts.
 	pub fn new(
-		idiom: Idiom,
+		display: String,
 		start_expr: Option<Arc<dyn PhysicalExpr>>,
 		parts: Vec<PhysicalPart>,
 	) -> Self {
 		Self {
-			idiom,
+			display,
 			start_expr,
 			parts,
 		}
@@ -241,8 +240,8 @@ impl PhysicalExpr for IdiomExpr {
 }
 
 impl ToSql for IdiomExpr {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.idiom.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.display);
 	}
 }
 

@@ -4,11 +4,9 @@
 
 use anyhow::Result;
 
-use crate::catalog::{DatabaseId, FullTextParams, IndexDefinition, NamespaceId};
+use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::expr::operator::MatchesOperator;
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::kvs::Transaction;
 use crate::val::RecordId;
 

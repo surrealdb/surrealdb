@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::catalog::{DatabaseId, HnswParams, IndexDefinition, NamespaceId, Record};
+use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId, Record};
 use crate::ctx::FrozenContext;
 use crate::val::{Number, RecordId};
 

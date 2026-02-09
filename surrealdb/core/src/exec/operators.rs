@@ -31,7 +31,7 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 pub use compute::Compute;
-pub use control_flow::{ControlFlowKind, ControlFlowPlan};
+pub use control_flow::ReturnPlan;
 pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
 pub use fetch::Fetch;

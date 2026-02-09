@@ -14,10 +14,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[{ detail: { direction: 'forward', table: 'blog' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[{ id: blog:1, title: 'Hello <em>World</em>!' }]"
 
 */
 CREATE blog:1 SET title = 'Hello World!';

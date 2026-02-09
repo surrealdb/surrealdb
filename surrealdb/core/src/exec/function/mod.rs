@@ -24,7 +24,7 @@ use std::fmt::Debug;
 pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub use index::{IndexFunction, MatchContext, MatchInfo, MatchesContext};
-pub use method::{MethodDescriptor, MethodRegistry};
+pub use method::MethodDescriptor;
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
 pub use signature::Signature;
