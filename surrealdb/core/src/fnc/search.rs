@@ -77,8 +77,8 @@ pub async fn offsets(
 ///   merged
 ///
 /// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`,
-/// `PartialOrd`) based solely on the RRF score (first field) to enable
-/// efficient sorting and heap operations during the top-k selection process.
+/// `PartialOrd`) based solely on the RRF score (first field). The ordering is
+/// reversed so a `BinaryHeap` behaves as a min-heap during top-k selection.
 struct RrfDoc(f64, Value, Vec<Object>);
 
 impl PartialEq for RrfDoc {
@@ -208,7 +208,7 @@ pub async fn rrf(
 					}
 				}
 				if ctx.is_done(Some(count)).await? {
-					break;
+					return Ok(Value::None);
 				}
 				count += 1;
 			}
@@ -230,14 +230,14 @@ pub async fn rrf(
 			}
 		}
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
 
-	// Extract the top `limit` results from the heap and build the final result array.
-	// Since we use a min-heap, pop() returns documents in ascending order (lowest first),
-	// so we collect them and reverse to get descending order (highest first).
+	// Extract the top `limit` results from the heap and build the final result
+	// array. With a min-heap, pop() yields lowest scores first, so reverse at
+	// the end to return descending order.
 	let mut result_array = Array::with_capacity(scored_docs.len());
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID across different result lists
@@ -245,30 +245,19 @@ pub async fn rrf(
 		// full-text search
 		let mut obj = Object::default();
 		for mut o in doc.2 {
-	// Extract the top `limit` results from the heap and build the final result array.
-	// Since we use a min-heap, pop() returns documents in ascending order (lowest first),
-	// so we insert them in reverse order into the result array.
-	let mut result_array = Array::with_capacity(scored_docs.len());
-	for (i, RrfDoc(score, id, objects)) in scored_docs.into_iter().enumerate() {
-		// Merge all objects from the same document ID across different result lists
-		// This combines fields like 'distance' from vector search and 'ft_score' from
-		// full-text search
-		let mut obj = Object::default();
-		for mut o in objects {
-			obj.append(&mut o);
+			obj.append(&mut o.0);
 		}
 		// Add the document ID back (was removed during processing) and the computed RRF
 		// score
-		obj.insert("id".to_string(), id);
-		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(score)));
-
-		let insert_idx = result_array.len() - i - 1;
-		result_array.insert(insert_idx, Value::Object(obj));
+		obj.insert("id".to_string(), doc.1);
+		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
+		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
+	result_array.reverse();
 	Ok(Value::Array(result_array))
 }
 
@@ -426,7 +415,7 @@ pub async fn linear(
 					}
 				}
 				if ctx.is_done(Some(count)).await? {
-					break;
+					return Ok(Value::None);
 				}
 				count += 1;
 			}
@@ -516,12 +505,13 @@ pub async fn linear(
 			scored_docs.push(RrfDoc(combined_score, id, objects));
 		}
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
 
-	// Build the final result array
+	// Build the final result array. With a min-heap, pop() yields lowest scores
+	// first, so reverse at the end to return descending order.
 	let mut result_array = Array::with_capacity(scored_docs.len());
 	while let Some(doc) = scored_docs.pop() {
 		// Merge all objects from the same document ID
@@ -534,7 +524,7 @@ pub async fn linear(
 		obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
