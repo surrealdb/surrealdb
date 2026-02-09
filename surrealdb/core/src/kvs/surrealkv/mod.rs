@@ -5,13 +5,14 @@ mod cnf;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use surrealkv::{Durability, HistoryOptions, Mode, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
 use tokio::sync::RwLock;
 
+use super::api::ScanLimit;
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
-use crate::kvs::{Key, Val, Version};
+use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -396,7 +397,12 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -406,6 +412,12 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Extract the limit count (surrealkv backend only supports count-based limits for keys)
+		let limit = match limit {
+			ScanLimit::Count(n) => n,
+			ScanLimit::Bytes(n) => n, // Treat bytes as count for keys-only scan
+			ScanLimit::BytesOrCount(_bytes, count) => count, // Use count for keys-only scan
+		};
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => {
@@ -437,7 +449,12 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -447,6 +464,12 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Extract the limit count (surrealkv backend only supports count-based limits for keys)
+		let limit = match limit {
+			ScanLimit::Count(n) => n,
+			ScanLimit::Bytes(n) => n, // Treat bytes as count for keys-only scan
+			ScanLimit::BytesOrCount(_bytes, count) => count, // Use count for keys-only scan
+		};
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => {
@@ -481,7 +504,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -493,30 +516,110 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				let mut iter = inner.history(&beg, &end)?;
-				let mut res = Vec::new();
-				iter.seek_first()?;
-				while iter.valid() && res.len() < limit as usize {
-					if iter.timestamp() <= ts {
-						let value = iter.value()?;
-						res.push((iter.key(), value));
+		// Retrieve the scan range based on limit type
+		let res = match limit {
+			ScanLimit::Count(c) => match version {
+				Some(ts) => {
+					let mut iter = inner.history(&beg, &end)?;
+					let mut res = Vec::new();
+					iter.seek_first()?;
+					while iter.valid() && res.len() < c as usize {
+						if iter.timestamp() <= ts {
+							let value = iter.value()?;
+							res.push((iter.key(), value));
+						}
+						iter.next()?;
 					}
-					iter.next()?;
+					res
+				}
+				None => {
+					let mut iter = inner.range(&beg, &end)?;
+					let mut res = Vec::new();
+					iter.seek_first()?;
+					while iter.valid() && res.len() < c as usize {
+						let key = iter.key();
+						let value = iter.value()?.unwrap_or_default();
+						res.push((key, value));
+						iter.next()?;
+					}
+					res
+				}
+			},
+			ScanLimit::Bytes(b) => {
+				let mut res = Vec::new();
+				let mut bytes_fetched = 0usize;
+				match version {
+					Some(ts) => {
+						let mut iter = inner.history(&beg, &end)?;
+						iter.seek_first()?;
+						while iter.valid() {
+							if iter.timestamp() <= ts {
+								let value = iter.value()?;
+								let key = iter.key();
+								bytes_fetched += value.len();
+								res.push((key, value));
+								// Stop if we've exceeded byte limit AND have at least one entry
+								if bytes_fetched >= b as usize && !res.is_empty() {
+									break;
+								}
+							}
+							iter.next()?;
+						}
+					}
+					None => {
+						let mut iter = inner.range(&beg, &end)?;
+						iter.seek_first()?;
+						while iter.valid() {
+							let key = iter.key();
+							let value = iter.value()?.unwrap_or_default();
+							bytes_fetched += value.len();
+							res.push((key, value));
+							// Stop if we've exceeded byte limit AND have at least one entry
+							if bytes_fetched >= b as usize && !res.is_empty() {
+								break;
+							}
+							iter.next()?;
+						}
+					}
 				}
 				res
 			}
-			None => {
-				let mut iter = inner.range(&beg, &end)?;
+			ScanLimit::BytesOrCount(bytes, count) => {
 				let mut res = Vec::new();
-				iter.seek_first()?;
-				while iter.valid() && res.len() < limit as usize {
-					let key = iter.key();
-					let value = iter.value()?.unwrap_or_default();
-					res.push((key, value));
-					iter.next()?;
+				let mut bytes_fetched = 0usize;
+				match version {
+					Some(ts) => {
+						let mut iter = inner.history(&beg, &end)?;
+						iter.seek_first()?;
+						while iter.valid() && res.len() < count as usize {
+							if iter.timestamp() <= ts {
+								let value = iter.value()?;
+								let key = iter.key();
+								bytes_fetched += value.len();
+								res.push((key, value));
+								// Stop if we've exceeded byte limit AND have at least one entry
+								if bytes_fetched >= bytes as usize && !res.is_empty() {
+									break;
+								}
+							}
+							iter.next()?;
+						}
+					}
+					None => {
+						let mut iter = inner.range(&beg, &end)?;
+						iter.seek_first()?;
+						while iter.valid() && res.len() < count as usize {
+							let key = iter.key();
+							let value = iter.value()?.unwrap_or_default();
+							bytes_fetched += value.len();
+							res.push((key, value));
+							// Stop if we've exceeded byte limit AND have at least one entry
+							if bytes_fetched >= bytes as usize && !res.is_empty() {
+								break;
+							}
+							iter.next()?;
+						}
+					}
 				}
 				res
 			}
@@ -530,7 +633,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -543,75 +646,113 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				let mut iter = inner.history(&beg, &end)?;
-				let mut res = Vec::new();
-				iter.seek_last()?;
-				while iter.valid() && res.len() < limit as usize {
-					if iter.timestamp() <= ts {
-						let value = iter.value()?;
-						res.push((iter.key(), value));
+		let res = match limit {
+			ScanLimit::Count(n) => match version {
+				Some(ts) => {
+					let mut iter = inner.history(&beg, &end)?;
+					let mut res = Vec::new();
+					iter.seek_last()?;
+					while iter.valid() && res.len() < n as usize {
+						if iter.timestamp() <= ts {
+							let value = iter.value()?;
+							res.push((iter.key(), value));
+						}
+						iter.prev()?;
 					}
-					iter.prev()?;
+					res
+				}
+				None => {
+					let mut iter = inner.range(&beg, &end)?;
+					let mut res = Vec::new();
+					iter.seek_last()?;
+					while iter.valid() && res.len() < n as usize {
+						let key = iter.key();
+						let value = iter.value()?.unwrap_or_default();
+						res.push((key, value));
+						iter.prev()?;
+					}
+					res
+				}
+			},
+			ScanLimit::Bytes(n) => {
+				let mut res = Vec::new();
+				let mut bytes_fetched = 0usize;
+				match version {
+					Some(ts) => {
+						let mut iter = inner.history(&beg, &end)?;
+						iter.seek_last()?;
+						while iter.valid() {
+							if iter.timestamp() <= ts {
+								let value = iter.value()?;
+								let key = iter.key();
+								bytes_fetched += value.len();
+								res.push((key, value));
+								// Stop if we've exceeded byte limit AND have at least one entry
+								if bytes_fetched >= n as usize && !res.is_empty() {
+									break;
+								}
+							}
+							iter.prev()?;
+						}
+					}
+					None => {
+						let mut iter = inner.range(&beg, &end)?;
+						iter.seek_last()?;
+						while iter.valid() {
+							let key = iter.key();
+							let value = iter.value()?.unwrap_or_default();
+							bytes_fetched += value.len();
+							res.push((key, value));
+							// Stop if we've exceeded byte limit AND have at least one entry
+							if bytes_fetched >= n as usize && !res.is_empty() {
+								break;
+							}
+							iter.prev()?;
+						}
+					}
 				}
 				res
 			}
-			None => {
-				let mut iter = inner.range(&beg, &end)?;
+			ScanLimit::BytesOrCount(bytes, count) => {
 				let mut res = Vec::new();
-				iter.seek_last()?;
-				while iter.valid() && res.len() < limit as usize {
-					let key = iter.key();
-					let value = iter.value()?.unwrap_or_default();
-					res.push((key, value));
-					iter.prev()?;
+				let mut bytes_fetched = 0usize;
+				match version {
+					Some(ts) => {
+						let mut iter = inner.history(&beg, &end)?;
+						iter.seek_last()?;
+						while iter.valid() && res.len() < count as usize {
+							if iter.timestamp() <= ts {
+								let value = iter.value()?;
+								let key = iter.key();
+								bytes_fetched += value.len();
+								res.push((key, value));
+								// Stop if we've exceeded byte limit AND have at least one entry
+								if bytes_fetched >= bytes as usize && !res.is_empty() {
+									break;
+								}
+							}
+							iter.prev()?;
+						}
+					}
+					None => {
+						let mut iter = inner.range(&beg, &end)?;
+						iter.seek_last()?;
+						while iter.valid() && res.len() < count as usize {
+							let key = iter.key();
+							let value = iter.value()?.unwrap_or_default();
+							bytes_fetched += value.len();
+							res.push((key, value));
+							// Stop if we've exceeded byte limit AND have at least one entry
+							if bytes_fetched >= bytes as usize && !res.is_empty() {
+								break;
+							}
+							iter.prev()?;
+						}
+					}
 				}
 				res
 			}
 		};
-		// Return result
-		Ok(res)
-	}
-
-	/// Retrieve all the versions from a range of keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan_all_versions(
-		&self,
-		rng: Range<Key>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Set the key range
-		let beg = rng.start;
-		let end = rng.end;
-		// Load the inner transaction
-		let inner = self.inner.read().await;
-		// Retrieve the scan range using history iterator with tombstones included
-		// Limit is on unique keys, not total entries
-		let opts = HistoryOptions::new().with_tombstones(true);
-		let mut iter = inner.history_with_options(&beg, &end, &opts)?;
-		let mut res = Vec::new();
-		let mut unique_keys = 0u32;
-		let mut last_key: Option<Vec<u8>> = None;
-		iter.seek_last()?;
-		while iter.valid() && unique_keys < limit {
-			let key = iter.key();
-			// Count unique keys
-			if last_key.as_ref() != Some(&key) {
-				unique_keys += 1;
-				last_key = Some(key.clone());
-			}
-			// Only collect if within the unique key limit
-			if unique_keys <= limit {
-				let entry = iter.entry()?;
-				res.push((entry.0, entry.1, entry.2, entry.3));
-			}
-			iter.prev()?;
-		}
 		// Return result
 		Ok(res)
 	}

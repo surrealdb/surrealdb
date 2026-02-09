@@ -722,12 +722,15 @@ pub(super) trait Collector {
 		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
-		while let Some(res) = stream.next().await {
-			if ctx.is_done(Some(skipped)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for key in batch {
+				if ctx.is_done(Some(skipped)).await? {
+					break 'outer;
+				}
+				last_key = key;
+				skipped += 1;
 			}
-			last_key = res?;
-			skipped += 1;
 		}
 		// If we don't have a last key, we're done
 		if last_key.is_empty() {
@@ -775,15 +778,17 @@ pub(super) trait Collector {
 
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Parse the data from the store
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let (k, v) = res?;
-			self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -817,16 +822,17 @@ pub(super) trait Collector {
 		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for k in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect the key
+				self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let k = res?;
-			// Collect the key
-			self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -907,16 +913,17 @@ pub(super) trait Collector {
 		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let (k, v) = res?;
-			// Collect
-			self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -951,15 +958,17 @@ pub(super) trait Collector {
 		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for k in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect the key
+				self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let k = res?;
-			self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -1038,23 +1047,23 @@ pub(super) trait Collector {
 		};
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
 		// Loop over the chosen edge types
-		for (beg, end) in keys {
+		'keys: for (beg, end) in keys {
 			// Create a new iterable range
 			let mut stream = txn.stream_keys(beg..end, opt.version, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
-				// Check if the context is finished
-				if ctx.is_done(Some(count)).await? {
-					break;
+				let batch = res?;
+				for key in batch {
+					// Check if the context is finished
+					if ctx.is_done(Some(count)).await? {
+						break 'keys;
+					}
+					// Collect the key
+					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
+					count += 1;
 				}
-				// Parse the key from the result
-				let key = res?;
-				// Collector the key
-				self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
-				count += 1;
 			}
 		}
 		// Everything ok

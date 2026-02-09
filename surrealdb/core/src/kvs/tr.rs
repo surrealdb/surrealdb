@@ -5,10 +5,10 @@ use std::ops::Range;
 use chrono::{DateTime, Utc};
 use futures::stream::Stream;
 
-use super::api::Transactable;
+use super::api::{ScanLimit, Transactable};
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
-use super::{IntoBytes, Key, Result, Val, Version};
+use super::{IntoBytes, Key, Result, Val};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -60,8 +60,18 @@ impl Drop for Transactor {
 
 impl Transactor {
 	/// Get the underlying datastore kind.
-	fn kind(&self) -> &'static str {
+	pub(super) fn kind(&self) -> &'static str {
 		self.inner.kind()
+	}
+
+	/// Check if the underlying storage engine is local (in-process).
+	///
+	/// Local storage engines (memory, surrealkv, rocksdb) can handle larger
+	/// batch sizes efficiently, while remote engines (tikv, indxdb) benefit
+	/// from smaller batches to reduce network overhead.
+	#[inline]
+	pub(super) fn is_local(&self) -> bool {
+		matches!(self.kind(), "memory" | "surrealkv" | "rocksdb")
 	}
 
 	/// Check if transaction is finished.
@@ -319,7 +329,12 @@ impl Transactor {
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>
 	where
 		K: IntoBytes + Debug,
 	{
@@ -339,7 +354,7 @@ impl Transactor {
 	pub async fn keysr<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -361,7 +376,7 @@ impl Transactor {
 	pub async fn scan<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -383,7 +398,7 @@ impl Transactor {
 	pub async fn scanr<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -453,35 +468,16 @@ impl Transactor {
 		self.inner.batch_keys_vals(beg..end, batch, version).await
 	}
 
-	/// Retrieve a batched scan of all versions over a specific range of keys in
-	/// the datastore.
-	///
-	/// This function fetches key-value-version pairs, in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_keys_vals_versions<K>(
-		&self,
-		rng: Range<K>,
-		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.batch_keys_vals_versions(beg..end, batch).await
-	}
-
 	// --------------------------------------------------
 	// Stream functions
 	// --------------------------------------------------
 
-	/// Retrieve a stream over a specific range of keys in the datastore.
+	/// Retrieve a stream of key batches over a specific range in the datastore.
 	///
-	/// This function fetches keys in batches, with multiple requests to the
-	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
-	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
-	/// by default for optimal read throughput.
+	/// This function returns a stream that yields batches of keys. The scanner:
+	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - Prefetches the next batch while the current batch is being processed
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn stream_keys<K>(
 		&self,
@@ -489,21 +485,25 @@ impl Transactor {
 		version: Option<u64>,
 		limit: Option<usize>,
 		dir: Direction,
-	) -> impl Stream<Item = Result<Key>> + '_
+	) -> impl Stream<Item = Result<Vec<Key>>> + '_
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		Scanner::<Key>::new(self, beg..end, version, limit, dir, true)
+		let scanner = Scanner::<Key>::new(self, beg..end, limit, dir);
+		match version {
+			Some(v) => scanner.version(v),
+			None => scanner,
+		}
 	}
 
-	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore. The Scanner uses adaptive batch
-	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
-	/// Prefetching is enabled by default for optimal read throughput.
+	/// This function returns a stream that yields batches of key-value pairs. The scanner:
+	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - Prefetches the next batch while the current batch is being processed
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn stream_keys_vals<K>(
 		&self,
@@ -511,13 +511,17 @@ impl Transactor {
 		version: Option<u64>,
 		limit: Option<usize>,
 		dir: Direction,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_
+	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, true)
+		let scanner = Scanner::<(Key, Val)>::new(self, beg..end, limit, dir);
+		match version {
+			Some(v) => scanner.version(v),
+			None => scanner,
+		}
 	}
 
 	// --------------------------------------------------
