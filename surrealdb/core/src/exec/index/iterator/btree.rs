@@ -59,7 +59,7 @@ impl IndexEqualIterator {
 
 		// Update begin key for next batch
 		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
+			self.beg.clone_from(key);
 			self.beg.push(0x00);
 		}
 
@@ -187,7 +187,7 @@ impl IndexRangeIterator {
 
 		// Update begin key for next batch
 		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
+			self.beg.clone_from(key);
 			self.beg.push(0x00);
 		}
 
@@ -267,11 +267,11 @@ impl UniqueRangeIterator {
 		if res.is_empty() {
 			self.done = true;
 			// Check end key if inclusive
-			if self.end_inclusive {
-				if let Some(val) = tx.get(&self.end, None).await? {
-					let rid: RecordId = revision::from_slice(&val)?;
-					return Ok(vec![rid]);
-				}
+			if self.end_inclusive
+				&& let Some(val) = tx.get(&self.end, None).await?
+			{
+				let rid: RecordId = revision::from_slice(&val)?;
+				return Ok(vec![rid]);
 			}
 			return Ok(Vec::new());
 		}
@@ -281,7 +281,7 @@ impl UniqueRangeIterator {
 
 		// Update begin key for next batch - increment to move past scanned records
 		if let Some((key, _)) = res.last() {
-			self.beg = key.clone();
+			self.beg.clone_from(key);
 			self.beg.push(0x00);
 		}
 

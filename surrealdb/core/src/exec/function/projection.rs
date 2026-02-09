@@ -71,6 +71,9 @@ pub trait ProjectionFunction: Send + Sync + Debug {
 	///
 	/// # Returns
 	/// A vector of (Idiom, Value) pairs to set on the output object
+	#[allow(clippy::type_complexity)]
+	#[allow(clippy::type_complexity)]
+	#[allow(clippy::type_complexity)]
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,

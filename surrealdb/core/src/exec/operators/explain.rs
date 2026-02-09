@@ -88,21 +88,21 @@ fn format_execution_plan(
 
 	// Show context level
 	let context = plan.required_context();
-	write!(output, "{} [ctx: {}]", name, context.short_name()).unwrap();
+	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
 
 	// Show properties if any
 	if !properties.is_empty() {
-		write!(output, " [").unwrap();
+		let _ = write!(output, " [");
 		for (i, (key, value)) in properties.iter().enumerate() {
 			if i > 0 {
-				write!(output, ", ").unwrap();
+				let _ = write!(output, ", ");
 			}
-			write!(output, "{key}: {value}").unwrap();
+			let _ = write!(output, "{key}: {value}");
 		}
-		write!(output, "]").unwrap();
+		let _ = write!(output, "]");
 	}
 
-	writeln!(output).unwrap();
+	let _ = writeln!(output);
 
 	// Format children
 	let children = plan.children();
@@ -115,7 +115,7 @@ fn format_execution_plan(
 			} else {
 				"├────> "
 			};
-			write!(output, "{}{}", prefix, child_connector).unwrap();
+			let _ = write!(output, "{}{}", prefix, child_connector);
 			// Calculate next prefix: align under the operator name, with continuation bar if not
 			// last
 			let next_prefix = if is_last_child {

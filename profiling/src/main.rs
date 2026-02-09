@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
 
 	db.query(
 		r#"
-			FOR $i IN 0..100 {
+			FOR $i IN 0..100000 {
 				CREATE person CONTENT { id: $i, name: 'Stu', age: $i }
 			}
     	"#,

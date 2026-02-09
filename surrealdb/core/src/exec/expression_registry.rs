@@ -40,11 +40,11 @@ use crate::expr::{Expr, Idiom};
 #[allow(dead_code)] // Variants used for future expansion
 pub enum ComputePoint {
 	/// Compute before Filter (expressions used in WHERE)
-	BeforeFilter = 0,
+	Filter = 0,
 	/// Compute before Aggregate (GROUP BY keys, aggregate inputs)
-	BeforeAggregate = 1,
+	Aggregate = 1,
 	/// Compute before Sort (ORDER BY keys, SELECT expressions)
-	BeforeSort = 2,
+	Sort = 2,
 }
 
 /// Information about a registered expression.

@@ -36,6 +36,7 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -166,6 +167,54 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	fn is_scalar(&self) -> bool {
 		false
 	}
+}
+
+/// A stream wrapper that creates a per-batch tracing span on each poll.
+///
+/// Each `poll_next` creates a new `trace`-level span named `"batch"` with:
+/// - `op`: the operator name (e.g. "Scan", "Filter")
+/// - `idx`: the batch index (incremented on each yielded batch)
+/// - `size`: the number of values in the batch (recorded after yield)
+///
+/// Because the pipeline is pull-based, these spans nest naturally:
+/// `batch(op=Project) > batch(op=Limit) > batch(op=Filter) > batch(op=Scan)`.
+struct InstrumentedStream {
+	inner: ValueBatchStream,
+	name: &'static str,
+	batch_idx: u64,
+}
+
+impl Stream for InstrumentedStream {
+	type Item = FlowResult<ValueBatch>;
+
+	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		let this = self.get_mut(); // safe: InstrumentedStream is Unpin
+		let span = tracing::trace_span!(
+			"batch",
+			op = this.name,
+			idx = this.batch_idx,
+			size = tracing::field::Empty,
+		);
+		let _enter = span.enter();
+
+		let result = this.inner.as_mut().poll_next(cx);
+
+		if let Poll::Ready(Some(Ok(ref batch))) = result {
+			span.record("size", batch.values.len() as u64);
+			this.batch_idx += 1;
+		}
+
+		result
+	}
+}
+
+/// Wrap a `ValueBatchStream` so that a per-batch tracing span is created on every poll.
+pub(crate) fn instrument_stream(stream: ValueBatchStream, name: &'static str) -> ValueBatchStream {
+	Box::pin(InstrumentedStream {
+		inner: stream,
+		name,
+		batch_idx: 0,
+	})
 }
 
 // #[cfg(test)]

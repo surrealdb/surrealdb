@@ -285,10 +285,10 @@ fn collect_matches(expr: &Expr, ctx: &mut crate::exec::function::MatchesContext)
 
 /// Try to extract the primary table name from the frozen context.
 pub(super) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> crate::val::TableName {
-	if let Some(mc) = ctx.get_matches_context() {
-		if let Some(table) = mc.table() {
-			return table.clone();
-		}
+	if let Some(mc) = ctx.get_matches_context()
+		&& let Some(table) = mc.table()
+	{
+		return table.clone();
 	}
 	crate::val::TableName::from("unknown".to_string())
 }

@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
 };
 
 /// Filters a stream of values based on a predicate.
@@ -44,6 +45,7 @@ impl ExecOperator for Filter {
 		vec![&self.input]
 	}
 
+	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context - we declared Database level, so this should succeed
 		// let db_ctx = ctx.database()?;
@@ -79,10 +81,11 @@ impl ExecOperator for Filter {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(instrument_stream(Box::pin(filtered), "Filter"))
 	}
 }
 
+#[instrument(level = "trace", skip_all)]
 async fn filter_batch_in_place(
 	batch: &mut ValueBatch,
 	predicate: &dyn PhysicalExpr,

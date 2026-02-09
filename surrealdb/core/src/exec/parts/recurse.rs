@@ -297,7 +297,7 @@ fn evaluate_repeat_recurse<'a>(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = FlowResult<Value>> + Send + 'a>> {
 	Box::pin(async move {
 		let rec_ctx = match &ctx.recursion_ctx {
-			Some(rc) => rc.clone(),
+			Some(rc) => *rc,
 			None => {
 				// RepeatRecurse outside recursion context is an error
 				return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
@@ -319,7 +319,7 @@ fn evaluate_repeat_recurse<'a>(
 			Value::Array(arr) => {
 				let mut results = Vec::with_capacity(arr.len());
 				for elem in arr.iter() {
-					let elem_ctx = ctx.with_recursion_ctx(next_ctx.clone());
+					let elem_ctx = ctx.with_recursion_ctx(next_ctx);
 					let result = evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
 					// Filter out dead-end values
 					if !is_final(&result) {
@@ -330,7 +330,7 @@ fn evaluate_repeat_recurse<'a>(
 			}
 			// For single values, recurse directly
 			_ => {
-				let elem_ctx = ctx.with_recursion_ctx(next_ctx.clone());
+				let elem_ctx = ctx.with_recursion_ctx(next_ctx);
 				evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await
 			}
 		}
@@ -427,8 +427,7 @@ async fn evaluate_recurse_collect(
 				}
 
 				let hash = value_hash(&v);
-				if !seen.contains(&hash) {
-					seen.insert(hash);
+				if seen.insert(hash) {
 					// Only collect if we've reached minimum depth
 					if depth + 1 >= min_depth {
 						collected.push(v.clone());
@@ -549,7 +548,7 @@ async fn evaluate_recurse_shortest(
 		let level_size = queue.len();
 
 		for _ in 0..level_size {
-			let (current, current_path) = queue.pop_front().unwrap();
+			let (current, current_path) = queue.pop_front().expect("queue checked non-empty");
 
 			let result = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
 
@@ -572,8 +571,7 @@ async fn evaluate_recurse_shortest(
 				}
 
 				let hash = value_hash(&v);
-				if !seen.contains(&hash) {
-					seen.insert(hash);
+				if seen.insert(hash) {
 					let mut new_path = current_path.clone();
 					new_path.push(v.clone());
 					queue.push_back((v, new_path));

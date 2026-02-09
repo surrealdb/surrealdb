@@ -215,13 +215,13 @@ pub fn select_access_path(
 	}
 
 	// WITH INDEX names - find the hinted index
-	if let Some(With::Index(names)) = with_hints {
-		if let Some(candidate) = find_hinted_index(&candidates, names) {
-			return candidate.to_access_path(direction);
-		}
-		// If hinted index not found, fall through to best effort
-		// (could also error here, but being lenient)
+	if let Some(With::Index(names)) = with_hints
+		&& let Some(candidate) = find_hinted_index(&candidates, names)
+	{
+		return candidate.to_access_path(direction);
 	}
+	// If hinted index not found, fall through to best effort
+	// (could also error here, but being lenient)
 
 	// No candidates - table scan
 	if candidates.is_empty() {

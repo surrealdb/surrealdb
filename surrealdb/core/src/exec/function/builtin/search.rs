@@ -441,18 +441,18 @@ impl ScalarFunction for SearchRrf {
 			for result_list in results {
 				if let Value::Array(array) = result_list {
 					for (rank, doc) in array.into_iter().enumerate() {
-						if let Value::Object(mut obj) = doc {
-							if let Some(id_value) = obj.remove("id") {
-								let rrf_contribution = 1.0 / (rrf_constant + (rank + 1) as f64);
-								match documents.entry(id_value) {
-									Entry::Vacant(entry) => {
-										entry.insert((rrf_contribution, vec![obj]));
-									}
-									Entry::Occupied(e) => {
-										let (score, objects) = e.into_mut();
-										*score += rrf_contribution;
-										objects.push(obj);
-									}
+						if let Value::Object(mut obj) = doc
+							&& let Some(id_value) = obj.remove("id")
+						{
+							let rrf_contribution = 1.0 / (rrf_constant + (rank + 1) as f64);
+							match documents.entry(id_value) {
+								Entry::Vacant(entry) => {
+									entry.insert((rrf_contribution, vec![obj]));
+								}
+								Entry::Occupied(e) => {
+									let (score, objects) = e.into_mut();
+									*score += rrf_contribution;
+									objects.push(obj);
 								}
 							}
 						}
@@ -468,11 +468,11 @@ impl ScalarFunction for SearchRrf {
 			for (id, (score, objects)) in documents {
 				if scored_docs.len() < limit {
 					scored_docs.push(FusionDoc(score, id, objects));
-				} else if let Some(FusionDoc(min_score, _, _)) = scored_docs.peek() {
-					if score > *min_score {
-						scored_docs.pop();
-						scored_docs.push(FusionDoc(score, id, objects));
-					}
+				} else if let Some(FusionDoc(min_score, _, _)) = scored_docs.peek()
+					&& score > *min_score
+				{
+					scored_docs.pop();
+					scored_docs.push(FusionDoc(score, id, objects));
 				}
 				if frozen.is_done(Some(count)).await? {
 					break;
@@ -616,29 +616,29 @@ impl ScalarFunction for SearchLinear {
 			for (list_idx, result_list) in results.into_iter().enumerate() {
 				if let Value::Array(array) = result_list {
 					for doc in array {
-						if let Value::Object(mut obj) = doc {
-							if let Some(id_value) = obj.remove("id") {
-								let score = if let Some(Value::Number(n)) = obj.get("distance") {
-									1.0 / (1.0 + n.as_float())
-								} else if let Some(Value::Number(n)) = obj.get("ft_score") {
-									n.as_float()
-								} else if let Some(Value::Number(n)) = obj.get("score") {
-									n.as_float()
-								} else {
-									1.0 / (1.0 + count as f64)
-								};
+						if let Value::Object(mut obj) = doc
+							&& let Some(id_value) = obj.remove("id")
+						{
+							let score = if let Some(Value::Number(n)) = obj.get("distance") {
+								1.0 / (1.0 + n.as_float())
+							} else if let Some(Value::Number(n)) = obj.get("ft_score") {
+								n.as_float()
+							} else if let Some(Value::Number(n)) = obj.get("score") {
+								n.as_float()
+							} else {
+								1.0 / (1.0 + count as f64)
+							};
 
-								match documents.entry(id_value) {
-									Entry::Vacant(entry) => {
-										let mut scores = vec![0.0; results_len];
-										scores[list_idx] = score;
-										entry.insert((scores, vec![obj]));
-									}
-									Entry::Occupied(e) => {
-										let (scores, objects) = e.into_mut();
-										scores[list_idx] = score;
-										objects.push(obj);
-									}
+							match documents.entry(id_value) {
+								Entry::Vacant(entry) => {
+									let mut scores = vec![0.0; results_len];
+									scores[list_idx] = score;
+									entry.insert((scores, vec![obj]));
+								}
+								Entry::Occupied(e) => {
+									let (scores, objects) = e.into_mut();
+									scores[list_idx] = score;
+									objects.push(obj);
 								}
 							}
 						}

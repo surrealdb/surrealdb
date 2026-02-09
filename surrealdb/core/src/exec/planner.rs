@@ -700,7 +700,7 @@ impl<'ctx> Planner<'ctx> {
 				expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
 			}) as Arc<dyn ExecOperator>)
 		} else if block.0.len() == 1 {
-			self.plan_expr(block.0.into_iter().next().unwrap())
+			self.plan_expr(block.0.into_iter().next().expect("block verified non-empty"))
 		} else {
 			Ok(Arc::new(SequencePlan {
 				block,

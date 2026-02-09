@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tracing::instrument;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
@@ -18,7 +19,7 @@ use crate::exec::permission::{
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
 };
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -99,6 +100,7 @@ impl ExecOperator for Scan {
 		self.source.access_mode()
 	}
 
+	#[instrument(name = "Scan::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?.clone();
@@ -233,6 +235,7 @@ impl ExecOperator for Scan {
 
 				// === TABLE SCAN (with optional index selection) ===
 				None => {
+					eprintln!("Scan::execute: with = {:?}", with);
 					// Determine if we should use an index
 					let access_path = if matches!(&with, Some(With::NoIndex)) {
 						None
@@ -247,6 +250,8 @@ impl ExecOperator for Scan {
 						let direction = determine_scan_direction(&order);
 						Some(select_access_path(table_name.clone(), candidates, with.as_ref(), direction))
 					};
+
+					eprintln!("Scan::execute: access_path = {:?}", access_path);
 
 					match access_path {
 						// B-tree index scan (single-column only)
@@ -308,7 +313,7 @@ impl ExecOperator for Scan {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(instrument_stream(Box::pin(stream), "Scan"))
 	}
 }
 
@@ -441,6 +446,7 @@ struct ComputedFieldDef {
 }
 
 /// Fetch field definitions and build the cached field state.
+#[allow(clippy::type_complexity)]
 async fn build_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,
@@ -546,7 +552,7 @@ async fn process_batch(
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	check_perms: bool,
-	values: &mut Vec<Value>,
+	values: &mut [Value],
 ) -> Result<(), ControlFlow> {
 	for value in values.iter_mut() {
 		// Evaluate computed fields

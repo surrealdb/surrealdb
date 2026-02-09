@@ -312,7 +312,7 @@ async fn collect_single_value(stream: ValueBatchStream) -> crate::expr::FlowResu
 	if values.is_empty() {
 		Ok(Value::None)
 	} else if values.len() == 1 {
-		Ok(values.into_iter().next().unwrap())
+		Ok(values.into_iter().next().expect("values verified non-empty"))
 	} else {
 		Ok(Value::Array(crate::val::Array(values)))
 	}

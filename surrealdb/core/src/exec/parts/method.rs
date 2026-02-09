@@ -75,7 +75,7 @@ impl PhysicalExpr for MethodPart {
 impl ToSql for MethodPart {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push('.');
-		f.push_str(&self.descriptor.name);
+		f.push_str(self.descriptor.name);
 		f.push('(');
 		for (i, arg) in self.args.iter().enumerate() {
 			if i > 0 {

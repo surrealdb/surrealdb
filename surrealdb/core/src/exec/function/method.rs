@@ -127,17 +127,9 @@ impl MethodDescriptor {
 /// Built at startup from the [`FunctionRegistry`], this maps method names
 /// to their [`MethodDescriptor`]s. The planner resolves method names to
 /// descriptors at plan time for efficient evaluation.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MethodRegistry {
 	methods: HashMap<&'static str, Arc<MethodDescriptor>>,
-}
-
-impl Default for MethodRegistry {
-	fn default() -> Self {
-		Self {
-			methods: HashMap::new(),
-		}
-	}
 }
 
 impl MethodRegistry {

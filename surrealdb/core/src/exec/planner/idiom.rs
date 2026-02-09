@@ -334,12 +334,11 @@ fn insert_auto_flattens(parts: Vec<Arc<dyn PhysicalExpr>>) -> Vec<Arc<dyn Physic
 	let mut result = Vec::with_capacity(parts.len() * 2);
 	for i in 0..parts.len() {
 		result.push(parts[i].clone());
-		if parts[i].name() == "Lookup" {
-			if let Some(next) = parts.get(i + 1) {
-				if next.name() == "Lookup" || next.name() == "Where" {
-					result.push(Arc::new(FlattenPart) as Arc<dyn PhysicalExpr>);
-				}
-			}
+		if parts[i].name() == "Lookup"
+			&& let Some(next) = parts.get(i + 1)
+			&& (next.name() == "Lookup" || next.name() == "Where")
+		{
+			result.push(Arc::new(FlattenPart) as Arc<dyn PhysicalExpr>);
 		}
 	}
 	result
@@ -355,17 +354,17 @@ fn ast_contains_repeat_recurse(parts: &[Part]) -> bool {
 			Part::RepeatRecurse => return true,
 			Part::Destructure(dest_parts) => {
 				for dp in dest_parts {
-					if let AstDestructurePart::Aliased(_, idiom) = dp {
-						if ast_contains_repeat_recurse(&idiom.0) {
-							return true;
-						}
+					if let AstDestructurePart::Aliased(_, idiom) = dp
+						&& ast_contains_repeat_recurse(&idiom.0)
+					{
+						return true;
 					}
 					if let AstDestructurePart::Destructure(_, nested) = dp {
 						for np in nested {
-							if let AstDestructurePart::Aliased(_, idiom) = np {
-								if ast_contains_repeat_recurse(&idiom.0) {
-									return true;
-								}
+							if let AstDestructurePart::Aliased(_, idiom) = np
+								&& ast_contains_repeat_recurse(&idiom.0)
+							{
+								return true;
 							}
 						}
 					}

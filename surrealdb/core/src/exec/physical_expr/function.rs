@@ -1097,7 +1097,7 @@ impl PhysicalExpr for ProjectionFunctionExec {
 		// This handles cases like: RETURN type::field("name")
 		if let Some(bindings) = self.evaluate_projection(ctx).await? {
 			if bindings.len() == 1 {
-				Ok(bindings.into_iter().next().unwrap().1)
+				Ok(bindings.into_iter().next().expect("bindings verified non-empty").1)
 			} else {
 				// Multiple bindings - return as array of values
 				Ok(Value::Array(bindings.into_iter().map(|(_, v)| v).collect()))

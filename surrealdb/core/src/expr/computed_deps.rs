@@ -32,7 +32,7 @@ pub struct ComputedDeps {
 /// Walks the expression tree using the visitor pattern to collect all same-table
 /// field references. Returns a `ComputedDeps` indicating which fields are referenced
 /// and whether the analysis is complete.
-pub fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
+pub(crate) fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 	let mut extractor = FieldDependencyExtractor {
 		deps: HashSet::new(),
 		is_complete: true,

@@ -270,7 +270,7 @@ impl ExecOperator for ReferenceScan {
 					(beg, end)
 				} else if let Some(ref field) = referencing_field {
 					// Field-specific scan (no range bounds)
-					let table = referencing_table.as_ref().unwrap();
+					let table = referencing_table.as_ref().expect("referencing_table required");
 					let beg = crate::key::r#ref::ffprefix(
 						ns.namespace_id,
 						db.database_id,
@@ -292,7 +292,7 @@ impl ExecOperator for ReferenceScan {
 					(beg, end)
 				} else {
 					// Scan all references from a specific referencing table (all fields)
-					let table = referencing_table.as_ref().unwrap();
+					let table = referencing_table.as_ref().expect("referencing_table required");
 					let beg = crate::key::r#ref::ftprefix(
 						ns.namespace_id,
 						db.database_id,

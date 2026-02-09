@@ -172,7 +172,7 @@ impl<'a> IndexAnalyzer<'a> {
 			// Try to match conditions to index columns in order
 			let mut prefix_values = Vec::new();
 			let mut range_condition: Option<(BinaryOperator, Value)> = None;
-			let mut all_equality = true;
+			let all_equality = true;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -212,7 +212,7 @@ impl<'a> IndexAnalyzer<'a> {
 				} else {
 					0
 				};
-			if matched_count >= 2 || (prefix_values.len() >= 1 && range_condition.is_some()) {
+			if matched_count >= 2 || (!prefix_values.is_empty() && range_condition.is_some()) {
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
 					range: range_condition,
@@ -330,21 +330,19 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Check if the idiom matches the first column of the index
-			if let Some(first_col) = ix_def.cols.first() {
-				if idiom_matches(idiom, first_col) {
-					if let Some(access) =
-						self.match_operator_to_access(op, &value, position, &ix_def.index)
-					{
-						let index_ref = IndexRef::new(self.indexes.clone(), idx);
-						let candidate = IndexCandidate {
-							index_ref,
-							access,
-							matched_exprs: HashSet::new(), // TODO: Track matched expressions
-							covers_order: false,
-						};
-						candidates.push(candidate);
-					}
-				}
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches(idiom, first_col)
+				&& let Some(access) =
+					self.match_operator_to_access(op, &value, position, &ix_def.index)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				let candidate = IndexCandidate {
+					index_ref,
+					access,
+					matched_exprs: HashSet::new(), // TODO: Track matched expressions
+					covers_order: false,
+				};
+				candidates.push(candidate);
 			}
 		}
 	}
@@ -451,20 +449,20 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			if let Some(first_col) = ix_def.cols.first() {
-				if idiom_matches(idiom, first_col) {
-					let index_ref = IndexRef::new(self.indexes.clone(), idx);
-					let candidate = IndexCandidate {
-						index_ref,
-						access: BTreeAccess::FullText {
-							query: query.clone(),
-							operator: operator.clone(),
-						},
-						matched_exprs: HashSet::new(),
-						covers_order: false,
-					};
-					candidates.push(candidate);
-				}
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches(idiom, first_col)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				let candidate = IndexCandidate {
+					index_ref,
+					access: BTreeAccess::FullText {
+						query: query.clone(),
+						operator: operator.clone(),
+					},
+					matched_exprs: HashSet::new(),
+					covers_order: false,
+				};
+				candidates.push(candidate);
 			}
 		}
 	}
@@ -497,7 +495,7 @@ impl<'a> IndexAnalyzer<'a> {
 					let nums: Vec<Number> = arr
 						.iter()
 						.filter_map(|v| match v {
-							Value::Number(n) => Some(n.clone()),
+							Value::Number(n) => Some(*n),
 							_ => None,
 						})
 						.collect();
@@ -524,21 +522,21 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			if let Some(first_col) = ix_def.cols.first() {
-				if idiom_matches(idiom, first_col) {
-					let index_ref = IndexRef::new(self.indexes.clone(), idx);
-					let candidate = IndexCandidate {
-						index_ref,
-						access: BTreeAccess::Knn {
-							vector: vector.clone(),
-							k,
-							ef,
-						},
-						matched_exprs: HashSet::new(),
-						covers_order: false,
-					};
-					candidates.push(candidate);
-				}
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches(idiom, first_col)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				let candidate = IndexCandidate {
+					index_ref,
+					access: BTreeAccess::Knn {
+						vector: vector.clone(),
+						k,
+						ef,
+					},
+					matched_exprs: HashSet::new(),
+					covers_order: false,
+				};
+				candidates.push(candidate);
 			}
 		}
 	}
@@ -568,27 +566,27 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			if let Some(first_col) = ix_def.cols.first() {
-				if idiom_matches(idiom, first_col) {
-					let index_ref = IndexRef::new(self.indexes.clone(), idx);
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches(idiom, first_col)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 
-					// Mark existing candidate as covering order, or add new one
-					let existing = candidates.iter_mut().find(|c| c.index_ref == index_ref);
-					if let Some(candidate) = existing {
-						candidate.covers_order = true;
-					} else {
-						// Create a full-range scan candidate that covers order
-						let candidate = IndexCandidate {
-							index_ref,
-							access: BTreeAccess::Range {
-								from: None,
-								to: None,
-							},
-							matched_exprs: HashSet::new(),
-							covers_order: true,
-						};
-						candidates.push(candidate);
-					}
+				// Mark existing candidate as covering order, or add new one
+				let existing = candidates.iter_mut().find(|c| c.index_ref == index_ref);
+				if let Some(candidate) = existing {
+					candidate.covers_order = true;
+				} else {
+					// Create a full-range scan candidate that covers order
+					let candidate = IndexCandidate {
+						index_ref,
+						access: BTreeAccess::Range {
+							from: None,
+							to: None,
+						},
+						matched_exprs: HashSet::new(),
+						covers_order: true,
+					};
+					candidates.push(candidate);
 				}
 			}
 		}
@@ -734,7 +732,7 @@ fn literal_to_value(lit: &crate::expr::Literal) -> Option<Value> {
 	match lit {
 		Literal::Integer(i) => Some(Value::from(*i)),
 		Literal::Float(f) => Some(Value::from(*f)),
-		Literal::Decimal(d) => Some(Value::from(d.clone())),
+		Literal::Decimal(d) => Some(Value::from(*d)),
 		Literal::String(s) => Some(Value::from(s.clone())),
 		Literal::Bool(b) => Some(Value::from(*b)),
 		Literal::Uuid(u) => Some(Value::from(*u)),
@@ -749,7 +747,7 @@ fn literal_to_value(lit: &crate::expr::Literal) -> Option<Value> {
 		}
 		Literal::Array(arr) => {
 			// Convert array elements
-			let values: Option<Vec<Value>> = arr.iter().map(|e| expr_to_value(e)).collect();
+			let values: Option<Vec<Value>> = arr.iter().map(expr_to_value).collect();
 			values.map(|v| Value::Array(v.into()))
 		}
 		Literal::Object(_) => None, // Complex objects not supported for index matching

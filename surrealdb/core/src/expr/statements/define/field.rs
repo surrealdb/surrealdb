@@ -435,7 +435,7 @@ impl DefineFieldStatement {
 		// Insert/replace the field being defined with its freshly-extracted deps
 		let new_deps =
 			definition.computed_deps.as_ref().map(|cd| cd.fields.clone()).unwrap_or_default();
-		graph.insert(field_name.clone(), new_deps);
+		graph.insert(field_name, new_deps);
 
 		// Iterative DFS cycle detection.
 		// States: 0 = unvisited, 1 = in current path, 2 = fully visited
@@ -472,7 +472,7 @@ impl DefineFieldStatement {
 							// Found a cycle! Build the cycle path for the error message.
 							let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
 							let cycle: Vec<String> =
-								path[cycle_start..].iter().map(|s| s.to_string()).collect();
+								path[cycle_start..].iter().map(|s| (*s).to_string()).collect();
 							let cycle_str = format!("{} -> {}", cycle.join(" -> "), neighbor);
 							bail!(Error::ComputedFieldCycle(cycle_str));
 						}

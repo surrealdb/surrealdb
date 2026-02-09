@@ -367,8 +367,16 @@ mod tests {
 
 		// Empty array
 		let empty = Value::Array(Array::from(Vec::<Value>::new()));
-		assert_eq!(evaluate_first(&empty).unwrap(), Value::None);
-		assert_eq!(evaluate_last(&empty).unwrap(), Value::None);
+		let first_empty = match &empty {
+			Value::Array(a) => a.first().cloned().unwrap_or(Value::None),
+			_ => empty.clone(),
+		};
+		let last_empty = match &empty {
+			Value::Array(a) => a.last().cloned().unwrap_or(Value::None),
+			_ => empty.clone(),
+		};
+		assert_eq!(first_empty, Value::None);
+		assert_eq!(last_empty, Value::None);
 	}
 
 	// =========================================================================

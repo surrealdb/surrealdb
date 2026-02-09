@@ -175,7 +175,7 @@ mod tests {
 	fn test_reservoir_sample_small() {
 		// When values.len() <= limit, should return all values
 		let values = vec![Value::from(1), Value::from(2), Value::from(3)];
-		let result = reservoir_sample_sync(values.clone(), 5);
+		let result = reservoir_sample_sync(values, 5);
 		assert_eq!(result.len(), 3);
 	}
 
@@ -183,7 +183,7 @@ mod tests {
 	fn test_reservoir_sample_exact() {
 		// When values.len() == limit, should return all values
 		let values = vec![Value::from(1), Value::from(2), Value::from(3)];
-		let result = reservoir_sample_sync(values.clone(), 3);
+		let result = reservoir_sample_sync(values, 3);
 		assert_eq!(result.len(), 3);
 	}
 

@@ -133,7 +133,7 @@ impl<'ctx> Planner<'ctx> {
 			cond.as_ref(),
 			order.as_ref(),
 			with.as_ref(),
-			needed_fields.clone(),
+			needed_fields,
 		)?;
 
 		let config = SelectPipelineConfig {
@@ -304,7 +304,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		if source_plans.len() == 1 {
-			Ok(source_plans.pop().unwrap())
+			Ok(source_plans.pop().expect("source_plans verified non-empty"))
 		} else {
 			Ok(Arc::new(Union {
 				inputs: source_plans,
@@ -369,7 +369,7 @@ impl<'ctx> Planner<'ctx> {
 						cond: cond.cloned(),
 						order: order.cloned(),
 						with: with.cloned(),
-						needed_fields: needed_fields.clone(),
+						needed_fields,
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
@@ -463,17 +463,18 @@ impl<'ctx> Planner<'ctx> {
 
 				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
 
-				if is_value_source && !has_wildcard && field_list.len() == 1 {
-					if let Some(Field::Single(selector)) = field_list.first()
-						&& selector.alias.is_none()
-						&& let Expr::Param(_) = &selector.expr
-					{
-						let expr = self.physical_expr(selector.expr.clone())?;
-						return Ok(Arc::new(ProjectValue {
-							input,
-							expr,
-						}) as Arc<dyn ExecOperator>);
-					}
+				if is_value_source
+					&& !has_wildcard
+					&& field_list.len() == 1
+					&& let Some(Field::Single(selector)) = field_list.first()
+					&& selector.alias.is_none()
+					&& let Expr::Param(_) = &selector.expr
+				{
+					let expr = self.physical_expr(selector.expr.clone())?;
+					return Ok(Arc::new(ProjectValue {
+						input,
+						expr,
+					}) as Arc<dyn ExecOperator>);
 				}
 
 				let mut field_selections = Vec::with_capacity(field_list.len());
@@ -645,7 +646,7 @@ impl<'ctx> Planner<'ctx> {
 								if has_lookups {
 									let name = registry.register(
 										&resolved_expr,
-										ComputePoint::BeforeSort,
+										ComputePoint::Sort,
 										Some(alias.clone()),
 										self.ctx,
 									)?;
@@ -656,7 +657,7 @@ impl<'ctx> Planner<'ctx> {
 										Err(_) => {
 											let name = registry.register(
 												&resolved_expr,
-												ComputePoint::BeforeSort,
+												ComputePoint::Sort,
 												Some(alias.clone()),
 												self.ctx,
 											)?;
@@ -668,7 +669,7 @@ impl<'ctx> Planner<'ctx> {
 							_ => {
 								let name = registry.register(
 									&resolved_expr,
-									ComputePoint::BeforeSort,
+									ComputePoint::Sort,
 									Some(alias.clone()),
 									self.ctx,
 								)?;
@@ -680,12 +681,8 @@ impl<'ctx> Planner<'ctx> {
 							Ok(path) => path,
 							Err(_) => {
 								let expr = Expr::Idiom(idiom.clone());
-								let name = registry.register(
-									&expr,
-									ComputePoint::BeforeSort,
-									None,
-									self.ctx,
-								)?;
+								let name =
+									registry.register(&expr, ComputePoint::Sort, None, self.ctx)?;
 								sort_only_fields.push(name.clone());
 								FieldPath::field(name)
 							}
@@ -705,9 +702,8 @@ impl<'ctx> Planner<'ctx> {
 					sort_keys.push(key);
 				}
 
-				let computed = if registry.has_expressions_for_point(ComputePoint::BeforeSort) {
-					let compute_fields =
-						registry.get_expressions_for_point(ComputePoint::BeforeSort);
+				let computed = if registry.has_expressions_for_point(ComputePoint::Sort) {
+					let compute_fields = registry.get_expressions_for_point(ComputePoint::Sort);
 					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
 				} else {
 					input

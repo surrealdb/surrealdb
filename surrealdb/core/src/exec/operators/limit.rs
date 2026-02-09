@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
 };
 use crate::expr::ControlFlow;
 
@@ -62,6 +63,7 @@ impl ExecOperator for Limit {
 		vec![&self.input]
 	}
 
+	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 
@@ -109,46 +111,45 @@ impl ExecOperator for Limit {
 			futures::pin_mut!(input_stream);
 
 			while let Some(batch_result) = input_stream.next().await {
-				let batch = batch_result?;
-				let mut values = batch.values;
+				let mut batch = batch_result?;
 
 				// Apply offset - skip values until we've skipped enough
 				if skipped < offset {
-					let to_skip = (offset - skipped).min(values.len());
+					let to_skip = (offset - skipped).min(batch.values.len());
 					skipped += to_skip;
-					if to_skip >= values.len() {
+					if to_skip >= batch.values.len() {
 						// Entire batch is within the offset window, skip it
 						continue;
 					}
 					// Remove the prefix in-place (single memmove, no allocation)
-					values.drain(..to_skip);
+					batch.values.drain(..to_skip);
 				}
 
 				// Apply limit - only take as many as we need
 				if let Some(limit) = limit_value {
 					let remaining = limit.saturating_sub(emitted);
-					if values.len() > remaining {
-						values.truncate(remaining);
+					if batch.values.len() > remaining {
+						batch.values.truncate(remaining);
 					}
 				}
 
-				emitted += values.len();
+				emitted += batch.values.len();
 
 				// Only emit non-empty batches
-				if !values.is_empty() {
-					yield ValueBatch { values };
+				if !batch.values.is_empty() {
+					yield batch;
 				}
 
 				// Stop if we've hit the limit
-				if let Some(limit) = limit_value {
-					if emitted >= limit {
-						break;
-					}
+				if let Some(limit) = limit_value
+					&& emitted >= limit
+				{
+					break;
 				}
 			}
 		};
 
-		Ok(Box::pin(limited))
+		Ok(instrument_stream(Box::pin(limited), "Limit"))
 	}
 }
 

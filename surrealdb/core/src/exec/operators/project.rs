@@ -13,12 +13,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tracing::instrument;
 
 use super::fetch::fetch_record;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -133,6 +134,7 @@ impl ExecOperator for Project {
 		vec![&self.input]
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let fields = self.fields.clone();
@@ -227,7 +229,7 @@ impl ExecOperator for Project {
 			}
 		});
 
-		Ok(Box::pin(projected))
+		Ok(instrument_stream(Box::pin(projected), "Project"))
 	}
 }
 
@@ -251,7 +253,7 @@ async fn evaluate_and_set_field(
 					// User provided an alias - use it as the field name
 					// For multiple bindings, collect values into an array
 					let value = if bindings.len() == 1 {
-						bindings.into_iter().next().unwrap().1
+						bindings.into_iter().next().expect("bindings verified non-empty").1
 					} else {
 						// Multiple bindings with alias - collect as array
 						Value::Array(
@@ -501,6 +503,7 @@ impl ExecOperator for SelectProject {
 		vec![&self.input]
 	}
 
+	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let projections = self.projections.clone();
@@ -526,7 +529,7 @@ impl ExecOperator for SelectProject {
 			}
 		});
 
-		Ok(Box::pin(projected))
+		Ok(instrument_stream(Box::pin(projected), "SelectProject"))
 	}
 }
 

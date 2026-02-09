@@ -81,7 +81,7 @@ impl ExecOperator for ReturnPlan {
 			let value = if inner_is_scalar {
 				// Scalar: unwrap single value, use NONE for empty
 				if values.len() == 1 {
-					values.into_iter().next().unwrap()
+					values.into_iter().next().expect("values verified non-empty")
 				} else if values.is_empty() {
 					Value::None
 				} else {

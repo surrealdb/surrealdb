@@ -144,7 +144,7 @@ impl<'ctx> Planner<'ctx> {
 			order,
 			limit,
 			start,
-			alias,
+			alias: _,
 		}: crate::expr::lookup::Lookup,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		let source_expr: Arc<dyn crate::exec::PhysicalExpr> =

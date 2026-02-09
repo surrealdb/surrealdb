@@ -191,7 +191,7 @@ mod tests {
 		]));
 
 		let mut output = Vec::new();
-		split_value_on_idiom(value.clone(), &idiom, &mut output);
+		split_value_on_idiom(value, &idiom, &mut output);
 
 		assert_eq!(output.len(), 1);
 	}
@@ -205,7 +205,7 @@ mod tests {
 		]));
 
 		let mut output = Vec::new();
-		split_value_on_idiom(value.clone(), &idiom, &mut output);
+		split_value_on_idiom(value, &idiom, &mut output);
 
 		assert_eq!(output.len(), 1);
 	}

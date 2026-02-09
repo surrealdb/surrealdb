@@ -270,7 +270,7 @@ impl ComputeExecutor {
 
 		// Return results as an array if it's a query, or the scalar value if it's a scalar plan
 		if plan.is_scalar() && results.len() == 1 {
-			Ok(results.pop().unwrap())
+			Ok(results.pop().expect("results verified non-empty"))
 		} else {
 			Ok(Value::Array(Array::from(results)))
 		}
