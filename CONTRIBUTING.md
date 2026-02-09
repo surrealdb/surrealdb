@@ -50,6 +50,61 @@ make fmt (or cargo make fmt)
 cargo clippy
 ```
 
+## Project structure
+
+The SurrealDB repository follows a specific structure for organizing crates:
+
+### Main crates
+
+- **`surrealdb/`** - The main SDK crate providing client-side and embedded database functionality
+- **`surrealdb/core/`** - Core database engine, query execution, and storage layer
+- **`surrealdb/server/`** - Server implementation with HTTP, WebSocket, and gRPC endpoints
+- **`surrealdb/types/`** - Public types for SurrealDB values, used by both the SDK and server
+- **`surrealdb/types/derive/`** - Procedural macros for deriving `SurrealValue` trait
+
+### Supporting crates
+
+- **`surrealism/`** - WebAssembly runtime for executing user-defined functions
+- **`language-tests/`** - Test framework for SurrealQL language testing using `.surql` files
+- **`fuzz/`** - Fuzzing tests for security and stability
+- **`profiling/`** - Performance profiling utilities
+
+### Adding a new crate
+
+When adding a new workspace crate:
+
+1. **Naming convention**: For hierarchical crates (sub-crates within a parent crate), the crate name should match its directory structure by replacing hyphens with directory separators:
+   - Crate named `surrealdb-types-derive` → located at `surrealdb/types/derive/`
+   - Crate named `surrealdb-core` → located at `surrealdb/core/`
+
+   For root-level crates (tools, testing, etc.), hyphens are acceptable:
+   - Crate named `language-tests` → located at `language-tests/`
+
+   This ensures consistency and makes the project structure intuitive.
+
+2. **Location**: Place the crate in the appropriate directory based on its purpose:
+   - Core database functionality → under `surrealdb/`
+   - Tools and testing → at the root level
+
+3. **Update workspace**: Add the crate path to the `members` array in the root `Cargo.toml`:
+   ```toml
+   [workspace]
+   members = [
+       # ... existing members ...
+       "your-new-crate",
+   ]
+   ```
+
+4. **Workspace dependencies**: If the crate will be used by other workspace members, add it to `[workspace.dependencies]`:
+   ```toml
+   [workspace.dependencies]
+   # For pre-release versions (e.g., -alpha, -beta, -rc)
+   your-new-crate = { version = "x.y.z-prerelease", path = "path/to/your-new-crate" }
+
+   # Or for release versions
+   your-new-crate = { version = "x.y", path = "path/to/your-new-crate" }
+   ```
+
 ## Getting started from the source
 
 To set up a working **development environment**, you can either [use the Nix package manager](pkg/nix#readme) or you can [install dependencies manually](doc/BUILDING.md#building-surrealdb) and ensure that you have `rustup` installed, and fork the project git repository.
@@ -94,7 +149,7 @@ To run all tests manually, use the SurrealDB command-line from your terminal:
 cargo test
 ```
 
-Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/crates/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
+Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
 
 ```toml
 /**

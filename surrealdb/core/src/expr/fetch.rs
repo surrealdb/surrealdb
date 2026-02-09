@@ -1,0 +1,171 @@
+use std::collections::BTreeSet;
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+use revision::revisioned;
+
+use super::FlowResultExt as _;
+use crate::ctx::FrozenContext;
+use crate::dbs::Options;
+use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Expr, Function, Idiom};
+use crate::fnc::args::FromArgs;
+use crate::syn;
+use crate::val::Value;
+
+/// A list of fetches to be applied to the result of a query.
+///
+/// Fetches are applied to the result of a query in the order they are specified.
+/// For this reason, the list of fetches is always sorted to ensure that parent fetches are
+/// applied before child fetches.
+///
+/// For example:
+/// `FETCH a.b, a` is sorted to `FETCH a, a.b`.
+/// `FETCH a.b, a.b.c, d, a, b` is sorted to `FETCH a, a.b, a.b.c, b, d`.
+///
+/// This prevents confusing behaviour like `FETCH a.b, a` only returning `a` because `a.b` gets
+/// clobbered by `a`.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct Fetchs(Vec<Fetch>);
+
+impl Fetchs {
+	pub(crate) fn new(fetches: Vec<Fetch>) -> Self {
+		Self(fetches)
+	}
+
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Fetch> {
+		self.0.iter()
+	}
+
+	pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Fetch> {
+		self.0.iter_mut()
+	}
+}
+
+impl IntoIterator for Fetchs {
+	type Item = Fetch;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
+impl surrealdb_types::ToSql for Fetchs {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_fetchs: crate::sql::Fetchs = self.clone().into();
+		sql_fetchs.fmt_sql(f, fmt);
+	}
+}
+
+impl InfoStructure for Fetchs {
+	fn structure(self) -> Value {
+		self.into_iter().map(Fetch::structure).collect::<Vec<_>>().into()
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct Fetch(pub(crate) Expr);
+
+impl Fetch {
+	#[instrument(level = "trace", name = "Fetch::compute", skip_all)]
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		idioms: &mut BTreeSet<Idiom>,
+	) -> Result<()> {
+		match &self.0 {
+			Expr::Idiom(idiom) => {
+				idioms.insert(idiom.to_owned());
+				Ok(())
+			}
+			Expr::Param(param) => {
+				let v = param.compute(stk, ctx, opt, None).await?;
+				idioms.insert(
+					syn::idiom(
+						v.clone()
+							.coerce_to::<String>()
+							.map_err(|_| Error::InvalidFetch {
+								value: v.into_literal(),
+							})?
+							.as_str(),
+					)?
+					.into(),
+				);
+				Ok(())
+			}
+			Expr::FunctionCall(f) => {
+				// NOTE: Behavior here changed with value inversion PR.
+				// Previously `type::field(a.b)` would produce a fetch `a.b`.
+				// This is somewhat weird because elsewhere this wouldn't work.
+				match f.receiver {
+					Function::Normal(ref x) if x == "type::field" => {
+						// Some manual reimplemenation of type::field to make it
+						// more efficient.
+						let mut arguments = Vec::new();
+						for arg in f.arguments.iter() {
+							arguments.push(
+								stk.run(|stk| arg.compute(stk, ctx, opt, None))
+									.await
+									.catch_return()?,
+							);
+						}
+
+						// replicate the same error that would happen with normal
+						// function calls
+						let (arg,) = <(String,)>::from_args("type::field", arguments)?;
+
+						// manually do the implementation of type::field
+						let idiom: Idiom = syn::idiom(&arg)?.into();
+						idioms.insert(idiom);
+						Ok(())
+					}
+					Function::Normal(ref x) if x == "type::fields" => {
+						let mut arguments = Vec::new();
+						for arg in f.arguments.iter() {
+							arguments.push(
+								stk.run(|stk| arg.compute(stk, ctx, opt, None))
+									.await
+									.catch_return()?,
+							);
+						}
+
+						// replicate the same error that would happen with normal
+						// function calls
+						let (args,) = <(Vec<String>,)>::from_args("type::fields", arguments)?;
+
+						// manually do the implementation of type::fields
+						for arg in args {
+							idioms.insert(syn::idiom(&arg)?.into());
+						}
+						Ok(())
+					}
+					_ => Err(anyhow::Error::new(Error::InvalidFetch {
+						value: Expr::FunctionCall(f.clone()),
+					})),
+				}
+			}
+			v => Err(anyhow::Error::new(Error::InvalidFetch {
+				value: v.clone(),
+			})),
+		}
+	}
+}
+
+impl surrealdb_types::ToSql for Fetch {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_fetch: crate::sql::Fetch = self.clone().into();
+		sql_fetch.fmt_sql(f, fmt);
+	}
+}
+
+impl InfoStructure for Fetch {
+	fn structure(self) -> Value {
+		use surrealdb_types::ToSql;
+		self.to_sql().into()
+	}
+}

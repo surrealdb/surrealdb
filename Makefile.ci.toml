@@ -482,7 +482,7 @@ category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with specified engine"
 script = """
     #!/bin/bash -ex
-    cd crates/language-tests
+    cd language-tests
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
         cargo build --features ${_TEST_LANG_FEATURES}
     else
@@ -547,13 +547,14 @@ run_task = { name = [
 category = "CI - WORKSPACE TESTS"
 description = "Run workspace library tests"
 command = "cargo"
+env = { SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
 args = [
     "nextest",
     "run",
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks",
     "--workspace",
     "--",
     "--skip", "api_integration",
@@ -614,7 +615,6 @@ args = [
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     # Exclude surrealism packages due to wasmtime complexity and stdin loops
-    "--exclude", "surrealism-cli",
     "--exclude", "surrealism-runtime",
     "--exclude", "surrealism",
     "--exclude", "surrealism-macros",

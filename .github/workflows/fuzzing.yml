@@ -21,19 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # (Actions must be pinned by commit hash) v2.8.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/fuzz
+          workspaces: fuzz
 
       - name: Check fuzzers
-        run: cargo build --manifest-path crates/fuzz/Cargo.toml
+        run: cargo build --manifest-path fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@cafd7a0eb8ecb4e007c56897996a9b65c49c972f # (Actions must be pinned by commit hash) master

@@ -10,7 +10,7 @@
     &nbsp;
     <a href="https://github.com/surrealdb/surrealdb"><img src="https://img.shields.io/badge/built_with-Rust-dca282.svg?style=flat-square"></a>
     &nbsp;
-	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/actions/workflow/status/surrealdb/surrealdb/nightly.yml?style=flat-square&branch=main"></a>
+	<a href="https://github.com/surrealdb/surrealdb/actions"><img src="https://img.shields.io/github/actions/workflow/status/surrealdb/surrealdb/ci.yml?style=flat-square&branch=main"></a>
     &nbsp;
     <a href="https://github.com/surrealdb/license"><img src="https://img.shields.io/badge/license-BSL_1.1-00bfff.svg?style=flat-square"></a>
 </p>
@@ -255,7 +255,7 @@ docker run --rm --pull always --name surrealdb -p 8000:8000 surrealdb/surrealdb:
 
 With strongly-typed data types, data can be fully modelled right in the database.
 
-```sql
+```surrealql
 UPDATE person SET
     waist = <int> "34",
     height = <float> 201,
@@ -265,7 +265,7 @@ UPDATE person SET
 
 Store dynamically computed fields which are calculated when retrieved.
 
-```sql
+```surrealql
 DEFINE FIELD can_drive ON TABLE person COMPUTED time::now() > birthday + 18y;
 CREATE person SET birthday = d"2007-06-22";
 ;
@@ -273,7 +273,7 @@ CREATE person SET birthday = d"2007-06-22";
 
 Easily work with unstructured or structured data, in schema-less or schema-full mode.
 
-```sql
+```surrealql
 -- Create a schemafull table
 DEFINE TABLE user SCHEMAFULL;
 
@@ -294,7 +294,7 @@ DEFINE EVENT email ON TABLE user WHEN $before.email != $after.email THEN (
 
 Connect records together with fully directed graph edge connections.
 
-```sql
+```surrealql
 -- Add a graph edge between user:tobie and article:surreal
 RELATE user:tobie->write->article:surreal
     SET time.written = time::now()
@@ -310,7 +310,7 @@ RELATE $from->like->$devs UNIQUE
 
 Query data flexibly with advanced expressions and graph queries.
 
-```sql
+```surrealql
 -- Select a nested array, and filter based on an attribute
 SELECT emails[WHERE active = true] FROM person;
 
@@ -329,7 +329,7 @@ SELECT ->purchased->product<-purchased<-person->(purchased WHERE created_at > ti
 
 Store GeoJSON geographical data types, including points, lines and polygons.
 
-```sql
+```surrealql
 UPDATE city:london SET
     centre = (-0.118092, 51.509865),
     boundary = {
@@ -345,7 +345,7 @@ UPDATE city:london SET
 
 Write custom embedded logic using JavaScript functions.
 
-```sql
+```surrealql
 CREATE film SET
     ratings = [
         { rating: 6, user: user:bt8e39uh1ouhfm8ko8s0 },
@@ -363,7 +363,7 @@ CREATE film SET
 
 Specify granular access permissions for client and application access.
 
-```sql
+```surrealql
 -- Specify access permissions for the 'post' table
 DEFINE TABLE post SCHEMALESS
     PERMISSIONS

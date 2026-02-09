@@ -1,0 +1,257 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::Result;
+use clap::Args;
+use rustls::crypto::CryptoProvider;
+use surrealdb::engine::{any, tasks};
+use surrealdb_core::buc::BucketStoreProvider;
+use surrealdb_core::kvs::TransactionBuilderFactory;
+use surrealdb_core::options::EngineOptions;
+use tokio_util::sync::CancellationToken;
+
+use super::config::Config;
+use crate::cli::ConfigCheck;
+use crate::cnf::LOGO;
+use crate::dbs::StartCommandDbsOptions;
+use crate::ntw::RouterFactory;
+use crate::ntw::client_ip::ClientIp;
+use crate::telemetry::metrics::ds::register_datastore_metrics;
+use crate::{dbs, env, ntw};
+
+#[derive(Args, Debug)]
+pub struct StartCommandArguments {
+	#[arg(help = "Database path used for storing data")]
+	#[arg(env = "SURREAL_PATH", index = 1)]
+	#[arg(default_value = "memory")]
+	path: String,
+	#[arg(help = "Whether to hide the startup banner")]
+	#[arg(env = "SURREAL_NO_BANNER", long)]
+	#[arg(default_value_t = false)]
+	no_banner: bool,
+	#[arg(help = "Encryption key to use for on-disk encryption")]
+	#[arg(env = "SURREAL_KEY", short = 'k', long = "key")]
+	#[arg(value_parser = super::validator::key_valid)]
+	#[arg(hide = true)] // Not currently in use
+	key: Option<String>,
+	//
+	// Tasks
+	#[arg(
+		help = "The interval at which to refresh node registration information",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_REFRESH_INTERVAL", long = "node-membership-refresh-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "3s")]
+	node_membership_refresh_interval: Duration,
+	#[arg(
+		help = "The interval at which to process and archive inactive nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "15s")]
+	node_membership_check_interval: Duration,
+	#[arg(
+		help = "The interval at which to process and cleanup archived nodes",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "300s")]
+	node_membership_cleanup_interval: Duration,
+	#[arg(
+		help = "The interval at which to perform changefeed garbage collection",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "30s")]
+	changefeed_gc_interval: Duration,
+	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "5s")]
+	index_compaction_interval: Duration,
+	#[arg(env = "SURREAL_ASYNC_EVENT_PROCESSING_INTERVAL", long = "async-event-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "5s")]
+	event_processing_interval: Duration,
+	//
+	// Authentication
+	#[arg(
+		help = "The username for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
+	)]
+	#[arg(
+		env = "SURREAL_USER",
+		short = 'u',
+		long = "username",
+		visible_alias = "user",
+		requires = "password"
+	)]
+	username: Option<String>,
+	#[arg(
+		help = "The password for the initial database root user. Only if no other root user exists",
+		help_heading = "Authentication"
+	)]
+	#[arg(
+		env = "SURREAL_PASS",
+		short = 'p',
+		long = "password",
+		visible_alias = "pass",
+		requires = "username"
+	)]
+	password: Option<String>,
+	//
+	// Datastore connection
+	#[command(next_help_heading = "Datastore connection")]
+	#[command(flatten)]
+	kvs: Option<StartCommandRemoteTlsOptions>,
+	//
+	// HTTP Server
+	#[command(next_help_heading = "HTTP server")]
+	#[command(flatten)]
+	web: Option<StartCommandWebTlsOptions>,
+	#[arg(help = "The method of detecting the client's IP address")]
+	#[arg(env = "SURREAL_CLIENT_IP", long)]
+	#[arg(default_value = "socket", value_enum)]
+	client_ip: ClientIp,
+	#[arg(help = "The hostname or IP address to listen for connections on")]
+	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
+	#[arg(default_value = "127.0.0.1:8000")]
+	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "Whether to suppress the server name and version headers")]
+	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
+	#[arg(default_value_t = false)]
+	no_identification_headers: bool,
+	//
+	// Database options
+	#[command(flatten)]
+	#[command(next_help_heading = "Database")]
+	dbs: StartCommandDbsOptions,
+}
+
+#[derive(Args, Debug)]
+#[group(requires_all = ["kvs_ca", "kvs_crt", "kvs_key"], multiple = true)]
+struct StartCommandRemoteTlsOptions {
+	#[arg(help = "Path to the CA file used when connecting to the remote KV store")]
+	#[arg(env = "SURREAL_KVS_CA", long = "kvs-ca", value_parser = super::validator::file_exists)]
+	kvs_ca: Option<PathBuf>,
+	#[arg(help = "Path to the certificate file used when connecting to the remote KV store")]
+	#[arg(env = "SURREAL_KVS_CRT", long = "kvs-crt", value_parser = super::validator::file_exists)]
+	kvs_crt: Option<PathBuf>,
+	#[arg(help = "Path to the private key file used when connecting to the remote KV store")]
+	#[arg(env = "SURREAL_KVS_KEY", long = "kvs-key", value_parser = super::validator::file_exists)]
+	kvs_key: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+#[group(requires_all = ["web_crt", "web_key"], multiple = true)]
+struct StartCommandWebTlsOptions {
+	#[arg(help = "Path to the certificate file for encrypted client connections")]
+	#[arg(env = "SURREAL_WEB_CRT", long = "web-crt", value_parser = super::validator::file_exists)]
+	web_crt: Option<PathBuf>,
+	#[arg(help = "Path to the private key file for encrypted client connections")]
+	#[arg(env = "SURREAL_WEB_KEY", long = "web-key", value_parser = super::validator::file_exists)]
+	web_key: Option<PathBuf>,
+}
+
+/// Start the server.
+///
+/// Initializes and starts the SurrealDB server with the provided configuration.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (datastore transaction builder for storage/backend selection)
+///   - `RouterFactory` (HTTP router factory for route/middleware customization)
+///   - `ConfigCheck` (validates configuration before initialization)
+pub async fn init<
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider,
+>(
+	mut composer: C,
+	StartCommandArguments {
+		path,
+		username: user,
+		password: pass,
+		client_ip,
+		listen_addresses,
+		dbs,
+		web,
+		node_membership_refresh_interval,
+		node_membership_check_interval,
+		node_membership_cleanup_interval,
+		changefeed_gc_interval,
+		index_compaction_interval,
+		event_processing_interval,
+		no_banner,
+		no_identification_headers,
+		..
+	}: StartCommandArguments,
+) -> Result<()> {
+	// Install the crypto provider before any TLS operations occur
+	let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
+	// Check the path is valid
+	C::path_valid(&path)?;
+	// Check if we should output a banner
+	if !no_banner {
+		println!("{LOGO}");
+	}
+	// Clean the path
+	let endpoint = any::__into_endpoint(path)?;
+	let path = if endpoint.path.is_empty() {
+		endpoint.url.to_string()
+	} else {
+		endpoint.path
+	};
+	// Extract the certificate and key
+	let (crt, key) = if let Some(val) = web {
+		(val.web_crt, val.web_key)
+	} else {
+		(None, None)
+	};
+	// Configure the engine
+	let engine = EngineOptions::default()
+		.with_node_membership_refresh_interval(node_membership_refresh_interval)
+		.with_node_membership_check_interval(node_membership_check_interval)
+		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
+		.with_changefeed_gc_interval(changefeed_gc_interval)
+		.with_index_compaction_interval(index_compaction_interval)
+		.with_event_processing_interval(event_processing_interval);
+	// Configure the config
+	let Some(bind) = listen_addresses.first().copied() else {
+		return Err(anyhow::anyhow!("No listen address provided"));
+	};
+	let config = Config {
+		bind,
+		client_ip,
+		path,
+		user,
+		pass,
+		no_identification_headers,
+		engine,
+		crt,
+		key,
+	};
+	composer.check_config(&config).await?;
+	// Setup the command-line options
+	// Initiate environment
+	env::init()?;
+
+	// Create a token to cancel tasks
+	let canceller = CancellationToken::new();
+	// Start the datastore
+	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	// Register datastore metrics
+	register_datastore_metrics(datastore.clone());
+	// Start the node agent
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
+	// Build and run the HTTP server using the provided RouterFactory implementation
+	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
+	// Shutdown and stop closed tasks
+	canceller.cancel();
+	// Wait for background tasks to finish
+	nodetasks.resolve().await?;
+	// Shutdown the datastore
+	datastore.shutdown().await?;
+	// All ok
+	Ok(())
+}

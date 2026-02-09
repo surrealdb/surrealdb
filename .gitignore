@@ -43,6 +43,7 @@ lcov.info
 /lib/target/
 /tests/sdk/*/Cargo.lock
 /tests/sdk/*/target
+/.github/scripts/__pycache__/
 
 .idea/
 .vscode/
@@ -61,6 +62,6 @@ history.txt
 /doc/tla/states/
 /profiling/traces/
 
-crates/surrealism/test/demo.surli
-crates/surrealism/test/surrealism
+surrealism/test/demo.surli
+surrealism/test/surrealism
 

@@ -1,0 +1,58 @@
+# Community PR Labeler
+#
+# This workflow automatically labels PRs from community contributors (non-core team members).
+# It runs when PRs are opened, marked ready for review, reopened, or synchronized.
+# PRs in draft mode are skipped.
+#
+# SECURITY NOTE: This uses pull_request_target (not pull_request) to allow labeling
+# forked PRs. This is safe because:
+# - We don't check out any code from the PR
+# - We only read PR metadata (author) from the GitHub API context
+# - The core team list is defined in this workflow file (not user-controlled)
+
+name: Community PR Labeler
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review, reopened, synchronize]
+
+permissions: read-all
+
+jobs:
+  label-community-pr:
+    # Skip draft PRs
+    if: ${{ !github.event.pull_request.draft }}
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Label community PRs
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8 (Actions must be pinned by commit hash)
+        with:
+          script: |
+            // Core team members - update this list when team membership changes
+            const CORE_TEAM = [
+              'arriqaaq',
+              'delskayn',
+              'dhghomon',
+              'emmanuel-keller',
+              'kearfy',
+              'mumoshu',
+              'rushmorem',
+              'ssttuu',
+              'tobiemh',
+            ];
+
+            const author = context.payload.pull_request.user.login.toLowerCase();
+            console.log('PR Author:', author);
+
+            if (!CORE_TEAM.includes(author)) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['community'],
+              });
+              console.log(`Added "community" label for ${author}`);
+            } else {
+              console.log(`Skipping - ${author} is a core team member`);
+            }

@@ -1,0 +1,79 @@
+# CodeQL security analysis for Rust
+#
+# This workflow performs static security analysis using GitHub CodeQL.
+# It is configured to:
+# - Run on main branch pushes and on a weekly schedule (not on PRs to avoid blocking merges)
+# - Use build-mode: none to avoid full Rust compilation (saves significant disk space)
+# - Clean up disk space before analysis to prevent out-of-space errors
+#
+# Results are uploaded to GitHub Security tab but do not block PR merges.
+
+name: CodeQL
+
+on:
+  push:
+    branches:
+      - main
+      - releases/**
+  schedule:
+    # Run weekly on Sunday at 3:00 AM UTC
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+# Prevent multiple concurrent CodeQL analyses
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    permissions:
+      # Required for all workflows
+      security-events: write
+      # Required to fetch internal or private CodeQL packs
+      packages: read
+      # Only required for workflows in private repositories
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Install Rust toolchain for rust-analyzer (used by CodeQL in build-mode: none)
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+          # Use build-mode: none to avoid full Rust compilation
+          # This uses rust-analyzer to compile build scripts and macros only,
+          # dramatically reducing disk space usage compared to a full build
+          build-mode: none
+          # Use custom config to exclude test directories and reduce analysis scope
+          config-file: ./.github/codeql/codeql-config.yml
+          # Use the default CodeQL query suites for security analysis
+          queries: security-extended
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
+          # Upload results even if previous steps had warnings
+          upload: always
+
+      - name: Cleanup CodeQL database
+        if: always()
+        run: |
+          # Clean up the CodeQL database to free disk space
+          rm -rf "${{ runner.temp }}/codeql_databases" || true
+
