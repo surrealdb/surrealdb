@@ -56,10 +56,31 @@ impl PhysicalExpr for MethodPart {
 		}
 
 		// Invoke the resolved function
-		if func.is_pure() {
-			Ok(func.invoke(func_args)?)
+		let result = if func.is_pure() {
+			func.invoke(func_args)
 		} else {
-			Ok(func.invoke_async(&ctx, func_args).await?)
+			func.invoke_async(&ctx, func_args).await
+		};
+
+		// Rewrite error names for method calls: when invoked as `.extend()`,
+		// the error should say "function extend()" not "function object::extend()".
+		match result {
+			Ok(v) => Ok(v),
+			Err(e) => {
+				if let Some(crate::err::Error::InvalidArguments {
+					message,
+					..
+				}) = e.downcast_ref::<crate::err::Error>()
+				{
+					Err(crate::err::Error::InvalidArguments {
+						name: self.descriptor.name.to_string(),
+						message: message.clone(),
+					}
+					.into())
+				} else {
+					Err(e.into())
+				}
+			}
 		}
 	}
 

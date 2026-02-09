@@ -68,9 +68,11 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow:
 				Ok(Value::Array(arr.clone()))
 			}
 		}
-		Value::Object(obj) => {
-			// Return all values from the object as an array
-			Ok(Value::Array(obj.values().cloned().collect::<Vec<_>>().into()))
+		Value::Object(_) => {
+			// All (*) on an Object is a no-op - returns the object itself.
+			// This matches the old executor's behavior where Part::All on Object
+			// simply continues with the remaining path.
+			Ok(value.clone())
 		}
 		Value::RecordId(rid) => {
 			// Fetch the record and return the full object with computed fields evaluated

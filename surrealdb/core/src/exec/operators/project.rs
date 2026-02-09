@@ -17,6 +17,7 @@ use tracing::instrument;
 
 use super::fetch::fetch_record;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
@@ -167,8 +168,13 @@ impl ExecOperator for Project {
 								Value::Object(obj)
 							}
 							Value::RecordId(rid) => {
-								// Dereference RecordId to full record
-								let fetched = fetch_record(&ctx, rid).await?;
+								// Dereference RecordId to full record with computed fields
+								let fetched = fetch_record_with_computed_fields(
+									rid,
+									EvalContext::from_exec_ctx(&ctx),
+								)
+								.await
+								.map_err(crate::expr::ControlFlow::Err)?;
 								match fetched {
 									Value::Object(mut obj) => {
 										// Add/override with explicit field selections
@@ -182,7 +188,13 @@ impl ExecOperator for Project {
 										}
 										Value::Object(obj)
 									}
-									other => other, // Pass through None or other values
+									Value::None => {
+										// Record doesn't exist - skip this row.
+										// This matches legacy behavior where non-existent
+										// records (e.g. from mock ranges) are excluded.
+										continue;
+									}
+									other => other, // Pass through other values
 								}
 							}
 							// For scalars (integers, strings, etc.), pass through as-is
@@ -499,6 +511,10 @@ impl ExecOperator for SelectProject {
 
 				for value in batch.values {
 					let projected = apply_projections(&value, &projections, &ctx).await?;
+					// Skip NONE values from non-existent records (e.g. mock ranges)
+					if matches!(&value, Value::RecordId(_)) && matches!(&projected, Value::None) {
+						continue;
+					}
 					projected_values.push(projected);
 				}
 
@@ -525,8 +541,12 @@ async fn apply_projections(
 	let input_obj = match value {
 		Value::Object(obj) => obj.clone(),
 		Value::RecordId(rid) if has_all => {
-			// Dereference RecordId to full record for SELECT *
-			match fetch_record(ctx, rid).await? {
+			// Dereference RecordId to full record with computed fields for SELECT *
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			match fetch_record_with_computed_fields(rid, eval_ctx)
+				.await
+				.map_err(crate::expr::ControlFlow::Err)?
+			{
 				Value::Object(obj) => obj,
 				Value::None => return Ok(Value::None),
 				other => return Ok(other),

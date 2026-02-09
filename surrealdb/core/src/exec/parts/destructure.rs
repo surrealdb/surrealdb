@@ -5,8 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::evaluate_physical_path;
-use crate::catalog::providers::TableProvider;
+use super::{evaluate_physical_path, fetch_record_with_computed_fields};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
@@ -198,28 +197,19 @@ async fn evaluate_destructure(
 			Ok(Value::Object(crate::val::Object(result)))
 		}
 		Value::RecordId(rid) => {
-			// Fetch the record from the database, then apply destructure to it
-			let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
-			let txn = ctx.exec_ctx.txn();
-			let record = txn
-				.get_record(
-					db_ctx.ns_ctx.ns.namespace_id,
-					db_ctx.db.database_id,
-					&rid.table,
-					&rid.key,
-					None,
-				)
-				.await
-				.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
-
-			// Get the record data as an object
-			let fetched = record.data.as_ref();
+			// Fetch the record with computed fields evaluated, then destructure it.
+			// Using fetch_record_with_computed_fields ensures that DEFINE FIELD ... COMPUTED
+			// fields are properly evaluated before destructuring.
+			let fetched =
+				fetch_record_with_computed_fields(rid, ctx.clone()).await.map_err(|e| {
+					crate::expr::ControlFlow::Err(anyhow::anyhow!("Failed to fetch record: {}", e))
+				})?;
 			if fetched.is_none() {
 				return Ok(Value::None);
 			}
 
 			// Continue destructure on the fetched object
-			Box::pin(evaluate_destructure(fetched, fields, ctx)).await
+			Box::pin(evaluate_destructure(&fetched, fields, ctx)).await
 		}
 		Value::Array(arr) => {
 			// Apply destructure to each element

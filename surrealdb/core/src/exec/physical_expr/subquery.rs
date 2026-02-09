@@ -27,9 +27,12 @@ impl PhysicalExpr for ScalarSubquery {
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
 		// Create a derived execution context with the parent value set.
-		// This allows $parent references in the subquery to access the outer document.
+		// This allows $parent and $this references in the subquery to access the outer document.
+		// $this is needed for correlated subqueries like `(SELECT ... FROM $this.field)`.
 		let subquery_ctx = if let Some(parent_value) = ctx.current_value {
-			ctx.exec_ctx.with_param("parent", parent_value.clone())
+			ctx.exec_ctx
+				.with_param("parent", parent_value.clone())
+				.with_param("this", parent_value.clone())
 		} else {
 			ctx.exec_ctx.clone()
 		};

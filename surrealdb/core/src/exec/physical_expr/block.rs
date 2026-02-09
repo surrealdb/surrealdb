@@ -142,147 +142,16 @@ impl PhysicalExpr for BlockPhysicalExpr {
 		let current_value_for_legacy = ctx.current_value.cloned();
 
 		for expr in self.block.0.iter() {
-			match expr {
-				Expr::Let(set_stmt) => {
-					// Check for protected parameter names
-					if PROTECTED_PARAM_NAMES.contains(&set_stmt.name.as_str()) {
-						return Err(Error::InvalidParam {
-							name: set_stmt.name.clone(),
-						}
-						.into());
-					}
-
-					// Create a frozen context for planning that includes current params
-					let frozen_ctx = create_planning_context(&current_exec_ctx, &local_params);
-
-					// Try to plan and evaluate the value expression
-					let value = match expr_to_physical_expr(set_stmt.what.clone(), &frozen_ctx) {
-						Ok(phys_expr) => {
-							let eval_ctx = EvalContext {
-								exec_ctx: &current_exec_ctx,
-								current_value: ctx.current_value,
-								local_params: if local_params.is_empty() {
-									None
-								} else {
-									Some(&local_params)
-								},
-								recursion_ctx: None,
-							};
-							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
-							phys_expr.evaluate(eval_ctx).await?
-						}
-						Err(Error::Unimplemented(ref msg))
-							if *frozen_ctx.new_planner_strategy()
-								== NewPlannerStrategy::AllReadOnlyStatements
-								&& !is_ddl_or_dml(&set_stmt.what) =>
-						{
-							// Hard fail: non-DDL/DML expression can't be planned
-							return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
-								message: format!("New executor does not support: {msg}"),
-							})));
-						}
-						Err(Error::Unimplemented(_)) => {
-							// Fallback to legacy compute path
-							let (opt, frozen) =
-								get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
-							// Create a CursorDoc from the current value for $this resolution
-							let doc = current_value_for_legacy
-								.as_ref()
-								.map(|v| CursorDoc::new(None, None, v.clone()));
-							let mut stack = TreeStack::new();
-							// Legacy compute returns FlowResult directly - propagate as-is
-							stack
-								.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
-								.finish()
-								.await?
-						}
-						Err(e) => {
-							return Err(ControlFlow::Err(anyhow::anyhow!(
-								"Failed to plan LET expression: {}",
-								e
-							)));
-						}
-					};
-
-					// Apply type coercion if specified
-					let value = if let Some(kind) = &set_stmt.kind {
-						value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
-							name: set_stmt.name.clone(),
-							error: Box::new(e),
-						})?
-					} else {
-						value
-					};
-
-					// Store in local params and update execution context
-					local_params.insert(set_stmt.name.clone(), value.clone());
-					current_exec_ctx =
-						current_exec_ctx.with_param(set_stmt.name.clone(), value.clone());
-
-					// Update the legacy context with the new parameter
-					if let Some(ref mut ctx) = legacy_ctx {
-						let mut new_ctx = crate::ctx::Context::new(ctx);
-						new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
-						*ctx = new_ctx.freeze();
-					}
-
-					// LET returns NONE
-					result = Value::None;
-				}
-				other => {
-					// Create a frozen context for planning that includes current params
-					let frozen_ctx = create_planning_context(&current_exec_ctx, &local_params);
-
-					// Try to plan and evaluate the expression
-					result = match expr_to_physical_expr(other.clone(), &frozen_ctx) {
-						Ok(phys_expr) => {
-							let eval_ctx = EvalContext {
-								exec_ctx: &current_exec_ctx,
-								current_value: ctx.current_value,
-								local_params: if local_params.is_empty() {
-									None
-								} else {
-									Some(&local_params)
-								},
-								recursion_ctx: None,
-							};
-							// Control flow (BREAK/CONTINUE/RETURN) propagates directly
-							phys_expr.evaluate(eval_ctx).await?
-						}
-						Err(Error::Unimplemented(ref msg))
-							if *frozen_ctx.new_planner_strategy()
-								== NewPlannerStrategy::AllReadOnlyStatements
-								&& !is_ddl_or_dml(other) =>
-						{
-							// Hard fail: non-DDL/DML expression can't be planned
-							return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
-								message: format!("New executor does not support: {msg}"),
-							})));
-						}
-						Err(Error::Unimplemented(_)) => {
-							// Fallback to legacy compute path
-							let (opt, frozen) =
-								get_legacy_context(&current_exec_ctx, &mut legacy_ctx)?;
-							// Create a CursorDoc from the current value for $this resolution
-							let doc = current_value_for_legacy
-								.as_ref()
-								.map(|v| CursorDoc::new(None, None, v.clone()));
-							let mut stack = TreeStack::new();
-							// Legacy compute returns FlowResult directly - propagate as-is
-							stack
-								.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
-								.finish()
-								.await?
-						}
-						Err(e) => {
-							return Err(ControlFlow::Err(anyhow::anyhow!(
-								"Failed to plan block expression: {}",
-								e
-							)));
-						}
-					};
-				}
-			}
+			result = self
+				.evaluate_block_entry(
+					expr,
+					&ctx,
+					&mut local_params,
+					&mut current_exec_ctx,
+					&mut legacy_ctx,
+					current_value_for_legacy.as_ref(),
+				)
+				.await?;
 		}
 
 		Ok(result)
@@ -302,6 +171,147 @@ impl PhysicalExpr for BlockPhysicalExpr {
 			AccessMode::ReadOnly
 		} else {
 			AccessMode::ReadWrite
+		}
+	}
+}
+
+impl BlockPhysicalExpr {
+	/// Evaluate a single entry in the block, handling LET bindings and expression planning.
+	///
+	/// Returns the evaluated value or a control flow signal.
+	#[allow(clippy::too_many_arguments)]
+	async fn evaluate_block_entry(
+		&self,
+		expr: &Expr,
+		ctx: &EvalContext<'_>,
+		local_params: &mut HashMap<String, Value>,
+		current_exec_ctx: &mut crate::exec::ExecutionContext,
+		legacy_ctx: &mut Option<FrozenContext>,
+		current_value_for_legacy: Option<&Value>,
+	) -> FlowResult<Value> {
+		match expr {
+			Expr::Let(set_stmt) => {
+				// Check for protected parameter names
+				if PROTECTED_PARAM_NAMES.contains(&set_stmt.name.as_str()) {
+					return Err(Error::InvalidParam {
+						name: set_stmt.name.clone(),
+					}
+					.into());
+				}
+
+				// Create a frozen context for planning that includes current params
+				let frozen_ctx = create_planning_context(current_exec_ctx, local_params);
+
+				// Try to plan and evaluate the value expression
+				let value = match expr_to_physical_expr(set_stmt.what.clone(), &frozen_ctx) {
+					Ok(phys_expr) => {
+						let eval_ctx = EvalContext {
+							exec_ctx: current_exec_ctx,
+							current_value: ctx.current_value,
+							local_params: if local_params.is_empty() {
+								None
+							} else {
+								Some(local_params)
+							},
+							recursion_ctx: None,
+						};
+						phys_expr.evaluate(eval_ctx).await?
+					}
+					Err(Error::Unimplemented(ref msg))
+						if *frozen_ctx.new_planner_strategy()
+							== NewPlannerStrategy::AllReadOnlyStatements
+							&& !is_ddl_or_dml(&set_stmt.what) =>
+					{
+						return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+							message: format!("New executor does not support: {msg}"),
+						})));
+					}
+					Err(Error::Unimplemented(_)) => {
+						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
+						let doc =
+							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
+						let mut stack = TreeStack::new();
+						stack
+							.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
+							.finish()
+							.await?
+					}
+					Err(e) => {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Failed to plan LET expression: {}",
+							e
+						)));
+					}
+				};
+
+				// Apply type coercion if specified
+				let value = if let Some(kind) = &set_stmt.kind {
+					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+						name: set_stmt.name.clone(),
+						error: Box::new(e),
+					})?
+				} else {
+					value
+				};
+
+				// Store in local params and update execution context
+				local_params.insert(set_stmt.name.clone(), value.clone());
+				*current_exec_ctx =
+					current_exec_ctx.with_param(set_stmt.name.clone(), value.clone());
+
+				// Update the legacy context with the new parameter
+				if let Some(ctx) = legacy_ctx {
+					let mut new_ctx = crate::ctx::Context::new(ctx);
+					new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
+					*ctx = new_ctx.freeze();
+				}
+
+				Ok(Value::None)
+			}
+			other => {
+				// Create a frozen context for planning that includes current params
+				let frozen_ctx = create_planning_context(current_exec_ctx, local_params);
+
+				// Try to plan and evaluate the expression
+				match expr_to_physical_expr(other.clone(), &frozen_ctx) {
+					Ok(phys_expr) => {
+						let eval_ctx = EvalContext {
+							exec_ctx: current_exec_ctx,
+							current_value: ctx.current_value,
+							local_params: if local_params.is_empty() {
+								None
+							} else {
+								Some(local_params)
+							},
+							recursion_ctx: None,
+						};
+						phys_expr.evaluate(eval_ctx).await
+					}
+					Err(Error::Unimplemented(ref msg))
+						if *frozen_ctx.new_planner_strategy()
+							== NewPlannerStrategy::AllReadOnlyStatements
+							&& !is_ddl_or_dml(other) =>
+					{
+						Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+							message: format!("New executor does not support: {msg}"),
+						})))
+					}
+					Err(Error::Unimplemented(_)) => {
+						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
+						let doc =
+							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
+						let mut stack = TreeStack::new();
+						stack
+							.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
+							.finish()
+							.await
+					}
+					Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(
+						"Failed to plan block expression: {}",
+						e
+					))),
+				}
+			}
 		}
 	}
 }

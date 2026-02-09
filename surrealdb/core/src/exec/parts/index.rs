@@ -85,44 +85,13 @@ pub(crate) fn evaluate_index(value: &Value, index: &Value) -> anyhow::Result<Val
 			let key = n.to_string();
 			Ok(obj.get(&key).cloned().unwrap_or(Value::None))
 		}
-		// RecordId with numeric index - access the key as an array
+		// RecordId with numeric index - only array keys support indexing
 		(Value::RecordId(rid), Value::Number(n)) => match &rid.key {
 			RecordIdKey::Array(arr) => {
 				let idx = n.to_usize();
 				Ok(arr.get(idx).cloned().unwrap_or(Value::None))
 			}
-			RecordIdKey::Number(num) => {
-				if n.to_usize() == 0 {
-					Ok(Value::from(*num))
-				} else {
-					Ok(Value::None)
-				}
-			}
-			RecordIdKey::String(s) => {
-				if n.to_usize() == 0 {
-					Ok(Value::from(s.clone()))
-				} else {
-					Ok(Value::None)
-				}
-			}
-			RecordIdKey::Uuid(u) => {
-				if n.to_usize() == 0 {
-					Ok(Value::from(*u))
-				} else {
-					Ok(Value::None)
-				}
-			}
-			RecordIdKey::Object(o) => {
-				if n.to_usize() == 0 {
-					Ok(Value::from(o.clone()))
-				} else {
-					Ok(Value::None)
-				}
-			}
-			RecordIdKey::Range(_) => {
-				// Ranges don't support indexing
-				Ok(Value::None)
-			}
+			_ => Ok(Value::None),
 		},
 		_ => Ok(Value::None),
 	}

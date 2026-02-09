@@ -109,10 +109,26 @@ impl PhysicalExpr for Param {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Handle special params $this and $self
+		// Handle special params $this and $self.
+		// When current_value is available (per-row context), use it directly.
+		// When it's None (scalar context, e.g. a subquery's FROM clause),
+		// check if $this was explicitly bound as a parameter (by ScalarSubquery)
+		// before defaulting to NONE. This avoids database lookups for $this.
 		match self.0.as_str() {
 			"this" | "self" => {
-				return Ok(ctx.current_value.cloned().unwrap_or(Value::None));
+				if let Some(v) = ctx.current_value {
+					return Ok(v.clone());
+				}
+				// Check if $this was explicitly bound as a parameter (e.g. by subquery)
+				if let Some(local_params) = ctx.local_params {
+					if let Some(v) = local_params.get(&self.0) {
+						return Ok(v.clone());
+					}
+				}
+				if let Some(v) = ctx.exec_ctx.value(&self.0) {
+					return Ok(v.clone());
+				}
+				return Ok(Value::None);
 			}
 			_ => {}
 		}

@@ -77,30 +77,17 @@ impl PhysicalExpr for IdiomExpr {
 		// Determine the base value for the idiom evaluation.
 		// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
 		// it first to produce the base value. Otherwise use the current row value.
-		let mut value = if let Some(ref start) = self.start_expr {
+		let value = if let Some(ref start) = self.start_expr {
 			start.evaluate(ctx.clone()).await?
 		} else {
-			match ctx.current_value {
-				Some(v) => v.clone(),
-				None => {
-					if self.is_simple_identifier() {
-						// Simple identifier without context evaluates to NONE
-						// This matches legacy SurrealQL behavior for undefined variables
-						return Ok(Value::None);
-					}
-					return Err(anyhow::anyhow!("Idiom evaluation requires current value").into());
-				}
-			}
+			// Use the current value if available, otherwise NONE.
+			// This matches legacy SurrealQL behavior where undefined identifiers
+			// evaluate to NONE, and allows control-flow expressions like
+			// `a[({BREAK})]` to work in contexts without a row value (e.g. FOR loops).
+			ctx.current_value.cloned().unwrap_or(Value::None)
 		};
 
-		// Clean evaluation loop -- zero runtime introspection.
-		// Post-lookup flatten is handled by FlattenPart inserted at plan time.
-		// Optional short-circuit is handled by OptionalChainPart internally.
-		for part in &self.parts {
-			value = part.evaluate(ctx.with_value(&value)).await?;
-		}
-
-		Ok(value)
+		evaluate_parts_with_continuation(&self.parts, value, ctx).await
 	}
 
 	fn references_current_value(&self) -> bool {
@@ -130,4 +117,83 @@ impl ToSql for IdiomExpr {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(&self.display);
 	}
+}
+
+/// Whether a physical expression triggers array continuation behavior.
+///
+/// In SurrealQL, certain operations like field access, `.*`, and destructuring
+/// on arrays cause all subsequent idiom parts to be mapped over each element.
+/// For example, `[{a: [1,2]}, {a: [3,4]}].a[0]` maps `.a[0]` over each element
+/// yielding `[1, 3]`, rather than indexing the flattened array.
+///
+/// Array operations like `[index]`, `[WHERE ...]`, `.first()`, etc. are NOT
+/// mapping parts — they consume the array directly.
+fn is_mapping_part(part: &dyn PhysicalExpr) -> bool {
+	matches!(part.name(), "Field" | "All" | "Destructure")
+}
+
+/// Evaluate idiom parts with array continuation semantics.
+///
+/// When a "mapping" part (`Field`, `All`, `Destructure`) encounters an array value
+/// and there are more parts remaining, the entire remaining path is mapped
+/// over each element of the array. This implements SurrealQL's idiom continuity
+/// where `array.field[index]` applies `.field[index]` to each element rather than
+/// applying `.field` first and then `[index]` to the collected result.
+///
+/// Parentheses (`Part::Start`) break the continuation chain by creating a new
+/// `IdiomExpr` with its own evaluation context.
+pub(crate) async fn evaluate_parts_with_continuation(
+	parts: &[Arc<dyn PhysicalExpr>],
+	mut value: Value,
+	ctx: EvalContext<'_>,
+) -> crate::expr::FlowResult<Value> {
+	let mut i = 0;
+	while i < parts.len() {
+		let part = &parts[i];
+
+		// Array continuation: when a mapping part encounters an array and there
+		// are more parts after it, map the remaining path over each element.
+		// This matches the old executor's default array handler which maps the full
+		// remaining path over elements for field-like operations.
+		//
+		// For `All` parts specifically, the old executor has element-type-aware behavior:
+		// - RecordId elements get the full remaining path (including `All`) so that `AllPart`
+		//   fetches the record and then continues with the rest of the path
+		// - Non-RecordId elements skip the `All` and get only the remaining path after it
+		// This handles cases like `[e:1].*.*` (graph, RecordIds) correctly while also
+		// supporting `[[3,2,1],[1,2,3]].*[0..1].min()` (pure arrays).
+		if matches!(&value, Value::Array(_))
+			&& is_mapping_part(part.as_ref())
+			&& i + 1 < parts.len()
+		{
+			let arr = match value {
+				Value::Array(a) => a,
+				_ => unreachable!(),
+			};
+			let is_all = part.name() == "All";
+			let remaining_with_current = &parts[i..];
+			let remaining_after_current = &parts[i + 1..];
+			let mut results = Vec::with_capacity(arr.len());
+			for elem in arr.iter() {
+				// For All parts: RecordIds use the path including All (to trigger
+				// fetch), non-RecordIds skip the All and apply remaining parts directly.
+				// For Field/Destructure: always include the current part.
+				let remaining = if is_all && !matches!(elem, Value::RecordId(_)) {
+					remaining_after_current
+				} else {
+					remaining_with_current
+				};
+				let mut v = elem.clone();
+				for rp in remaining {
+					v = rp.evaluate(ctx.with_value(&v)).await?;
+				}
+				results.push(v);
+			}
+			return Ok(Value::Array(results.into()));
+		}
+
+		value = part.evaluate(ctx.with_value(&value)).await?;
+		i += 1;
+	}
+	Ok(value)
 }
