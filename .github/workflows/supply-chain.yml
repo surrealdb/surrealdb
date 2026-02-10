@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.88.0
 
 jobs:
   cargo-deny:
