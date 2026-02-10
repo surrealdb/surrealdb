@@ -33,8 +33,8 @@ pub enum Direction {
 /// ```ignore
 /// let scanner = Scanner::<Key>::new(&tx, range, limit, Direction::Forward)
 ///     .version(1234567890)
-///     .initial_batch_size(SizeLimit::Count(50))
-///     .subsequent_batch_size(SizeLimit::Bytes(8 * 1024 * 1024))
+///     .initial_batch_size(ScanLimit::Count(50))
+///     .subsequent_batch_size(ScanLimit::Bytes(8 * 1024 * 1024))
 ///     .prefetch(false);
 /// ```
 pub struct Scanner<'a, I> {
