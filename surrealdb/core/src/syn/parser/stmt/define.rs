@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::catalog::ApiMethod;
+use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -842,6 +842,7 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Sync,
 		};
 
 		loop {
@@ -851,22 +852,58 @@ impl Parser<'_> {
 					res.when = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("THEN") => {
-					self.pop_peek();
+					let token = self.pop_peek();
 					res.then = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
 						res.then.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+					}
+					if res.then.is_empty() {
+						bail!("Expected at least one `THEN` statement", @token.span => "`THEN` statement required");
 					}
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
+				t!("ASYNC") => {
+					self.pop_peek();
+					res.event_kind = EventKind::Async {
+						retry: EventDefinition::DEFAULT_RETRY,
+						max_depth: EventDefinition::DEFAULT_MAX_DEPTH,
+					};
+				}
+				t!("RETRY") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						retry,
+						..
+					} = &mut res.event_kind
+					{
+						*retry = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
+					}
+				}
+				t!("MAXDEPTH") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						max_depth,
+						..
+					} = &mut res.event_kind
+					{
+						*max_depth = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
+					}
+				}
 				_ => break,
 			}
 		}
+		if res.then.is_empty() {
+			bail!("Expected at least one `THEN` statement", @self.last_span => "`THEN` statement required");
+		}
 		Ok(res)
 	}
-
 	pub(crate) async fn parse_define_field(
 		&mut self,
 		stk: &mut Stk,

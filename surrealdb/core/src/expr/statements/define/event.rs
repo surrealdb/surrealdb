@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{EventDefinition, TableDefinition};
+use crate::catalog::{EventDefinition, EventKind, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -22,6 +22,7 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub event_kind: EventKind,
 }
 
 impl DefineEventStatement {
@@ -81,6 +82,7 @@ impl DefineEventStatement {
 				then: self.then.clone(),
 				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 				comment,
+				kind: self.event_kind.clone(),
 			},
 			None,
 		)

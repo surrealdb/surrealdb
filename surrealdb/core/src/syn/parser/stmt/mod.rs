@@ -115,9 +115,12 @@ impl Parser<'_> {
 				self.parse_show_stmt().map(TopLevelExpr::Show)
 			}
 			_ => {
+				let covered = self.peek_kind() == t!("(");
 				let expr = self.parse_expr_start(stk).await?;
 				let span = token.span.covers(self.last_span);
-				Self::reject_letless_let(&expr, span)?;
+				if !covered {
+					Self::reject_letless_let(&expr, span)?;
+				}
 				Ok(TopLevelExpr::Expr(expr))
 			}
 		}

@@ -162,8 +162,8 @@ impl fmt::Display for NormaliserMap {
 #[cfg(test)]
 pub mod tests {
 
-	use super::super::keys::tests::generate_string as generate_key_bindings_string;
 	use super::super::keys::KeyBindings;
+	use super::super::keys::tests::generate_string as generate_key_bindings_string;
 	use super::*;
 
 	pub fn generate_string() -> String {

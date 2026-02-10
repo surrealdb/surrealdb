@@ -48,6 +48,7 @@ pub(crate) mod version;
 
 pub use api::Transactable;
 pub use clock::SizedClock;
+pub(crate) use ds::TransactionFactory;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
 	Datastore, DatastoreFlavor, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,

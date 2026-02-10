@@ -14,6 +14,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use surrealdb_types::{SurrealValue, object};
+use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -45,9 +46,8 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::{Node, Timestamp};
-use crate::dbs::{
-	Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session,
-};
+use crate::dbs::{Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -130,6 +130,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -156,13 +158,20 @@ pub(crate) struct TransactionFactory {
 	clock: Arc<SizedClock>,
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
+	pub(super) fn new(
+		clock: Arc<SizedClock>,
+		async_event_trigger: Arc<Notify>,
+		builder: Box<dyn TransactionBuilder>,
+	) -> Self {
 		Self {
 			clock,
 			builder: Arc::new(builder),
+			async_event_trigger,
 		}
 	}
 
@@ -193,6 +202,7 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
+			self.async_event_trigger.clone(),
 			Transactor {
 				inner,
 			},
@@ -687,7 +697,8 @@ impl Datastore {
 		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
-		let tf = TransactionFactory::new(clock, builder);
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(clock, async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		Ok(Self {
 			id,
@@ -709,6 +720,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger,
 		})
 	}
 
@@ -750,6 +762,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger: self.async_event_trigger,
 		}
 	}
 
@@ -1367,14 +1380,14 @@ impl Datastore {
 	/// Performs changefeed garbage collection as a background task.
 	///
 	/// This method is responsible for cleaning up old changefeed data across
-	/// all databases. It uses a distributed task lease mechanism to ensure
-	/// that only one node in a cluster performs this maintenance operation at
-	/// a time, preventing duplicate work and potential conflicts.
+	/// all databases. It uses a distributed task lease mechanism to coordinate
+	/// which node performs this maintenance operation. Once a batch starts it
+	/// runs to completion even if the lease expires, so brief overlap is
+	/// possible.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Calculating the current system time
-	/// 4. Cleaning up old changefeed data from all databases
+	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
@@ -1414,8 +1427,9 @@ impl Datastore {
 	///
 	/// This method is called periodically by the index compaction thread to
 	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to ensure only one node in a cluster performs the
-	/// compaction at a time.
+	/// distributed lease to coordinate compaction across the cluster. Once a
+	/// batch starts it runs to completion even if the lease expires, so brief
+	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
 	/// processes each index that needs compaction. Currently, only full-text
@@ -1440,7 +1454,7 @@ impl Datastore {
 		)?;
 		// We continue without interruptions while there are keys and the lease
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());
@@ -1510,6 +1524,38 @@ impl Datastore {
 		}
 	}
 
+	/// Process queued async events using a distributed lease to coordinate batches.
+	/// Once a batch starts it runs to completion even if the lease expires, so
+	/// brief overlap is possible.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting event processing process");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::EventProcessing,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the EventProcessing task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Output function invocation details to logs
+			trace!(target: TARGET, "Running event processing process");
+			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
+				// The last batch didn't have any events to process,
+				// we can sleep until the next wake-up call
+				return Ok(());
+			}
+		}
+	}
+
 	// --------------------------------------------------
 	// Other functions
 	// --------------------------------------------------
@@ -1530,6 +1576,17 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	}
+
+	pub(crate) fn sequences(&self) -> &Sequences {
+		&self.sequences
+	}
+
+	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
+		&self.transaction_factory
+	}
+	pub fn async_event_trigger(&self) -> &Arc<Notify> {
+		&self.async_event_trigger
 	}
 
 	pub async fn health_check(&self) -> Result<()> {

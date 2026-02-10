@@ -304,7 +304,7 @@ impl ExecutionContext {
 	/// with child values taking precedence over parent values (shadowing).
 	/// Protected parameter names are excluded.
 	pub fn collect_params(&self) -> Parameters {
-		self.root().ctx.collect_params()
+		self.root().ctx.collect_values(HashMap::new())
 	}
 
 	/// Get the datastore (if available).

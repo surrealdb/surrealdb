@@ -1,3 +1,5 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 
 use anyhow::{Result, bail};
@@ -15,12 +17,14 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum TaskLeaseType {
 	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
 	/// Index compaction
 	IndexCompaction,
+	/// Event processing
+	EventProcessing,
 }
 
 #[revisioned(revision = 1)]
@@ -45,15 +49,16 @@ impl TaskLease {
 /// Manages distributed task leases in a multi-node environment.
 ///
 /// The LeaseHandler provides a mechanism for coordinating tasks across multiple
-/// nodes by implementing a distributed lease system. This ensures that only one
-/// node at a time performs a specific task, preventing duplicate work and race
-/// conditions in a distributed setup.
+/// nodes by implementing a distributed lease system. This helps keep a single
+/// node responsible for a task at a time, while allowing an in-flight batch to
+/// complete even if the lease expires.
 ///
 /// The handler uses a datastore to persist lease information, with built-in
 /// support for:
 /// - Lease acquisition with exponential backoff and jitter to handle contention
 /// - Automatic lease expiration based on configurable duration
 /// - Lease ownership verification
+#[derive(Clone)]
 pub struct LeaseHandler {
 	sequences: Sequences,
 	/// UUID of the current node trying to acquire or check leases
@@ -64,6 +69,10 @@ pub struct LeaseHandler {
 	task_type: TaskLeaseType,
 	/// How long each acquired lease should remain valid
 	lease_duration: Duration,
+	/// Unix timestamp (seconds) of the last lease maintenance check
+	last_maintain_check: Arc<AtomicI64>,
+	/// Maintenance period in seconds used to throttle lease checks
+	maintain_period: i64,
 }
 
 impl LeaseHandler {
@@ -79,7 +88,9 @@ impl LeaseHandler {
 			node,
 			tf,
 			task_type,
-			lease_duration: Duration::from_std(lease_duration)?,
+			lease_duration: Duration::from_std(lease_duration)?.max(Duration::seconds(8)),
+			last_maintain_check: Arc::new(AtomicI64::new(0)),
+			maintain_period: ((lease_duration.as_secs() / 8) as i64).max(1),
 		})
 	}
 
@@ -104,7 +115,7 @@ impl LeaseHandler {
 		// We use exponential backoff with a maximum limit to prevent infinite retries
 		let start = Instant::now();
 		while tempo < MAX_BACKOFF {
-			match self.check_lease().await {
+			match self.check_lease(Utc::now()).await {
 				Ok(r) => return Ok(r),
 				Err(e) => {
 					trace!("Tolerated error while getting a lease for {:?}: {e}", self.task_type);
@@ -124,16 +135,26 @@ impl LeaseHandler {
 	/// Attempts to maintain the current lease by checking and potentially
 	/// renewing it.
 	///
-	/// This method is a simplified wrapper around `check_lease()` that:
-	/// 1. Checks if the current node owns a valid lease
+	/// This method is a throttled wrapper around `check_lease()` that:
+	/// 1. Runs a lease check at most once per maintenance period (lease_duration / 8)
 	/// 2. Renews the lease if needed
-	/// 3. Ignores the boolean return value from `check_lease()`
+	/// 3. Does not surface lease ownership to callers
 	///
 	/// # Returns
-	/// * `Ok(())` - If the lease check completed successfully (regardless of ownership)
+	/// * `Ok(())` - Lease check completed successfully or was skipped due to throttling
 	/// * `Err` - If database operations fail
 	pub(crate) async fn try_maintain_lease(&self) -> Result<()> {
-		self.check_lease().await?;
+		let now = Utc::now();
+		let now_ts = now.timestamp();
+		let last = self.last_maintain_check.load(Ordering::Relaxed);
+		if (now_ts < last || now_ts - last > self.maintain_period)
+			&& self
+				.last_maintain_check
+				.compare_exchange(last, now_ts, Ordering::Relaxed, Ordering::Relaxed)
+				.is_ok()
+		{
+			self.check_lease(now).await?;
+		}
 		Ok(())
 	}
 
@@ -149,8 +170,7 @@ impl LeaseHandler {
 	/// * `Ok(true)` - If the node successfully acquired or already owns the lease
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If database operations fail
-	async fn check_lease(&self) -> Result<bool> {
-		let now = Utc::now();
+	async fn check_lease(&self, now: DateTime<Utc>) -> Result<bool> {
 		// First check if there's already a valid lease
 		if let Some(current_lease) = self.check_valid_lease(now).await? {
 			// If another node owns the lease, we don't have the lease
@@ -224,6 +244,7 @@ mod tests {
 	use chrono::Utc;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
+	use tokio::sync::Notify;
 	use uuid::Uuid;
 
 	use crate::dbs::node::Timestamp;
@@ -311,8 +332,10 @@ mod tests {
 	async fn task_lease_concurrency(flavor: DatastoreFlavor) {
 		// Create a fake clock for deterministic testing
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+		// Async event trigger
+		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -391,9 +414,9 @@ mod tests {
 	/// 2. A node that owns a lease does try to re-acquire it if less than half the lease duration
 	///    remains
 	///
-	/// Note: This test has limitations because we can't directly control the
-	/// `Utc::now()` used in `check_lease()`. Instead, we verify the behavior
-	/// by:
+	/// Note: `check_lease()` now takes an explicit `now`, but lease expiration is
+	/// still based on `Utc::now()` inside `acquire_new_lease()`. We therefore
+	/// validate relative behavior instead of exact timestamps by:
 	/// - Checking that multiple calls to `check_lease()` in quick succession don't change the lease
 	///   expiration
 	/// - Manually verifying the condition that would trigger renewal (less than half duration
@@ -406,7 +429,10 @@ mod tests {
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create an in-memory datastore
 		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		// Create an async event trigger
+		let async_event_trigger = Arc::new(Notify::new());
+		// Create the transaction factory
+		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 minutes
@@ -425,7 +451,7 @@ mod tests {
 
 		// PART 1: Initial lease acquisition
 		// Initially acquire the lease
-		let has_lease = lh.check_lease().await.unwrap();
+		let has_lease = lh.check_lease(Utc::now()).await.unwrap();
 		assert!(has_lease, "Should successfully acquire the lease initially");
 
 		// Get the current lease to check its expiration
@@ -436,7 +462,7 @@ mod tests {
 
 		// PART 2: Verify no renewal when more than half duration remains
 		// Check again immediately - should return true without re-acquiring
-		let has_lease = lh.check_lease().await.unwrap();
+		let has_lease = lh.check_lease(Utc::now()).await.unwrap();
 		assert!(has_lease, "Should still have the lease without re-acquiring");
 
 		// Verify the expiration hasn't changed (no renewal)
@@ -477,7 +503,7 @@ mod tests {
 		// In a real scenario with time passing, this would only renew if less than half
 		// duration remains But for testing purposes, we're forcing it to demonstrate
 		// the renewal behavior
-		let has_lease = lh.check_lease().await.unwrap();
+		let has_lease = lh.check_lease(Utc::now()).await.unwrap();
 		assert!(has_lease, "Should still have the lease after attempted renewal");
 
 		// Get the lease again and check if it was renewed

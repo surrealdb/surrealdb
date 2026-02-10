@@ -126,7 +126,7 @@ impl Timestamp for IncTimestamp {
 /// This provides up to 65,535 unique timestamps per millisecond while maintaining monotonicity
 /// even when the system clock goes backwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct HlcTimestamp(u64);
+pub struct HlcTimestamp(pub(crate) u64);
 
 impl HlcTimestamp {
 	/// Generate the next monotonic HLC timestamp.
@@ -144,7 +144,7 @@ impl HlcTimestamp {
 		#[cfg(target_family = "wasm")]
 		use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
-		// Set the tiimestamps and masks
+		// Set the timestamps and masks
 		static LAST_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 		const COUNTER_MASK: u64 = 0xFFFF;
 		const COUNTER_MAX: u64 = COUNTER_MASK;

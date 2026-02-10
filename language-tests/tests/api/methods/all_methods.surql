@@ -7,42 +7,42 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'get' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'get' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'post' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'post' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'put' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'put' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'patch' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'patch' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'delete' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'delete' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { method: 'trace' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { method: 'trace' }, headers: {}, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]
