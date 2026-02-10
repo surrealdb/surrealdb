@@ -43,9 +43,11 @@ DEFINE FUNCTION fn::t5() {
 		f: <future>{ time::now() }
 	}
 };
+
 DEFINE FUNCTION fn::t6() {
 	RELATE a:1->b->c:1 SET a = <future> { time::now() };
 };
+
 DEFINE FUNCTION fn::t7() {
 	UPDATE foo SET a = <future> { time::now() };
 };
@@ -82,6 +84,10 @@ CREATE t9:1 SET a = || { 1 + 1 };
 
 DEFINE FUNCTION fn::f12(){
 	CREATE f SET a = || { 1 + 1 };
+};
+
+DEFINE FUNCTION fn::f13(){
+	DEFINE INDEX a ON b MTREE DIMENSION 4;
 };
 
 null
