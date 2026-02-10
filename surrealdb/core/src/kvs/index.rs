@@ -549,17 +549,26 @@ impl Building {
 		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
 			return Ok(());
 		};
-		// Check the index still exists and is not decommissioned
-		tx.expect_tb_index(self.ix_key.ns, self.ix_key.db, &self.ix.table_name, &self.ix.name)
+		// Check the index still exists and has not been marked for removal.
+		// We use get_tb_index (returns Option) instead of expect_tb_index because
+		// this check runs on a separate read transaction. During a blocking DEFINE
+		// INDEX, the index definition is only committed after indexing completes,
+		// so this read transaction may not yet see it.
+		// If the index is not found, we continue — the prepare_remove flag can only
+		// be set by REMOVE INDEX, which runs in a separate transaction.
+		if let Some(ix) = tx
+			.get_tb_index(self.ix_key.ns, self.ix_key.db, &self.ix.table_name, &self.ix.name)
 			.await?
-			.expect_not_prepare_remove()?;
+		{
+			ix.expect_not_prepare_remove()?;
+		}
 		*last_prepare_remove_check = Instant::now();
 		Ok(())
 	}
 
-	async fn check_prepare_remove(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
+	async fn check_prepare_remove(&self, last_prepare_remove_check: &mut Instant) -> Result<()> {
 		let tx = self.new_read_tx().await?;
-		catch!(tx, self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await);
+		catch!(tx, self.check_prepare_remove_with_tx(last_prepare_remove_check, &tx).await);
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -603,7 +612,7 @@ impl Building {
 			self.is_beyond_threshold(None)?;
 			let batch = {
 				let tx = self.new_read_tx().await?;
-				// Check if the index has been decommissioned
+				// Check if the index has been marked for removal
 				catch!(
 					tx,
 					self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await
@@ -653,7 +662,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Check the index still exists and is not decommissioned
+			// Check the index still exists and has not been marked for removal
 			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 
 			let keys = {

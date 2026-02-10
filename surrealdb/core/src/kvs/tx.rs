@@ -886,6 +886,10 @@ impl NamespaceProvider for Transaction {
 		let key = crate::key::root::ns::new(&ns.name);
 		self.set(&key, &ns, None).await?;
 
+		// Invalidate the cached list of all namespaces
+		let list_key = cache::tx::Lookup::Nss;
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_ns = Arc::new(ns.clone());
 
@@ -1006,6 +1010,10 @@ impl DatabaseProvider for Transaction {
 		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
 		self.set(&key, &db, None).await?;
 
+		// Invalidate the cached list of all databases for this namespace
+		let list_key = cache::tx::Lookup::Dbs(db.namespace_id);
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_db = Arc::new(db.clone());
 
@@ -1029,6 +1037,14 @@ impl DatabaseProvider for Transaction {
 			self.del(&key).await?;
 			self.delp(&database_root).await?
 		};
+
+		// Invalidate the cached list of all databases for this namespace
+		let list_key = cache::tx::Lookup::Dbs(db.namespace_id);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached database entry
+		let db_key = cache::tx::Lookup::DbByName(ns, &db.name);
+		self.cache.remove(db_key);
 
 		Ok(Some(()))
 	}
@@ -1308,7 +1324,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	/// Retrieve a specific function definition from a database.
+	/// Retrieve a specific param definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_param(
 		&self,
@@ -1365,6 +1381,16 @@ impl DatabaseProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
 		self.set(&key, fc, None).await?;
+
+		// Invalidate the cached list of all functions for this database
+		let list_key = cache::tx::Lookup::Fcs(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Fc(ns, db, &fc.name);
+		let entry = cache::tx::Entry::Any(Arc::new(fc.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -1377,6 +1403,16 @@ impl DatabaseProvider for Transaction {
 		let name = md.get_storage_name()?;
 		let key = crate::key::database::md::new(ns, db, &name);
 		self.set(&key, md, None).await?;
+
+		// Invalidate the cached list of all modules for this database
+		let list_key = cache::tx::Lookup::Mds(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Md(ns, db, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(md.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -1388,6 +1424,16 @@ impl DatabaseProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::pa::new(ns, db, &pa.name);
 		self.set(&key, pa, None).await?;
+
+		// Invalidate the cached list of all params for this database
+		let list_key = cache::tx::Lookup::Pas(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Pa(ns, db, &pa.name);
+		let entry = cache::tx::Entry::Any(Arc::new(pa.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -1541,6 +1587,10 @@ impl TableProvider for Transaction {
 			}
 		}
 
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
 		let cached_entry =
@@ -1566,6 +1616,10 @@ impl TableProvider for Transaction {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.del(&key).await?;
 
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
+
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
 		self.cache.remove(qey);
@@ -1585,6 +1639,10 @@ impl TableProvider for Transaction {
 
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.clr(&key).await?;
+
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
 
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
@@ -1772,6 +1830,15 @@ impl TableProvider for Transaction {
 		let name = fd.name.to_raw_string();
 		let key = crate::key::table::fd::new(ns, db, tb, &name);
 		self.set(&key, fd, None).await?;
+
+		// Invalidate the cached list of all fields for this table
+		let list_key = cache::tx::Lookup::Fds(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Fd(ns, db, tb, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(fd.clone()));
+		self.cache.insert(qey, entry);
 		Ok(())
 	}
 
@@ -1829,6 +1896,10 @@ impl TableProvider for Transaction {
 			crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
 		self.set(&name_lookup_key, &ix.name, None).await?;
 
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
 		// Set the entry in the cache
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
 		let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
@@ -1855,6 +1926,14 @@ impl TableProvider for Transaction {
 		// Delete the definition
 		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
 		self.del(&key).await?;
+
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
+		// Invalidate the cached index entry
+		let index_key = cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix.name);
+		self.cache.remove(index_key);
 
 		Ok(())
 	}
@@ -2128,12 +2207,32 @@ impl UserProvider for Transaction {
 	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
 		let key = crate::key::root::us::new(&us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all root users
+		let list_key = cache::tx::Lookup::Rus;
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ru(&us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
 	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
 		let key = crate::key::namespace::us::new(ns, &us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all namespace users
+		let list_key = cache::tx::Lookup::Nus(ns);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Nu(ns, &us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -2145,6 +2244,16 @@ impl UserProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::us::new(ns, db, &us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all database users
+		let list_key = cache::tx::Lookup::Dus(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Du(ns, db, &us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -2418,7 +2527,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::root::access::all::new(ra);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all root accesses
+		let list_key = cache::tx::Lookup::Ras;
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Ra(ra);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Rgs(ra);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 
@@ -2429,7 +2548,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::namespace::access::all::new(ns, na);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all namespace accesses
+		let list_key = cache::tx::Lookup::Nas(ns);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Na(ns, na);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Ngs(ns, na);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 
@@ -2440,7 +2569,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::database::access::all::new(ns, db, da);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all database accesses
+		let list_key = cache::tx::Lookup::Das(ns, db);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Da(ns, db, da);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Dgs(ns, db, da);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 }
@@ -2495,7 +2634,16 @@ impl ApiProvider for Transaction {
 		let name = ap.path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		self.set(&key, ap, None).await?;
-		// Return result
+
+		// Invalidate the cached list of all APIs for this database
+		let list_key = cache::tx::Lookup::Aps(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ap(ns, db, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(ap.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -2503,7 +2651,7 @@ impl ApiProvider for Transaction {
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl BucketProvider for Transaction {
-	/// Retrieve all analyzer definitions for a specific database.
+	/// Retrieve all bucket definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_buckets(
 		&self,
@@ -2525,7 +2673,7 @@ impl BucketProvider for Transaction {
 		}
 	}
 
-	/// Retrieve a specific api definition.
+	/// Retrieve a specific bucket definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_bucket(
 		&self,
