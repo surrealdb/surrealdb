@@ -215,8 +215,9 @@ pub async fn rrf(
 		}
 	}
 
-	// Use a min-heap (via reversed Ord) to efficiently maintain only the top `limit`
-	// documents. This avoids sorting all documents when we only need the top-k results.
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
+	// `limit` documents. This avoids sorting all documents when we only need the
+	// top-k results.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
@@ -257,6 +258,7 @@ pub async fn rrf(
 		}
 		count += 1;
 	}
+	// Return the fused results sorted by RRF score in descending order
 	result_array.reverse();
 	Ok(Value::Array(result_array))
 }
@@ -467,7 +469,8 @@ pub async fn linear(
 		}
 	}
 
-	// Use a min-heap (via reversed Ord) to efficiently maintain only the top `limit` documents.
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
+	// `limit` documents.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 
 	for (id, (scores, objects)) in documents {
