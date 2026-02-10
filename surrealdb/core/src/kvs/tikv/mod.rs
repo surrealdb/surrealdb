@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
 use super::err::{Error, Result};
+use crate::cnf::COUNT_BATCH_SIZE;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, TimeStamp, TimeStampImpl, Val};
@@ -428,6 +429,58 @@ impl Transactable for Transaction {
 		self.db.unsafe_destroy_range(rng.start..rng.end).await?;
 		// Return result
 		Ok(())
+	}
+
+	/// Count the total number of keys within a range in the database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Store the total count
+		let mut total = 0usize;
+		// Store the end range key
+		let end = rng.end.clone();
+		// Store the next start key
+		let mut start = rng.start;
+		// Loop until we have exhausted the range
+		loop {
+			// Scan keys in key-only mode (no values fetched)
+			let iter = inner.tx.scan_keys(start..end.clone(), *COUNT_BATCH_SIZE).await?;
+			// Count the items, tracking the last key seen
+			let mut key: Option<tikv::Key> = None;
+			// Count the items in this batch
+			let mut count = 0u32;
+			// Loop over the iterator
+			for k in iter {
+				count += 1;
+				key = Some(k);
+			}
+			// Increment the total count
+			total += count as usize;
+			// If we got fewer than batch_size, we've exhausted the range
+			if count < *COUNT_BATCH_SIZE {
+				break;
+			}
+			// Advance past the last key for the next batch
+			match key {
+				Some(k) => {
+					let mut k = Key::from(k);
+					super::util::advance_key(&mut k);
+					start = k;
+				}
+				None => break,
+			}
+		}
+		// Return the total count
+		Ok(total)
 	}
 
 	/// Retrieve a range of keys from the database

@@ -340,7 +340,7 @@ impl Transactable for Transaction {
 
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -353,7 +353,10 @@ impl Transactable for Transaction {
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || -> Result<_> {
 			// Count the items in the range
-			let res = inner.total(beg..end, None, None)?;
+			let res = match version {
+				Some(ts) => inner.total_at_version(beg..end, None, None, ts)?,
+				None => inner.total(beg..end, None, None)?,
+			};
 			// Return result
 			Ok(res)
 		})

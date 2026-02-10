@@ -641,7 +641,9 @@ pub(super) trait Collector {
 			// For Table and Range iterables, the RecordStrategy determines whether we
 			// collect only keys, keys+values, or just a count without materializing records.
 			Iterable::Range(doc_ctx, tb, v, rs, sc) => match rs {
-				RecordStrategy::Count => self.collect_range_count(ctx, doc_ctx, &tb, v).await?,
+				RecordStrategy::Count => {
+					self.collect_range_count(ctx, opt, doc_ctx, &tb, v).await?
+				}
 				RecordStrategy::KeysOnly => {
 					self.collect_range_keys(ctx, opt, doc_ctx, &tb, v, sc).await?
 				}
@@ -653,7 +655,7 @@ pub(super) trait Collector {
 				let ctx = Self::check_query_planner_context(ctx, &table);
 				match rs {
 					RecordStrategy::Count => {
-						self.collect_table_count(&ctx, doc_ctx, &table).await?
+						self.collect_table_count(&ctx, opt, doc_ctx, &table).await?
 					}
 					RecordStrategy::KeysOnly => {
 						self.collect_table_keys(&ctx, opt, doc_ctx, &table, sc).await?
@@ -842,6 +844,7 @@ pub(super) trait Collector {
 	async fn collect_table_count(
 		&mut self,
 		ctx: &FrozenContext,
+		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		v: &TableName,
 	) -> Result<()> {
@@ -850,7 +853,7 @@ pub(super) trait Collector {
 		let beg = record::prefix(ns, db, v)?;
 		let end = record::suffix(ns, db, v)?;
 		// Create a new iterable range
-		let count = ctx.tx().count(beg..end).await?;
+		let count = ctx.tx().count(beg..end, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
@@ -978,6 +981,7 @@ pub(super) trait Collector {
 	async fn collect_range_count(
 		&mut self,
 		ctx: &FrozenContext,
+		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		tb: &TableName,
 		r: RecordIdKeyRange,
@@ -988,7 +992,7 @@ pub(super) trait Collector {
 		let (beg, end) =
 			Self::range_prepare(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, tb, r).await?;
 		// Create a new iterable range
-		let count = txn.count(beg..end).await?;
+		let count = txn.count(beg..end, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok

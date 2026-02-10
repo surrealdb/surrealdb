@@ -342,7 +342,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// This function fetches the total key count from the underlying datastore
 	/// in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -351,7 +351,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		let mut len = 0;
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, None).await?;
+			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, version).await?;
 			next = res.next;
 			len += res.result.len();
 		}

@@ -80,9 +80,9 @@ pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
 
 /// The maximum number of keys that should be scanned at once for count queries
-/// (default: 10,000)
+/// (default: 50,000)
 pub static COUNT_BATCH_SIZE: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", u32, 10_000);
+	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", u32, 50_000);
 
 /// The maximum number of keys to scan at once per concurrent indexing batch
 /// (default: 250)
