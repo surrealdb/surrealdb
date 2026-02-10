@@ -53,7 +53,7 @@ pub mod ctx;
 pub mod dbs;
 pub mod env;
 pub mod err;
-mod exec;
+pub mod exec;
 pub mod expr;
 #[cfg(feature = "graphql")]
 pub mod gql;

@@ -46,11 +46,13 @@ pub trait IndexFunction: Send + Sync + Debug {
 	fn name(&self) -> &'static str;
 
 	/// The function signature describing arguments and return type.
+	#[allow(unused)]
 	fn signature(&self) -> Signature;
 
 	/// Infer the return type given the argument types.
 	///
 	/// The default implementation returns the signature's return type.
+	#[allow(unused)]
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
 		Ok(self.signature().returns)
 	}

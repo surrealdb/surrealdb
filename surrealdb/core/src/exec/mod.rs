@@ -42,8 +42,8 @@ use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
-// Re-export FlowResult for operator implementations
-pub(crate) use crate::expr::FlowResult;
+// Re-export FlowResult and FlowResultExt for operator implementations
+pub(crate) use crate::expr::{FlowResult, FlowResultExt};
 use crate::val::Value;
 
 pub(crate) mod access_mode;
@@ -63,9 +63,6 @@ pub(crate) mod planner;
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
-// Re-export function types (allow unused for now - these are public API)
-#[allow(unused_imports)]
-pub(crate) use function::{FunctionRegistry, ScalarFunction, Signature};
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
@@ -79,7 +76,8 @@ pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 /// }
 /// ```
 #[derive(Debug, Clone)]
-pub(crate) struct ValueBatch {
+#[non_exhaustive]
+pub struct ValueBatch {
 	pub(crate) values: Vec<Value>,
 }
 

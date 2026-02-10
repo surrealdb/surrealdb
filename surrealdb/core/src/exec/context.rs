@@ -65,7 +65,7 @@ impl ContextLevel {
 /// This contains session data that can be accessed by functions like
 /// `session::ns()`, `session::db()`, `session::id()`, etc.
 #[derive(Debug, Clone, Default)]
-pub struct SessionInfo {
+pub(crate) struct SessionInfo {
 	/// The currently selected namespace
 	pub ns: Option<String>,
 	/// The currently selected database
@@ -118,7 +118,7 @@ pub struct RootContext {
 	/// Whether authentication is enabled on the datastore
 	pub auth_enabled: bool,
 	/// Session information for context-aware functions
-	pub session: Option<Arc<SessionInfo>>,
+	pub(crate) session: Option<Arc<SessionInfo>>,
 }
 
 impl std::fmt::Debug for RootContext {

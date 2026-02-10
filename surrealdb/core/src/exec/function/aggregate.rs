@@ -33,6 +33,7 @@ pub trait Accumulator: Send + Sync + Debug {
 	///
 	/// Used for parallel execution where partial aggregates from
 	/// different partitions need to be combined.
+	#[allow(unused)]
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()>;
 
 	/// Compute the final aggregate value.
@@ -44,12 +45,15 @@ pub trait Accumulator: Send + Sync + Debug {
 	/// Reset the accumulator to its initial state.
 	///
 	/// Allows reusing the same accumulator instance for multiple groups.
+	#[allow(unused)]
 	fn reset(&mut self);
 
 	/// Clone the accumulator into a boxed trait object.
+	#[allow(unused)]
 	fn clone_box(&self) -> Box<dyn Accumulator>;
 
 	/// Returns self as Any for downcasting in merge operations.
+	#[allow(unused)]
 	fn as_any(&self) -> &dyn Any;
 }
 
@@ -81,11 +85,13 @@ pub trait AggregateFunction: Send + Sync + Debug {
 	}
 
 	/// The function signature describing arguments and return type.
+	#[allow(unused)]
 	fn signature(&self) -> Signature;
 
 	/// Infer the return type given the argument types.
 	///
 	/// The default implementation returns the signature's return type.
+	#[allow(unused)]
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
 		Ok(self.signature().returns)
 	}

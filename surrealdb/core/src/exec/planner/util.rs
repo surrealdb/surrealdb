@@ -12,52 +12,11 @@ use crate::expr::{BinaryOperator, Cond, Expr, Literal};
 // Literal / Value Conversion
 // ============================================================================
 
-/// Convert a `RecordIdKeyLit` to a `RecordIdKey` for record ID construction.
-pub(super) fn convert_record_key_lit(
-	key_lit: &crate::expr::record_id::RecordIdKeyLit,
-) -> Result<crate::val::RecordIdKey, Error> {
-	use crate::expr::record_id::RecordIdKeyLit;
-	use crate::val::RecordIdKey;
-
-	match key_lit {
-		RecordIdKeyLit::Number(n) => Ok(RecordIdKey::Number(*n)),
-		RecordIdKeyLit::String(s) => Ok(RecordIdKey::String(s.clone())),
-		RecordIdKeyLit::Uuid(u) => Ok(RecordIdKey::Uuid(*u)),
-		RecordIdKeyLit::Generate(generator) => Ok(generator.compute()),
-		RecordIdKeyLit::Array(exprs) => {
-			let mut values = Vec::with_capacity(exprs.len());
-			for expr in exprs {
-				let value = static_expr_to_value(expr)?;
-				values.push(value);
-			}
-			Ok(RecordIdKey::Array(crate::val::Array(values)))
-		}
-		RecordIdKeyLit::Object(entries) => {
-			let mut obj = crate::val::Object::default();
-			for entry in entries {
-				let value = static_expr_to_value(&entry.value)?;
-				obj.insert(entry.key.clone(), value);
-			}
-			Ok(RecordIdKey::Object(obj))
-		}
-		RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
-			"Nested range record keys not supported in execution plans".to_string(),
-		)),
-	}
-}
-
-/// Convert a static `Expr` to a `Value` at plan time.
-pub(super) fn static_expr_to_value(expr: &Expr) -> Result<crate::val::Value, Error> {
-	match expr {
-		Expr::Literal(lit) => literal_to_value(lit.clone()),
-		_ => Err(Error::PlannerUnimplemented(
-			"Dynamic expressions in record ID keys not yet supported in execution plans"
-				.to_string(),
-		)),
-	}
-}
-
 /// Convert a `Literal` to a `Value` for static (non-computed) cases.
+///
+/// Note: `Literal::RecordId` is handled directly in `Planner::physical_expr()`
+/// via `RecordIdExpr`, so it should never reach this function. Array, Object,
+/// and Set literals are similarly handled upstream by the planner.
 pub(super) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
 ) -> Result<crate::val::Value, Error> {
@@ -80,51 +39,10 @@ pub(super) fn literal_to_value(
 		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		Literal::RecordId(rid_lit) => {
-			use std::ops::Bound;
-
-			use crate::expr::record_id::RecordIdKeyLit;
-			use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
-
-			let key = match &rid_lit.key {
-				RecordIdKeyLit::Number(n) => RecordIdKey::Number(*n),
-				RecordIdKeyLit::String(s) => RecordIdKey::String(s.clone()),
-				RecordIdKeyLit::Uuid(u) => RecordIdKey::Uuid(*u),
-				RecordIdKeyLit::Generate(generator) => generator.compute(),
-				RecordIdKeyLit::Range(range_lit) => {
-					let start = match &range_lit.start {
-						Bound::Unbounded => Bound::Unbounded,
-						Bound::Included(key_lit) => {
-							Bound::Included(convert_record_key_lit(key_lit)?)
-						}
-						Bound::Excluded(key_lit) => {
-							Bound::Excluded(convert_record_key_lit(key_lit)?)
-						}
-					};
-					let end = match &range_lit.end {
-						Bound::Unbounded => Bound::Unbounded,
-						Bound::Included(key_lit) => {
-							Bound::Included(convert_record_key_lit(key_lit)?)
-						}
-						Bound::Excluded(key_lit) => {
-							Bound::Excluded(convert_record_key_lit(key_lit)?)
-						}
-					};
-					RecordIdKey::Range(Box::new(RecordIdKeyRange {
-						start,
-						end,
-					}))
-				}
-				RecordIdKeyLit::Array(_) | RecordIdKeyLit::Object(_) => {
-					convert_record_key_lit(&rid_lit.key)?
-				}
-			};
-
-			Ok(Value::RecordId(RecordId {
-				table: rid_lit.table,
-				key,
-			}))
-		}
+		// RecordId is handled by RecordIdExpr in physical_expr() before reaching here.
+		Literal::RecordId(_) => Err(Error::PlannerUnimplemented(
+			"Literal::RecordId should be handled by RecordIdExpr in physical_expr()".to_string(),
+		)),
 		Literal::Array(_) => Err(Error::PlannerUnimplemented(
 			"Array literals in USE statements not yet supported".to_string(),
 		)),

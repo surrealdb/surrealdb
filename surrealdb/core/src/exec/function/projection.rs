@@ -35,21 +35,15 @@ pub trait ProjectionFunction: Send + Sync + Debug {
 	fn name(&self) -> &'static str;
 
 	/// The function signature describing arguments and return type.
+	#[allow(unused)]
 	fn signature(&self) -> Signature;
 
 	/// Infer the return type given the argument types.
 	///
 	/// The default implementation returns the signature's return type.
+	#[allow(unused)]
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
 		Ok(self.signature().returns)
-	}
-
-	/// Whether this function requires async execution.
-	///
-	/// Projection functions typically need to evaluate idioms against documents,
-	/// which may require async operations.
-	fn is_async(&self) -> bool {
-		true
 	}
 
 	/// The minimum context level required to execute this function.
@@ -71,8 +65,6 @@ pub trait ProjectionFunction: Send + Sync + Debug {
 	///
 	/// # Returns
 	/// A vector of (Idiom, Value) pairs to set on the output object
-	#[allow(clippy::type_complexity)]
-	#[allow(clippy::type_complexity)]
 	#[allow(clippy::type_complexity)]
 	fn invoke_async<'a>(
 		&'a self,

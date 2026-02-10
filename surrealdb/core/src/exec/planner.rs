@@ -142,8 +142,8 @@ impl<'ctx> Planner<'ctx> {
 			ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
 			ClosureExec, ControlFlowExpr, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
 			MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
-			ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
-			UserDefinedFunctionExec,
+			RecordIdExpr, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec,
+			UnaryOp, UserDefinedFunctionExec,
 		};
 
 		match expr {
@@ -173,6 +173,13 @@ impl<'ctx> Planner<'ctx> {
 				}
 				Ok(Arc::new(SetLiteral {
 					elements: phys_elements,
+				}))
+			}
+			Expr::Literal(crate::expr::literal::Literal::RecordId(rid_lit)) => {
+				let key = self.convert_record_key_to_physical(&rid_lit.key)?;
+				Ok(Arc::new(RecordIdExpr {
+					table: rid_lit.table,
+					key,
 				}))
 			}
 			Expr::Literal(lit) => {
@@ -502,6 +509,75 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		self.physical_expr(expr)
+	}
+
+	// ========================================================================
+	// Record ID Key Conversion
+	// ========================================================================
+
+	/// Convert a `RecordIdKeyLit` to a `PhysicalRecordIdKey` for runtime evaluation.
+	///
+	/// Scalar key types (Number, String, Uuid, Generate) are mapped directly.
+	/// Array and Object elements are converted via `physical_expr()` so they
+	/// can contain arbitrary expressions (function calls, params, etc.).
+	/// Range bounds recurse through this method.
+	fn convert_record_key_to_physical(
+		&self,
+		key: &crate::expr::RecordIdKeyLit,
+	) -> Result<crate::exec::physical_expr::record_id::PhysicalRecordIdKey, Error> {
+		use crate::exec::physical_expr::record_id::PhysicalRecordIdKey;
+		use crate::expr::RecordIdKeyLit;
+
+		match key {
+			RecordIdKeyLit::Number(n) => Ok(PhysicalRecordIdKey::Number(*n)),
+			RecordIdKeyLit::String(s) => Ok(PhysicalRecordIdKey::String(s.clone())),
+			RecordIdKeyLit::Uuid(u) => Ok(PhysicalRecordIdKey::Uuid(*u)),
+			RecordIdKeyLit::Generate(generator) => {
+				Ok(PhysicalRecordIdKey::Generate(generator.clone()))
+			}
+			RecordIdKeyLit::Array(exprs) => {
+				let mut phys = Vec::with_capacity(exprs.len());
+				for expr in exprs {
+					phys.push(self.physical_expr(expr.clone())?);
+				}
+				Ok(PhysicalRecordIdKey::Array(phys))
+			}
+			RecordIdKeyLit::Object(entries) => {
+				let mut phys = Vec::with_capacity(entries.len());
+				for entry in entries {
+					let value = self.physical_expr(entry.value.clone())?;
+					phys.push((entry.key.clone(), value));
+				}
+				Ok(PhysicalRecordIdKey::Object(phys))
+			}
+			RecordIdKeyLit::Range(range) => {
+				let start = self.convert_bound_to_physical(&range.start)?;
+				let end = self.convert_bound_to_physical(&range.end)?;
+				Ok(PhysicalRecordIdKey::Range {
+					start,
+					end,
+				})
+			}
+		}
+	}
+
+	/// Convert a `Bound<RecordIdKeyLit>` to a `Bound<Box<PhysicalRecordIdKey>>`.
+	fn convert_bound_to_physical(
+		&self,
+		bound: &std::ops::Bound<crate::expr::RecordIdKeyLit>,
+	) -> Result<
+		std::ops::Bound<Box<crate::exec::physical_expr::record_id::PhysicalRecordIdKey>>,
+		Error,
+	> {
+		match bound {
+			std::ops::Bound::Unbounded => Ok(std::ops::Bound::Unbounded),
+			std::ops::Bound::Included(key) => Ok(std::ops::Bound::Included(Box::new(
+				self.convert_record_key_to_physical(key)?,
+			))),
+			std::ops::Bound::Excluded(key) => Ok(std::ops::Bound::Excluded(Box::new(
+				self.convert_record_key_to_physical(key)?,
+			))),
+		}
 	}
 
 	// ========================================================================

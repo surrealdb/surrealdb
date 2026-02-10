@@ -367,6 +367,7 @@ impl WelfordAccumulator {
 	/// Uses Chan's parallel algorithm for combining partial results.
 	/// Reference: Chan et al. (1979) "Updating Formulae and a Pairwise
 	/// Algorithm for Computing Sample Variances"
+	#[allow(unused)]
 	fn merge_welford(&mut self, other: &WelfordAccumulator) {
 		if other.count == 0 {
 			return;

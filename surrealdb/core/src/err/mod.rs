@@ -1185,6 +1185,27 @@ impl Error {
 				| Error::FieldUndefined { .. }
 		)
 	}
+
+	/// Returns true if this error represents a data-shape problem
+	/// (type mismatch, coercion failure, etc.) that can be safely
+	/// treated as NONE in expression evaluation contexts.
+	///
+	/// Returns false for system errors (storage, I/O, timeout,
+	/// permissions) that must always propagate.
+	pub fn is_ignorable(&self) -> bool {
+		matches!(
+			self,
+			Error::Coerce(_)
+				| Error::Cast(_)
+				| Error::InvalidArguments { .. }
+				| Error::TryAdd(..)
+				| Error::TrySub(..)
+				| Error::TryMul(..)
+				| Error::TryDiv(..)
+				| Error::TryPow(..)
+				| Error::TryNeg(..)
+		)
+	}
 }
 
 impl From<Error> for String {

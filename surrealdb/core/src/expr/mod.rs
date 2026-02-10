@@ -139,6 +139,28 @@ impl From<crate::err::Error> for ControlFlow {
 	}
 }
 
+impl ControlFlow {
+	/// Returns true if this represents a data-shape error that can safely
+	/// be treated as `Value::None` (e.g., type mismatches, coercion failures).
+	///
+	/// Returns false for system errors (storage, timeout, permissions),
+	/// control flow signals (Break/Continue), and Return values.
+	pub fn is_ignorable(&self) -> bool {
+		match self {
+			// Control flow signals are never ignorable
+			ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => false,
+			ControlFlow::Err(e) => {
+				// Check if the inner error is a known ignorable type
+				if let Some(err) = e.downcast_ref::<crate::err::Error>() {
+					err.is_ignorable()
+				} else {
+					false // Unknown error types are not ignorable
+				}
+			}
+		}
+	}
+}
+
 /// Helper trait to catch controlflow return unwinding.
 pub(crate) trait FlowResultExt {
 	/// Function which catches `ControlFlow::Return(x)` and turns it into
@@ -148,6 +170,10 @@ pub(crate) trait FlowResultExt {
 	/// `ControlFlow::Continue` it will instead create an error that
 	/// break/continue was used within an invalid location.
 	fn catch_return(self) -> Result<Value, anyhow::Error>;
+
+	/// Falls back to `Value::None` for ignorable errors (type mismatches, etc.),
+	/// but propagates consequential errors (storage, timeout, permissions).
+	fn or_none(self) -> FlowResult<Value>;
 }
 
 impl FlowResultExt for FlowResult<Value> {
@@ -159,6 +185,14 @@ impl FlowResultExt for FlowResult<Value> {
 			Err(ControlFlow::Return(x)) => Ok(x),
 			Err(ControlFlow::Err(e)) => Err(e),
 			Ok(x) => Ok(x),
+		}
+	}
+
+	fn or_none(self) -> FlowResult<Value> {
+		match self {
+			Ok(v) => Ok(v),
+			Err(cf) if cf.is_ignorable() => Ok(Value::None),
+			Err(cf) => Err(cf),
 		}
 	}
 }

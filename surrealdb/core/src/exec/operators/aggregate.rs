@@ -7,7 +7,7 @@ use futures::StreamExt;
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResultExt as _, PhysicalExpr, ValueBatch, ValueBatchStream,
 };
 use crate::expr::idiom::Idiom;
 use crate::val::{Object, Value};
@@ -225,13 +225,8 @@ impl ExecOperator for Aggregate {
 					for extracted in &info.aggregates {
 						let mut args = Vec::with_capacity(extracted.extra_args.len());
 						for extra_arg in &extracted.extra_args {
-							let value = match extra_arg.evaluate(eval_ctx_for_args.clone()).await {
-								Ok(v) => v,
-								Err(e) => {
-									tracing::debug!(error = %e, "Extra arg evaluation failed, using None");
-									Value::None
-								}
-							};
+							let value =
+								extra_arg.evaluate(eval_ctx_for_args.clone()).await.or_none()?;
 							args.push(value);
 						}
 						field_args.push(args);
@@ -260,18 +255,18 @@ impl ExecOperator for Aggregate {
 						.await
 					{
 						Ok(v) => v,
-						Err(_) => {
-							// Fallback: evaluate per-row, replacing errors with None
-							let mut keys = Vec::with_capacity(batch.values.len());
-							for value in &batch.values {
-								let v = expr
-									.evaluate(eval_ctx.with_value(value))
-									.await
-									.unwrap_or(Value::None);
-								keys.push(v);
-							}
-							keys
+					Err(_) => {
+						// Fallback: evaluate per-row, replacing ignorable errors with None
+						let mut keys = Vec::with_capacity(batch.values.len());
+						for value in &batch.values {
+							let v = expr
+								.evaluate(eval_ctx.with_value(value))
+								.await
+								.or_none()?;
+							keys.push(v);
 						}
+						keys
+					}
 					};
 					group_key_columns.push(keys);
 				}
@@ -288,11 +283,21 @@ impl ExecOperator for Aggregate {
 								.evaluate_batch(eval_ctx.clone(), &batch.values)
 								.await
 							{
-								Ok(v) => v,
-								Err(e) => {
-									tracing::debug!(error = %e, "Aggregate arg batch evaluation failed, using None for all");
-									vec![Value::None; batch.values.len()]
+							Ok(v) => v,
+							Err(_) => {
+								// Fallback: evaluate per-row, replacing ignorable errors with None
+								let mut col =
+									Vec::with_capacity(batch.values.len());
+								for value in &batch.values {
+									let v = extracted
+										.argument_expr
+										.evaluate(eval_ctx.with_value(value))
+										.await
+										.or_none()?;
+									col.push(v);
 								}
+								col
+							}
 							};
 							field_cols.push(col);
 						}
@@ -332,18 +337,19 @@ impl ExecOperator for Aggregate {
 									tracing::debug!(error = %e, "Accumulator update failed, skipping value");
 								}
 							}
-						} else if let Some(expr) = &agg.fallback_expr {
-							// Non-aggregate field - store first value (per-row, lazy)
-							if state.first_values[field_idx].is_none() {
-								match expr.evaluate(eval_ctx.with_value(value)).await {
-									Ok(field_value) => {
-										state.first_values[field_idx] = field_value;
-									}
-									Err(e) => {
-										tracing::debug!(error = %e, "Fallback expression evaluation failed");
-									}
+					} else if let Some(expr) = &agg.fallback_expr {
+						// Non-aggregate field - store first value (per-row, lazy)
+						if state.first_values[field_idx].is_none() {
+							match expr.evaluate(eval_ctx.with_value(value)).await {
+								Ok(field_value) => {
+									state.first_values[field_idx] = field_value;
 								}
+								Err(cf) if cf.is_ignorable() => {
+									tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+								}
+								Err(cf) => Err(cf)?,
 							}
+						}
 						}
 					}
 				}
@@ -357,7 +363,7 @@ impl ExecOperator for Aggregate {
 					state,
 					&aggregates,
 					&ctx,
-				).await;
+				).await?;
 				results.push(result);
 			}
 
@@ -421,16 +427,16 @@ async fn compute_single_field_value(
 	accumulators: &[Box<dyn Accumulator>],
 	first_value: Value,
 	ctx: &ExecutionContext,
-) -> Value {
+) -> FlowResult<Value> {
 	if let Some(idx) = agg.group_key_index {
 		// For group-by keys, use the key value directly by index
-		group_key.get(idx).cloned().unwrap_or(Value::None)
+		Ok(group_key.get(idx).cloned().unwrap_or(Value::None))
 	} else if let Some(info) = &agg.aggregate_expr_info {
 		// Compute the aggregate value(s)
 		compute_aggregate_field_value(info, accumulators, ctx).await
 	} else {
 		// Return first value for non-aggregate fields
-		first_value
+		Ok(first_value)
 	}
 }
 
@@ -444,7 +450,7 @@ async fn compute_group_result_async(
 	state: GroupState,
 	aggregates: &[AggregateField],
 	ctx: &ExecutionContext,
-) -> Value {
+) -> FlowResult<Value> {
 	// Special case: SELECT VALUE with GROUP BY
 	// If there's exactly one aggregate with an empty name, return the raw value
 	if aggregates.len() == 1 && aggregates[0].is_empty_name() {
@@ -462,14 +468,14 @@ async fn compute_group_result_async(
 
 	for ((agg, accumulators), first_value) in field_data {
 		let field_value =
-			compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await;
+			compute_single_field_value(agg, group_key, &accumulators, first_value, ctx).await?;
 
 		// Use nested setting to properly construct nested objects
 		// e.g., path ["address", "city"] creates { address: { city: value } }
 		set_nested_value(&mut result, &agg.output_path, field_value);
 	}
 
-	Value::Object(result)
+	Ok(Value::Object(result))
 }
 
 /// Set a value at a nested path in an object.
@@ -516,9 +522,9 @@ async fn compute_aggregate_field_value(
 	info: &AggregateExprInfo,
 	accumulators: &[Box<dyn Accumulator>],
 	ctx: &ExecutionContext,
-) -> Value {
+) -> FlowResult<Value> {
 	if info.aggregates.is_empty() {
-		return Value::Null;
+		return Ok(Value::Null);
 	}
 
 	// Finalize all accumulators and build the aggregate document
@@ -539,14 +545,15 @@ async fn compute_aggregate_field_value(
 		let doc_value = Value::Object(agg_doc);
 		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&doc_value);
 		match post_expr.evaluate(eval_ctx).await {
-			Ok(v) => v,
-			Err(e) => {
-				debug!(error = %e, "Post-expression evaluation failed, using Null");
-				Value::Null
+			Ok(v) => Ok(v),
+			Err(cf) if cf.is_ignorable() => {
+				debug!(error = %cf, "Post-expression evaluation failed (ignorable), using Null");
+				Ok(Value::Null)
 			}
+			Err(cf) => Err(cf),
 		}
 	} else {
 		// No post-expression means direct single aggregate - return first value
-		agg_doc.0.into_values().next().unwrap_or(Value::Null)
+		Ok(agg_doc.0.into_values().next().unwrap_or(Value::Null))
 	}
 }
