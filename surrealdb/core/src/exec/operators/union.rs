@@ -25,7 +25,8 @@ pub struct Union {
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Union {
 	fn name(&self) -> &'static str {
 		"Union"

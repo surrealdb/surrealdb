@@ -35,7 +35,8 @@ pub struct TableInfoPlan {
 	pub version: Option<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for TableInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoTable"

@@ -9,7 +9,6 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashMap};
-use std::pin::Pin;
 
 use anyhow::Result;
 use reblessive::tree::TreeStack;
@@ -69,7 +68,7 @@ impl ScalarFunction for SearchAnalyze {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let mut args = args.into_iter();
 
@@ -181,7 +180,7 @@ impl IndexFunction for SearchHighlight {
 		ctx: &'a EvalContext<'_>,
 		match_ctx: &'a MatchContext,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let mut args = args.into_iter();
 
@@ -246,7 +245,7 @@ impl IndexFunction for SearchScore {
 		ctx: &'a EvalContext<'_>,
 		match_ctx: &'a MatchContext,
 		_args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
@@ -311,7 +310,7 @@ impl IndexFunction for SearchOffsets {
 		ctx: &'a EvalContext<'_>,
 		match_ctx: &'a MatchContext,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let mut args = args.into_iter();
 			let partial = args.next().map(|v| v.is_truthy()).unwrap_or(false);
@@ -391,7 +390,7 @@ impl ScalarFunction for SearchRrf {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let mut args = args.into_iter();
@@ -541,7 +540,7 @@ impl ScalarFunction for SearchLinear {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let mut args = args.into_iter();

@@ -1,7 +1,5 @@
 //! Sequence functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 
 use crate::err::Error;
@@ -42,7 +40,7 @@ impl ScalarFunction for SequenceNextval {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options().ok_or_else(|| {

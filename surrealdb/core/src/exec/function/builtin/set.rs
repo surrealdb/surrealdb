@@ -1,7 +1,5 @@
 //! Set functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 use reblessive::tree::TreeStack;
 
@@ -72,7 +70,7 @@ macro_rules! define_set_closure_function {
 				&'a self,
 				ctx: &'a EvalContext<'_>,
 				args: Vec<Value>,
-			) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+			) -> crate::exec::BoxFut<'a, Result<Value>> {
 				Box::pin(async move {
 					let args = FromArgs::from_args($func_name, args)?;
 					let frozen = ctx.exec_ctx.ctx();

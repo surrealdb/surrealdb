@@ -1,7 +1,5 @@
 //! Type conversion and checking functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 
 use crate::exec::ContextLevel;
@@ -86,7 +84,7 @@ impl ProjectionFunction for TypeField {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<(Idiom, Value)>>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Vec<(Idiom, Value)>>> {
 		Box::pin(async move {
 			// Extract the string path argument
 			let (path,): (String,) = FromArgs::from_args("type::field", args)?;
@@ -132,7 +130,7 @@ impl ProjectionFunction for TypeFields {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<(Idiom, Value)>>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Vec<(Idiom, Value)>>> {
 		Box::pin(async move {
 			// Extract the array of string paths
 			let (paths,): (Vec<String>,) = FromArgs::from_args("type::fields", args)?;

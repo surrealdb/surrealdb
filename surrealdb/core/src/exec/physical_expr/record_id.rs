@@ -41,8 +41,7 @@ impl PhysicalRecordIdKey {
 	pub fn evaluate<'a>(
 		&'a self,
 		ctx: EvalContext<'a>,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = FlowResult<RecordIdKey>> + Send + 'a>>
-	{
+	) -> crate::exec::BoxFut<'a, FlowResult<RecordIdKey>> {
 		Box::pin(async move {
 			match self {
 				PhysicalRecordIdKey::Number(n) => Ok(RecordIdKey::Number(*n)),
@@ -200,7 +199,8 @@ pub struct RecordIdExpr {
 	pub(crate) key: PhysicalRecordIdKey,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RecordIdExpr {
 	fn name(&self) -> &'static str {
 		"RecordIdExpr"

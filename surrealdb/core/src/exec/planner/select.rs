@@ -17,7 +17,7 @@ use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
-#[cfg(storage)]
+#[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
 	Aggregate, Compute, Fetch, FieldSelection, Filter, Limit, Project, ProjectValue, Projection,
@@ -679,7 +679,7 @@ impl<'ctx> Planner<'ctx> {
 			Ordering::Order(order_list) => {
 				let order_by = self.convert_order_list(order_list)?;
 
-				#[cfg(storage)]
+				#[cfg(all(storage, not(target_family = "wasm")))]
 				if tempfiles && let Some(temp_dir) = self.ctx.temporary_directory() {
 					return Ok(Arc::new(ExternalSort {
 						input,

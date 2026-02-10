@@ -16,7 +16,8 @@ pub struct BinaryOp {
 	pub(crate) right: Arc<dyn PhysicalExpr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for BinaryOp {
 	fn name(&self) -> &'static str {
 		"BinaryOp"
@@ -183,7 +184,8 @@ pub struct UnaryOp {
 	pub(crate) expr: Arc<dyn PhysicalExpr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for UnaryOp {
 	fn name(&self) -> &'static str {
 		"UnaryOp"
@@ -251,7 +253,8 @@ pub struct PostfixOp {
 	pub(crate) expr: Arc<dyn PhysicalExpr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for PostfixOp {
 	fn name(&self) -> &'static str {
 		"PostfixOp"

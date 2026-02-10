@@ -52,7 +52,8 @@ fn planning_context(exec_ctx: &ExecutionContext) -> &FrozenContext {
 	exec_ctx.ctx()
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SequencePlan {
 	fn name(&self) -> &'static str {
 		"Sequence"

@@ -240,7 +240,24 @@ impl<'ctx> Planner<'ctx> {
 				AstDestructurePart::All(name) => DestructureField::All(name),
 				AstDestructurePart::Field(name) => DestructureField::Field(name),
 				AstDestructurePart::Aliased(name, idiom) => {
-					let path = self.convert_parts(idiom.0)?;
+					let mut parts = idiom.0;
+					// Handle Part::Start the same way convert_idiom does:
+					// extract it, convert to a physical expression, and prepend
+					// to the path. This occurs when the parser wraps non-idiom
+					// expressions (like $this or level * 2) in Part::Start
+					// within destructure aliases.
+					let start_expr = if matches!(parts.first(), Some(Part::Start(_))) {
+						let Part::Start(expr) = parts.remove(0) else {
+							unreachable!()
+						};
+						Some(self.physical_expr(expr)?)
+					} else {
+						None
+					};
+					let mut path = self.convert_parts(parts)?;
+					if let Some(start) = start_expr {
+						path.insert(0, start);
+					}
 					DestructureField::Aliased {
 						field: name,
 						path,

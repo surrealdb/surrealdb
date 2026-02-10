@@ -40,7 +40,8 @@ pub struct IfElsePlan {
 	pub else_body: Option<Expr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IfElsePlan {
 	fn name(&self) -> &'static str {
 		"IfElse"

@@ -30,6 +30,7 @@ pub use registry::FunctionRegistry;
 pub use signature::Signature;
 
 use crate::exec::physical_expr::EvalContext;
+use crate::exec::{BoxFut, SendSyncRequirement};
 use crate::expr::Kind;
 use crate::val::Value;
 
@@ -40,7 +41,7 @@ use crate::val::Value;
 /// - Pure: operate only on their arguments with no side effects
 /// - Context-aware: need access to session/database state
 /// - Async: perform I/O operations
-pub trait ScalarFunction: Send + Sync + Debug {
+pub trait ScalarFunction: SendSyncRequirement + Debug {
 	/// The fully qualified function name (e.g., "math::abs", "string::len")
 	fn name(&self) -> &'static str;
 
@@ -98,7 +99,7 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> BoxFut<'a, Result<Value>> {
 		Box::pin(async move { self.invoke(args) })
 	}
 }

@@ -31,7 +31,8 @@ pub struct MethodPart {
 	pub args: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for MethodPart {
 	fn name(&self) -> &'static str {
 		"Method"
@@ -124,7 +125,8 @@ pub struct ClosureFieldCallPart {
 	pub args: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ClosureFieldCallPart {
 	fn name(&self) -> &'static str {
 		"ClosureFieldCall"

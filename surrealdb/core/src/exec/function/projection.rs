@@ -12,13 +12,12 @@
 //! Examples: type::field, type::fields
 
 use std::fmt::Debug;
-use std::pin::Pin;
 
 use anyhow::Result;
 
 use super::Signature;
-use crate::exec::ContextLevel;
 use crate::exec::physical_expr::EvalContext;
+use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
@@ -30,7 +29,7 @@ use crate::val::Value;
 ///
 /// For example, `SELECT type::field("name") FROM person` produces `{ name: "value" }`
 /// rather than `{ "type::field": "value" }`.
-pub trait ProjectionFunction: Send + Sync + Debug {
+pub trait ProjectionFunction: SendSyncRequirement + Debug {
 	/// The fully qualified function name (e.g., "type::field", "type::fields")
 	fn name(&self) -> &'static str;
 
@@ -70,5 +69,5 @@ pub trait ProjectionFunction: Send + Sync + Debug {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<(Idiom, Value)>>> + Send + 'a>>;
+	) -> BoxFut<'a, Result<Vec<(Idiom, Value)>>>;
 }

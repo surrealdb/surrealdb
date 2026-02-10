@@ -1,7 +1,5 @@
 //! API functions for the streaming executor.
 
-use std::pin::Pin;
-
 use anyhow::Result;
 use reblessive::TreeStack;
 
@@ -45,7 +43,7 @@ impl ScalarFunction for ApiInvoke {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			// Check DefineApi experimental capability
 			let caps = ctx.capabilities();

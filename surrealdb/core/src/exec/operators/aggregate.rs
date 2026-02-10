@@ -151,7 +151,8 @@ struct GroupState {
 	first_values: Vec<Value>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Aggregate {
 	fn name(&self) -> &'static str {
 		"Aggregate"

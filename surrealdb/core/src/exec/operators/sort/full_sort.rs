@@ -41,7 +41,8 @@ pub struct Sort {
 	pub(crate) order_by: Vec<OrderByField>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Sort {
 	fn name(&self) -> &'static str {
 		"Sort"
@@ -202,7 +203,8 @@ impl SortByKey {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SortByKey {
 	fn name(&self) -> &'static str {
 		"SortByKey"

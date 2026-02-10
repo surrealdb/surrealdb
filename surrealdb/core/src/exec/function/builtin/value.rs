@@ -1,7 +1,5 @@
 //! Value functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 use reblessive::tree::TreeStack;
 
@@ -43,7 +41,7 @@ impl ScalarFunction for ValueDiff {
 		&'a self,
 		_ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("value::diff", args)?;
 			crate::fnc::value::diff(args).await
@@ -83,7 +81,7 @@ impl ScalarFunction for ValuePatch {
 		&'a self,
 		_ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("value::patch", args)?;
 			crate::fnc::value::patch(args).await
@@ -123,7 +121,7 @@ impl ScalarFunction for ValueChain {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("value::chain", args)?;
 			let frozen = ctx.exec_ctx.ctx();

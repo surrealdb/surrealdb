@@ -70,7 +70,8 @@ pub struct RecursePart {
 	pub has_repeat_recurse: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RecursePart {
 	fn name(&self) -> &'static str {
 		"Recurse"
@@ -215,7 +216,8 @@ impl ToSql for RecursePart {
 #[derive(Debug, Clone)]
 pub struct RepeatRecursePart;
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RepeatRecursePart {
 	fn name(&self) -> &'static str {
 		"RepeatRecurse"
@@ -261,7 +263,7 @@ fn evaluate_recurse_with_plan<'a>(
 	value: &'a Value,
 	path: &'a [Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'a>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = FlowResult<Value>> + Send + 'a>> {
+) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 	Box::pin(async move {
 		let rec_ctx = ctx.recursion_ctx.as_ref().expect("recursion context must be set");
 		let max_depth = rec_ctx.max_depth.unwrap_or(256);
@@ -291,7 +293,7 @@ fn evaluate_recurse_with_plan<'a>(
 fn evaluate_repeat_recurse<'a>(
 	value: &'a Value,
 	ctx: EvalContext<'a>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = FlowResult<Value>> + Send + 'a>> {
+) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 	Box::pin(async move {
 		let rec_ctx = match &ctx.recursion_ctx {
 			Some(rc) => *rc,

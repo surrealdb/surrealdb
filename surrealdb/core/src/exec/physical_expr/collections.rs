@@ -14,7 +14,8 @@ pub struct ArrayLiteral {
 	pub(crate) elements: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ArrayLiteral {
 	fn name(&self) -> &'static str {
 		"ArrayLiteral"
@@ -65,7 +66,8 @@ pub struct ObjectLiteral {
 	pub(crate) entries: Vec<(String, Arc<dyn PhysicalExpr>)>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ObjectLiteral {
 	fn name(&self) -> &'static str {
 		"ObjectLiteral"
@@ -116,7 +118,8 @@ pub struct SetLiteral {
 	pub(crate) elements: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for SetLiteral {
 	fn name(&self) -> &'static str {
 		"SetLiteral"

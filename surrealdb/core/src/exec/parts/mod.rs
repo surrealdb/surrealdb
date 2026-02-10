@@ -188,7 +188,7 @@ pub(crate) fn evaluate_physical_path<'a>(
 	value: &'a Value,
 	path: &'a [Arc<dyn PhysicalExpr>],
 	ctx: EvalContext<'a>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = FlowResult<Value>> + Send + 'a>> {
+) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 	Box::pin(async move {
 		let mut current = value.clone();
 		for part in path {

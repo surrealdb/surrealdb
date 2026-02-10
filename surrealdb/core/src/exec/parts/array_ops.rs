@@ -23,7 +23,8 @@ const PARALLEL_BATCH_THRESHOLD: usize = 2;
 #[derive(Debug, Clone)]
 pub struct AllPart;
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for AllPart {
 	fn name(&self) -> &'static str {
 		"All"
@@ -117,7 +118,8 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow:
 #[derive(Debug, Clone)]
 pub struct FlattenPart;
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for FlattenPart {
 	fn name(&self) -> &'static str {
 		"Flatten"
@@ -172,7 +174,8 @@ pub(crate) fn evaluate_flatten(value: &Value) -> anyhow::Result<Value> {
 #[derive(Debug, Clone)]
 pub struct FirstPart;
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for FirstPart {
 	fn name(&self) -> &'static str {
 		"First"
@@ -213,7 +216,8 @@ impl ToSql for FirstPart {
 #[derive(Debug, Clone)]
 pub struct LastPart;
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for LastPart {
 	fn name(&self) -> &'static str {
 		"Last"

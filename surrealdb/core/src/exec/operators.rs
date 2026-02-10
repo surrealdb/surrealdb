@@ -51,7 +51,7 @@ pub use r#return::ReturnPlan;
 pub use scan::Scan;
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
-#[cfg(storage)]
+#[cfg(all(storage, not(target_family = "wasm")))]
 pub use sort::ExternalSort;
 pub use sort::{OrderByField, RandomShuffle, Sort, SortByKey, SortDirection, SortKey, SortTopK};
 pub use source_expr::SourceExpr;

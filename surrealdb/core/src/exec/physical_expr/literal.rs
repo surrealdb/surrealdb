@@ -20,7 +20,8 @@ use crate::val::{Array, Value};
 #[derive(Debug, Clone)]
 pub struct Literal(pub(crate) Value);
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for Literal {
 	fn name(&self) -> &'static str {
 		"Literal"
@@ -124,7 +125,8 @@ impl Param {
 	}
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for Param {
 	fn name(&self) -> &'static str {
 		"Param"
@@ -237,7 +239,8 @@ impl ToSql for Param {
 #[derive(Debug, Clone)]
 pub struct MockExpr(pub(crate) Mock);
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for MockExpr {
 	fn name(&self) -> &'static str {
 		"Mock"

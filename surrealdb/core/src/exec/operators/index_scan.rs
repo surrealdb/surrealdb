@@ -46,7 +46,8 @@ pub struct IndexScan {
 	pub table_name: crate::val::TableName,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IndexScan {
 	fn name(&self) -> &'static str {
 		"IndexScan"

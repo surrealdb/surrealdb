@@ -24,7 +24,8 @@ pub struct Fetch {
 	pub(crate) fields: Vec<Idiom>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Fetch {
 	fn name(&self) -> &'static str {
 		"Fetch"
@@ -109,7 +110,7 @@ fn fetch_field_path<'a>(
 	ctx: &'a ExecutionContext,
 	value: &'a mut Value,
 	path: &'a [Part],
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<()>> + Send + 'a>> {
+) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<()>> {
 	Box::pin(async move {
 		let mut current = value;
 		let mut depth = 0usize;

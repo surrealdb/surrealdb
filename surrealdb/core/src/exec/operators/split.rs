@@ -22,7 +22,8 @@ pub struct Split {
 	pub(crate) idioms: Vec<Idiom>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Split {
 	fn name(&self) -> &'static str {
 		"Split"

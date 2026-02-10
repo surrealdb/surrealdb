@@ -46,7 +46,9 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::{Node, Timestamp};
-use crate::dbs::{Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::dbs::{
+	Capabilities, ComputeExecutor, Options, QueryResult, QueryResultBuilder, Session,
+};
 use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;

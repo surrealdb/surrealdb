@@ -23,8 +23,6 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Returns the aggregate fields and the physical expressions for group keys.
 	#[allow(clippy::type_complexity)]
-	#[allow(clippy::type_complexity)]
-	#[allow(clippy::type_complexity)]
 	pub(crate) fn plan_aggregation(
 		&self,
 		fields: &Fields,
@@ -144,8 +142,6 @@ impl<'ctx> Planner<'ctx> {
 	/// Takes `expr` by value. When no aggregate functions are found, the visitor
 	/// leaves the expression unchanged, so we can use it directly for the
 	/// implicit `array::group` fallback without an extra clone.
-	#[allow(clippy::type_complexity)]
-	#[allow(clippy::type_complexity)]
 	#[allow(clippy::type_complexity)]
 	pub(crate) fn extract_aggregate_info(
 		&self,

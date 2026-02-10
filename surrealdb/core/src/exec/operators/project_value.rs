@@ -27,7 +27,8 @@ pub struct ProjectValue {
 	pub expr: Arc<dyn PhysicalExpr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ProjectValue {
 	fn name(&self) -> &'static str {
 		"ProjectValue"

@@ -19,7 +19,8 @@ pub struct Filter {
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Filter {
 	fn name(&self) -> &'static str {
 		"Filter"

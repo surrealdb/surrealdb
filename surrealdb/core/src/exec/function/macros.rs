@@ -377,13 +377,7 @@ macro_rules! define_context_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				_args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx) })
 			}
 		}
@@ -453,13 +447,7 @@ macro_rules! define_async_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				_args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx).await })
 			}
 		}
@@ -502,13 +490,7 @@ macro_rules! define_async_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx, args).await })
 			}
 		}
@@ -552,13 +534,7 @@ macro_rules! define_async_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx, args).await })
 			}
 		}
@@ -602,13 +578,7 @@ macro_rules! define_async_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx, args).await })
 			}
 		}
@@ -653,13 +623,7 @@ macro_rules! define_async_function {
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
-			) -> std::pin::Pin<
-				Box<
-					dyn std::future::Future<Output = anyhow::Result<$crate::val::Value>>
-						+ Send
-						+ 'a,
-				>,
-			> {
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move { $impl_fn(ctx, args).await })
 			}
 		}

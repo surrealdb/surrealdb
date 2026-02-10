@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
+use crate::exec::{AccessMode, ContextLevel, ExecutionContext, SendSyncRequirement};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
@@ -178,8 +178,9 @@ impl<'a> EvalContext<'a> {
 	}
 }
 
-#[async_trait]
-pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	fn name(&self) -> &'static str;
 
 	/// The minimum context level required to evaluate this expression.

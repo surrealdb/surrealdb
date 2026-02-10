@@ -36,7 +36,8 @@ pub struct RootInfoPlan {
 	pub structured: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for RootInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoRoot"

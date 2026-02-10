@@ -15,7 +15,8 @@ pub struct ScalarSubquery {
 	pub(crate) plan: Arc<dyn ExecOperator>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ScalarSubquery {
 	fn name(&self) -> &'static str {
 		"ScalarSubquery"

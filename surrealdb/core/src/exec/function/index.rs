@@ -16,14 +16,13 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
 
 use super::Signature;
-use crate::exec::ContextLevel;
 use crate::exec::physical_expr::EvalContext;
+use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::idx::ft::MatchRef;
@@ -41,7 +40,7 @@ use crate::val::{TableName, Value};
 /// planner extracts this argument from the AST, resolves it against the WHERE
 /// clause's MATCHES operators, and creates a `MatchContext` that is passed to
 /// the function at evaluation time.
-pub trait IndexFunction: Send + Sync + Debug {
+pub trait IndexFunction: SendSyncRequirement + Debug {
 	/// The fully qualified function name (e.g., "search::highlight", "search::score")
 	fn name(&self) -> &'static str;
 
@@ -87,7 +86,7 @@ pub trait IndexFunction: Send + Sync + Debug {
 		ctx: &'a EvalContext<'_>,
 		match_ctx: &'a MatchContext,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>>;
+	) -> BoxFut<'a, Result<Value>>;
 }
 
 // =========================================================================

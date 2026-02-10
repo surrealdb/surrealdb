@@ -155,7 +155,8 @@ pub struct BuiltinFunctionExec {
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for BuiltinFunctionExec {
 	fn name(&self) -> &'static str {
 		"BuiltinFunction"
@@ -225,7 +226,8 @@ pub struct UserDefinedFunctionExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for UserDefinedFunctionExec {
 	fn name(&self) -> &'static str {
 		"UserDefinedFunction"
@@ -337,7 +339,8 @@ pub struct JsFunctionExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for JsFunctionExec {
 	fn name(&self) -> &'static str {
 		"JsFunction"
@@ -419,7 +422,8 @@ pub struct ModelFunctionExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ModelFunctionExec {
 	fn name(&self) -> &'static str {
 		"ModelFunction"
@@ -643,7 +647,8 @@ pub struct SurrealismModuleExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for SurrealismModuleExec {
 	fn name(&self) -> &'static str {
 		"SurrealismModule"
@@ -798,7 +803,8 @@ pub struct SiloModuleExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for SiloModuleExec {
 	fn name(&self) -> &'static str {
 		"SiloModule"
@@ -862,7 +868,8 @@ pub struct ClosureExec {
 	pub(crate) closure: crate::expr::ClosureExpr,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ClosureExec {
 	fn name(&self) -> &'static str {
 		"Closure"
@@ -925,7 +932,8 @@ pub struct ClosureCallExec {
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ClosureCallExec {
 	fn name(&self) -> &'static str {
 		"ClosureCall"
@@ -1080,7 +1088,8 @@ pub struct ProjectionFunctionExec {
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ProjectionFunctionExec {
 	fn name(&self) -> &'static str {
 		"ProjectionFunction"
@@ -1172,7 +1181,8 @@ pub struct IndexFunctionExec {
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for IndexFunctionExec {
 	fn name(&self) -> &'static str {
 		"IndexFunction"

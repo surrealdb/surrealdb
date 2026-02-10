@@ -1,7 +1,5 @@
 //! Schema functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
@@ -42,7 +40,7 @@ impl ScalarFunction for SchemaTableExists {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("schema::table::exists", args)?;
 			let frozen = ctx.exec_ctx.ctx();

@@ -61,7 +61,8 @@ pub struct LookupPart {
 	pub extract_id: bool,
 }
 
-#[async_trait]
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for LookupPart {
 	fn name(&self) -> &'static str {
 		"Lookup"

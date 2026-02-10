@@ -1,7 +1,5 @@
 //! Record functions
 
-use std::pin::Pin;
-
 use anyhow::Result;
 use reblessive::tree::TreeStack;
 
@@ -48,7 +46,7 @@ impl ScalarFunction for RecordExists {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("record::exists", args)?;
 			let frozen = ctx.exec_ctx.ctx();
@@ -98,7 +96,7 @@ impl ScalarFunction for RecordIsEdge {
 		&'a self,
 		ctx: &'a EvalContext<'_>,
 		args: Vec<Value>,
-	) -> Pin<Box<dyn std::future::Future<Output = Result<Value>> + Send + 'a>> {
+	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let args = FromArgs::from_args("record::is_edge", args)?;
 			let frozen = ctx.exec_ctx.ctx();

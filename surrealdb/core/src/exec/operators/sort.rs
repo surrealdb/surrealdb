@@ -10,14 +10,14 @@
 //! - [`ExternalSort`]: Disk-based external merge sort for large datasets (storage feature)
 
 mod common;
-#[cfg(storage)]
+#[cfg(all(storage, not(target_family = "wasm")))]
 mod external;
 mod full_sort;
 mod shuffle;
 mod topk;
 
 pub use common::{OrderByField, SortDirection, SortKey};
-#[cfg(storage)]
+#[cfg(all(storage, not(target_family = "wasm")))]
 pub use external::ExternalSort;
 pub use full_sort::{Sort, SortByKey};
 pub use shuffle::RandomShuffle;
