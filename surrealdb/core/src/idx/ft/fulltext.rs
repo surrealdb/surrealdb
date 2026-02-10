@@ -1204,8 +1204,8 @@ mod tests {
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
 		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 	}
 }

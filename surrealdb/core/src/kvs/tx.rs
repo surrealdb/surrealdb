@@ -476,13 +476,13 @@ impl Transaction {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
+	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
 	where
 		K: KVKey + Debug,
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.count(beg..end).await.map_err(Error::from)?)
+		Ok(self.tr.count(beg..end, version).await.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------

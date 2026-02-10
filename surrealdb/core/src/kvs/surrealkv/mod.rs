@@ -5,7 +5,7 @@ mod cnf;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Durability, HistoryOptions, Mode, Transaction as Tx, Tree, TreeBuilder};
 use tokio::sync::RwLock;
 
 use super::Direction;
@@ -374,7 +374,7 @@ impl Transactable for Transaction {
 
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -384,16 +384,65 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Count items using range iterator
-		let mut iter = inner.range(&beg, &end)?;
-		let mut count = 0;
-		iter.seek_first()?;
-		while iter.valid() {
-			count += 1;
-			iter.next()?;
-		}
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || -> Result<_> {
+			// Store the count
+			let mut count = 0;
+			//
+			match version {
+				Some(ts) => {
+					// Include tombstones so we can detect deleted keys
+					let opts = HistoryOptions::new().with_tombstones(true);
+					// Create the iterator with tombstone visibility
+					let mut iter = inner.history_with_options(beg, end, &opts)?;
+					// Seek to the first key
+					iter.seek_first()?;
+					// History entries are sorted (key ASC, timestamp DESC),
+					// so the first entry with timestamp <= ts is the latest
+					// version for each key. We skip newer versions and only
+					// count non-tombstone entries.
+					while iter.valid() {
+						// This is the latest relevant version for this key
+						if iter.timestamp() <= ts {
+							// Store the current key
+							let key = iter.key();
+							// Check if this is a tombstone
+							let is_tombstone = iter.is_tombstone();
+							// Skip remaining older versions of this key
+							loop {
+								iter.next()?;
+								if !iter.valid() || iter.key() != key {
+									break;
+								}
+							}
+							// Count values which are not deletes
+							if !is_tombstone {
+								count += 1;
+							}
+						} else {
+							// This version is newer, skip it
+							iter.next()?;
+						}
+					}
+				}
+				None => {
+					// Create the iterator
+					let mut iter = inner.range(beg, end)?;
+					// Seek to the first key
+					iter.seek_first()?;
+					// Loop over all keys
+					while iter.valid() {
+						count += 1;
+						iter.next()?;
+					}
+				}
+			}
+			// Return result
+			Ok(count)
+		})
+		.await?;
 		// Return result
-		Ok(count)
+		Ok(res)
 	}
 
 	/// Retrieve a range of keys.

@@ -407,13 +407,13 @@ impl Transactor {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
+	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.count(beg..end).await
+		self.inner.count(beg..end, version).await
 	}
 
 	// --------------------------------------------------

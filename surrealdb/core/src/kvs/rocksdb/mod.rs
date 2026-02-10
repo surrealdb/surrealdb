@@ -698,7 +698,11 @@ impl Transactable for Transaction {
 
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
