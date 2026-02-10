@@ -251,6 +251,10 @@ criteria = "safe-to-deploy"
 version = "0.6.12"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytes]]
+version = "1.11.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.bzip2-sys]]
 version = "0.1.13+1.0.8"
 criteria = "safe-to-deploy"
@@ -390,6 +394,10 @@ criteria = "safe-to-run"
 [[exemptions.deadpool-runtime]]
 version = "0.1.4"
 criteria = "safe-to-run"
+
+[[exemptions.deranged]]
+version = "0.5.5"
+criteria = "safe-to-deploy"
 
 [[exemptions.derive_arbitrary]]
 version = "1.4.1"
@@ -801,6 +809,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-complex]]
 version = "0.4.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.num-conv]]
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-format]]
@@ -1384,11 +1396,15 @@ version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
-version = "0.3.40"
+version = "0.3.47"
+criteria = "safe-to-deploy"
+
+[[exemptions.time-core]]
+version = "0.1.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.time-macros]]
-version = "0.2.21"
+version = "0.2.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.tiny-keccak]]
