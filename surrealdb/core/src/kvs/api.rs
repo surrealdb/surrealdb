@@ -11,7 +11,24 @@ use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
-use crate::kvs::{DefaultTimestamp, Key, Val, Version};
+use crate::kvs::{DefaultTimestamp, Key, Val};
+
+/// Specifies the limit for scan operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanLimit {
+	/// Fetch up to the specified number of entries
+	Count(u32),
+	/// Fetch at least the specified number of bytes
+	Bytes(u32),
+	/// Fetch at least the specified number of bytes, limited by the specified number of entries
+	BytesOrCount(u32, u32),
+}
+
+impl From<u32> for ScanLimit {
+	fn from(count: u32) -> Self {
+		ScanLimit::Count(count)
+	}
+}
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -111,13 +128,23 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -126,7 +153,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -137,7 +164,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -331,20 +358,6 @@ pub trait Transactable: requirements::TransactionRequirements {
 		Ok(len)
 	}
 
-	/// Retrieve all the versions for a specific range of keys from the
-	/// datastore.
-	///
-	/// This function fetches all the versions for the full range of key-value
-	/// pairs, in a single request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
-	async fn scan_all_versions(
-		&self,
-		_rng: Range<Key>,
-		_limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		Err(Error::UnsupportedVersionedQueries)
-	}
-
 	// --------------------------------------------------
 	// Batch functions
 	// --------------------------------------------------
@@ -367,7 +380,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.keys(rng, batch, version).await?;
+		let res = self.keys(rng, ScanLimit::Count(batch), version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<Key>::new(None, res))
@@ -410,7 +423,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.scan(rng, batch, version).await?;
+		let res = self.scan(rng, ScanLimit::Count(batch), version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<(Key, Val)>::new(None, res))
@@ -431,48 +444,6 @@ pub trait Transactable: requirements::TransactionRequirements {
 				// there should be a last item in the
 				// vector, so we shouldn't arrive here
 				None => Ok(Batch::<(Key, Val)>::new(None, res)),
-			}
-		}
-	}
-
-	/// Retrieve a batched scan over a specific range of keys in the datastore.
-	///
-	/// This function fetches key-value-version pairs, in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_keys_vals_versions(
-		&self,
-		rng: Range<Key>,
-		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Continue with function logic
-		let end = rng.end.clone();
-		// Scan for the next batch
-		let res = self.scan_all_versions(rng, batch).await?;
-		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::<(Key, Val, Version, bool)>::new(None, res))
-		} else {
-			match res.last() {
-				Some((k, _, _, _)) => {
-					let mut k = k.clone();
-					util::advance_key(&mut k);
-					Ok(Batch::<(Key, Val, Version, bool)>::new(
-						Some(Range {
-							start: k,
-							end,
-						}),
-						res,
-					))
-				}
-				// We have checked the length above, so
-				// there should be a last item in the
-				// vector, so we shouldn't arrive here
-				None => Ok(Batch::<(Key, Val, Version, bool)>::new(None, res)),
 			}
 		}
 	}

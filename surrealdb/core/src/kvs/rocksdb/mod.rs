@@ -21,6 +21,8 @@ use rocksdb::{
 };
 use tokio::sync::Mutex;
 
+use super::Direction;
+use super::api::ScanLimit;
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
@@ -740,7 +742,12 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -749,8 +756,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -770,16 +775,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some(k) = iter.key() {
-				res.push(k.to_vec());
-				iter.next();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -788,7 +785,12 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -797,8 +799,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -818,16 +818,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some(k) = iter.key() {
-				res.push(k.to_vec());
-				iter.prev();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -839,7 +831,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -850,8 +842,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -871,16 +861,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some((k, v)) = iter.item() {
-				res.push((k.to_vec(), v.to_vec()));
-				iter.next();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -892,7 +874,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -903,8 +885,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -924,16 +904,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some((k, v)) = iter.item() {
-				res.push((k.to_vec(), v.to_vec()));
-				iter.prev();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -970,5 +942,151 @@ impl Transactable for Transaction {
 		};
 		self.db.compact_range(start, end);
 		Ok(())
+	}
+}
+
+// Consume and iterate over only keys
+fn consume_keys<D: rocksdb::DBAccess>(
+	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
+	limit: ScanLimit,
+	dir: Direction,
+) -> Vec<Key> {
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 128).min(4096)); // Assuming 128 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+	}
+}
+
+// Consume and iterate over keys and values
+fn consume_vals<D: rocksdb::DBAccess>(
+	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
+	limit: ScanLimit,
+	dir: Direction,
+) -> Vec<(Key, Val)> {
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 512).min(4096)); // Assuming 512 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
 	}
 }
