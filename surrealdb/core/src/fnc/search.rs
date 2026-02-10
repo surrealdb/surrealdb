@@ -236,11 +236,12 @@ pub async fn rrf(
 		count += 1;
 	}
 
-	// Extract the top `limit` results from the heap and build the final result
-	// array. With a min-heap, pop() yields lowest scores first, so reverse at
-	// the end to return descending order.
-	let mut result_array = Array::with_capacity(scored_docs.len());
-	while let Some(doc) = scored_docs.pop() {
+	// Build the final result array sorted by RRF score in descending order.
+	// `into_sorted_vec()` on our min-heap (reversed Ord) yields documents from
+	// highest to lowest score, so no reversal is needed.
+	let sorted_docs = scored_docs.into_sorted_vec();
+	let mut result_array = Array::with_capacity(sorted_docs.len());
+	for doc in sorted_docs {
 		// Merge all objects from the same document ID across different result lists
 		// This combines fields like 'distance' from vector search and 'ft_score' from
 		// full-text search
@@ -258,8 +259,6 @@ pub async fn rrf(
 		}
 		count += 1;
 	}
-	// Return the fused results sorted by RRF score in descending order
-	result_array.reverse();
 	Ok(Value::Array(result_array))
 }
 
@@ -515,10 +514,12 @@ pub async fn linear(
 		count += 1;
 	}
 
-	// Build the final result array. With a min-heap, pop() yields lowest scores
-	// first, so reverse at the end to return descending order.
-	let mut result_array = Array::with_capacity(scored_docs.len());
-	while let Some(doc) = scored_docs.pop() {
+	// Build the final result array sorted by linear score in descending order.
+	// `into_sorted_vec()` on our min-heap (reversed Ord) yields documents from
+	// highest to lowest score, so no reversal is needed.
+	let sorted_docs = scored_docs.into_sorted_vec();
+	let mut result_array = Array::with_capacity(sorted_docs.len());
+	for doc in sorted_docs {
 		// Merge all objects from the same document ID
 		let mut obj = Object::default();
 		for mut o in doc.2 {
@@ -533,6 +534,5 @@ pub async fn linear(
 		}
 		count += 1;
 	}
-	result_array.reverse();
 	Ok(Value::Array(result_array))
 }
