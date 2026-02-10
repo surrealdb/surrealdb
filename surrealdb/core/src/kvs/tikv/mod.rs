@@ -451,7 +451,7 @@ impl Transactable for Transaction {
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => b / ESTIMATED_BYTES_PER_KEY,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
 			ScanLimit::BytesOrCount(_, c) => c,
 		};
 		// Create the iterator
@@ -483,7 +483,7 @@ impl Transactable for Transaction {
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => b / ESTIMATED_BYTES_PER_KEY,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
 			ScanLimit::BytesOrCount(_, c) => c,
 		};
 		// Create the iterator
@@ -515,7 +515,7 @@ impl Transactable for Transaction {
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => b / ESTIMATED_BYTES_PER_VAL,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
 			ScanLimit::BytesOrCount(_, c) => c,
 		};
 		// Create the iterator
@@ -547,7 +547,7 @@ impl Transactable for Transaction {
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => b / ESTIMATED_BYTES_PER_VAL,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
 			ScanLimit::BytesOrCount(_, c) => c,
 		};
 		// Create the iterator
