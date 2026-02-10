@@ -21,5 +21,5 @@ rustflags = [
 	"-C", "link-arg=/DEFAULTLIB:libvcruntime.lib",
 	"-C", "link-arg=/DEFAULTLIB:libcmt.lib",
 	"-C", "link-arg=/DEFAULTLIB:ucrt.lib",
-	"-C", "link-arg=Advapi32.lib",
+	"-C", "link-arg=/DEFAULTLIB:Advapi32.lib",
 ]
