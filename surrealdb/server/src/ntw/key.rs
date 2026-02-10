@@ -13,7 +13,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn;
+use surrealdb_core::{map, syn};
 use surrealdb_types::{Array, SurrealValue, Value, Variables, vars};
 use tower_http::limit::RequestBodyLimitLayer;
 

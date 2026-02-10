@@ -69,7 +69,7 @@ impl Transactor {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`kvs::Error::TransactionFinished`] error.
+	/// in a [`crate::kvs::Error::TransactionFinished`] error.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn closed(&self) -> bool {
 		self.inner.closed()
@@ -81,8 +81,8 @@ impl Transactor {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return a [`kvs::Error::TransactionReadonly`] error w
-	/// hen attempting to modify any data within the transaction.
+	/// will return a [`crate::kvs::Error::TransactionReadonly`] error when
+	/// attempting to modify any data within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn writeable(&self) -> bool {
 		self.inner.writeable()

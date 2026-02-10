@@ -63,7 +63,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`kvs::Error::TransactionFinished`] error.
+	/// in a [`crate::kvs::Error::TransactionFinished`] error.
 	fn closed(&self) -> bool;
 
 	/// Check if transaction is writeable.
@@ -72,7 +72,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return a [`kvs::Error::TransactionReadonly`] error.
+	/// will return a [`crate::kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
 
 	/// Cancel a transaction.
