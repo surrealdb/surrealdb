@@ -64,16 +64,6 @@ impl Transactor {
 		self.inner.kind()
 	}
 
-	/// Check if the underlying storage engine is local (in-process).
-	///
-	/// Local storage engines (memory, surrealkv, rocksdb) can handle larger
-	/// batch sizes efficiently, while remote engines (tikv, indxdb) benefit
-	/// from smaller batches to reduce network overhead.
-	#[inline]
-	pub(super) fn is_local(&self) -> bool {
-		matches!(self.kind(), "memory" | "surrealkv" | "rocksdb")
-	}
-
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
