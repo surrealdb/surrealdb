@@ -340,6 +340,8 @@ jobs:
         env:
           SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
           RUSTUP_TOOLCHAIN: "1.88"
+          # ort build script (vswhom_sys) needs Advapi32.lib for Windows Registry APIs; target rustflags are not applied to build scripts
+          RUSTFLAGS: ${{ matrix.arch == 'x86_64-pc-windows-msvc' && '-C link-arg=/DEFAULTLIB:Advapi32.lib' || '' }}
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
