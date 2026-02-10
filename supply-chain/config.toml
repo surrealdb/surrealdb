@@ -327,6 +327,10 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.convert_case]]
+version = "0.10.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.cpp_demangle]]
 version = "0.4.4"
 criteria = "safe-to-deploy"
@@ -557,6 +561,10 @@ criteria = "safe-to-run"
 
 [[exemptions.hash32]]
 version = "0.3.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.hashbrown]]
+version = "0.16.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.heapless]]
@@ -1073,6 +1081,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_users]]
 version = "0.4.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.relative-path]]
+version = "2.0.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rend]]
