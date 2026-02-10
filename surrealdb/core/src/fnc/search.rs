@@ -67,35 +67,35 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
-/// Internal structure for storing documents during RRF (Reciprocal Rank Fusion)
-/// processing.
+/// Internal structure for storing scored documents during search result fusion
+/// (used by both `search::rrf` and `search::linear`).
 ///
 /// This tuple struct contains:
-/// - `f64`: The accumulated RRF score for the document
+/// - `f64`: The accumulated fusion score for the document (RRF score or linear combination score)
 /// - `Value`: The document ID used to identify the same document across different result lists
 /// - `Vec<Object>`: Collection of original objects from different search results that will be
 ///   merged
 ///
 /// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`,
-/// `PartialOrd`) based solely on the RRF score (first field). The ordering is
+/// `PartialOrd`) based solely on the score (first field). The ordering is
 /// reversed so a `BinaryHeap` behaves as a min-heap during top-k selection.
-struct RrfDoc(f64, Value, Vec<Object>);
+struct ScoredDoc(f64, Value, Vec<Object>);
 
-impl PartialEq for RrfDoc {
+impl PartialEq for ScoredDoc {
 	fn eq(&self, other: &Self) -> bool {
 		self.0 == other.0
 	}
 }
 
-impl Eq for RrfDoc {}
+impl Eq for ScoredDoc {}
 
-impl PartialOrd for RrfDoc {
+impl PartialOrd for ScoredDoc {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for RrfDoc {
+impl Ord for ScoredDoc {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
 		other.0.partial_cmp(&self.0).unwrap_or(std::cmp::Ordering::Equal)
 	}
@@ -168,7 +168,7 @@ pub async fn rrf(
 	}
 
 	// Map to store document IDs with their accumulated RRF scores and original
-	// objects Key: document ID, Value: (accumulated_rrf_score,
+	// objects. Key: document ID, Value: (accumulated_rrf_score,
 	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
@@ -222,12 +222,12 @@ pub async fn rrf(
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
 			// Heap not full yet - add document directly
-			scored_docs.push(RrfDoc(score, id, objects));
-		} else if let Some(RrfDoc(heap_min_score, _, _)) = scored_docs.peek() {
+			scored_docs.push(ScoredDoc(score, id, objects));
+		} else if let Some(ScoredDoc(heap_min_score, _, _)) = scored_docs.peek() {
 			// Heap is full - only add if this document has a higher score than the heap minimum
 			if score > *heap_min_score {
 				scored_docs.pop(); // Remove the lowest scoring document from top-k
-				scored_docs.push(RrfDoc(score, id, objects)); // Add the new higher scoring document
+				scored_docs.push(ScoredDoc(score, id, objects)); // Add the new higher scoring document
 			}
 		}
 		if ctx.is_done(Some(count)).await? {
@@ -374,12 +374,12 @@ pub async fn linear(
 	let results_len = results.len();
 
 	// Map to store document IDs with their scores from each result list and
-	// original objects Key: document ID, Value: (scores_vector,
+	// original objects. Key: document ID, Value: (scores_per_list,
 	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (Vec<f64>, Vec<Object>)> = HashMap::new();
 
-	// First pass: collect all documents and their scores from each result list
+	// First pass: collect all documents and their raw scores from each result list
 	let mut count = 0;
 	for (list_idx, result_list) in results.into_iter().enumerate() {
 		if let Value::Array(array) = result_list {
@@ -424,7 +424,7 @@ pub async fn linear(
 		}
 	}
 
-	// Second pass: normalize scores and compute weighted linear combination
+	// Second pass: gather raw scores per list for normalization
 	let mut all_scores_by_list: Vec<Vec<f64>> = vec![Vec::new(); results_len];
 
 	// Collect all scores for normalization
@@ -436,7 +436,9 @@ pub async fn linear(
 		}
 	}
 
-	// Normalize scores for each result list
+	// Compute normalization parameters for each result list.
+	// For MinMax: (min_score, range)  where range = max - min
+	// For ZScore: (mean, std_dev)
 	let mut normalized_params: Vec<(f64, f64)> = Vec::new();
 	for list_scores in &all_scores_by_list {
 		if list_scores.is_empty() {
@@ -500,12 +502,12 @@ pub async fn linear(
 		}
 
 		if scored_docs.len() < limit {
-			scored_docs.push(RrfDoc(combined_score, id, objects));
-		} else if let Some(RrfDoc(heap_min_score, _, _)) = scored_docs.peek()
+			scored_docs.push(ScoredDoc(combined_score, id, objects));
+		} else if let Some(ScoredDoc(heap_min_score, _, _)) = scored_docs.peek()
 			&& combined_score > *heap_min_score
 		{
 			scored_docs.pop();
-			scored_docs.push(RrfDoc(combined_score, id, objects));
+			scored_docs.push(ScoredDoc(combined_score, id, objects));
 		}
 		if ctx.is_done(Some(count)).await? {
 			return Ok(Value::None);
