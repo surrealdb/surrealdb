@@ -872,7 +872,7 @@ mod tests {
 		assert!(super::distance::levenshtein((a.clone(), b.clone())).is_ok());
 		assert!(super::distance::hamming((a.clone(), a.clone())).is_ok());
 		assert!(super::similarity::jaro((a.clone(), b.clone())).is_ok());
-		assert!(super::similarity::fuzzy((a.clone(), b.clone())).is_ok());
+		assert!(super::similarity::fuzzy((a, b)).is_ok());
 
 		// Strings exceeding limit should error
 		let limit = *STRING_SIMILARITY_LIMIT;
@@ -886,11 +886,11 @@ mod tests {
 
 		// Second argument too long
 		assert!(super::distance::levenshtein((short.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((short.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro((short, long_b.clone())).is_err());
 
 		// Both arguments too long
 		assert!(super::distance::levenshtein((long_a.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((long_a.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro((long_a, long_b)).is_err());
 
 		// Strings at exactly the limit should work
 		let at_limit_a = "a".repeat(limit);
