@@ -152,19 +152,11 @@ version = "0.6.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
-version = "0.7.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.axum]]
 version = "0.8.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum-core]]
 version = "0.3.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.axum-core]]
-version = "0.4.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum-core]]
@@ -301,10 +293,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.combine]]
 version = "4.6.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.compare]]
-version = "0.0.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.compression-codecs]]
@@ -779,10 +767,6 @@ criteria = "safe-to-deploy"
 version = "4.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.interval-heap]]
-version = "0.0.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.ipnet]]
 version = "2.10.1"
 criteria = "safe-to-deploy"
@@ -1144,10 +1128,6 @@ version = "0.12.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost]]
-version = "0.13.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost]]
 version = "0.14.3"
 criteria = "safe-to-deploy"
 
@@ -1165,10 +1145,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
 version = "0.12.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost-types]]
-version = "0.13.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
@@ -1563,8 +1539,12 @@ criteria = "safe-to-deploy"
 version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.surrealkv]]
+version = "0.18.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.surrealmx]]
-version = "0.15.0"
+version = "0.16.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
@@ -1677,10 +1657,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
 version = "0.10.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tonic]]
-version = "0.12.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
@@ -1863,10 +1839,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.windows-core]]
-version = "0.62.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.windows-future]]
 version = "0.2.1"
 criteria = "safe-to-deploy"
@@ -1875,24 +1847,12 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.windows-result]]
-version = "0.4.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-strings]]
-version = "0.5.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.windows-sys]]
 version = "0.45.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
 version = "0.52.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-sys]]
-version = "0.59.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
