@@ -140,6 +140,7 @@ impl InfoStructure for TableDefinition {
 			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"id".to_string() => self.table_id.0.into(),
 		})
 	}
 }

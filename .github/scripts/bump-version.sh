@@ -10,7 +10,7 @@ if [[ -z "$VERSION" ]]; then
 	exit 1
 fi
 
-RELEASE_BRANCH="release/v${VERSION}"
+RELEASE_BRANCH="releases/v${VERSION}"
 
 # Configure git
 git config user.name "github-actions[bot]"

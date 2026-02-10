@@ -70,7 +70,7 @@ revision = { version = "0.17.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "0.17.1"
+surrealkv = "0.18.0"
 surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"
@@ -124,7 +124,7 @@ humantime = "2.3.0"
 indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
-jsonwebtoken = { version = "10.2.0", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 nanoid = "0.4.0"
@@ -189,7 +189,7 @@ rstest = "0.26.1"
 serial_test = "3.3.1"
 temp-dir = "0.1.16"
 test-log = "0.2.19"
-time = "0.3.45"
+time = "0.3.47"
 tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 

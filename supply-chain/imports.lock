@@ -1021,8 +1021,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-protocol]]
-version = "0.6.1"
-when = "2025-11-18"
+version = "0.8.3"
+when = "2026-01-26"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1035,43 +1035,43 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism]]
-version = "0.1.7"
-when = "2026-01-16"
+version = "0.1.8"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-macros]]
-version = "0.1.7"
-when = "2026-01-16"
+version = "0.1.8"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-runtime]]
-version = "0.1.7"
-when = "2026-01-16"
+version = "0.1.8"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-types]]
-version = "0.1.7"
-when = "2026-01-16"
+version = "0.1.8"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealkv]]
-version = "0.17.1"
-when = "2026-01-16"
+version = "0.18.0"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealml-core]]
-version = "0.1.9"
-when = "2025-05-20"
+version = "0.1.10"
+when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -5039,12 +5039,6 @@ who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.10.0 -> 0.10.1"
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.num-conv]]
-who = "Daira-Emma Hopwood <daira@jacaranda.org>"
-criteria = "safe-to-deploy"
-version = "0.1.0"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.potential_utf]]
 who = "Jack Grigg <jack@electriccoin.co>"

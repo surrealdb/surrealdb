@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use anyhow::Result;
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, MutexGuard, Notify};
 use uuid::Uuid;
 
 use super::batch::Batch;
@@ -28,6 +29,7 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
+use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
@@ -49,6 +51,9 @@ pub struct Transaction {
 	async_event_trigger: Arc<Notify>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
+	/// Per index, track the pending append batch for cleanup after rollback (cancel or failed
+	/// commit).
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
 impl Deref for Transaction {
@@ -75,7 +80,14 @@ impl Transaction {
 			cf: crate::cf::Writer::new(),
 			async_event_trigger,
 			trigger_async_event: AtomicBool::new(false),
+			pending_index_batches: Mutex::new(HashMap::new()),
 		}
+	}
+
+	pub(super) async fn lock_pending_index_batches<'a>(
+		&'a self,
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>> {
+		self.pending_index_batches.lock().await
 	}
 
 	/// Check if the transaction is local or remote
@@ -105,6 +117,9 @@ impl Transaction {
 	pub async fn cancel(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		self.cf.clear();
+		// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed
+		// commit).
+		self.cleanup_index_batches().await;
 		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
@@ -123,6 +138,8 @@ impl Transaction {
 		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
+			// Enqueue pending index batches for deferred cleanup after commit failure.
+			self.cleanup_index_batches().await;
 			anyhow::bail!(e);
 		}
 		if self.trigger_async_event.load(Ordering::Relaxed) {
@@ -130,6 +147,18 @@ impl Transaction {
 			self.async_event_trigger.notify_one();
 		}
 		Ok(())
+	}
+
+	/// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed commit).
+	async fn cleanup_index_batches(&self) {
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, clean_queue)) in batches {
+			// Enqueue batch ids for cleaning
+			clean_queue.lock().await.push(batch_id);
+		}
 	}
 
 	/// Check if a key exists in the datastore.

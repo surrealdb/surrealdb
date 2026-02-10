@@ -211,7 +211,7 @@ async fn table_change_feeds() -> Result<()> {
 	};
 	let changes = cs0.get("changes").expect("changes");
 	let expected = syn::value(
-		"[{ define_table: { name: 'person', changefeed: { expiry: 1h, original: false }, drop: false, kind: { kind: 'ANY' }, permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }]"
+		"[{ define_table: { id: 0, name: 'person', changefeed: { expiry: 1h, original: false }, drop: false, kind: { kind: 'ANY' }, permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }]"
 	).unwrap();
 	assert_eq!(changes, &expected, "First changeset should be DEFINE TABLE");
 
@@ -339,6 +339,7 @@ async fn changefeed_with_ts() -> Result<()> {
 			"[
 		{
 			define_table: {
+				id: 0,
 				name: 'user',
 				changefeed: {
 					expiry: 1h,
