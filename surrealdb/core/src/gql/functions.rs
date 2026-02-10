@@ -29,7 +29,7 @@ pub async fn process_fns(
 		let fnd1 = fnd.clone();
 		let mut field = Field::new(
 			format!("fn_{}", fnd.name),
-			kind_to_type(kind.clone(), types)?,
+			kind_to_type(kind.clone(), types, false)?,
 			move |ctx| {
 				let sess1 = sess1.clone();
 				let kvs1 = kvs1.clone();
@@ -87,7 +87,7 @@ pub async fn process_fns(
 		);
 
 		for (arg_name, arg_kind) in fnd.args.iter() {
-			let arg_ty = kind_to_type(arg_kind.clone(), types)?;
+			let arg_ty = kind_to_type(arg_kind.clone(), types, true)?;
 			field = field.argument(InputValue::new(arg_name, arg_ty))
 		}
 

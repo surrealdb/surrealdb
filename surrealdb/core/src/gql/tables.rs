@@ -22,7 +22,7 @@ use crate::expr::{
 	TopLevelExpr,
 };
 use crate::gql::error::internal_error;
-use crate::gql::schema::{kind_to_type, unwrap_type};
+use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::{Datastore, Transaction};
 use crate::val::{RecordId, Value};
@@ -353,7 +353,7 @@ pub async fn process_tbs(
 				continue;
 			};
 			let fd_name = Name::new(fd.name.to_sql());
-			let fd_type = kind_to_type(kind.clone(), types)?;
+			let fd_type = kind_to_type(kind.clone(), types, false)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
 
@@ -516,6 +516,20 @@ fn make_table_field_resolver(
 						};
 						Ok(Some(field_val))
 					}
+					Value::Geometry(g) => {
+						// Store the Geometry as owned_any so the geometry Object
+						// type resolvers can downcast it via try_downcast_ref.
+						let type_name = geometry_gql_type_name(&g);
+						let field_val = FieldValue::owned_any(g);
+						let field_val = match &field_kind {
+							// Union type or unrestricted geometry – needs .with_type()
+							Some(Kind::Geometry(ks)) if ks.is_empty() || ks.len() > 1 => {
+								field_val.with_type(type_name)
+							}
+							_ => field_val,
+						};
+						Ok(Some(field_val))
+					}
 					Value::None | Value::Null => Ok(None),
 					v => {
 						match field_kind {
@@ -558,7 +572,7 @@ fn filter_from_type(
 			)),
 			_ => TypeRef::named(TypeRef::ID),
 		},
-		k => unwrap_type(kind_to_type(k.clone(), types)?),
+		k => unwrap_type(kind_to_type(k.clone(), types, true)?),
 	};
 
 	let mut filter = InputObject::new(filter_name);

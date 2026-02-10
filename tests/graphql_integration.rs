@@ -421,6 +421,266 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn geometry() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with various geometry types
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE place SCHEMAFUL;
+					DEFINE FIELD name ON place TYPE string;
+					DEFINE FIELD location ON place TYPE geometry<point>;
+
+					DEFINE TABLE area SCHEMAFUL;
+					DEFINE FIELD name ON area TYPE string;
+					DEFINE FIELD boundary ON area TYPE geometry<polygon>;
+
+					DEFINE TABLE feature SCHEMAFUL;
+					DEFINE FIELD name ON feature TYPE string;
+					DEFINE FIELD geom ON feature TYPE geometry;
+
+					CREATE place:london SET name = "London", location = (-0.118092, 51.509865);
+					CREATE place:paris SET name = "Paris", location = (2.349014, 48.864716);
+
+					CREATE area:london SET name = "London Bounds", boundary = {
+						type: "Polygon",
+						coordinates: [[
+							[-0.38314819, 51.37692386],
+							[0.1785278, 51.37692386],
+							[0.1785278, 51.61460570],
+							[-0.38314819, 51.61460570],
+							[-0.38314819, 51.37692386]
+						]]
+					};
+
+					CREATE feature:point SET name = "A Point", geom = (1.0, 2.0);
+					CREATE feature:line SET name = "A Line", geom = {
+						type: "LineString",
+						coordinates: [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]
+					};
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Test 1: Query a specific geometry<point> field
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						place(order: {asc: name}) {
+							id
+							name
+							location { type coordinates }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let expected = json!({
+				"data": {
+					"place": [
+						{
+							"id": "place:london",
+							"name": "London",
+							"location": {
+								"type": "Point",
+								"coordinates": [-0.118092, 51.509865]
+							}
+						},
+						{
+							"id": "place:paris",
+							"name": "Paris",
+							"location": {
+								"type": "Point",
+								"coordinates": [2.349014, 48.864716]
+							}
+						}
+					]
+				}
+			});
+			assert_eq!(expected, body);
+		}
+
+		// Test 2: Query a specific geometry<polygon> field
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						area {
+							id
+							name
+							boundary { type coordinates }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let expected = json!({
+				"data": {
+					"area": [
+						{
+							"id": "area:london",
+							"name": "London Bounds",
+							"boundary": {
+								"type": "Polygon",
+								"coordinates": [[
+									[-0.38314819, 51.37692386],
+									[0.1785278, 51.37692386],
+									[0.1785278, 51.6146057],
+									[-0.38314819, 51.6146057],
+									[-0.38314819, 51.37692386]
+								]]
+							}
+						}
+					]
+				}
+			});
+			assert_eq!(expected, body);
+		}
+
+		// Test 3: Query a general geometry field (union type) with inline fragments
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						feature(order: {asc: name}) {
+							id
+							name
+							geom {
+								... on GeometryPoint { type coordinates }
+								... on GeometryLineString { type coordinates }
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let expected = json!({
+				"data": {
+					"feature": [
+						{
+							"id": "feature:line",
+							"name": "A Line",
+							"geom": {
+								"type": "LineString",
+								"coordinates": [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]
+							}
+						},
+						{
+							"id": "feature:point",
+							"name": "A Point",
+							"geom": {
+								"type": "Point",
+								"coordinates": [1.0, 2.0]
+							}
+						}
+					]
+				}
+			});
+			assert_eq!(expected, body);
+		}
+
+		// Test 4: Fetch a single record by ID with geometry
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_place(id: "london") {
+							id
+							name
+							location { type coordinates }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let expected = json!({
+				"data": {
+					"_get_place": {
+						"id": "place:london",
+						"name": "London",
+						"location": {
+							"type": "Point",
+							"coordinates": [-0.118092, 51.509865]
+						}
+					}
+				}
+			});
+			assert_eq!(expected, body);
+		}
+
+		// Test 5: Schema introspection shows geometry types
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "GeometryType") {
+							kind
+							enumValues { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let geo_type = &body["data"]["__type"];
+			assert_eq!(geo_type["kind"], "ENUM");
+			let enum_values = geo_type["enumValues"].as_array().unwrap();
+			let names: Vec<&str> =
+				enum_values.iter().map(|v| v["name"].as_str().unwrap()).collect();
+			assert!(names.contains(&"Point"));
+			assert!(names.contains(&"LineString"));
+			assert!(names.contains(&"Polygon"));
+			assert!(names.contains(&"MultiPoint"));
+			assert!(names.contains(&"MultiLineString"));
+			assert!(names.contains(&"MultiPolygon"));
+			assert!(names.contains(&"GeometryCollection"));
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn functions() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");

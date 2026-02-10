@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::dynamic::{
-	Enum, Interface, InterfaceField, Object, Scalar, Schema, Type, TypeRef, Union,
+	Enum, Field, FieldFuture, FieldValue, InputObject, InputValue, Interface, InterfaceField,
+	Object, Scalar, Schema, Type, TypeRef, Union,
 };
 use async_graphql::{Name, Value as GqlValue};
 use rust_decimal::Decimal;
@@ -16,15 +18,16 @@ use super::ext::ValidatorExt;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{GraphQLConfig, GraphQLFunctionsConfig, GraphQLTablesConfig};
 use crate::dbs::Session;
-use crate::expr::kind::KindLiteral;
+use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::{Expr, Kind, Literal};
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::functions::process_fns;
 use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::val::{
-	Array as SurArray, Number as SurNumber, Object as SurObject, RecordId as SurRecordId,
-	RecordIdKey as SurRecordIdKey, Set as SurSet, TableName, Value as SurValue,
+	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
+	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,
+	Value as SurValue,
 };
 
 pub async fn generate_schema(
@@ -114,6 +117,9 @@ pub async fn generate_schema(
 	if let Some(fns) = fns {
 		query = process_fns(fns, query, &mut types, session, datastore).await?;
 	}
+
+	// Register all geometry-related types (enum, object types, union, input types)
+	register_geometry_types(&mut types);
 
 	trace!("current Query object for schema: {:?}", query);
 
@@ -226,7 +232,7 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 				})
 				.collect(),
 		),
-		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SurValue::Geometry(ref g) => return geometry_to_gql_object(g),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner()),
 		SurValue::RecordId(t) => GqlValue::String(t.to_sql()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
@@ -234,7 +240,11 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 	Ok(out)
 }
 
-pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
+pub fn kind_to_type(
+	kind: Kind,
+	types: &mut Vec<Type>,
+	is_input: bool,
+) -> Result<TypeRef, GqlError> {
 	let optional = kind.can_be_none();
 	let out_ty = match kind {
 		Kind::Any => TypeRef::named("any"),
@@ -269,7 +279,42 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 				TypeRef::named(ty_name)
 			}
 		},
-		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
+		Kind::Geometry(ref geo_kinds) => {
+			if is_input {
+				// Input context: return InputObject type names
+				match geo_kinds.len() {
+					0 => TypeRef::named("GeometryInput"),
+					1 => TypeRef::named(geometry_kind_to_gql_input_type_name(&geo_kinds[0])),
+					_ => {
+						// GraphQL doesn't support union input types, so we use
+						// the unified GeometryInput for multi-kind geometry fields
+						TypeRef::named("GeometryInput")
+					}
+				}
+			} else {
+				// Output context: return Object type / Union names
+				match geo_kinds.len() {
+					0 => TypeRef::named("Geometry"),
+					1 => TypeRef::named(geometry_kind_to_gql_type_name(&geo_kinds[0])),
+					_ => {
+						// Create a partial union of the allowed geometry types
+						let names: Vec<&str> =
+							geo_kinds.iter().map(geometry_kind_to_gql_type_name).collect();
+						let ty_name = names.join("_or_");
+
+						let mut partial_union = Union::new(ty_name.clone()).description(format!(
+							"A geometry which is one of: {}",
+							names.join(", ")
+						));
+						for name in &names {
+							partial_union = partial_union.possible_type(*name);
+						}
+						types.push(Type::Union(partial_union));
+						TypeRef::named(ty_name)
+					}
+				}
+			}
+		}
 		Kind::Either(ks) => {
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(KindLiteral::String(_))));
@@ -302,7 +347,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 			};
 
 			let pos_names: Result<Vec<TypeRef>, GqlError> =
-				others.into_iter().map(|k| kind_to_type(k, types)).collect();
+				others.into_iter().map(|k| kind_to_type(k, types, is_input)).collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
 
@@ -319,7 +364,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 			TypeRef::named(ty_name)
 		}
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
-		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types)?)),
+		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types, is_input)?)),
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
 		// TODO(raphaeldarley): check if union is of literals and generate enum
@@ -684,8 +729,13 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		// TODO: add geometry
-		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
+		Kind::Geometry(ref geo_kinds) => match val {
+			GqlValue::Object(obj) => {
+				let geometry = gql_geometry_from_object(obj, geo_kinds)?;
+				Ok(SurValue::Geometry(geometry))
+			}
+			_ => Err(type_error(kind, val)),
+		},
 		// TODO: handle nested eithers
 		Kind::Either(ref ks) => {
 			use Kind::*;
@@ -726,8 +776,13 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 					either_try_kind!(ks, list, Kind::Array);
 					Err(type_error(kind, val))
 				}
-				// TODO: consider geometry and other types that can come from objects
 				obj @ GqlValue::Object(_) => {
+					// Try geometry kinds first (geometry inputs are objects)
+					for geo_kind in ks.iter().filter(|k| matches!(k, Kind::Geometry(_))).cloned() {
+						if let Ok(out) = gql_to_sql_kind(obj, geo_kind) {
+							return Ok(out);
+						}
+					}
 					either_try_kind!(ks, obj, Kind::Object);
 					Err(type_error(kind, val))
 				}
@@ -759,4 +814,412 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Geometry support: helpers, type registration, and conversion
+// ---------------------------------------------------------------------------
+
+/// Map a `GeometryKind` to the corresponding GraphQL output Object type name.
+pub(crate) fn geometry_kind_to_gql_type_name(kind: &GeometryKind) -> &'static str {
+	match kind {
+		GeometryKind::Point => "GeometryPoint",
+		GeometryKind::Line => "GeometryLineString",
+		GeometryKind::Polygon => "GeometryPolygon",
+		GeometryKind::MultiPoint => "GeometryMultiPoint",
+		GeometryKind::MultiLine => "GeometryMultiLineString",
+		GeometryKind::MultiPolygon => "GeometryMultiPolygon",
+		GeometryKind::Collection => "GeometryCollection",
+	}
+}
+
+/// Map a `GeometryKind` to the corresponding GraphQL InputObject type name.
+fn geometry_kind_to_gql_input_type_name(kind: &GeometryKind) -> &'static str {
+	match kind {
+		GeometryKind::Point => "GeometryPointInput",
+		GeometryKind::Line => "GeometryLineStringInput",
+		GeometryKind::Polygon => "GeometryPolygonInput",
+		GeometryKind::MultiPoint => "GeometryMultiPointInput",
+		GeometryKind::MultiLine => "GeometryMultiLineStringInput",
+		GeometryKind::MultiPolygon => "GeometryMultiPolygonInput",
+		GeometryKind::Collection => "GeometryCollectionInput",
+	}
+}
+
+/// Map a `Geometry` value to the GraphQL Object type name for that variant.
+pub(crate) fn geometry_gql_type_name(g: &SurGeometry) -> &'static str {
+	match g {
+		SurGeometry::Point(_) => "GeometryPoint",
+		SurGeometry::Line(_) => "GeometryLineString",
+		SurGeometry::Polygon(_) => "GeometryPolygon",
+		SurGeometry::MultiPoint(_) => "GeometryMultiPoint",
+		SurGeometry::MultiLine(_) => "GeometryMultiLineString",
+		SurGeometry::MultiPolygon(_) => "GeometryMultiPolygon",
+		SurGeometry::Collection(_) => "GeometryCollection",
+	}
+}
+
+/// Build a `TypeRef` for nested Float arrays at a given depth.
+///
+/// - depth 1 → `[Float!]!`       (Point coordinates)
+/// - depth 2 → `[[Float!]!]!`    (LineString / MultiPoint coordinates)
+/// - depth 3 → `[[[Float!]!]!]!` (Polygon / MultiLineString coordinates)
+/// - depth 4 → `[[[[Float!]!]!]!]!` (MultiPolygon coordinates)
+fn nested_float_list(depth: usize) -> TypeRef {
+	let mut ty = TypeRef::named_nn(TypeRef::FLOAT); // Float!
+	for _ in 0..depth {
+		ty = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(ty)))); // [...]!
+	}
+	ty
+}
+
+/// Build a geometry Object type for variants that have `coordinates`.
+///
+/// Creates an Object type with:
+/// - `type: GeometryType!` (fixed enum value)
+/// - `coordinates: <nested_float_list>!`
+fn make_geometry_object_type(
+	obj_name: &str,
+	geojson_type: &'static str,
+	coord_depth: usize,
+) -> Object {
+	let coords_ty = nested_float_list(coord_depth);
+	Object::new(obj_name)
+		.field(Field::new("type", TypeRef::named_nn("GeometryType"), {
+			move |_ctx| {
+				FieldFuture::new(async move {
+					Ok(Some(FieldValue::value(GqlValue::Enum(Name::new(geojson_type)))))
+				})
+			}
+		}))
+		.field(Field::new("coordinates", coords_ty, |ctx| {
+			FieldFuture::new(async move {
+				let g = ctx.parent_value.try_downcast_ref::<SurGeometry>()?;
+				let coords = g.as_coordinates();
+				let gql_coords = sql_value_to_gql_value(coords)?;
+				Ok(Some(FieldValue::value(gql_coords)))
+			})
+		}))
+}
+
+/// Build the `GeometryCollection` Object type, which uses `geometries` instead
+/// of `coordinates`.
+fn make_geometry_collection_type() -> Object {
+	Object::new("GeometryCollection")
+		.field(Field::new("type", TypeRef::named_nn("GeometryType"), |_ctx| {
+			FieldFuture::new(async move {
+				Ok(Some(FieldValue::value(GqlValue::Enum(Name::new("GeometryCollection")))))
+			})
+		}))
+		.field(Field::new("geometries", TypeRef::named_nn_list_nn("Geometry"), |ctx| {
+			FieldFuture::new(async move {
+				let g = ctx.parent_value.try_downcast_ref::<SurGeometry>()?;
+				match g {
+					SurGeometry::Collection(geometries) => {
+						let items: Vec<FieldValue> = geometries
+							.iter()
+							.map(|g| {
+								let type_name = geometry_gql_type_name(g);
+								FieldValue::owned_any(g.clone()).with_type(type_name)
+							})
+							.collect();
+						Ok(Some(FieldValue::list(items)))
+					}
+					_ => Err(internal_error("Expected GeometryCollection value").into()),
+				}
+			})
+		}))
+}
+
+/// Register all geometry-related types into the types list and return types
+/// that must be registered directly on the Schema builder (enum, union).
+///
+/// Types registered into `types` vec:
+/// - Object types: `GeometryPoint`, `GeometryLineString`, `GeometryPolygon`,
+///   `GeometryMultiPoint`, `GeometryMultiLineString`, `GeometryMultiPolygon`,
+///   `GeometryCollection`
+///
+/// Types that need `schema.register()`:
+/// - Enum: `GeometryType`
+/// - Union: `Geometry`
+/// - InputObject types for each variant + unified `GeometryInput`
+pub(crate) fn register_geometry_types(types: &mut Vec<Type>) {
+	// GeometryType enum
+	types.push(Type::Enum(
+		Enum::new("GeometryType")
+			.description("GeoJSON geometry type discriminator")
+			.item("Point")
+			.item("LineString")
+			.item("Polygon")
+			.item("MultiPoint")
+			.item("MultiLineString")
+			.item("MultiPolygon")
+			.item("GeometryCollection"),
+	));
+
+	// Per-variant output Object types
+	types.push(Type::Object(make_geometry_object_type("GeometryPoint", "Point", 1)));
+	types.push(Type::Object(make_geometry_object_type("GeometryLineString", "LineString", 2)));
+	types.push(Type::Object(make_geometry_object_type("GeometryPolygon", "Polygon", 3)));
+	types.push(Type::Object(make_geometry_object_type("GeometryMultiPoint", "MultiPoint", 2)));
+	types.push(Type::Object(make_geometry_object_type(
+		"GeometryMultiLineString",
+		"MultiLineString",
+		3,
+	)));
+	types.push(Type::Object(make_geometry_object_type("GeometryMultiPolygon", "MultiPolygon", 4)));
+	types.push(Type::Object(make_geometry_collection_type()));
+
+	// Geometry union (covers all variants)
+	types.push(Type::Union(
+		Union::new("Geometry")
+			.description("A GeoJSON geometry – one of Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon, or GeometryCollection")
+			.possible_type("GeometryPoint")
+			.possible_type("GeometryLineString")
+			.possible_type("GeometryPolygon")
+			.possible_type("GeometryMultiPoint")
+			.possible_type("GeometryMultiLineString")
+			.possible_type("GeometryMultiPolygon")
+			.possible_type("GeometryCollection"),
+	));
+
+	// Per-variant InputObject types
+	types.push(Type::InputObject(
+		InputObject::new("GeometryPointInput")
+			.description("GeoJSON Point input – coordinates is [lng, lat]")
+			.field(InputValue::new("coordinates", nested_float_list(1))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryLineStringInput")
+			.description("GeoJSON LineString input")
+			.field(InputValue::new("coordinates", nested_float_list(2))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryPolygonInput")
+			.description("GeoJSON Polygon input")
+			.field(InputValue::new("coordinates", nested_float_list(3))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryMultiPointInput")
+			.description("GeoJSON MultiPoint input")
+			.field(InputValue::new("coordinates", nested_float_list(2))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryMultiLineStringInput")
+			.description("GeoJSON MultiLineString input")
+			.field(InputValue::new("coordinates", nested_float_list(3))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryMultiPolygonInput")
+			.description("GeoJSON MultiPolygon input")
+			.field(InputValue::new("coordinates", nested_float_list(4))),
+	));
+	types.push(Type::InputObject(
+		InputObject::new("GeometryCollectionInput")
+			.description("GeoJSON GeometryCollection input")
+			.field(InputValue::new("geometries", TypeRef::named_nn_list_nn("GeometryInput"))),
+	));
+
+	// Unified GeometryInput (for fields typed as `geometry` without specific variant)
+	types.push(Type::InputObject(
+		InputObject::new("GeometryInput")
+			.description(
+				"Generic GeoJSON geometry input. Use `type` to select the variant, \
+				 `coordinates` for coordinate-based types, `geometries` for GeometryCollection.",
+			)
+			.field(InputValue::new("type", TypeRef::named_nn("GeometryType")))
+			.field(InputValue::new("coordinates", TypeRef::named("any")))
+			.field(InputValue::new("geometries", TypeRef::named_list("GeometryInput"))),
+	));
+}
+
+/// Convert a GraphQL coordinate value (nested arrays of numbers) to a SurrealDB
+/// `Value` suitable for `Geometry::array_to_*` helpers.
+fn gql_coords_to_sur_value(val: &GqlValue) -> Result<SurValue, GqlError> {
+	match val {
+		GqlValue::Number(n) => {
+			let f = n
+				.as_f64()
+				.ok_or_else(|| resolver_error("Invalid coordinate: expected finite number"))?;
+			Ok(SurValue::Number(SurNumber::Float(f)))
+		}
+		GqlValue::List(items) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				items.iter().map(gql_coords_to_sur_value).collect();
+			Ok(vals?.into())
+		}
+		_ => Err(resolver_error("Expected number or array in geometry coordinates")),
+	}
+}
+
+/// Convert a GraphQL geometry input Object (GeoJSON format) to a SurrealDB
+/// `Geometry` value.
+///
+/// For typed inputs (e.g. `GeometryPointInput`), the `type` field is optional
+/// and the variant is inferred from `expected_kind`. For the unified
+/// `GeometryInput`, the `type` field is required.
+fn gql_geometry_from_object(
+	obj: &IndexMap<Name, GqlValue>,
+	expected_kind: &[GeometryKind],
+) -> Result<SurGeometry, GqlError> {
+	// Determine the geometry type: from explicit `type` field or from expected_kind
+	let geo_type: &str = if let Some(ty) = obj.get("type") {
+		match ty {
+			GqlValue::Enum(s) => s.as_str(),
+			GqlValue::String(s) => s.as_str(),
+			_ => return Err(resolver_error("Geometry 'type' must be a GeometryType enum value")),
+		}
+	} else if expected_kind.len() == 1 {
+		// Infer from the single expected kind
+		match &expected_kind[0] {
+			GeometryKind::Point => "Point",
+			GeometryKind::Line => "LineString",
+			GeometryKind::Polygon => "Polygon",
+			GeometryKind::MultiPoint => "MultiPoint",
+			GeometryKind::MultiLine => "MultiLineString",
+			GeometryKind::MultiPolygon => "MultiPolygon",
+			GeometryKind::Collection => "GeometryCollection",
+		}
+	} else {
+		return Err(resolver_error(
+			"Geometry input must include a 'type' field when multiple geometry types are allowed",
+		));
+	};
+
+	// Validate that the type is allowed by the expected kinds
+	if !expected_kind.is_empty() {
+		let kind = match geo_type {
+			"Point" => GeometryKind::Point,
+			"LineString" => GeometryKind::Line,
+			"Polygon" => GeometryKind::Polygon,
+			"MultiPoint" => GeometryKind::MultiPoint,
+			"MultiLineString" => GeometryKind::MultiLine,
+			"MultiPolygon" => GeometryKind::MultiPolygon,
+			"GeometryCollection" => GeometryKind::Collection,
+			other => return Err(resolver_error(format!("Unknown geometry type: {other}"))),
+		};
+		if !expected_kind.contains(&kind) {
+			return Err(resolver_error(format!(
+				"Geometry type '{geo_type}' is not allowed here; expected one of: {}",
+				expected_kind
+					.iter()
+					.map(|k| geometry_kind_to_gql_type_name(k))
+					.collect::<Vec<_>>()
+					.join(", ")
+			)));
+		}
+	}
+
+	// Parse based on type
+	match geo_type {
+		"Point" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("Point requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_point(&sur_coords)
+				.map(SurGeometry::Point)
+				.ok_or_else(|| resolver_error("Invalid Point coordinates: expected [lng, lat]"))
+		}
+		"LineString" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("LineString requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_line(&sur_coords).map(SurGeometry::Line).ok_or_else(|| {
+				resolver_error("Invalid LineString coordinates: expected [[lng, lat], ...]")
+			})
+		}
+		"Polygon" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("Polygon requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_polygon(&sur_coords).map(SurGeometry::Polygon).ok_or_else(|| {
+				resolver_error("Invalid Polygon coordinates: expected [[[lng, lat], ...], ...]")
+			})
+		}
+		"MultiPoint" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("MultiPoint requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_multipoint(&sur_coords).map(SurGeometry::MultiPoint).ok_or_else(
+				|| resolver_error("Invalid MultiPoint coordinates: expected [[lng, lat], ...]"),
+			)
+		}
+		"MultiLineString" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("MultiLineString requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_multiline(&sur_coords).map(SurGeometry::MultiLine).ok_or_else(
+				|| {
+					resolver_error(
+						"Invalid MultiLineString coordinates: expected [[[lng, lat], ...], ...]",
+					)
+				},
+			)
+		}
+		"MultiPolygon" => {
+			let coords = obj
+				.get("coordinates")
+				.ok_or_else(|| resolver_error("MultiPolygon requires 'coordinates' field"))?;
+			let sur_coords = gql_coords_to_sur_value(coords)?;
+			SurGeometry::array_to_multipolygon(&sur_coords)
+				.map(SurGeometry::MultiPolygon)
+				.ok_or_else(|| resolver_error("Invalid MultiPolygon coordinates"))
+		}
+		"GeometryCollection" => {
+			let gql_geometries = obj
+				.get("geometries")
+				.ok_or_else(|| resolver_error("GeometryCollection requires 'geometries' field"))?;
+			let list = match gql_geometries {
+				GqlValue::List(l) => l,
+				_ => {
+					return Err(resolver_error("GeometryCollection 'geometries' must be an array"));
+				}
+			};
+			let mut geometries = Vec::with_capacity(list.len());
+			for item in list {
+				match item {
+					GqlValue::Object(sub_obj) => {
+						// Recursively parse each sub-geometry (allow any type)
+						geometries.push(gql_geometry_from_object(sub_obj, &[])?);
+					}
+					_ => {
+						return Err(resolver_error(
+							"Each item in 'geometries' must be a geometry object",
+						));
+					}
+				}
+			}
+			Ok(SurGeometry::Collection(geometries))
+		}
+		other => Err(resolver_error(format!("Unknown geometry type: {other}"))),
+	}
+}
+
+/// Convert a SurrealDB `Geometry` value to a `GqlValue::Object` in GeoJSON format.
+///
+/// Used by `sql_value_to_gql_value` for geometry values in arrays / nested objects
+/// where we cannot use `FieldValue::owned_any`.
+pub(crate) fn geometry_to_gql_object(g: &SurGeometry) -> Result<GqlValue, GqlError> {
+	let mut map = IndexMap::new();
+	map.insert(Name::new("type"), GqlValue::Enum(Name::new(g.as_type())));
+
+	match g {
+		SurGeometry::Collection(geometries) => {
+			let gql_geometries: Result<Vec<GqlValue>, GqlError> =
+				geometries.iter().map(geometry_to_gql_object).collect();
+			map.insert(Name::new("geometries"), GqlValue::List(gql_geometries?));
+		}
+		_ => {
+			let coords = g.as_coordinates();
+			let gql_coords = sql_value_to_gql_value(coords)?;
+			map.insert(Name::new("coordinates"), gql_coords);
+		}
+	}
+
+	Ok(GqlValue::Object(map))
 }
