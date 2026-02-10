@@ -1,10 +1,10 @@
 use std::str::{self, FromStr};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{DecodingKey, Validation, decode};
+use jsonwebtoken::{DecodingKey, TokenData, Validation, decode};
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
@@ -76,16 +76,16 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	Ok((dec, val))
 }
 
-pub(crate) static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
-
-pub(crate) static DUD: LazyLock<Validation> = LazyLock::new(|| {
-	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-	validation.insecure_disable_signature_validation();
-	validation.validate_nbf = false;
-	validation.validate_exp = false;
-	validation.validate_aud = false;
-	validation
-});
+/// Decodes JWT claims without cryptographic verification.
+///
+/// SAFETY: This is used exclusively to extract routing information (namespace,
+/// database, access method) needed to look up the correct verification key.
+/// The token MUST be fully verified via [`verify_token`] before any claims
+/// are trusted for authorization decisions.
+fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>> {
+	let data = jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?;
+	Ok(data)
+}
 
 pub async fn basic(
 	kvs: &Datastore,
@@ -155,8 +155,8 @@ pub async fn basic(
 pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
-	// Decode the token without verifying
-	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
+	// Decode the token without verifying to extract routing claims
+	let token_data = decode_claims_unverified(token)?;
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used

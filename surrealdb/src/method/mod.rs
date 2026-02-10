@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
@@ -79,7 +80,7 @@ pub use version::Version;
 use super::opt::{CreateResource, IntoResource};
 
 /// A alias for an often used type of future returned by async methods in this
-/// library.
+/// library
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Machine learning model marker type for import and export types
@@ -93,6 +94,14 @@ pub struct Live;
 
 /// Relation marker type
 pub struct Relation;
+
+/// Query execution statistics
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Stats {
+	/// The time taken to execute the query
+	pub execution_time: Option<Duration>,
+}
 
 /// Responses returned with statistics
 #[derive(Debug)]

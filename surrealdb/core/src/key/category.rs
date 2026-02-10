@@ -35,6 +35,8 @@ pub enum Category {
 	RootConfig,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
+	/// crate::key::root::eq                 /!eq{ns}{db}{tb}{ev}{ts}{nid}
+	EventQueue,
 	///
 	/// ------------------------------
 	///
@@ -162,7 +164,8 @@ pub enum Category {
 	IndexHnswVec,
 	/// crate::key::index::hh                /*{ns}*{db}*{tb}+{ix}!hh{hash}
 	IndexHnswHashedVec,
-	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id}
+	/// crate::key::index::ia                /*{ns}*{db}*{tb}+{ix}!ia{id} (Previously - discarded by
+	/// #6856) crate::key::index::ig                /*{ns}*{db}*{tb}+{ix}!ig{id}
 	IndexAppendings,
 	/// crate::key::index::ib                /*{ns}*{db}*{tb}+{ix}!ib{id}
 	IndexInvertedDocIds,
@@ -283,6 +286,7 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::EventQueue => "EventQueue",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
 		};

@@ -211,7 +211,7 @@ async fn table_change_feeds() -> Result<()> {
 	};
 	let changes = cs0.get("changes").expect("changes");
 	let expected = syn::value(
-		"[{ define_table: { name: 'person', changefeed: { expiry: 1h, original: false }, drop: false, kind: { kind: 'ANY' }, permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }]"
+		"[{ define_table: { id: 0, name: 'person', changefeed: { expiry: 1h, original: false }, drop: false, kind: { kind: 'ANY' }, permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }]"
 	).unwrap();
 	assert_eq!(changes, &expected, "First changeset should be DEFINE TABLE");
 
@@ -339,6 +339,7 @@ async fn changefeed_with_ts() -> Result<()> {
 			"[
 		{
 			define_table: {
+				id: 0,
 				name: 'user',
 				changefeed: {
 					expiry: 1h,
@@ -484,5 +485,149 @@ async fn changefeed_with_ts() -> Result<()> {
 		unreachable!()
 	};
 	assert_eq!(array.len(), 0);
+	Ok(())
+}
+
+#[tokio::test]
+async fn test_changefeed_gc_cycle_removed() -> Result<()> {
+	let db = new_ds("test-cf-ts", "test-cf-ts").await?;
+	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
+
+	let src = r#"
+		DEFINE TABLE t CHANGEFEED 1ns;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	res.remove(0).result.unwrap();
+
+	let src = r#"
+		SHOW CHANGES FOR TABLE t SINCE 0;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	let res1 = res.remove(0).result.unwrap();
+	assert_eq!(
+		res1.get(0).get("changes"),
+		syn::value(
+			r#"
+			[{
+				define_table: {
+					changefeed: {
+						expiry: 1ns,
+						original: false,
+					},
+					drop: false,
+					id: 0,
+					kind: {
+						kind: 'ANY'
+					},
+					name: 't',
+					permissions: {
+						create: false,
+						delete: false,
+						select: false,
+						update: false,
+					},
+					schemafull: false
+				}
+			}]
+		]"#
+		)
+		.unwrap()
+	);
+
+	tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+	db.changefeed_process(&std::time::Duration::from_secs(1)).await.unwrap();
+
+	let src = r#"
+		SHOW CHANGES FOR TABLE t SINCE 0;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	let res1 = res.remove(0).result.unwrap();
+	assert_eq!(res1, syn::value(r#"[]"#).unwrap());
+	Ok(())
+}
+
+#[tokio::test]
+async fn test_changefeed_gc_cycle_kept() -> Result<()> {
+	let db = new_ds("test-cf-ts", "test-cf-ts").await?;
+	let ses = Session::owner().with_ns("test-cf-ts").with_db("test-cf-ts");
+
+	let src = r#"
+		DEFINE TABLE t CHANGEFEED 1d;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	res.remove(0).result.unwrap();
+
+	let src = r#"
+		SHOW CHANGES FOR TABLE t SINCE 0;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	let res1 = res.remove(0).result.unwrap();
+	assert_eq!(
+		res1.get(0).get("changes"),
+		syn::value(
+			r#"
+			[{
+				define_table: {
+					changefeed: {
+						expiry: 1d,
+						original: false,
+					},
+					drop: false,
+					id: 0,
+					kind: {
+						kind: 'ANY'
+					},
+					name: 't',
+					permissions: {
+						create: false,
+						delete: false,
+						select: false,
+						update: false,
+					},
+					schemafull: false
+				}
+			}]
+		]"#
+		)
+		.unwrap()
+	);
+
+	tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+	db.changefeed_process(&std::time::Duration::from_secs(1)).await.unwrap();
+
+	let src = r#"
+		SHOW CHANGES FOR TABLE t SINCE 0;
+	"#;
+	let mut res = db.execute(src, &ses, None).await?;
+	let res1 = dbg!(res.remove(0).result.unwrap());
+	assert_eq!(
+		res1.get(0).get("changes"),
+		syn::value(
+			r#"
+			[{
+				define_table: {
+					changefeed: {
+						expiry: 1d,
+						original: false,
+					},
+					drop: false,
+					id: 0,
+					kind: {
+						kind: 'ANY'
+					},
+					name: 't',
+					permissions: {
+						create: false,
+						delete: false,
+						select: false,
+						update: false,
+					},
+					schemafull: false
+				}
+			}]"#
+		)
+		.unwrap()
+	);
+
 	Ok(())
 }

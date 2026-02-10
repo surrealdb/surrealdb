@@ -5,7 +5,7 @@ mod cnf;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Durability, HistoryOptions, Mode, Transaction as Tx, Tree, TreeBuilder};
 use tokio::sync::RwLock;
 
 use super::err::{Error, Result};
@@ -159,7 +159,7 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(&key, ts)?.is_some(),
+			Some(ts) => inner.get_at(&key, ts)?.is_some(),
 			None => inner.get(&key)?.is_some(),
 		};
 		// Return result
@@ -177,7 +177,7 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(&key, ts)?,
+			Some(ts) => inner.get_at(&key, ts)?,
 			None => inner.get(&key)?,
 		};
 		// Return result
@@ -199,7 +199,7 @@ impl Transactable for Transaction {
 		let mut inner = self.inner.write().await;
 		// Set the key
 		match version {
-			Some(ts) => inner.set_at_version(&key, &val, ts)?,
+			Some(ts) => inner.set_at(&key, &val, ts)?,
 			None => inner.set(&key, &val)?,
 		}
 		// Return result
@@ -240,7 +240,7 @@ impl Transactable for Transaction {
 		let mut inner = self.inner.write().await;
 		// Set the key if empty
 		if let Some(ts) = version {
-			inner.set_at_version(&key, &val, ts)?;
+			inner.set_at(&key, &val, ts)?;
 		} else {
 			match inner.get(&key)? {
 				None => inner.set(&key, &val)?,
@@ -382,16 +382,16 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || -> Result<_> {
-			// Count the items in the range
-			let res = inner.count(beg, end)?;
-			// Return result
-			Ok(res)
-		})
-		.await?;
+		// Count items using range iterator
+		let mut iter = inner.range(&beg, &end)?;
+		let mut count = 0;
+		iter.seek_first()?;
+		while iter.valid() {
+			count += 1;
+			iter.next()?;
+		}
 		// Return result
-		Ok(res)
+		Ok(count)
 	}
 
 	/// Retrieve a range of keys.
@@ -408,16 +408,28 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner
-				.keys_at_version(beg, end, ts)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
-			None => inner
-				.keys(beg, end)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			Some(ts) => {
+				let mut iter = inner.history(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					if iter.timestamp() <= ts {
+						res.push(iter.key());
+					}
+					iter.next()?;
+				}
+				res
+			}
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					res.push(iter.key());
+					iter.next()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -437,18 +449,28 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner
-				.keys_at_version(beg, end, ts)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
-			None => inner
-				.keys(beg, end)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			Some(ts) => {
+				let mut iter = inner.history(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					if iter.timestamp() <= ts {
+						res.push(iter.key());
+					}
+					iter.prev()?;
+				}
+				res
+			}
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					res.push(iter.key());
+					iter.prev()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -473,16 +495,31 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner
-				.range_at_version(beg, end, ts)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
-			None => inner
-				.range(beg, end)?
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			Some(ts) => {
+				let mut iter = inner.history(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					if iter.timestamp() <= ts {
+						let value = iter.value()?;
+						res.push((iter.key(), value));
+					}
+					iter.next()?;
+				}
+				res
+			}
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_first()?;
+				while iter.valid() && res.len() < limit as usize {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					res.push((key, value));
+					iter.next()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -507,18 +544,31 @@ impl Transactable for Transaction {
 		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
-			Some(ts) => inner
-				.range_at_version(beg, end, ts)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
-			None => inner
-				.range(beg, end)?
-				.rev()
-				.take(limit as usize)
-				.map(|r| r.map_err(Into::into))
-				.collect::<Result<_>>()?,
+			Some(ts) => {
+				let mut iter = inner.history(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					if iter.timestamp() <= ts {
+						let value = iter.value()?;
+						res.push((iter.key(), value));
+					}
+					iter.prev()?;
+				}
+				res
+			}
+			None => {
+				let mut iter = inner.range(&beg, &end)?;
+				let mut res = Vec::new();
+				iter.seek_last()?;
+				while iter.valid() && res.len() < limit as usize {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					res.push((key, value));
+					iter.prev()?;
+				}
+				res
+			}
 		};
 		// Return result
 		Ok(res)
@@ -539,9 +589,29 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let inner = self.inner.write().await;
-		// Retrieve the scan range
-		let res = inner.scan_all_versions(beg, end, Some(limit as usize))?.into_iter().collect();
+		let inner = self.inner.read().await;
+		// Retrieve the scan range using history iterator with tombstones included
+		// Limit is on unique keys, not total entries
+		let opts = HistoryOptions::new().with_tombstones(true);
+		let mut iter = inner.history_with_options(&beg, &end, &opts)?;
+		let mut res = Vec::new();
+		let mut unique_keys = 0u32;
+		let mut last_key: Option<Vec<u8>> = None;
+		iter.seek_last()?;
+		while iter.valid() && unique_keys < limit {
+			let key = iter.key();
+			// Count unique keys
+			if last_key.as_ref() != Some(&key) {
+				unique_keys += 1;
+				last_key = Some(key.clone());
+			}
+			// Only collect if within the unique key limit
+			if unique_keys <= limit {
+				let entry = iter.entry()?;
+				res.push((entry.0, entry.1, entry.2, entry.3));
+			}
+			iter.prev()?;
+		}
 		// Return result
 		Ok(res)
 	}

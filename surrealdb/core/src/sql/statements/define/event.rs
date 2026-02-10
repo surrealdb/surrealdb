@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::catalog::EventKind;
 use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Literal};
 
@@ -14,6 +15,7 @@ pub(crate) struct DefineEventStatement {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub event_kind: EventKind,
 }
 
 impl ToSql for DefineEventStatement {
@@ -24,15 +26,18 @@ impl ToSql for DefineEventStatement {
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write_sql!(
-			f,
-			fmt,
-			" {} ON {} WHEN {} THEN {}",
-			CoverStmts(&self.name),
-			CoverStmts(&self.target_table),
-			CoverStmts(&self.when),
-			Fmt::comma_separated(self.then.iter().map(CoverStmts))
-		);
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.target_table),);
+		if let EventKind::Async {
+			retry,
+			max_depth,
+		} = self.event_kind
+		{
+			write_sql!(f, fmt, " ASYNC RETRY {} MAXDEPTH {}", retry, max_depth);
+		}
+		write_sql!(f, fmt, " WHEN {}", CoverStmts(&self.when),);
+		if !self.then.is_empty() {
+			write_sql!(f, fmt, " THEN {}", Fmt::comma_separated(self.then.iter().map(CoverStmts)));
+		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
@@ -48,6 +53,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			event_kind: v.event_kind,
 		}
 	}
 }
@@ -62,6 +68,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.into(),
+			event_kind: v.event_kind,
 		}
 	}
 }

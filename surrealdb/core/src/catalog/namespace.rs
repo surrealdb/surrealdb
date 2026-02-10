@@ -100,6 +100,7 @@ impl InfoStructure for NamespaceDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"id".to_string() => self.namespace_id.0.into(),
 		})
 	}
 }

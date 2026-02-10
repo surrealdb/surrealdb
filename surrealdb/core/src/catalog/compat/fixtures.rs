@@ -459,6 +459,7 @@ pub fn event_basic() -> EventDefinition {
 		))],
 		comment: Some("Audit log on create".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
+		kind: EventKind::Sync,
 	}
 }
 
@@ -1104,7 +1105,7 @@ pub fn appending_both() -> Appending {
 // ===========================================================================
 
 pub fn primary_appending_basic() -> PrimaryAppending {
-	PrimaryAppending::new(123)
+	PrimaryAppending::new(123, 0)
 }
 
 // ===========================================================================
