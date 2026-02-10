@@ -10,9 +10,8 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::{IndexedResults, Notification};
+use surrealdb::{IndexedResults, Notification, Stats};
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
-use surrealdb_core::rpc::DbResultStats;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
@@ -295,7 +294,7 @@ fn process(
 	// Get the number of statements the query contained
 	let num_statements = response.num_statements();
 	// Prepare a single value from the query response
-	let mut vec = Vec::<(DbResultStats, Value)>::with_capacity(num_statements);
+	let mut vec = Vec::<(Stats, Value)>::with_capacity(num_statements);
 	for index in 0..num_statements {
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
