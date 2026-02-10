@@ -5,20 +5,21 @@
 //! to inform subsequent expression planning. This mirrors how the top-level
 //! script executor handles multiple statements.
 //!
-//! When planning fails with `Error::Unimplemented`, the sequence falls back to
-//! the legacy `Expr::compute` path, similar to how the top-level executor
-//! handles unimplemented expressions.
+//! When planning fails with `PlannerUnsupported` or `PlannerUnimplemented`,
+//! the sequence falls back to the legacy `Expr::compute` path, similar to how
+//! the top-level executor handles unplanned expressions.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
+use futures::stream;
 use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
+use crate::exec::plan_or_compute::collect_stream;
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::Block;
@@ -185,9 +186,9 @@ async fn execute_block_with_context(
 					};
 				}
 			}
-			Err(Error::Unimplemented(_)) => {
+			Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 				// Fallback to legacy compute path
-				let (opt, frozen) = get_legacy_context(&current_ctx, &mut legacy_ctx)
+				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
 					.map_err(|e| ControlFlow::Err(e.into()))?;
 
 				// Handle LET statements specially - only compute the value expression
@@ -223,11 +224,11 @@ async fn execute_block_with_context(
 	Ok((result, current_ctx))
 }
 
-/// Get the Options and FrozenContext for legacy compute fallback.
+/// Get the Options and FrozenContext for legacy compute fallback, with caching.
 ///
-/// Since the ExecutionContext's FrozenContext is the single source of truth
-/// for parameters, we can use it directly without reconstruction.
-fn get_legacy_context<'a>(
+/// Sequence needs a cached legacy context because LET statements may update it
+/// incrementally across iterations of the block.
+fn get_legacy_context_cached<'a>(
 	exec_ctx: &'a ExecutionContext,
 	cached_ctx: &mut Option<FrozenContext>,
 ) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
@@ -245,29 +246,6 @@ fn get_legacy_context<'a>(
 	*cached_ctx = Some(frozen.clone());
 
 	Ok((options, frozen))
-}
-
-/// Collect all values from a stream into a Vec
-///
-/// Returns `FlowResult` to properly propagate control flow signals:
-/// - `Ok(values)` - normal completion with collected values
-/// - `Err(ControlFlow::Break)` - BREAK signal (propagated to enclosing FOR loop)
-/// - `Err(ControlFlow::Continue)` - CONTINUE signal (propagated to enclosing FOR loop)
-/// - `Err(ControlFlow::Return(v))` - RETURN statement
-/// - `Err(ControlFlow::Err(e))` - error during execution
-async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
-	let mut results = Vec::new();
-	futures::pin_mut!(stream);
-
-	while let Some(batch_result) = stream.next().await {
-		match batch_result {
-			Ok(batch) => results.extend(batch.values),
-			// Propagate all control flow signals directly
-			Err(ctrl) => return Err(ctrl),
-		}
-	}
-
-	Ok(results)
 }
 
 impl ToSql for SequencePlan {

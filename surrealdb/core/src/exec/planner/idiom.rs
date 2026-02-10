@@ -171,7 +171,7 @@ impl<'ctx> Planner<'ctx> {
 				}))
 			}
 
-			Part::Start(_) => Err(Error::Unimplemented(
+			Part::Start(_) => Err(Error::Unreachable(
 				"Start parts should be handled at the idiom level".to_string(),
 			)),
 

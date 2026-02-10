@@ -56,7 +56,7 @@ pub(crate) mod operators;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
-pub(crate) mod physical_part;
+pub(crate) mod plan_or_compute;
 pub(crate) mod planner;
 
 // Re-export access mode types

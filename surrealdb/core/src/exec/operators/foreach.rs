@@ -7,14 +7,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
-use reblessive::tree::TreeStack;
+use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::planner::try_plan_expr;
+use crate::exec::plan_or_compute::{evaluate_body_expr, evaluate_expr};
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::{Block, ControlFlow, Expr, Param};
 use crate::val::Value;
@@ -56,37 +54,6 @@ impl Iterator for ForeachIter {
 			ForeachIter::Range(iter) => iter.next(),
 		}
 	}
-}
-
-/// Get the Options and FrozenContext for legacy compute fallback with a loop variable.
-///
-/// Creates a child context from the ExecutionContext's FrozenContext and adds
-/// the loop variable. The FrozenContext already has the correct params.
-fn get_legacy_context_with_param<'a>(
-	exec_ctx: &'a ExecutionContext,
-	param_name: &str,
-	param_value: &Value,
-) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-
-	// Create a child context that adds the loop variable
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
-	ctx.add_value(param_name.to_string(), Arc::new(param_value.clone()));
-
-	Ok((options, ctx.freeze()))
-}
-
-/// Get the Options and FrozenContext for legacy compute fallback (without loop variable).
-fn get_legacy_context(
-	exec_ctx: &ExecutionContext,
-) -> Result<(&crate::dbs::Options, FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-
-	Ok((options, exec_ctx.ctx().clone()))
 }
 
 #[async_trait]
@@ -183,7 +150,7 @@ async fn execute_foreach(
 
 		// Execute each statement in the body
 		for expr in body.0.iter() {
-			let result = execute_body_expr(expr, &mut current_ctx, &param_name, &v).await;
+			let result = evaluate_body_expr(expr, &mut current_ctx, &param_name, &v).await;
 
 			// Handle control flow signals
 			match result {
@@ -215,107 +182,6 @@ async fn execute_foreach(
 	Ok(ValueBatch {
 		values: vec![Value::None],
 	})
-}
-
-/// Evaluate an expression using deferred planning.
-///
-/// Tries to plan the expression with the streaming engine first,
-/// falling back to legacy compute if unimplemented.
-/// This is used for the range expression before the loop starts.
-async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	// Use the FrozenContext directly for planning (it's the source of truth)
-	let frozen_ctx = ctx.ctx();
-
-	match try_plan_expr(expr.clone(), frozen_ctx) {
-		Ok(plan) => {
-			// Execute the plan and collect the result
-			let stream = plan.execute(ctx)?;
-			let value = collect_single_value(stream).await?;
-			Ok(value)
-		}
-		Err(Error::Unimplemented(_)) => {
-			// Fallback to legacy compute path
-			let (opt, frozen) = get_legacy_context(ctx)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
-			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
-		}
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
-	}
-}
-
-/// Execute a body expression with the loop variable in context.
-///
-/// LET statements are context-mutating - when they execute successfully via
-/// the streaming engine, the context is updated so subsequent statements can
-/// access the new parameter. When falling back to legacy compute, the LET
-/// binding is handled internally by the legacy executor.
-async fn execute_body_expr(
-	expr: &Expr,
-	ctx: &mut ExecutionContext,
-	param_name: &str,
-	param_value: &Value,
-) -> crate::expr::FlowResult<Value> {
-	// The loop variable is already in the ExecutionContext's FrozenContext
-	// (added by with_param), so we can use it directly for planning.
-	// For the planning context, add the current loop value explicitly
-	// since it may have been updated by LET statements.
-	let frozen_ctx = ctx.ctx().clone();
-
-	match try_plan_expr(expr.clone(), &frozen_ctx) {
-		Ok(plan) => {
-			// Handle context-mutating operators (like LET)
-			if plan.mutates_context() {
-				// Get the output context - this also executes the plan
-				*ctx = plan
-					.output_context(ctx)
-					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
-				Ok(Value::None)
-			} else {
-				// Execute the plan normally
-				let stream = plan.execute(ctx)?;
-				collect_single_value(stream).await
-			}
-		}
-		Err(Error::Unimplemented(_)) => {
-			// Fallback to legacy compute path with the loop variable
-			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
-			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
-		}
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
-	}
-}
-
-/// Collect values from a stream into a single value.
-///
-/// For scalar expressions (single value), returns that value.
-/// For query expressions (multiple values), returns an array.
-/// Propagates control flow signals appropriately.
-async fn collect_single_value(stream: ValueBatchStream) -> crate::expr::FlowResult<Value> {
-	let mut values = Vec::new();
-	futures::pin_mut!(stream);
-
-	while let Some(batch_result) = stream.next().await {
-		match batch_result {
-			Ok(batch) => values.extend(batch.values),
-			Err(ctrl) => return Err(ctrl),
-		}
-	}
-
-	// Return the value appropriately:
-	// - Empty: NONE
-	// - Single value: that value
-	// - Multiple values: wrap in array (for query results like SELECT)
-	if values.is_empty() {
-		Ok(Value::None)
-	} else if values.len() == 1 {
-		Ok(values.into_iter().next().expect("values verified non-empty"))
-	} else {
-		Ok(Value::Array(crate::val::Array(values)))
-	}
 }
 
 impl ToSql for ForeachPlan {

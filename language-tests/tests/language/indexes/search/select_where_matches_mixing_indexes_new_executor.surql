@@ -20,10 +20,10 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[{ name: 'Jaime' }]"
 
 */
 DEFINE TABLE person;

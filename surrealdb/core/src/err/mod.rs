@@ -683,6 +683,16 @@ pub(crate) enum Error {
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
 
+	/// The planner does not support this statement type (e.g. DML/DDL).
+	/// Callers should always fall back to the compute path.
+	#[error("Planner unsupported: {0}")]
+	PlannerUnsupported(String),
+
+	/// The planner intends to support this but it is not yet implemented.
+	/// Callers fall back in BestEffort mode; hard error in AllReadOnlyStatements mode.
+	#[error("Planner not yet implemented: {0}")]
+	PlannerUnimplemented(String),
+
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),

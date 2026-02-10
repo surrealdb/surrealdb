@@ -27,7 +27,7 @@ use crate::expr::{Cond, ControlFlow};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::record;
-use crate::kvs::{KVKey, KVValue};
+use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::val::{RecordIdKey, TableName, Value};
 
 /// Batch size for collecting records before yielding.
@@ -238,21 +238,10 @@ impl ExecOperator for Scan {
 				|| (check_perms && !field_state.field_permissions.is_empty())
 				|| predicate.is_some();
 
-			// Whether limit/start tracking is needed across batches
-			let has_limit = limit_val.is_some() || start_val > 0;
-
-			// For the pure fast path (no filter, no perms, no computed fields),
-			// we can push start+limit to the storage layer and skip decoding
-			// offset rows entirely.
-			let effective_storage_limit = if !needs_processing && has_limit {
-				limit_val.map(|l| start_val.saturating_add(l))
-			} else {
-				None
-			};
-
-			match rid {
-				// === POINT LOOKUP (single record by ID) ===
-				Some(rid) if !matches!(rid.key, RecordIdKey::Range(_)) => {
+			// === POINT LOOKUP (single record by ID) ===
+			// Handled inline - single record, no limit/start or pipeline needed.
+			if let Some(ref rid) = rid {
+				if !matches!(rid.key, RecordIdKey::Range(_)) {
 					let record = txn
 						.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
 						.await
@@ -263,272 +252,84 @@ impl ExecOperator for Scan {
 					}
 
 					let mut value = record.data.as_ref().clone();
-					value.def(&rid);
+					value.def(rid);
 
-					if check_perm!(&select_permission, &value, &ctx)? {
-						let mut batch = vec![value];
-						process_batch(&ctx, &field_state, check_perms, &mut batch).await?;
-						// Apply predicate for point lookups
-						if let Some(ref pred) = predicate {
-							let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&batch[0]);
-							if !pred.evaluate(eval_ctx).await?.is_truthy() {
-								return;
-							}
-						}
+					let mut batch = vec![value];
+					if needs_processing {
+						filter_and_process_batch(
+							&mut batch, &select_permission, predicate.as_ref(),
+							&ctx, &field_state, check_perms,
+						).await?;
+					}
+					if !batch.is_empty() {
 						yield ValueBatch { values: batch };
 					}
+					return;
 				}
+			}
 
-			// === RANGE SCAN (record ID with range key) ===
-			Some(rid) => {
-					let RecordIdKey::Range(range) = &rid.key else { unreachable!() };
+			// === STREAM-BASED PATHS (range scan and table scan) ===
+			// All use the unified ScanPipeline consumption loop.
 
-					let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
-					let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+			// When no processing is needed, push start to the KV layer as pre_skip
+			// so rows are discarded before deserialization.
+			let pre_skip = if !needs_processing { start_val } else { 0 };
 
-					let direction = determine_scan_direction(&order);
-					let kv_stream = txn.stream_keys_vals(beg..end, version, effective_storage_limit, direction);
-					let chunks = kv_stream.ready_chunks(BATCH_SIZE);
-					futures::pin_mut!(chunks);
+			// Push start+limit to the storage layer for the pure fast path.
+			let effective_storage_limit = if !needs_processing {
+				limit_val.map(|l| start_val.saturating_add(l))
+			} else {
+				None
+			};
 
-					if needs_processing {
-						let mut skipped = 0usize;
-						let mut emitted = 0usize;
-						while let Some(chunk) = chunks.next().await {
-							let mut batch = Vec::with_capacity(chunk.len());
-							for result in chunk {
-								let (key, val) = result
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-								batch.push(decode_record(&key, val)?);
-							}
-							filter_and_process_batch(&mut batch, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
-							if has_limit && !batch.is_empty() {
-								// Apply start offset
-								if skipped < start_val {
-									let to_skip = (start_val - skipped).min(batch.len());
-									skipped += to_skip;
-									batch.drain(..to_skip);
-								}
-								// Apply limit
-								if let Some(limit) = limit_val {
-									let remaining = limit.saturating_sub(emitted);
-									if batch.len() > remaining {
-										batch.truncate(remaining);
-									}
-								}
-								emitted += batch.len();
-							}
-							if !batch.is_empty() {
-								yield ValueBatch { values: batch };
-							}
-							if limit_val.is_some_and(|l| emitted >= l) {
-								break;
-							}
-						}
-					} else if has_limit {
-						// Fast path with limit: skip before decode, stop early
-						let mut skipped = 0usize;
-						let mut emitted = 0usize;
-						while let Some(chunk) = chunks.next().await {
-							let mut batch = Vec::with_capacity(chunk.len());
-							for result in chunk {
-								let (key, val) = result
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-								if skipped < start_val {
-									skipped += 1;
-									continue; // Skip without decoding
-								}
-								if limit_val.is_some_and(|l| emitted >= l) {
-									break;
-								}
-								batch.push(decode_record(&key, val)?);
-								emitted += 1;
-							}
-							if !batch.is_empty() {
-								yield ValueBatch { values: batch };
-							}
-							if limit_val.is_some_and(|l| emitted >= l) {
-								break;
-							}
-						}
-					} else {
-						// Fast path: no filtering, no limit
-						while let Some(chunk) = chunks.next().await {
-							let mut batch = Vec::with_capacity(chunk.len());
-							for result in chunk {
-								let (key, val) = result
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-								batch.push(decode_record(&key, val)?);
-							}
-							yield ValueBatch { values: batch };
-						}
-					}
+			let direction = determine_scan_direction(&order);
+
+			// Create the source stream based on scan type.
+			// `applied_pre_skip` tracks how many rows the source will skip
+			// before decoding, so the pipeline can adjust its start accordingly.
+			let (mut source, applied_pre_skip) = if let Some(rid) = rid {
+				// Range scan (must be a range since point lookup returned above)
+				let RecordIdKey::Range(range) = &rid.key else { unreachable!() };
+				let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
+				let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+				let stream = kv_scan_stream(
+					Arc::clone(&txn), beg, end, version,
+					effective_storage_limit, direction, pre_skip,
+				);
+				(stream, pre_skip)
+			} else {
+				// Table scan (with index selection)
+				resolve_table_scan_stream(
+					&ctx, TableScanConfig {
+						ns_id: ns.namespace_id,
+						db_id: db.database_id,
+						table_name,
+						cond,
+						order: order.clone(),
+						with,
+						direction,
+						version,
+						storage_limit: effective_storage_limit,
+						pre_skip,
+					},
+				).await?
+			};
+
+			// Build the pipeline with start adjusted for any pre-skipping.
+			let mut pipeline = ScanPipeline::new(
+				select_permission, predicate, field_state,
+				check_perms, limit_val, start_val.saturating_sub(applied_pre_skip),
+			);
+
+			// Unified consumption loop for all stream-based sources.
+			while let Some(batch_result) = source.next().await {
+				let mut batch = batch_result?;
+				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
+				if !batch.values.is_empty() {
+					yield ValueBatch { values: batch.values };
 				}
-
-				// === TABLE SCAN (with optional index selection) ===
-				None => {
-					let direction = determine_scan_direction(&order);
-
-					// Determine if we should use an index
-					let access_path = if matches!(&with, Some(With::NoIndex)) {
-						None
-					} else {
-						let indexes = txn
-							.all_tb_indexes(ns.namespace_id, db.database_id, &table_name)
-							.await
-							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}")))?;
-
-						let analyzer = IndexAnalyzer::new(&table_name, indexes, with.as_ref());
-						let candidates = analyzer.analyze(cond.as_ref(), order.as_ref());
-						Some(select_access_path(table_name.clone(), candidates, with.as_ref(), direction))
-					};
-
-					match access_path {
-						// B-tree index scan (single-column only)
-						Some(AccessPath::BTreeScan { index_ref, access, direction }) if index_ref.cols.len() == 1 => {
-							let operator = IndexScan { index_ref, access, direction, table_name: table_name.clone() };
-							let mut stream = operator.execute(&ctx)?;
-							let mut skipped = 0usize;
-							let mut emitted = 0usize;
-							while let Some(batch_result) = stream.next().await {
-								let mut batch = batch_result?;
-								// Apply predicate as residual filter + computed fields
-								filter_and_process_batch(&mut batch.values, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
-								if has_limit && !batch.values.is_empty() {
-									if skipped < start_val {
-										let to_skip = (start_val - skipped).min(batch.values.len());
-										skipped += to_skip;
-										batch.values.drain(..to_skip);
-									}
-									if let Some(limit) = limit_val {
-										let remaining = limit.saturating_sub(emitted);
-										if batch.values.len() > remaining {
-											batch.values.truncate(remaining);
-										}
-									}
-									emitted += batch.values.len();
-								}
-								if !batch.values.is_empty() {
-									yield batch;
-								}
-								if limit_val.is_some_and(|l| emitted >= l) {
-									break;
-								}
-							}
-						}
-
-						// Full-text search
-						Some(AccessPath::FullTextSearch { index_ref, query, operator }) => {
-							let ft_op = FullTextScan { index_ref, query, operator, table_name: table_name.clone() };
-							let mut stream = ft_op.execute(&ctx)?;
-							let mut skipped = 0usize;
-							let mut emitted = 0usize;
-							while let Some(batch_result) = stream.next().await {
-								let mut batch = batch_result?;
-								// Apply predicate as residual filter + computed fields
-								filter_and_process_batch(&mut batch.values, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
-								if has_limit && !batch.values.is_empty() {
-									if skipped < start_val {
-										let to_skip = (start_val - skipped).min(batch.values.len());
-										skipped += to_skip;
-										batch.values.drain(..to_skip);
-									}
-									if let Some(limit) = limit_val {
-										let remaining = limit.saturating_sub(emitted);
-										if batch.values.len() > remaining {
-											batch.values.truncate(remaining);
-										}
-									}
-									emitted += batch.values.len();
-								}
-								if !batch.values.is_empty() {
-									yield batch;
-								}
-								if limit_val.is_some_and(|l| emitted >= l) {
-									break;
-								}
-							}
-						}
-
-						// Fall back to table scan (NOINDEX, compound indexes, KNN, etc.)
-						_ => {
-							let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
-							let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
-
-							let kv_stream = txn.stream_keys_vals(beg..end, version, effective_storage_limit, direction);
-							let chunks = kv_stream.ready_chunks(BATCH_SIZE);
-							futures::pin_mut!(chunks);
-
-							if needs_processing {
-								let mut skipped = 0usize;
-								let mut emitted = 0usize;
-								while let Some(chunk) = chunks.next().await {
-									let mut batch = Vec::with_capacity(chunk.len());
-									for result in chunk {
-										let (key, val) = result
-											.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-										batch.push(decode_record(&key, val)?);
-									}
-									filter_and_process_batch(&mut batch, &select_permission, predicate.as_ref(), &ctx, &field_state, check_perms).await?;
-									if has_limit && !batch.is_empty() {
-										if skipped < start_val {
-											let to_skip = (start_val - skipped).min(batch.len());
-											skipped += to_skip;
-											batch.drain(..to_skip);
-										}
-										if let Some(limit) = limit_val {
-											let remaining = limit.saturating_sub(emitted);
-											if batch.len() > remaining {
-												batch.truncate(remaining);
-											}
-										}
-										emitted += batch.len();
-									}
-									if !batch.is_empty() {
-										yield ValueBatch { values: batch };
-									}
-									if limit_val.is_some_and(|l| emitted >= l) {
-										break;
-									}
-								}
-							} else if has_limit {
-								// Fast path with limit: skip before decode, stop early
-								let mut skipped = 0usize;
-								let mut emitted = 0usize;
-								while let Some(chunk) = chunks.next().await {
-									let mut batch = Vec::with_capacity(chunk.len());
-									for result in chunk {
-										let (key, val) = result?;
-										if skipped < start_val {
-											skipped += 1;
-											continue; // Skip without decoding
-										}
-										if limit_val.is_some_and(|l| emitted >= l) {
-											break;
-										}
-										batch.push(decode_record(&key, val)?);
-										emitted += 1;
-									}
-									if !batch.is_empty() {
-										yield ValueBatch { values: batch };
-									}
-									if limit_val.is_some_and(|l| emitted >= l) {
-										break;
-									}
-								}
-							} else {
-								// Fast path: no filtering, no limit
-								while let Some(chunk) = chunks.next().await {
-									let mut batch = Vec::with_capacity(chunk.len());
-									for result in chunk {
-										let (key, val) = result?;
-										batch.push(decode_record(&key, val)?);
-									}
-									yield ValueBatch { values: batch };
-								}
-							}
-						}
-					}
+				if !cont {
+					break;
 				}
 			}
 		};
@@ -536,6 +337,110 @@ impl ExecOperator for Scan {
 		Ok(instrument_stream(Box::pin(stream), "Scan"))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ScanPipeline: encapsulates per-batch processing and cross-batch limit/start
+// ---------------------------------------------------------------------------
+
+/// Inline pipeline that performs all per-batch operations (filtering, computed
+/// fields, permissions, limit/start) in a single pass with minimal await
+/// boundaries. Limit/start state is tracked across batches so the logic is
+/// written once rather than duplicated in every scan path.
+struct ScanPipeline {
+	permission: PhysicalPermission,
+	predicate: Option<Arc<dyn PhysicalExpr>>,
+	field_state: FieldState,
+	check_perms: bool,
+	/// Cached at construction: true when filter_and_process_batch must run.
+	needs_processing: bool,
+	/// Maximum rows to emit (pushed-down LIMIT).
+	limit: Option<usize>,
+	/// Rows to skip after filtering (pushed-down START, adjusted for pre_skip).
+	start: usize,
+	/// How many post-filter rows have been skipped so far.
+	skipped: usize,
+	/// How many rows have been emitted so far.
+	emitted: usize,
+}
+
+impl ScanPipeline {
+	fn new(
+		permission: PhysicalPermission,
+		predicate: Option<Arc<dyn PhysicalExpr>>,
+		field_state: FieldState,
+		check_perms: bool,
+		limit: Option<usize>,
+		start: usize,
+	) -> Self {
+		let needs_processing = !matches!(permission, PhysicalPermission::Allow)
+			|| !field_state.computed_fields.is_empty()
+			|| (check_perms && !field_state.field_permissions.is_empty())
+			|| predicate.is_some();
+		Self {
+			permission,
+			predicate,
+			field_state,
+			check_perms,
+			needs_processing,
+			limit,
+			start,
+			skipped: 0,
+			emitted: 0,
+		}
+	}
+
+	/// Returns true when limit or start tracking is active.
+	fn has_limit(&self) -> bool {
+		self.limit.is_some() || self.start > 0
+	}
+
+	/// Process a single batch in-place: filter, compute fields, apply
+	/// permissions, then apply limit/start. Returns `false` when the
+	/// limit has been reached and the caller should stop iterating.
+	async fn process_batch(
+		&mut self,
+		batch: &mut Vec<Value>,
+		ctx: &ExecutionContext,
+	) -> Result<bool, ControlFlow> {
+		// Phase 1: filter + process (parallel per-record via try_join_all_buffered)
+		if self.needs_processing {
+			filter_and_process_batch(
+				batch,
+				&self.permission,
+				self.predicate.as_ref(),
+				ctx,
+				&self.field_state,
+				self.check_perms,
+			)
+			.await?;
+		}
+
+		// Phase 2: limit/start tracking
+		if self.has_limit() && !batch.is_empty() {
+			// Apply start offset
+			if self.skipped < self.start {
+				let to_skip = (self.start - self.skipped).min(batch.len());
+				self.skipped += to_skip;
+				batch.drain(..to_skip);
+			}
+			// Apply limit
+			if let Some(limit) = self.limit {
+				let remaining = limit.saturating_sub(self.emitted);
+				if batch.len() > remaining {
+					batch.truncate(remaining);
+				}
+			}
+			self.emitted += batch.len();
+		}
+
+		// Continue iterating unless the limit has been reached.
+		Ok(self.limit.is_none_or(|l| self.emitted < l))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Source helpers
+// ---------------------------------------------------------------------------
 
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
@@ -552,12 +457,148 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 	}
 }
 
+/// Produce a `ValueBatchStream` from a raw KV range scan.
+///
+/// When `pre_skip > 0`, that many KV pairs are discarded *before* decoding,
+/// avoiding deserialization work for rows that will be skipped anyway (the
+/// fast-path optimisation for `START` without a pushdown predicate).
+fn kv_scan_stream(
+	txn: Arc<Transaction>,
+	beg: crate::kvs::Key,
+	end: crate::kvs::Key,
+	version: Option<u64>,
+	storage_limit: Option<usize>,
+	direction: ScanDirection,
+	pre_skip: usize,
+) -> ValueBatchStream {
+	let stream = async_stream::try_stream! {
+		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, direction);
+		let chunks = kv_stream.ready_chunks(BATCH_SIZE);
+		futures::pin_mut!(chunks);
+
+		let mut skipped = 0usize;
+		while let Some(chunk) = chunks.next().await {
+			let mut batch = Vec::with_capacity(chunk.len());
+			for result in chunk {
+				let (key, val) = result
+					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+				if skipped < pre_skip {
+					skipped += 1;
+					continue; // discard without decoding
+				}
+				batch.push(decode_record(&key, val)?);
+			}
+			if !batch.is_empty() {
+				yield ValueBatch { values: batch };
+			}
+		}
+	};
+	Box::pin(stream)
+}
+
+/// Configuration bundle for [`resolve_table_scan_stream`].
+struct TableScanConfig {
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	table_name: TableName,
+	cond: Option<Cond>,
+	order: Option<Ordering>,
+	with: Option<With>,
+	direction: ScanDirection,
+	version: Option<u64>,
+	storage_limit: Option<usize>,
+	/// Number of KV pairs to skip before decoding (fast-path only).
+	pre_skip: usize,
+}
+
+/// Resolve the optimal access path for a table scan and return the source
+/// stream together with the number of rows that were pre-skipped at the
+/// KV layer (zero for index / full-text sources).
+async fn resolve_table_scan_stream(
+	ctx: &ExecutionContext,
+	cfg: TableScanConfig,
+) -> Result<(ValueBatchStream, usize), ControlFlow> {
+	let txn = ctx.txn();
+
+	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
+		None
+	} else {
+		let indexes = txn
+			.all_tb_indexes(cfg.ns_id, cfg.db_id, &cfg.table_name)
+			.await
+			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}")))?;
+
+		let analyzer = IndexAnalyzer::new(&cfg.table_name, indexes, cfg.with.as_ref());
+		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
+		Some(select_access_path(
+			cfg.table_name.clone(),
+			candidates,
+			cfg.with.as_ref(),
+			cfg.direction,
+		))
+	};
+
+	match access_path {
+		// B-tree index scan (single-column only)
+		Some(AccessPath::BTreeScan {
+			index_ref,
+			access,
+			direction,
+		}) if index_ref.cols.len() == 1 => {
+			let operator = IndexScan {
+				index_ref,
+				access,
+				direction,
+				table_name: cfg.table_name,
+			};
+			let stream = operator.execute(ctx)?;
+			Ok((stream, 0))
+		}
+
+		// Full-text search
+		Some(AccessPath::FullTextSearch {
+			index_ref,
+			query,
+			operator,
+		}) => {
+			let ft_op = FullTextScan {
+				index_ref,
+				query,
+				operator,
+				table_name: cfg.table_name,
+			};
+			let stream = ft_op.execute(ctx)?;
+			Ok((stream, 0))
+		}
+
+		// Fall back to table KV scan (NOINDEX, compound indexes, KNN, etc.)
+		_ => {
+			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
+			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
+			let stream = kv_scan_stream(
+				txn,
+				beg,
+				end,
+				cfg.version,
+				cfg.storage_limit,
+				cfg.direction,
+				cfg.pre_skip,
+			);
+			Ok((stream, cfg.pre_skip))
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Batch processing
+// ---------------------------------------------------------------------------
+
 /// Combined single-pass filter and process for a batch of decoded values.
 ///
-/// Performs table-level permission filtering, computed field evaluation,
-/// WHERE predicate filtering, and field-level permission filtering in a
-/// single iteration over the batch. Records that fail any check are skipped
-/// entirely, avoiding wasted compute on records that will be filtered out.
+/// Per-record pipeline (sequential, in-place):
+///   table permission -> computed fields -> WHERE predicate -> field permissions.
+/// Records that fail any check are compacted out via an in-place swap so the
+/// surviving prefix can be truncated at the end with no extra allocation.
 async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
@@ -569,7 +610,7 @@ async fn filter_and_process_batch(
 	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
 	let mut write_idx = 0;
 	for read_idx in 0..batch.len() {
-		// Check table-level permission (skip if Allow)
+		// Table-level permission (skip if Allow)
 		if needs_perm_filter && !check_perm!(permission, &batch[read_idx], ctx)? {
 			continue;
 		}
@@ -577,15 +618,16 @@ async fn filter_and_process_batch(
 		if write_idx != read_idx {
 			batch.swap(write_idx, read_idx);
 		}
-		// Process in-place: computed fields first (predicate may reference them)
+		// Computed fields (must run before predicate)
 		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
-		// Apply WHERE predicate (after computed fields, before field perms)
+		// WHERE predicate
 		if let Some(pred) = predicate {
 			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&batch[write_idx]);
 			if !pred.evaluate(eval_ctx).await?.is_truthy() {
 				continue;
 			}
 		}
+		// Field-level permissions
 		if check_perms {
 			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
 		}
@@ -594,6 +636,10 @@ async fn filter_and_process_batch(
 	batch.truncate(write_idx);
 	Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Key helpers
+// ---------------------------------------------------------------------------
 
 /// Compute the start key for a range scan.
 fn range_start_key(
@@ -690,6 +736,10 @@ fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 	// Take ownership of the value (zero-cost move for freshly deserialized Mutable data)
 	Ok(record.data.into_value())
 }
+
+// ---------------------------------------------------------------------------
+// Field state
+// ---------------------------------------------------------------------------
 
 /// Cached state for field processing (computed fields and permissions).
 /// Initialized on first batch and reused for subsequent batches.
@@ -812,26 +862,6 @@ async fn build_field_state(
 		computed_fields,
 		field_permissions,
 	})
-}
-
-/// Process a batch of values: evaluate computed fields and apply field-level permissions.
-async fn process_batch(
-	ctx: &ExecutionContext,
-	state: &FieldState,
-	check_perms: bool,
-	values: &mut [Value],
-) -> Result<(), ControlFlow> {
-	for value in values.iter_mut() {
-		// Evaluate computed fields
-		compute_fields_for_value(ctx, state, value).await?;
-
-		// Apply field-level permissions
-		if check_perms {
-			filter_fields_by_permission(ctx, state, value).await?;
-		}
-	}
-
-	Ok(())
 }
 
 /// Compute all computed fields for a single value.

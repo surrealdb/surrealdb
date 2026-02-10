@@ -40,7 +40,7 @@ pub(super) fn convert_record_key_lit(
 			}
 			Ok(RecordIdKey::Object(obj))
 		}
-		RecordIdKeyLit::Range(_) => Err(Error::Unimplemented(
+		RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
 			"Nested range record keys not supported in execution plans".to_string(),
 		)),
 	}
@@ -50,7 +50,7 @@ pub(super) fn convert_record_key_lit(
 pub(super) fn static_expr_to_value(expr: &Expr) -> Result<crate::val::Value, Error> {
 	match expr {
 		Expr::Literal(lit) => literal_to_value(lit.clone()),
-		_ => Err(Error::Unimplemented(
+		_ => Err(Error::PlannerUnimplemented(
 			"Dynamic expressions in record ID keys not yet supported in execution plans"
 				.to_string(),
 		)),
@@ -125,13 +125,13 @@ pub(super) fn literal_to_value(
 				key,
 			}))
 		}
-		Literal::Array(_) => Err(Error::Unimplemented(
+		Literal::Array(_) => Err(Error::PlannerUnimplemented(
 			"Array literals in USE statements not yet supported".to_string(),
 		)),
-		Literal::Set(_) => Err(Error::Unimplemented(
+		Literal::Set(_) => Err(Error::PlannerUnimplemented(
 			"Set literals in USE statements not yet supported".to_string(),
 		)),
-		Literal::Object(_) => Err(Error::Unimplemented(
+		Literal::Object(_) => Err(Error::PlannerUnimplemented(
 			"Object literals in USE statements not yet supported".to_string(),
 		)),
 	}
@@ -152,9 +152,9 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 		RecordIdKeyLit::Object(entries) => {
 			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
 		}
-		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => {
-			Err(Error::Unimplemented("Generated/range keys in graph range bounds".to_string()))
-		}
+		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
+			"Generated/range keys in graph range bounds".to_string(),
+		)),
 	}
 }
 

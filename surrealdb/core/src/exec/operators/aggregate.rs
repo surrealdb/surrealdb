@@ -17,7 +17,7 @@ use crate::val::{Object, Value};
 /// GROUP BY collects all values into groups based on the specified keys,
 /// then applies aggregate functions (COUNT, SUM, array::group, etc.) to each group.
 ///
-/// This is a blocking operator - it must consume the entire input stream
+/// This is a pipeline breaking operator - it must consume the entire input stream
 /// before producing any output.
 #[derive(Debug, Clone)]
 pub struct Aggregate {

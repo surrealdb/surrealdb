@@ -94,114 +94,102 @@ async fn fetch_fields(
 	fields: &[Idiom],
 ) -> crate::expr::FlowResult<Value> {
 	for field in fields {
-		fetch_field_recursive(ctx, &mut value, &field.0, 0).await?;
+		fetch_field_path(ctx, &mut value, &field.0).await?;
 	}
 	Ok(value)
 }
 
-/// Recursively fetch a field path, handling wildcards and nested paths.
+/// Traverse a field path through a value, fetching record IDs along the way.
 ///
-/// This traverses the path parts one by one:
-/// - Field: navigate into the object field
-/// - All (*): apply remaining path to all array/object elements
-/// - At the end, if we have a RecordId, fetch it; if we have an array of RecordIds, fetch each
-fn fetch_field_recursive<'a>(
+/// Uses an iterative loop for linear path descent (Field on Object, First, Last)
+/// and only recurses for fan-out cases (iterating over array/object elements).
+/// This avoids per-step heap allocation and reduces stack depth compared to
+/// fully recursive traversal.
+fn fetch_field_path<'a>(
 	ctx: &'a ExecutionContext,
 	value: &'a mut Value,
 	path: &'a [Part],
-	depth: usize,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::expr::FlowResult<()>> + Send + 'a>> {
 	Box::pin(async move {
-		// If we've reached the end of the path, check if we need to fetch the current value
-		if depth >= path.len() {
-			return fetch_value_if_record(ctx, value).await;
-		}
+		let mut current = value;
+		let mut depth = 0usize;
 
-		let part = &path[depth];
-		let remaining = &path[depth + 1..];
+		loop {
+			// End of path: fetch the current value if it's a record
+			if depth >= path.len() {
+				return fetch_value_if_record(ctx, current).await;
+			}
 
-		match part {
-			Part::Field(field_name) => {
-				match value {
+			// Mid-path RecordId: fetch in place and retry at the same depth
+			if matches!(&*current, Value::RecordId(_)) {
+				fetch_value_if_record(ctx, current).await?;
+				continue;
+			}
+
+			match &path[depth] {
+				Part::Field(name) => match current {
 					Value::Object(obj) => {
-						if let Some(field_value) = obj.get_mut(field_name.as_str()) {
-							// If this field is a RecordId and we have more path to traverse,
-							// we need to fetch it first so we can navigate into it
-							if matches!(field_value, Value::RecordId(_)) && !remaining.is_empty() {
-								fetch_value_if_record(ctx, field_value).await?;
-							}
-							// Continue traversing into this field
-							fetch_field_recursive(ctx, field_value, path, depth + 1).await?;
-						}
+						current = match obj.get_mut(name.as_str()) {
+							Some(child) => child,
+							None => return Ok(()),
+						};
+						depth += 1;
 					}
 					Value::Array(arr) => {
-						// Apply path to each element in the array
-						for item in arr.iter_mut() {
-							fetch_field_recursive(ctx, item, path, depth).await?;
-						}
+						// Fan-out: apply the same field path to each array element
+						return fetch_each(ctx, arr.iter_mut(), &path[depth..]).await;
 					}
-					Value::RecordId(_) => {
-						// The current value is a RecordId - fetch it first, then navigate
-						fetch_value_if_record(ctx, value).await?;
-						// Now try again with the fetched value
-						fetch_field_recursive(ctx, value, path, depth).await?;
-					}
-					_ => {}
-				}
-			}
-			Part::All => {
-				// Wildcard - apply remaining path to all elements
-				match value {
+					_ => return Ok(()),
+				},
+				Part::All => match current {
 					Value::Array(arr) => {
-						for item in arr.iter_mut() {
-							// If the item is a RecordId, we must fetch it first
-							// before we can navigate into its fields
-							if matches!(item, Value::RecordId(_)) {
-								fetch_value_if_record(ctx, item).await?;
-							}
-							if remaining.is_empty() {
-								// No more path - we're done (already fetched if needed)
-							} else {
-								// Continue with remaining path on the (possibly fetched) item
-								fetch_field_recursive(ctx, item, path, depth + 1).await?;
-							}
-						}
+						return fetch_each(ctx, arr.iter_mut(), &path[depth + 1..]).await;
 					}
 					Value::Object(obj) => {
-						for (_, field_value) in obj.iter_mut() {
-							// If the field value is a RecordId, fetch it first
-							if matches!(field_value, Value::RecordId(_)) {
-								fetch_value_if_record(ctx, field_value).await?;
-							}
-							if !remaining.is_empty() {
-								// Continue with remaining path
-								fetch_field_recursive(ctx, field_value, path, depth + 1).await?;
-							}
-						}
+						return fetch_each(ctx, obj.values_mut(), &path[depth + 1..]).await;
 					}
-					_ => {}
+					_ => return Ok(()),
+				},
+				Part::First => {
+					current = match current {
+						Value::Array(arr) => match arr.first_mut() {
+							Some(v) => v,
+							None => return Ok(()),
+						},
+						_ => return Ok(()),
+					};
+					depth += 1;
 				}
-			}
-			Part::First => {
-				if let Value::Array(arr) = value
-					&& let Some(first) = arr.first_mut()
-				{
-					fetch_field_recursive(ctx, first, path, depth + 1).await?;
+				Part::Last => {
+					current = match current {
+						Value::Array(arr) => match arr.last_mut() {
+							Some(v) => v,
+							None => return Ok(()),
+						},
+						_ => return Ok(()),
+					};
+					depth += 1;
 				}
+				// For other path parts, we don't support fetching through them
+				_ => return Ok(()),
 			}
-			Part::Last => {
-				if let Value::Array(arr) = value
-					&& let Some(last) = arr.last_mut()
-				{
-					fetch_field_recursive(ctx, last, path, depth + 1).await?;
-				}
-			}
-			// For other path parts, we don't support fetching through them
-			_ => {}
 		}
-
-		Ok(())
 	})
+}
+
+/// Fan-out helper: process each value with the remaining path.
+///
+/// Used when traversal encounters a collection (array or object) that
+/// requires applying the remaining field path to each element.
+async fn fetch_each<'a>(
+	ctx: &'a ExecutionContext,
+	values: impl Iterator<Item = &'a mut Value>,
+	remaining_path: &'a [Part],
+) -> crate::expr::FlowResult<()> {
+	for item in values {
+		fetch_field_path(ctx, item, remaining_path).await?;
+	}
+	Ok(())
 }
 
 /// If the value is a RecordId, fetch it and replace the value.

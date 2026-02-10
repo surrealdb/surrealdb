@@ -47,7 +47,7 @@ pub enum NewPlannerStrategy {
 	/// Skip the new planner entirely; always use the compute executor.
 	ComputeOnly,
 	/// Require the new planner for all read-only statements.
-	/// Returns Error::Query instead of Error::Unimplemented for non-DDL/DML failures.
+	/// Promotes Error::PlannerUnimplemented to Error::Query (hard error) instead of falling back.
 	AllReadOnlyStatements,
 }
 

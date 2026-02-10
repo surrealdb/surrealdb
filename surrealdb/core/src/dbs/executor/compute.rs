@@ -488,7 +488,7 @@ impl ComputeExecutor {
 						// exec_result is now FlowResult<Value>, propagate directly
 						exec_result
 					}
-					Err(Error::Unimplemented(_)) => {
+					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 						// Fallback to existing compute path
 						ctx_mut!().set_transaction(txn);
 						let res = self

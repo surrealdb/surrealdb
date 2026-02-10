@@ -1,6 +1,5 @@
 mod aggregate;
 mod compute;
-mod control_flow;
 mod explain;
 mod expr;
 mod fetch;
@@ -17,6 +16,7 @@ mod limit;
 mod project;
 mod project_value;
 mod reference_scan;
+mod r#return;
 mod scan;
 mod sequence;
 mod sleep;
@@ -31,7 +31,6 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 pub use compute::Compute;
-pub use control_flow::ReturnPlan;
 pub use explain::ExplainPlan;
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
@@ -49,6 +48,7 @@ pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
 pub use reference_scan::{ReferenceScan, ReferenceScanOutput};
+pub use r#return::ReturnPlan;
 pub use scan::Scan;
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;

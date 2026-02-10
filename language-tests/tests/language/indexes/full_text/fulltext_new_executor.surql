@@ -35,13 +35,13 @@ value = '[{ score: 0.9537026882171631f, title: { "0": [{ e: 7, s: 4 }] } }]'
 value = "[]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[{ score: 0, title: 'Foo Bar' }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
+value = "[]"
 
 */
 

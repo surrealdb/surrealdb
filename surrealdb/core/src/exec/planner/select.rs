@@ -73,20 +73,20 @@ impl<'ctx> Planner<'ctx> {
 		} = select;
 
 		if explain.is_some() {
-			return Err(Error::Unimplemented(
+			return Err(Error::PlannerUnimplemented(
 				"SELECT ... EXPLAIN not yet supported in execution plans".to_string(),
 			));
 		}
 
 		if let Some(ref c) = cond {
 			if contains_knn_operator(&c.0) {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnimplemented(
 					"WHERE clause with KNN operators not yet supported in streaming executor"
 						.to_string(),
 				));
 			}
 			if contains_non_indexable_matches(&c.0) {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnimplemented(
 					"WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
 						.to_string(),
 				));
@@ -931,32 +931,32 @@ impl<'ctx> Planner<'ctx> {
 		let value: Arc<dyn ExecOperator> = match what {
 			Expr::Select(select) => self.plan_select_statement(*select)?,
 			Expr::Create(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"CREATE statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
 			Expr::Update(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"UPDATE statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
 			Expr::Upsert(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"UPSERT statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
 			Expr::Delete(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"DELETE statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
 			Expr::Insert(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"INSERT statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
 			Expr::Relate(_) => {
-				return Err(Error::Unimplemented(
+				return Err(Error::PlannerUnsupported(
 					"RELATE statements in LET not yet supported in execution plans".to_string(),
 				));
 			}
@@ -1008,14 +1008,14 @@ impl<'ctx> Planner<'ctx> {
 			Expr::FunctionCall(ref call) => match &call.receiver {
 				Function::Normal(name) if name == "type::field" => {
 					let arg = call.arguments.first().ok_or_else(|| {
-						Error::Unimplemented(
+						Error::PlannerUnimplemented(
 							"type::field in OMIT/FETCH requires an argument".to_string(),
 						)
 					})?;
 					let s = self.resolve_expr_to_string(arg)?;
 					let idiom: Idiom = crate::syn::idiom(&s)
 						.map_err(|e| {
-							Error::Unimplemented(format!(
+							Error::PlannerUnimplemented(format!(
 								"Failed to parse field path '{}': {}",
 								s, e
 							))
@@ -1025,7 +1025,7 @@ impl<'ctx> Planner<'ctx> {
 				}
 				Function::Normal(name) if name == "type::fields" => {
 					let arg = call.arguments.first().ok_or_else(|| {
-						Error::Unimplemented(
+						Error::PlannerUnimplemented(
 							"type::fields in OMIT/FETCH requires an argument".to_string(),
 						)
 					})?;
@@ -1034,7 +1034,7 @@ impl<'ctx> Planner<'ctx> {
 					for s in strings {
 						let idiom: Idiom = crate::syn::idiom(&s)
 							.map_err(|e| {
-								Error::Unimplemented(format!(
+								Error::PlannerUnimplemented(format!(
 									"Failed to parse field path '{}': {}",
 									s, e
 								))
@@ -1061,12 +1061,12 @@ impl<'ctx> Planner<'ctx> {
 				let value =
 					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
 				value.coerce_to::<String>().map_err(|_| {
-					Error::Unimplemented(
+					Error::PlannerUnimplemented(
 						"OMIT/FETCH parameter did not resolve to a string".to_string(),
 					)
 				})
 			}
-			_ => Err(Error::Unimplemented(
+			_ => Err(Error::PlannerUnimplemented(
 				"OMIT/FETCH with computed expressions not yet supported in execution plans"
 					.to_string(),
 			)),
@@ -1082,12 +1082,12 @@ impl<'ctx> Planner<'ctx> {
 				let value =
 					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
 				value.coerce_to::<Vec<String>>().map_err(|_| {
-					Error::Unimplemented(
+					Error::PlannerUnimplemented(
 						"OMIT/FETCH parameter did not resolve to an array of strings".to_string(),
 					)
 				})
 			}
-			_ => Err(Error::Unimplemented(
+			_ => Err(Error::PlannerUnimplemented(
 				"OMIT/FETCH with computed expressions not yet supported in execution plans"
 					.to_string(),
 			)),

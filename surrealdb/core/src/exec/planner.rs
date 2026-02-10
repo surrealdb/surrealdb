@@ -368,16 +368,16 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			// DDL — cannot be used in expression context
-			Expr::Define(_) => Err(Error::Unimplemented(
+			Expr::Define(_) => Err(Error::PlannerUnsupported(
 				"DEFINE statements cannot be used in expression context".to_string(),
 			)),
-			Expr::Remove(_) => Err(Error::Unimplemented(
+			Expr::Remove(_) => Err(Error::PlannerUnsupported(
 				"REMOVE statements cannot be used in expression context".to_string(),
 			)),
-			Expr::Rebuild(_) => Err(Error::Unimplemented(
+			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
 				"REBUILD statements cannot be used in expression context".to_string(),
 			)),
-			Expr::Alter(_) => Err(Error::Unimplemented(
+			Expr::Alter(_) => Err(Error::PlannerUnsupported(
 				"ALTER statements cannot be used in expression context".to_string(),
 			)),
 
@@ -431,18 +431,18 @@ impl<'ctx> Planner<'ctx> {
 					plan,
 				}))
 			}
-			Expr::Foreach(_) => Err(Error::Unimplemented(
+			Expr::Foreach(_) => Err(Error::PlannerUnimplemented(
 				"FOR loops cannot be used in expression context".to_string(),
 			)),
-			Expr::Sleep(_) => Err(Error::Unimplemented(
+			Expr::Sleep(_) => Err(Error::PlannerUnimplemented(
 				"SLEEP statements cannot be used in expression context".to_string(),
 			)),
-			Expr::Let(_) => Err(Error::Unimplemented(
+			Expr::Let(_) => Err(Error::PlannerUnimplemented(
 				"LET statements cannot be used in expression context".to_string(),
 			)),
 			Expr::Explain {
 				..
-			} => Err(Error::Unimplemented(
+			} => Err(Error::PlannerUnimplemented(
 				"EXPLAIN statements cannot be used in expression context".to_string(),
 			)),
 
@@ -459,22 +459,22 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			// DML subqueries — not yet implemented
-			Expr::Create(_) => Err(Error::Unimplemented(
+			Expr::Create(_) => Err(Error::PlannerUnsupported(
 				"CREATE subqueries not yet supported in execution plans".to_string(),
 			)),
-			Expr::Update(_) => Err(Error::Unimplemented(
+			Expr::Update(_) => Err(Error::PlannerUnsupported(
 				"UPDATE subqueries not yet supported in execution plans".to_string(),
 			)),
-			Expr::Upsert(_) => Err(Error::Unimplemented(
+			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
 				"UPSERT subqueries not yet supported in execution plans".to_string(),
 			)),
-			Expr::Delete(_) => Err(Error::Unimplemented(
+			Expr::Delete(_) => Err(Error::PlannerUnsupported(
 				"DELETE subqueries not yet supported in execution plans".to_string(),
 			)),
-			Expr::Relate(_) => Err(Error::Unimplemented(
+			Expr::Relate(_) => Err(Error::PlannerUnsupported(
 				"RELATE subqueries not yet supported in execution plans".to_string(),
 			)),
-			Expr::Insert(_) => Err(Error::Unimplemented(
+			Expr::Insert(_) => Err(Error::PlannerUnsupported(
 				"INSERT subqueries not yet supported in execution plans".to_string(),
 			)),
 		}
@@ -508,11 +508,13 @@ impl<'ctx> Planner<'ctx> {
 	// Internal Planning
 	// ========================================================================
 
-	/// When `AllReadOnlyStatements` strategy is active, convert `Error::Unimplemented`
+	/// When `AllReadOnlyStatements` strategy is active, convert `Error::PlannerUnimplemented`
 	/// into `Error::Query` so it becomes a hard error instead of a silent fallback.
+	///
+	/// `PlannerUnsupported` (DML/DDL) is left untouched — those always fall back to compute.
 	fn require_planned<T>(&self, result: Result<T, Error>) -> Result<T, Error> {
 		match result {
-			Err(Error::Unimplemented(msg))
+			Err(Error::PlannerUnimplemented(msg))
 				if *self.ctx.new_planner_strategy()
 					== NewPlannerStrategy::AllReadOnlyStatements =>
 			{
@@ -527,36 +529,36 @@ impl<'ctx> Planner<'ctx> {
 	fn plan_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
 			// DML — always fall back to old executor
-			Expr::Create(_) => Err(Error::Unimplemented(
+			Expr::Create(_) => Err(Error::PlannerUnsupported(
 				"CREATE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Update(_) => Err(Error::Unimplemented(
+			Expr::Update(_) => Err(Error::PlannerUnsupported(
 				"UPDATE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Upsert(_) => Err(Error::Unimplemented(
+			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
 				"UPSERT statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Delete(_) => Err(Error::Unimplemented(
+			Expr::Delete(_) => Err(Error::PlannerUnsupported(
 				"DELETE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Insert(_) => Err(Error::Unimplemented(
+			Expr::Insert(_) => Err(Error::PlannerUnsupported(
 				"INSERT statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Relate(_) => Err(Error::Unimplemented(
+			Expr::Relate(_) => Err(Error::PlannerUnsupported(
 				"RELATE statements not yet supported in execution plans".to_string(),
 			)),
 
 			// DDL — always fall back to old executor
-			Expr::Define(_) => Err(Error::Unimplemented(
+			Expr::Define(_) => Err(Error::PlannerUnsupported(
 				"DEFINE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Remove(_) => Err(Error::Unimplemented(
+			Expr::Remove(_) => Err(Error::PlannerUnsupported(
 				"REMOVE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Rebuild(_) => Err(Error::Unimplemented(
+			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
 				"REBUILD statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Alter(_) => Err(Error::Unimplemented(
+			Expr::Alter(_) => Err(Error::PlannerUnsupported(
 				"ALTER statements not yet supported in execution plans".to_string(),
 			)),
 
@@ -778,13 +780,15 @@ impl<'ctx> Planner<'ctx> {
 /// Plan an expression into an executable operator tree.
 ///
 /// This is the main entry point for the planner, delegating to `Planner::plan()`.
-/// Returns `Error::Unimplemented` when `ComputeOnly` strategy is active.
+/// Returns `Error::PlannerUnsupported` when `ComputeOnly` strategy is active.
 pub(crate) fn try_plan_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {
-		return Err(Error::Unimplemented("ComputeOnly strategy: skipping new planner".to_string()));
+		return Err(Error::PlannerUnsupported(
+			"ComputeOnly strategy: skipping new planner".to_string(),
+		));
 	}
 	Planner::new(ctx).plan(expr)
 }

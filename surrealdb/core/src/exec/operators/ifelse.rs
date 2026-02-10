@@ -7,16 +7,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
-use reblessive::tree::TreeStack;
+use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::FrozenContext;
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::planner::try_plan_expr;
+use crate::exec::plan_or_compute::evaluate_expr;
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
-use crate::expr::{ControlFlow, Expr};
+use crate::expr::Expr;
 use crate::val::Value;
 
 /// IfElse operator with deferred planning.
@@ -41,16 +38,6 @@ pub struct IfElsePlan {
 	pub branches: Vec<(Expr, Expr)>,
 	/// Optional else body
 	pub else_body: Option<Expr>,
-}
-
-/// Get the Options and FrozenContext for legacy compute fallback.
-fn get_legacy_context(
-	exec_ctx: &ExecutionContext,
-) -> Result<(&crate::dbs::Options, &FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-	Ok((options, exec_ctx.ctx()))
 }
 
 #[async_trait]
@@ -138,48 +125,6 @@ async fn execute_ifelse(
 			values: vec![Value::None],
 		})
 	}
-}
-
-/// Evaluate an expression using deferred planning.
-///
-/// Tries to plan the expression with the streaming engine first,
-/// falling back to legacy compute if unimplemented.
-async fn evaluate_expr(expr: &Expr, ctx: &ExecutionContext) -> crate::expr::FlowResult<Value> {
-	match try_plan_expr(expr.clone(), ctx.ctx()) {
-		Ok(plan) => {
-			// Execute the plan and collect the result
-			let stream = plan.execute(ctx)?;
-			let value = collect_single_value(stream).await?;
-			Ok(value)
-		}
-		Err(Error::Unimplemented(_)) => {
-			// Fallback to legacy compute path
-			let (opt, frozen) = get_legacy_context(ctx)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
-			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, frozen, opt, None)).finish().await
-		}
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
-	}
-}
-
-/// Collect a single value from a stream.
-///
-/// For scalar expressions, this returns the single value.
-/// Propagates control flow signals appropriately.
-async fn collect_single_value(stream: ValueBatchStream) -> crate::expr::FlowResult<Value> {
-	let mut values = Vec::new();
-	futures::pin_mut!(stream);
-
-	while let Some(batch_result) = stream.next().await {
-		match batch_result {
-			Ok(batch) => values.extend(batch.values),
-			Err(ctrl) => return Err(ctrl),
-		}
-	}
-
-	// Return the single value, or NONE if empty
-	Ok(values.into_iter().next().unwrap_or(Value::None))
 }
 
 impl ToSql for IfElsePlan {

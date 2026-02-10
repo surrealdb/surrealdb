@@ -5,9 +5,9 @@
 //! the planner to use resolved variable values (from LET statements) for
 //! optimization of subsequent expressions.
 //!
-//! When planning fails with `Error::Unimplemented`, the block falls back to the
-//! legacy `Expr::compute` path, similar to how the top-level executor handles
-//! unimplemented expressions.
+//! When planning fails with `PlannerUnsupported` or `PlannerUnimplemented`,
+//! the block falls back to the legacy `Expr::compute` path, similar to how the
+//! top-level executor handles unplanned expressions.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,24 +26,6 @@ use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
-
-/// Check if an expression is a DDL or DML statement that should always
-/// fall back to the legacy compute path regardless of planner strategy.
-fn is_ddl_or_dml(expr: &Expr) -> bool {
-	matches!(
-		expr,
-		Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Upsert(_)
-			| Expr::Delete(_)
-			| Expr::Insert(_)
-			| Expr::Relate(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Alter(_)
-	)
-}
 
 /// Block expression with deferred planning.
 ///
@@ -84,7 +66,7 @@ fn create_planning_context(
 	ctx.freeze()
 }
 
-/// Get the Options and FrozenContext for legacy compute fallback.
+/// Get the Options and FrozenContext for legacy compute fallback, with caching.
 ///
 /// Since the ExecutionContext's FrozenContext is the single source of truth
 /// for parameters, we can use it directly without reconstruction.
@@ -217,16 +199,15 @@ impl BlockPhysicalExpr {
 						};
 						phys_expr.evaluate(eval_ctx).await?
 					}
-					Err(Error::Unimplemented(ref msg))
+					Err(Error::PlannerUnimplemented(ref msg))
 						if *frozen_ctx.new_planner_strategy()
-							== NewPlannerStrategy::AllReadOnlyStatements
-							&& !is_ddl_or_dml(&set_stmt.what) =>
+							== NewPlannerStrategy::AllReadOnlyStatements =>
 					{
 						return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
 							message: format!("New executor does not support: {msg}"),
 						})));
 					}
-					Err(Error::Unimplemented(_)) => {
+					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
@@ -287,16 +268,15 @@ impl BlockPhysicalExpr {
 						};
 						phys_expr.evaluate(eval_ctx).await
 					}
-					Err(Error::Unimplemented(ref msg))
+					Err(Error::PlannerUnimplemented(ref msg))
 						if *frozen_ctx.new_planner_strategy()
-							== NewPlannerStrategy::AllReadOnlyStatements
-							&& !is_ddl_or_dml(other) =>
+							== NewPlannerStrategy::AllReadOnlyStatements =>
 					{
 						Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
 							message: format!("New executor does not support: {msg}"),
 						})))
 					}
-					Err(Error::Unimplemented(_)) => {
+					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));

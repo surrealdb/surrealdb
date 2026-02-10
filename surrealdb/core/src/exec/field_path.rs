@@ -77,10 +77,10 @@ impl TryFrom<&Idiom> for FieldPath {
 				// Skip parts that don't affect output path structure
 				Part::Destructure(_) | Part::Start(_) => {}
 				_ => {
-					return Err(Error::Unimplemented(format!(
+					return Err(Error::PlannerUnimplemented(format!(
 						"FieldPath cannot contain complex parts like where clauses or method calls. \
-					 Only simple field access (a.b.c), literal indices ([0], [$]), and graph traversals are supported. \
-					 Got: {:?}",
+				 Only simple field access (a.b.c), literal indices ([0], [$]), and graph traversals are supported. \
+				 Got: {:?}",
 						idiom
 					)));
 				}

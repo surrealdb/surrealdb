@@ -15,7 +15,6 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tracing::instrument;
 
-use super::fetch::fetch_record;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
