@@ -7,9 +7,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 use futures::StreamExt;
 use surrealdb_core::kvs::Direction::Forward;
 use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::ScanLimit;
 use surrealdb_core::kvs::TransactionType::Read;
-use surrealdb_core::kvs::{Key, Scanner, Val};
+use surrealdb_core::kvs::{Key, ScanLimit, Scanner, Val};
 
 // ============================================================================
 // Benchmark: Scanner (Keys/KeyVal, Prefetch On/Off)
