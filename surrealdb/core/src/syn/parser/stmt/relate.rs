@@ -13,22 +13,21 @@ impl Parser<'_> {
 	) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let (from, through, to) = stk.run(|stk| self.parse_relation(stk)).await?;
-		let uniq = self.eat(t!("UNIQUE"));
+
+		// UNIQUE is unused, parse it for backwards compatibility
+		self.eat(t!("UNIQUE"));
 
 		let data = self.try_parse_data(stk).await?;
 		let output = self.try_parse_output(stk).await?;
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
 			only,
 			through,
 			from,
 			to,
-			uniq,
 			data,
 			output,
 			timeout,
-			parallel,
 		})
 	}
 

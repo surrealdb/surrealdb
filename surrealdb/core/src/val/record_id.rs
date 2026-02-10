@@ -434,9 +434,22 @@ impl RecordId {
 	) -> anyhow::Result<Option<Object>> {
 		// Fetch the record id's contents
 		let stm = SelectStatement {
-			expr: Fields::Select(vec![Field::All]),
+			fields: Fields::Select(vec![Field::All]),
 			what: vec![Expr::Literal(Literal::RecordId(self.into_literal()))],
-			..SelectStatement::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			cond: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 		if let Value::Object(x) = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first() {
 			Ok(Some(x))

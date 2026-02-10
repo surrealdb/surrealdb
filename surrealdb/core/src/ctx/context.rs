@@ -618,6 +618,25 @@ impl Context {
 		}
 	}
 
+	/// Collect context values into the provided map, walking up parent contexts
+	/// unless this context is isolated.
+	pub(crate) fn collect_values(
+		&self,
+		map: HashMap<Cow<'static, str>, Arc<Value>>,
+	) -> HashMap<Cow<'static, str>, Arc<Value>> {
+		let mut map = if !self.isolated
+			&& let Some(p) = &self.parent
+		{
+			p.collect_values(map)
+		} else {
+			map
+		};
+		self.values.iter().for_each(|(k, v)| {
+			map.insert(k.clone(), v.clone());
+		});
+		map
+	}
+
 	/// Get a 'static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {

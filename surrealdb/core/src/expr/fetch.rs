@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::collections::BTreeSet;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -14,15 +14,33 @@ use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::Value;
 
+/// A list of fetches to be applied to the result of a query.
+///
+/// Fetches are applied to the result of a query in the order they are specified.
+/// For this reason, the list of fetches is always sorted to ensure that parent fetches are
+/// applied before child fetches.
+///
+/// For example:
+/// `FETCH a.b, a` is sorted to `FETCH a, a.b`.
+/// `FETCH a.b, a.b.c, d, a, b` is sorted to `FETCH a, a.b, a.b.c, b, d`.
+///
+/// This prevents confusing behaviour like `FETCH a.b, a` only returning `a` because `a.b` gets
+/// clobbered by `a`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Fetchs(pub Vec<Fetch>);
+pub(crate) struct Fetchs(Vec<Fetch>);
 
-impl Deref for Fetchs {
-	type Target = Vec<Fetch>;
+impl Fetchs {
+	pub(crate) fn new(fetches: Vec<Fetch>) -> Self {
+		Self(fetches)
+	}
 
-	fn deref(&self) -> &Self::Target {
-		&self.0
+	pub(crate) fn iter(&self) -> impl Iterator<Item = &Fetch> {
+		self.0.iter()
+	}
+
+	pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Fetch> {
+		self.0.iter_mut()
 	}
 }
 
@@ -58,16 +76,16 @@ impl Fetch {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		idioms: &mut Vec<Idiom>,
+		idioms: &mut BTreeSet<Idiom>,
 	) -> Result<()> {
 		match &self.0 {
 			Expr::Idiom(idiom) => {
-				idioms.push(idiom.to_owned());
+				idioms.insert(idiom.to_owned());
 				Ok(())
 			}
 			Expr::Param(param) => {
 				let v = param.compute(stk, ctx, opt, None).await?;
-				idioms.push(
+				idioms.insert(
 					syn::idiom(
 						v.clone()
 							.coerce_to::<String>()
@@ -103,7 +121,7 @@ impl Fetch {
 
 						// manually do the implementation of type::field
 						let idiom: Idiom = syn::idiom(&arg)?.into();
-						idioms.push(idiom);
+						idioms.insert(idiom);
 						Ok(())
 					}
 					Function::Normal(ref x) if x == "type::fields" => {
@@ -122,7 +140,7 @@ impl Fetch {
 
 						// manually do the implementation of type::fields
 						for arg in args {
-							idioms.push(syn::idiom(&arg)?.into());
+							idioms.insert(syn::idiom(&arg)?.into());
 						}
 						Ok(())
 					}

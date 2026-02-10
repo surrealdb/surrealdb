@@ -33,37 +33,132 @@ async fn insert_statement_object_single() -> Result<()> {
 	Ok(())
 }
 
+/// Test that INSERT RELATION preserves extra fields beyond in/out
+/// Regression test for bug where RelateThrough::Table variant dropped extra fields
 #[tokio::test]
-async fn insert_statement_object_multiple() -> Result<()> {
+async fn insert_relation_with_extra_fields() -> Result<()> {
 	let sql = "
-		INSERT INTO test [
-			{
-				id: 1,
-				test: true,
-				something: 'other',
-			},
-			{
-				id: 2,
-				test: false,
-				something: 'else',
-			},
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON person TYPE string;
+		
+		DEFINE TABLE friendship TYPE RELATION IN person OUT person SCHEMAFULL;
+		DEFINE FIELD strength ON friendship TYPE int;
+		DEFINE FIELD since ON friendship TYPE string;
+		
+		INSERT INTO person [
+			{ id: person:alice, name: 'Alice' },
+			{ id: person:bob, name: 'Bob' }
 		];
+		
+		-- Test single object with extra fields
+		INSERT RELATION INTO friendship { 
+			in: person:alice, 
+			out: person:bob, 
+			strength: 100,
+			since: '2024-01-01'
+		};
+		
+		SELECT strength, since FROM friendship;
 	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{ id: test:1, test: true, something: 'other' },
-			{ id: test:2, test: false, something: 'else' }
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
+	let mut t = Test::new(sql).await?;
+
+	// Skip: 2 DEFINE TABLE + 3 DEFINE FIELD + 1 INSERT INTO person = 6
+	t.skip_ok(6)?;
+
+	// Check the INSERT RELATION result has 1 record with extra fields
+	let result = t.next()?.result?;
+	let records = result.into_array().unwrap();
+	assert_eq!(records.len(), 1, "Expected 1 relation record, got {}", records.len());
+
+	// Check the SELECT result - extra fields should be preserved
+	t.expect_val("[{ strength: 100, since: '2024-01-01' }]")?;
+
+	Ok(())
+}
+
+/// Test INSERT RELATION with array of objects with extra fields
+#[tokio::test]
+async fn insert_relation_array_with_extra_fields() -> Result<()> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON person TYPE string;
+		
+		DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMAFULL;
+		DEFINE FIELD rating ON likes TYPE int;
+		
+		INSERT INTO person [
+			{ id: person:a, name: 'A' },
+			{ id: person:b, name: 'B' },
+			{ id: person:c, name: 'C' }
+		];
+		
+		INSERT RELATION INTO likes [
+			{ in: person:a, out: person:b, rating: 5 },
+			{ in: person:b, out: person:c, rating: 3 }
+		];
+		
+		SELECT rating FROM likes ORDER BY rating DESC;
+	";
+	let mut t = Test::new(sql).await?;
+
+	// Skip: 2 DEFINE TABLE + 1 DEFINE FIELD + 1 INSERT INTO person = 4
+	// But INSERT INTO person is response 4, so skip 5 to get to INSERT RELATION
+	t.skip_ok(5)?;
+
+	// Check the INSERT RELATION array result
+	let result = t.next()?.result?;
+	let records = result.into_array().unwrap();
+	assert_eq!(records.len(), 2, "Expected 2 relation records, got {}", records.len());
+
+	// Check the SELECT result (ordered by rating DESC) - extra fields preserved
+	t.expect_val("[{ rating: 5 }, { rating: 3 }]")?;
+
+	Ok(())
+}
+
+/// Test INSERT RELATION with ON DUPLICATE KEY UPDATE and extra fields
+#[tokio::test]
+async fn insert_relation_on_duplicate_key_update_extra_fields() -> Result<()> {
+	let sql = "
+		DEFINE TABLE person SCHEMAFULL;
+		DEFINE FIELD name ON person TYPE string;
+		
+		DEFINE TABLE follows TYPE RELATION IN person OUT person SCHEMAFULL;
+		DEFINE FIELD priority ON follows TYPE int;
+		DEFINE INDEX idx_follows_unique ON follows FIELDS in, out UNIQUE;
+		
+		INSERT INTO person [
+			{ id: person:x, name: 'X' },
+			{ id: person:y, name: 'Y' }
+		];
+		
+		-- Initial insert
+		INSERT RELATION INTO follows { in: person:x, out: person:y, priority: 1 };
+		
+		-- Update with ON DUPLICATE KEY UPDATE  
+		INSERT RELATION INTO follows { in: person:x, out: person:y, priority: 99 }
+			ON DUPLICATE KEY UPDATE priority = $input.priority;
+		
+		SELECT priority FROM follows;
+	";
+	let mut t = Test::new(sql).await?;
+
+	// Skip DEFINE statements and INSERT INTO person
+	t.skip_ok(6)?;
+
+	// Check initial insert has 1 record
+	let result = t.next()?.result?;
+	let records = result.into_array().unwrap();
+	assert_eq!(records.len(), 1);
+
+	// Check update result has 1 record
+	let update_result = t.next()?.result?;
+	let updated = update_result.into_array().unwrap();
+	assert_eq!(updated.len(), 1);
+
+	// Check final SELECT - priority should be updated to 99
+	t.expect_val("[{ priority: 99 }]")?;
+
 	Ok(())
 }
 
@@ -241,7 +336,7 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 		DEFINE INDEX name ON TABLE company COLUMNS name UNIQUE;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-10') ON DUPLICATE KEY UPDATE founded = $input.founded;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
-		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded PARALLEL;
+		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded;
 	";
 	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");

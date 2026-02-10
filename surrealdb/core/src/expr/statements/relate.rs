@@ -22,11 +22,12 @@ pub(crate) struct RelateStatement {
 	pub from: Expr,
 	/// The expression the relation targets.
 	pub to: Expr,
-	pub uniq: bool,
+	/// The data associated with the relation being created
 	pub data: Option<Data>,
+	/// What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub output: Option<Output>,
+	/// The timeout for the statement
 	pub timeout: Expr,
-	pub parallel: bool,
 }
 
 impl RelateStatement {
@@ -42,7 +43,7 @@ impl RelateStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Create a new iterator
-		let mut i = Iterator::new();
+		let mut iterator = Iterator::new();
 		// Check if there is a timeout
 		let ctx_store: FrozenContext;
 		let ctx = match stk
@@ -172,7 +173,7 @@ impl RelateStatement {
 					fields,
 				};
 
-				i.ingest(Iterable::Relatable(doc_ctx, f.clone(), through, t.clone(), None));
+				iterator.ingest(Iterable::Relatable(doc_ctx, f.clone(), through, t.clone(), None));
 			}
 		}
 
@@ -181,7 +182,9 @@ impl RelateStatement {
 
 		CursorDoc::update_parent(ctx, doc, async |ctx| {
 			// Process the statement
-			let res = i.output(stk, ctx.as_ref(), opt, &stm, RecordStrategy::KeysAndValues).await?;
+			let res = iterator
+				.output(stk, ctx.as_ref(), opt, &stm, RecordStrategy::KeysAndValues)
+				.await?;
 			// Catch statement timeout
 			ctx.expect_not_timedout().await?;
 			// Output the results

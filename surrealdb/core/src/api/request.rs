@@ -18,6 +18,8 @@ pub struct ApiRequest {
 	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,
 	pub context: PublicObject,
+	/// Server-generated request ID for tracing and logging
+	pub request_id: String,
 }
 
 impl TryFrom<Value> for ApiRequest {

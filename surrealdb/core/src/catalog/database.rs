@@ -105,6 +105,7 @@ impl InfoStructure for DatabaseDefinition {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"id".to_string() => self.database_id.0.into(),
 		})
 	}
 }

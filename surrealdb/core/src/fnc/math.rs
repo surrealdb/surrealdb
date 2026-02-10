@@ -61,7 +61,7 @@ pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value> {
 		min <= max,
 		Error::InvalidArguments {
 			name: "math::clamp".to_string(),
-			message: "Lowerbound for clamp must be smaller the the upperbound".to_string(),
+			message: "Lowerbound for clamp must be smaller than the upperbound".to_string(),
 		}
 	);
 	Ok(arg.clamp(min, max).into())

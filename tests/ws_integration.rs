@@ -2712,8 +2712,8 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		socket.send_request_with_session("query", json!(["RETURN $var1"]), session1).await.unwrap();
 	assert_eq!(res["result"][0]["result"], "value1");
 
-	// Test 4: Reset with session ID removes the session completely
-	socket.send_request_with_session("reset", json!([]), session1).await.unwrap();
+	// Test 4: Detach with session ID removes the session completely
+	socket.send_request_with_session("detach", json!([]), session1).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();
@@ -2723,8 +2723,8 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
 	assert!(!session_ids.contains(&session1.to_string()), "Session 1 should be removed");
 
-	// Reset another session
-	socket.send_request_with_session("reset", json!([]), session2).await.unwrap();
+	// Detach another session
+	socket.send_request_with_session("detach", json!([]), session2).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();

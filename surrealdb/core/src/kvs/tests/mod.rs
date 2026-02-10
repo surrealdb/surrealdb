@@ -34,6 +34,7 @@ mod raw;
 mod read_and_deletion_only;
 mod reverse_iterator;
 mod snapshot;
+mod tx_cache_test;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {

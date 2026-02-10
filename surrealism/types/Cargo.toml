@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-types"
-version = "0.1.6"
+version = "0.1.8"
 description = "Types for Surrealism"
 edition.workspace = true
 authors.workspace = true
@@ -17,8 +17,8 @@ host = []
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 surrealdb-types.workspace = true
-bytes = "1.10.1"
 
 [lints]
 workspace = true

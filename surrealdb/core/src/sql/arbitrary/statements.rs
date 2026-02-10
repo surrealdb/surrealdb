@@ -164,7 +164,6 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 			update,
 			output: u.arbitrary()?,
 			timeout: u.arbitrary()?,
-			parallel: u.arbitrary()?,
 			relation: u.arbitrary()?,
 			version: u.arbitrary()?,
 		})
@@ -173,28 +172,28 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let mut expr = u.arbitrary()?;
+		let mut fields = u.arbitrary()?;
 
 		let group = if u.arbitrary()? {
-			Some(arb_group(u, &mut expr)?)
+			Some(arb_group(u, &mut fields)?)
 		} else {
 			None
 		};
 
 		let split = if u.arbitrary()? {
-			Some(arb_splits(u, &mut expr)?)
+			Some(arb_splits(u, &mut fields)?)
 		} else {
 			None
 		};
 
 		let order = if u.arbitrary()? {
-			Some(arb_order(u, &mut expr)?)
+			Some(arb_order(u, &mut fields)?)
 		} else {
 			None
 		};
 
 		Ok(SelectStatement {
-			expr,
+			fields,
 			omit: u.arbitrary()?,
 			only: u.arbitrary()?,
 			what: arb_vec1(u, Expr::arbitrary)?,
@@ -208,7 +207,6 @@ impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 			fetch: u.arbitrary()?,
 			version: u.arbitrary()?,
 			timeout: u.arbitrary()?,
-			parallel: u.arbitrary()?,
 			explain: u.arbitrary()?,
 			tempfiles: u.arbitrary()?,
 		})

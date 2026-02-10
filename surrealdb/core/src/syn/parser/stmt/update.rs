@@ -16,7 +16,6 @@ impl Parser<'_> {
 		let cond = self.try_parse_condition(stk).await?;
 		let output = self.try_parse_output(stk).await?;
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 		let explain = self.try_parse_explain()?;
 
 		Ok(UpdateStatement {
@@ -27,7 +26,6 @@ impl Parser<'_> {
 			cond,
 			output,
 			timeout,
-			parallel,
 			explain,
 		})
 	}

@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
+use crate::catalog::auth::AuthLimit;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
@@ -13,7 +14,7 @@ use crate::sql;
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct ApiDefinition {
@@ -27,6 +28,17 @@ pub struct ApiDefinition {
 	pub(crate) config: ApiConfigDefinition,
 	/// An optional comment for the definition.
 	pub(crate) comment: Option<String>,
+	/// The auth limit of the API.
+	#[revision(start = 2, default_fn = "default_auth_limit")]
+	pub(crate) auth_limit: AuthLimit,
+}
+
+// This was pushed in after the first beta, so we need to add auth_limit to structs in a
+// non-breaking way
+impl ApiDefinition {
+	fn default_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 
 impl_kv_value_revisioned!(ApiDefinition);

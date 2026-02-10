@@ -8,6 +8,7 @@
 
 mod access;
 pub(crate) mod aggregation;
+mod auth;
 mod database;
 mod module;
 mod namespace;

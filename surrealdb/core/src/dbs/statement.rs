@@ -313,7 +313,7 @@ impl Statement<'_> {
 			Statement::Select {
 				stmt,
 				..
-			} => Some(&stmt.expr),
+			} => Some(&stmt.fields),
 			Statement::Live(v) => match &v.fields {
 				LiveFields::Diff => None,
 				LiveFields::Select(x) => Some(x),
@@ -426,6 +426,17 @@ impl Statement<'_> {
 				..
 			} => stmt.limit.as_ref(),
 			_ => None,
+		}
+	}
+
+	/// Returns any OMIT fields if specified
+	pub(crate) fn omit(&self) -> &[Idiom] {
+		match self {
+			Statement::Select {
+				omit,
+				..
+			} => omit.as_slice(),
+			_ => &[],
 		}
 	}
 

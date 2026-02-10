@@ -8,7 +8,6 @@ use axum::extract::MatchedPath;
 use futures::Future;
 use http::{Request, Response, StatusCode, Version};
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::MetricsError;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
@@ -85,13 +84,7 @@ where
 		// Initialize the metrics if not already done.
 		if this.tracker.state.get_mut() == &ResultState::None {
 			this.tracker.set_state(ResultState::Started);
-
-			if let Err(err) = on_request_start(this.tracker) {
-				error!("Failed to setup metrics when request started: {}", err);
-				// Consider this request not tracked: reset the state to None, so that the drop
-				// handler does not decrease the counter.
-				this.tracker.set_state(ResultState::None);
-			};
+			on_request_start(this.tracker);
 		}
 
 		let response = futures_util::ready!(this.inner.poll(cx));
@@ -246,20 +239,18 @@ impl Drop for HttpCallMetricTracker {
 
 		self.finish = Some(Instant::now());
 
-		if let Err(err) = on_request_finish(self) {
-			error!(target: "surrealdb::telemetry", "Failed to setup metrics when request finished: {}", err);
-		}
+		on_request_finish(self);
 	}
 }
 
-pub fn on_request_start(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
+pub fn on_request_start(tracker: &HttpCallMetricTracker) {
 	// Increase the number of active requests.
-	super::observe_active_request(1, tracker)
+	super::observe_active_request(1, tracker);
 }
 
-pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsError> {
+pub fn on_request_finish(tracker: &HttpCallMetricTracker) {
 	// Decrease the number of active requests.
-	super::observe_active_request(-1, tracker)?;
+	super::observe_active_request(-1, tracker);
 
 	// Record the duration of the request.
 	super::record_request_duration(tracker);
@@ -276,6 +267,4 @@ pub fn on_request_finish(tracker: &HttpCallMetricTracker) -> Result<(), MetricsE
 	if let Some(size) = tracker.response_size {
 		super::record_response_size(tracker, size)
 	}
-
-	Ok(())
 }

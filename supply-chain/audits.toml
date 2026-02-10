@@ -122,11 +122,6 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.21.1"
 
-[[audits.rust-s3]]
-who = "Micha de Vries <micha@devrie.sh>"
-criteria = "safe-to-deploy"
-version = "0.35.1"
-
 [[audits.rxml]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
@@ -436,13 +431,13 @@ end = "2026-05-06"
 
 [[trusted.crc]]
 criteria = "safe-to-deploy"
-user-id = 64482 # Akhil Velagapudi (akhilles)
+user-id = 64482
 start = "2021-10-28"
 end = "2026-05-06"
 
 [[trusted.crc-catalog]]
 criteria = "safe-to-deploy"
-user-id = 64482 # Akhil Velagapudi (akhilles)
+user-id = 64482
 start = "2019-12-14"
 end = "2026-05-06"
 
@@ -466,7 +461,7 @@ end = "2026-10-30"
 
 [[trusted.deflate64]]
 criteria = "safe-to-deploy"
-user-id = 131098 # anatawa12 (anatawa12)
+user-id = 131098
 start = "2023-07-29"
 end = "2026-05-06"
 
@@ -556,7 +551,7 @@ end = "2026-10-30"
 
 [[trusted.fslock]]
 criteria = "safe-to-deploy"
-user-id = 23043 # brunoczim
+user-id = 23043
 start = "2020-01-01"
 end = "2026-05-06"
 
@@ -577,12 +572,6 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-13"
 end = "2025-08-06"
-
-[[trusted.hashbrown]]
-criteria = "safe-to-deploy"
-user-id = 2915 # Amanieu d'Antras (Amanieu)
-start = "2019-04-02"
-end = "2025-05-02"
 
 [[trusted.headers]]
 criteria = "safe-to-deploy"
@@ -766,7 +755,7 @@ end = "2025-09-03"
 
 [[trusted.lzma-rs]]
 criteria = "safe-to-deploy"
-user-id = 14564 # Guillaume E (gendx)
+user-id = 14564
 start = "2019-02-24"
 end = "2026-05-06"
 
@@ -832,7 +821,7 @@ end = "2026-10-30"
 
 [[trusted.nanoservices-utils]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2024-03-30"
 end = "2025-09-03"
 
@@ -874,7 +863,7 @@ end = "2025-08-06"
 
 [[trusted.onnx-embedding]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2025-04-17"
 end = "2026-05-06"
 
@@ -1310,12 +1299,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-02-13"
 end = "2026-11-20"
 
-[[trusted.surrealism-cli]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2025-11-05"
-end = "2026-11-20"
-
 [[trusted.surrealism-macros]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -1624,7 +1607,7 @@ end = "2026-10-30"
 
 [[trusted.wasmtime-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2023-08-21"
 end = "2026-10-30"
 
@@ -1768,12 +1751,12 @@ end = "2026-05-06"
 
 [[trusted.zip]]
 criteria = "safe-to-deploy"
-user-id = 209322 # Chris Hennick (Pr0methean)
+user-id = 209322
 start = "2024-04-20"
 end = "2026-05-06"
 
 [[trusted.zopfli]]
 criteria = "safe-to-deploy"
-user-id = 111932 # Alejandro González (AlexTMjugador)
+user-id = 111932
 start = "2022-08-19"
 end = "2026-05-06"

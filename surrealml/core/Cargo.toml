@@ -1,0 +1,33 @@
+[package]
+name = "surrealml-core"
+version = "0.1.10"
+edition.workspace = true
+description = "The core machine learning library for SurrealML that enables SurrealDB to store and load ML models"
+repository.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+
+[features]
+default = []
+sklearn-tests = []
+onnx-tests = []
+torch-tests = []
+tensorflow-tests = []
+gpu = []
+
+[dependencies]
+bytes.workspace = true
+futures.workspace = true
+hyper.workspace = true
+ndarray.workspace = true
+ort.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
+
+[lib]
+name = "surrealml_core"
+path = "src/lib.rs"

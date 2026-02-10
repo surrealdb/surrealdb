@@ -35,13 +35,13 @@ impl FileCollector {
 
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
-	pub(super) fn new(temp_dir: &Path) -> Result<Self, Error> {
+	pub(super) fn new(temp_dir: &Path, orders: Option<Ordering>) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 		Ok(Self {
 			len: 0,
 			writer: Some(FileWriter::new(&dir)?),
 			reader: None,
-			orders: None,
+			orders,
 			paging: Default::default(),
 			dir,
 		})
@@ -73,9 +73,6 @@ impl FileCollector {
 			self.reader = Some(FileReader::new(self.len, &self.dir)?);
 		}
 		Ok(())
-	}
-	pub(super) fn sort(&mut self, orders: &Ordering) {
-		self.orders = Some(orders.clone());
 	}
 
 	pub(super) fn len(&self) -> usize {

@@ -4,7 +4,6 @@ use std::io::Error as IoError;
 use std::string::FromUtf8Error;
 
 use base64::DecodeError as Base64Error;
-use bincode::Error as BincodeError;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -13,7 +12,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use storekey::DecodeError;
+use storekey::DecodeError as StorekeyError;
 use surrealdb_types::ToSql;
 use thiserror::Error;
 
@@ -625,7 +624,7 @@ pub(crate) enum Error {
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
-	Decode(#[from] DecodeError),
+	Storekey(#[from] StorekeyError),
 
 	/// Represents an underlying error with versioned data encoding / decoding
 	#[error("Versioned error: {0}")]
@@ -649,10 +648,6 @@ pub(crate) enum Error {
 	/// Represents an error when trying to highlight a value
 	#[error("A value can't be highlighted: {0}")]
 	HighlightError(String),
-
-	/// Represents an underlying error with Bincode serializing / deserializing
-	#[error("Bincode error: {0}")]
-	Bincode(#[from] BincodeError),
 
 	/// Represents an underlying error with FST
 	#[error("FstError error: {0}")]
@@ -1155,6 +1150,19 @@ pub(crate) enum Error {
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
 	IdFieldUnsupportedKind(String),
+
+	#[error(
+		"Error with the event {0}. The ID of the namespace `{1}` does not match the namespace this event has been generated from."
+	)]
+	EvNamespaceMismatch(String, String),
+
+	#[error(
+		"Error with the event {0}. The ID of the database `{1}` does not match the database this event has been generated from."
+	)]
+	EvDatabaseMismatch(String, String),
+
+	#[error("The event {0} reached the max async event nesting depth: {1}.")]
+	EvReachMaxDepth(String, u16),
 }
 
 impl Error {

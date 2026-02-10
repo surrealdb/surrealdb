@@ -107,7 +107,7 @@ async fn get_handler(
 	}
 	// Now let's upgrade the WebSocket connection with comprehensive buffer configuration
 	Ok(ws
-		// Set the potential WebSocket protocols (JSON, CBOR, Bincode, etc.)
+		// Set the potential WebSocket protocols (JSON, CBOR, etc.)
 		.protocols(PROTOCOLS)
 		// Set the maximum WebSocket frame size to prevent oversized frames
 		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)

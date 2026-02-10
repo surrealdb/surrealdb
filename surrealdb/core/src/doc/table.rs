@@ -652,7 +652,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Selector {
+				fields: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),
@@ -663,7 +663,17 @@ impl Document {
 				cond: condition.map(Cond),
 				// GROUP ALL
 				group: Some(Groups(Vec::new())),
-				..Default::default()
+				omit: vec![],
+				with: None,
+				split: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: Expr::Literal(Literal::None),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
 			};
 
 			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;
@@ -1049,7 +1059,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Selector {
+				fields: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),
@@ -1060,7 +1070,17 @@ impl Document {
 				cond: condition.map(Cond),
 				// GROUP ALL
 				group: Some(Groups(Vec::new())),
-				..Default::default()
+				omit: vec![],
+				with: None,
+				split: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: Expr::Literal(Literal::None),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
 			};
 
 			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;

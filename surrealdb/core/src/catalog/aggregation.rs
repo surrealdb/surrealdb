@@ -687,7 +687,6 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(d) = &mut s.data {
 			ParentRewritor.visit_mut_data(d)?;
 		}
-		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -700,7 +699,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		}
 		self.visit_mut_expr(&mut s.version)?;
 
-		ParentRewritor.visit_mut_fields(&mut s.expr)?;
+		ParentRewritor.visit_mut_fields(&mut s.fields)?;
 		for o in s.omit.iter_mut() {
 			ParentRewritor.visit_mut_expr(o)?;
 		}
@@ -721,7 +720,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			ParentRewritor.visit_mut_ordering(o)?;
 		}
 		if let Some(f) = s.fetch.as_mut() {
-			for f in f.0.iter_mut() {
+			for f in f.iter_mut() {
 				ParentRewritor.visit_mut_expr(&mut f.0)?;
 			}
 		}
@@ -777,7 +776,6 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		self.visit_mut_expr(&mut i.version)?;
 
 		ParentRewritor.visit_mut_data(&mut i.data)?;
 		if let Some(update) = i.update.as_mut() {
@@ -855,12 +853,11 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(e)?;
 		}
 		self.visit_mut_expr(&mut s.timeout)?;
-		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
 	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
-		self.visit_mut_fields(&mut s.expr)?;
+		self.visit_mut_fields(&mut s.fields)?;
 		for v in s.what.iter_mut() {
 			self.visit_mut_expr(v)?;
 		}
@@ -902,7 +899,6 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		self.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 

@@ -53,7 +53,8 @@ value = "NONE"
 
 # 11
 [[test.results]]
-value = "{ body: { native: 'format' }, context: {  }, headers: { 'content-type': 'application/vnd.surrealdb.native' }, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { native: 'format' }, headers: { 'content-type': 'application/vnd.surrealdb.native' }, status: 200 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

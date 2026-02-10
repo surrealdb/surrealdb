@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess,
@@ -53,7 +54,7 @@ static SOURCE: &str = r#"
 	COMMIT;
 	COMMIT TRANSACTION;
 	CONTINUE;
-	CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s PARALLEL;
+	CREATE ONLY foo SET bar = 3, foo +?= 4 RETURN VALUE foo AS bar TIMEOUT 1s;
 	DEFINE NAMESPACE a COMMENT 'test';
 	DEFINE NS a;
 	DEFINE DATABASE a COMMENT 'test' CHANGEFEED 10m;
@@ -64,13 +65,13 @@ static SOURCE: &str = r#"
 	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
-	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
+	DEFINE EVENT event ON TABLE table ASYNC RETRY 5 MAXDEPTH 64 WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
-	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL;
-	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN FULL;
+	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s EXPLAIN FULL;
+	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h EXPLAIN FULL;
 	FOR $foo IN (SELECT foo FROM bar) * 2 {
 		BREAK
 	};
@@ -79,10 +80,9 @@ static SOURCE: &str = r#"
 	INFO FOR ROOT;
 	INFO FOR NAMESPACE;
 	INFO FOR USER user ON namespace;
-	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a,1
+	SELECT bar as foo,[1,2],bar OMIT bar FROM ONLY a
 		WITH INDEX index,index_2
 		WHERE true
-		SPLIT ON foo,bar
 		GROUP foo,bar
 		ORDER BY foo COLLATE NUMERIC ASC
 		START AT { a: true }
@@ -90,6 +90,7 @@ static SOURCE: &str = r#"
 		FETCH foo
 		VERSION d"2012-04-23T18:25:43.0000511Z"
 		EXPLAIN FULL;
+	SELECT foo,bar FROM a SPLIT ON foo,bar;
 	LET $param = 1;
 	SHOW CHANGES FOR TABLE foo SINCE 1 LIMIT 10;
 	SHOW CHANGES FOR DATABASE SINCE d"2012-04-23T18:25:43.0000511Z";
@@ -98,11 +99,11 @@ static SOURCE: &str = r#"
 	INSERT IGNORE INTO $foo (a,b,c) VALUES (1,2,3),(4,5,6) ON DUPLICATE KEY UPDATE a.b +?= null, c.d += none RETURN AFTER;
 	KILL u"e72bee20-f49b-11ec-b939-0242ac120002";
 	RETURN RETRUN FETCH RETURN;
-	RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE PARALLEL;
+	RELATE ONLY [1,2]->a:b->(CREATE foo) UNIQUE SET a += 1 RETURN NONE;
 	REMOVE FUNCTION fn::foo::bar();
 	REMOVE FIELD foo.bar[10] ON bar;
-	UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
-	UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s PARALLEL EXPLAIN FULL;
+	UPDATE ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL;
+	UPSERT ONLY a->b WITH INDEX index,index_2 UNSET foo... , a->b, c[*] WHERE true RETURN DIFF TIMEOUT 1s EXPLAIN FULL;
 	function(){ ((1 + 1)) };
 	"a b c d e f g h";
 	u"ffffffff-ffff-ffff-ffff-ffffffffffff";
@@ -153,8 +154,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
-			version: Expr::Literal(Literal::None),
 		}))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
@@ -295,6 +294,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			},
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,
@@ -379,7 +382,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Delete(Box::new(DeleteStatement {
@@ -400,14 +402,13 @@ fn statements() -> Vec<TopLevelExpr> {
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(60 * 60))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Foreach(Box::new(ForeachStatement {
 			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
-					expr: Fields::Select(vec![Field::Single(Selector {
+					fields: Fields::Select(vec![Field::Single(Selector {
 						expr: ident_field("foo"),
 						alias: None,
 					})]),
@@ -424,7 +425,6 @@ fn statements() -> Vec<TopLevelExpr> {
 					fetch: None,
 					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
-					parallel: false,
 					explain: None,
 					tempfiles: false,
 				}))),
@@ -455,7 +455,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			false,
 		)))),
 		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
-			expr: Fields::Select(vec![
+			fields: Fields::Select(vec![
 				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
@@ -474,13 +474,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			]),
 			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
 			only: true,
-			what: vec![Expr::Table("a".to_owned()), Expr::Literal(Literal::Integer(1))],
+			what: vec![Expr::Table("a".to_owned())],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
-			split: Some(Splits(vec![
-				Split(Idiom(vec![Part::Field("foo".to_owned())])),
-				Split(Idiom(vec![Part::Field("bar".to_owned())])),
-			])),
+			split: None,
 			group: Some(Groups(vec![
 				Group(Idiom(vec![Part::Field("foo".to_owned())])),
 				Group(Idiom(vec![Part::Field("bar".to_owned())])),
@@ -502,9 +499,38 @@ fn statements() -> Vec<TopLevelExpr> {
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
 			version: Expr::Literal(Literal::Datetime(PublicDatetime::from(expected_datetime))),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			tempfiles: false,
 			explain: Some(Explain(true)),
+		}))),
+		TopLevelExpr::Expr(Expr::Select(Box::new(SelectStatement {
+			fields: Fields::Select(vec![
+				Field::Single(Selector {
+					expr: ident_field("foo"),
+					alias: None,
+				}),
+				Field::Single(Selector {
+					expr: ident_field("bar"),
+					alias: None,
+				}),
+			]),
+			omit: vec![],
+			only: false,
+			what: vec![Expr::Table("a".to_owned())],
+			with: None,
+			cond: None,
+			split: Some(Splits(vec![
+				Split(Idiom(vec![Part::Field("foo".to_owned())])),
+				Split(Idiom(vec![Part::Field("bar".to_owned())])),
+			])),
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			tempfiles: false,
+			explain: None,
 		}))),
 		TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
 			name: "param".to_owned(),
@@ -555,9 +581,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				},
 			])),
 			output: Some(Output::After),
-			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
 		}))),
 		TopLevelExpr::Kill(KillStatement {
@@ -585,10 +609,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
-				parallel: false,
-				version: Expr::Literal(Literal::None),
 			})),
-			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {
 				place: Idiom(vec![Part::Field("a".to_owned())]),
 				operator: AssignOperator::Add,
@@ -596,7 +617,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			}])),
 			output: Some(Output::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: true,
 		}))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Function(
 			RemoveFunctionStatement {
@@ -645,7 +665,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Upsert(Box::new(UpsertStatement {
@@ -680,7 +699,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
-			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {

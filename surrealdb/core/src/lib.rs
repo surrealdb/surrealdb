@@ -35,7 +35,8 @@ mod mac;
 #[doc(hidden)]
 pub mod buc;
 mod cf;
-mod doc;
+#[doc(hidden)]
+pub mod doc;
 mod exe;
 mod fmt;
 mod fnc;
@@ -85,7 +86,7 @@ pub(crate) mod types {
 }
 
 #[cfg(feature = "ml")]
-pub use surrealml as ml;
+pub use surrealml_core as ml;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {

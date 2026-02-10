@@ -8,11 +8,13 @@ value = "NONE"
 
 # 1
 [[test.results]]
-value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { handler: 'get' }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
-value = "{ body: { handler: 'post' }, context: {  }, headers: {}, status: 201 }"
+skip-api-request-id = true
+value = "{ body: { handler: 'post' }, headers: {}, status: 201 }"
 
 # 3
 [[test.results]]
@@ -24,11 +26,13 @@ value = "NONE"
 
 # 5
 [[test.results]]
-value = "{ body: { handler: 'get', middleware: 'get_mw' }, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: { handler: 'get', middleware: 'get_mw' }, headers: {}, status: 200 }"
 
 # 6
 [[test.results]]
-value = "{ body: { handler: 'post', middleware: 'post_mw' }, context: {  }, headers: {}, status: 201 }"
+skip-api-request-id = true
+value = "{ body: { handler: 'post', middleware: 'post_mw' }, headers: {}, status: 201 }"
 
 [env.capabilities]
 allow-experimental = ["define_api"]

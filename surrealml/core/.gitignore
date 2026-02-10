@@ -1,0 +1,6 @@
+onnx_driver/
+target/
+output/
+downloaded_onnx_package/
+src/execution/libonnxruntime.a
+libonnxruntime.*

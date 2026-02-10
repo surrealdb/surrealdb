@@ -61,4 +61,3 @@ SELECT ->(knows START 1) AS edges FROM ONLY person:alice;
 
 -- 7: Order, start, and limit together
 SELECT ->(SELECT * FROM knows ORDER BY since ASC START 0 LIMIT 2) AS edges FROM ONLY person:alice;
-

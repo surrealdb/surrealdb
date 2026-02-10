@@ -77,7 +77,7 @@ pub trait RpcProtocol {
 	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		match session_id {
 			Some(id) => {
-				self.del_session(&id);
+				self.del_session(&id).await;
 				Ok(DbResult::Other(PublicValue::None))
 			}
 			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
@@ -98,8 +98,10 @@ pub trait RpcProtocol {
 	}
 
 	/// Deletes a session
-	fn del_session(&self, id: &Uuid) {
+	async fn del_session(&self, id: &Uuid) {
 		self.session_map().remove(&Some(*id));
+		// Cleanup live queries
+		self.cleanup_lqs(Some(id)).await;
 	}
 
 	/// Lists all non-default sessions
@@ -265,24 +267,24 @@ pub trait RpcProtocol {
 				// Fetch defaults from database configuration
 				let kvs = self.kvs();
 				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				let (ns, db) = if let Some(x) = tx.get_default_config().await? {
+				let (ns, db) = if let Some(x) = catch_into!(tx, tx.get_default_config().await) {
 					(x.namespace.clone(), x.database.clone())
 				} else {
 					(None, None)
 				};
 
 				if let Some(ns) = ns {
-					tx.get_or_add_ns(None, &ns).await?;
+					catch_into!(tx, tx.get_or_add_ns(None, &ns).await);
 
 					if let Some(db) = db {
-						tx.ensure_ns_db(None, &ns, &db).await?;
+						catch_into!(tx, tx.ensure_ns_db(None, &ns, &db).await);
 						session.db = Some(db);
 					}
 
 					session.ns = Some(ns);
 				}
 
-				tx.commit().await?;
+				catch_into!(tx, tx.commit().await);
 			}
 		} else {
 			// Update the selected namespace
@@ -292,9 +294,7 @@ pub trait RpcProtocol {
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
 					let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-					tx.get_or_add_ns(None, &ns).await?;
-					tx.commit().await?;
-
+					run!(tx, tx.get_or_add_ns(None, &ns).await)?;
 					session.ns = Some(ns)
 				}
 				unexpected => {
@@ -313,8 +313,7 @@ pub trait RpcProtocol {
 						.kvs()
 						.transaction(TransactionType::Write, LockType::Optimistic)
 						.await?;
-					tx.ensure_ns_db(None, &ns, &db).await?;
-					tx.commit().await?;
+					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)?;
 					session.db = Some(db)
 				}
 				unexpected => {
@@ -522,15 +521,11 @@ pub trait RpcProtocol {
 	}
 
 	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		if let Some(session_id) = session_id {
-			self.del_session(&session_id);
-		} else {
-			// Get a write lock on the session
-			let session_lock = self.get_session(&session_id)?;
-			let mut session = session_lock.write().await;
-			// Reset the current session
-			crate::iam::reset::reset(&mut session);
-		}
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
+		// Reset the current session
+		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(session_id.as_ref()).await;
 		// Return nothing on success
@@ -749,7 +744,7 @@ pub trait RpcProtocol {
 		// Specify the SQL query string
 		let sql = SelectStatement {
 			only,
-			expr: Fields::all(),
+			fields: Fields::all(),
 			what: vec![what],
 			with: None,
 			cond: None,
@@ -762,7 +757,6 @@ pub trait RpcProtocol {
 			fetch: None,
 			version: Expr::Literal(Literal::None),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 			tempfiles: false,
 		};
@@ -812,9 +806,7 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			relation: false,
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -860,8 +852,6 @@ pub trait RpcProtocol {
 			ignore: false,
 			update: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
@@ -916,8 +906,6 @@ pub trait RpcProtocol {
 			data,
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
-			version: Expr::Literal(Literal::None),
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
@@ -971,7 +959,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		};
 		let ast = Ast::single_expr(Expr::Upsert(Box::new(sql)));
@@ -1027,7 +1014,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		};
 		let ast = Ast::single_expr(Expr::Update(Box::new(sql)));
@@ -1148,7 +1134,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		}));
 		// Specify the query parameters
@@ -1206,9 +1191,7 @@ pub trait RpcProtocol {
 			to: Expr::from_public_value(with),
 			data,
 			output: Some(Output::After),
-			uniq: false,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 		}));
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
@@ -1246,7 +1229,6 @@ pub trait RpcProtocol {
 			with: None,
 			cond: None,
 			timeout: Expr::Literal(Literal::None),
-			parallel: false,
 			explain: None,
 		}));
 		let ast = Ast::single_expr(sql);

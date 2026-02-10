@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::mem;
 use std::sync::Arc;
 
@@ -7,14 +8,17 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
+use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
+use crate::dbs::store::{MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx, NsDbTbCtx};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::expr::order::Ordering;
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
@@ -749,14 +753,10 @@ impl Iterator {
 			// Process any SPLIT AT clause
 			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
-			self.output_group(stk, ctx, opt).await?;
+			self.output_group(stk, ctx, opt, stm).await?;
 			// Process any ORDER BY clause
-			if let Some(orders) = stm.order() {
-				#[cfg(not(target_family = "wasm"))]
-				self.results.sort(orders).await?;
-				#[cfg(target_family = "wasm")]
-				self.results.sort(orders);
-			}
+			// NOTE: This is a no-op for order-less queries.
+			self.results.sort().await?;
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
 			// Process any FETCH clause
@@ -997,6 +997,16 @@ impl Iterator {
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
 						}
+						Value::Set(v) => {
+							for val in v {
+								// Make a copy of object
+								let mut obj = obj.clone();
+								// Set the value at the path
+								obj.set(stk, ctx, opt, split, val).await?;
+								// Add the object to the results
+								self.results.push(stk, ctx, opt, rs, obj).await?;
+							}
+						}
 						_ => {
 							// Make a copy of object
 							let mut obj = obj.clone();
@@ -1017,10 +1027,59 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
+		stm: &Statement<'_>,
 	) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
-			self.results = Results::Memory(g.output(stk, ctx, opt).await?);
+			// Get the grouped values from the collector
+			let mut collector = g.output(stk, ctx, opt).await?;
+			let values = collector.take_vec();
+
+			// Create the appropriate Results variant based on ORDER BY clause
+			self.results = if let Some(ordering) = stm.order() {
+				match ordering {
+					Ordering::Random => {
+						let mut res = MemoryRandom::new(None);
+						for val in values {
+							res.push(val);
+						}
+						Results::MemoryRandom(res)
+					}
+					Ordering::Order(orders) => {
+						// Check if we should use the priority queue optimization
+						if let Some(limit) = self.limit {
+							let effective_limit = self.start.unwrap_or(0) + limit;
+							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+								let mut res = MemoryOrderedLimit::new(
+									effective_limit as usize,
+									orders.clone(),
+								);
+								for val in values {
+									res.push(val);
+								}
+								Results::MemoryOrderedLimit(res)
+							} else {
+								// Use standard MemoryOrdered
+								let mut res = MemoryOrdered::new(orders.clone(), None);
+								for val in values {
+									res.push(val);
+								}
+								Results::MemoryOrdered(res)
+							}
+						} else {
+							// No limit, use standard MemoryOrdered
+							let mut res = MemoryOrdered::new(orders.clone(), None);
+							for val in values {
+								res.push(val);
+							}
+							Results::MemoryOrdered(res)
+						}
+					}
+				}
+			} else {
+				// No ORDER BY, just use Memory
+				Results::Memory(values.into())
+			};
 		}
 		// Everything ok
 		Ok(())
@@ -1034,10 +1093,11 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		if let Some(fetchs) = stm.fetch() {
-			let mut idioms = Vec::with_capacity(fetchs.0.len());
+			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
 				fetch.compute(stk, ctx, opt, &mut idioms).await?;
 			}
+
 			for i in &idioms {
 				let mut values = self.results.take().await?;
 				// Loop over each result value

@@ -6,6 +6,7 @@ use rstest::rstest;
 use uuid::Uuid;
 
 use super::*;
+use crate::catalog::auth::AuthLimit;
 use crate::catalog::record::{Data, Record};
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
@@ -73,7 +74,7 @@ use crate::val::{Datetime, TableName, Value};
 	})])),
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
-	fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
+	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
@@ -140,7 +141,8 @@ use crate::val::{Datetime, TableName, Value};
 		permissions: Permission::Full,
 	},
 	comment: None,
-}, 44)]
+	auth_limit: AuthLimit::default(),
+}, 48)]
 #[case::bucket(BucketDefinition {
 	id: Some(BucketId(123)),
 	readonly: false,
@@ -159,7 +161,12 @@ use crate::val::{Datetime, TableName, Value};
 	when: Expr::Literal(Literal::String("when".to_string())),
 	then: vec![Expr::Literal(Literal::String("then".to_string()))],
 	comment: Some("comment".to_string()),
-}, 35)]
+	auth_limit: AuthLimit::default(),
+    kind: EventKind::Async {
+        retry: 1,
+        max_depth: 5,
+    },
+}, 43)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
 	table: TableName::from("what"),
@@ -175,7 +182,8 @@ use crate::val::{Datetime, TableName, Value};
 	update_permission: Permission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
-}, 39)]
+	auth_limit: AuthLimit::default(),
+}, 43)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],
@@ -185,7 +193,8 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 	returns: Some(Kind::Any),
-}, 36)]
+	auth_limit: AuthLimit::default(),
+}, 40)]
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
 	name: "test".to_string(),

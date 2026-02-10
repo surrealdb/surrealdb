@@ -6,7 +6,8 @@ reason = "Test API comment functionality"
 value = "NONE"
 
 [[test.results]]
-value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
+skip-api-request-id = true
+value = "{ body: {}, headers: {}, status: 200 }"
 
 [[test.results]]
 value = '''{ "/commented": "DEFINE API '/commented' FOR any PERMISSIONS FULL THEN { { status: 200, body: {  } } } COMMENT 'This is a test API'" }'''

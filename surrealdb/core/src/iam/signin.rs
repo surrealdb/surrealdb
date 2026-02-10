@@ -297,7 +297,8 @@ pub async fn db_access(
 				// This record access allows signin
 				Some(val) => {
 					// Setup the system session for finding the signin record
-					let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+					let mut sess =
+						Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 					sess.ip.clone_from(&session.ip);
 					sess.or.clone_from(&session.or);
 					// Compute the value with the params
@@ -326,7 +327,10 @@ pub async fn db_access(
 									if let Some(au) = &av.authenticate {
 										// Setup the system session for finding the signin
 										// record
-										let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+										let mut sess = Session::for_level(
+											Level::Database(ns.clone(), db.clone()),
+											Role::Editor,
+										);
 										sess.rd = Some(
 											crate::val::convert_value_to_public_value(
 												Value::RecordId(rid.clone().into()),
@@ -871,8 +875,10 @@ pub async fn signin_bearer(
 	if let Some(au) = &av.authenticate {
 		// Setup the system session for executing the clause.
 		let mut sess = match (&ns, &db) {
-			(Some(ns), Some(db)) => Session::editor().with_ns(&ns.name).with_db(&db.name),
-			(Some(ns), None) => Session::editor().with_ns(&ns.name),
+			(Some(ns), Some(db)) => {
+				Session::for_level(Level::Database(ns.name.clone(), db.name.clone()), Role::Editor)
+			}
+			(Some(ns), None) => Session::for_level(Level::Namespace(ns.name.clone()), Role::Editor),
 			(None, None) => Session::editor(),
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
