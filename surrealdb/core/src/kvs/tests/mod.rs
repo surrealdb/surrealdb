@@ -34,6 +34,7 @@ mod raw;
 mod read_and_deletion_only;
 mod reverse_iterator;
 mod snapshot;
+#[cfg(feature = "kv-mem")]
 mod tx_cache_test;
 
 #[derive(Clone, Debug)]
