@@ -515,6 +515,7 @@ async fn test_changefeed_gc_cycle_removed() -> Result<()> {
 						original: false,
 					},
 					drop: false,
+					id: 0,
 					kind: {
 						kind: 'ANY'
 					},
@@ -572,6 +573,7 @@ async fn test_changefeed_gc_cycle_kept() -> Result<()> {
 						original: false,
 					},
 					drop: false,
+					id: 0,
 					kind: {
 						kind: 'ANY'
 					},
@@ -609,6 +611,7 @@ async fn test_changefeed_gc_cycle_kept() -> Result<()> {
 						original: false,
 					},
 					drop: false,
+					id: 0,
 					kind: {
 						kind: 'ANY'
 					},
