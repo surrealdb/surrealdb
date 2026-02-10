@@ -628,7 +628,7 @@ struct RangeCursor<'a> {
 
 impl Cursor for RangeCursor<'_> {
 	fn next_key(&mut self) -> Result<Option<Key>> {
-		while self.inner.valid() {
+		if self.inner.valid() {
 			let key = self.inner.key();
 			match self.dir {
 				Direction::Forward => self.inner.next()?,
@@ -640,7 +640,7 @@ impl Cursor for RangeCursor<'_> {
 	}
 
 	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
-		while self.inner.valid() {
+		if self.inner.valid() {
 			let key = self.inner.key();
 			let value = self.inner.value()?.unwrap_or_default();
 			match self.dir {
