@@ -5,7 +5,7 @@ mod cnf;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
+use surrealkv::{Durability, Mode, ReadOptions, Transaction as Tx, Tree, TreeBuilder};
 use tokio::sync::RwLock;
 
 use super::Direction;
@@ -413,34 +413,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				// Create the iterator
-				let mut iter = inner.history(&beg, &end)?;
-				// Seek to the first key
-				iter.seek_first()?;
-				// Consume the iterator
-				let mut cursor = HistoryCursor {
-					inner: iter,
-					dir: Direction::Forward,
-					ts,
-				};
-				consume_keys(&mut cursor, limit)?
-			}
-			None => {
-				// Create the iterator
-				let mut iter = inner.range(&beg, &end)?;
-				// Seek to the first key
-				iter.seek_first()?;
-				// Consume the iterator
-				let mut cursor = RangeCursor {
-					inner: iter,
-					dir: Direction::Forward,
-				};
-				consume_keys(&mut cursor, limit)?
-			}
-		};
+		// Check for a version
+		let mut opts = ReadOptions::default().with_timestamp(version);
+		// Set the lower and upper bounds
+		opts.set_iterate_lower_bound(Some(beg));
+		opts.set_iterate_upper_bound(Some(end));
+		// Create the iterator
+		let mut iter = inner.range_with_options(&opts)?;
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, Direction::Forward)?;
 		// Return result
 		Ok(res)
 	}
@@ -462,34 +443,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				// Create the iterator
-				let mut iter = inner.history(&beg, &end)?;
-				// Seek to the last key
-				iter.seek_last()?;
-				// Consume the iterator
-				let mut cursor = HistoryCursor {
-					inner: iter,
-					dir: Direction::Backward,
-					ts,
-				};
-				consume_keys(&mut cursor, limit)?
-			}
-			None => {
-				// Create the iterator
-				let mut iter = inner.range(&beg, &end)?;
-				// Seek to the last key
-				iter.seek_last()?;
-				// Consume the iterator
-				let mut cursor = RangeCursor {
-					inner: iter,
-					dir: Direction::Backward,
-				};
-				consume_keys(&mut cursor, limit)?
-			}
-		};
+		// Check for a version
+		let mut opts = ReadOptions::default().with_timestamp(version);
+		// Set the lower and upper bounds
+		opts.set_iterate_lower_bound(Some(beg));
+		opts.set_iterate_upper_bound(Some(end));
+		// Create the iterator
+		let mut iter = inner.range_with_options(&opts)?;
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, Direction::Backward)?;
 		// Return result
 		Ok(res)
 	}
@@ -511,34 +473,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				// Create the iterator
-				let mut iter = inner.history(&beg, &end)?;
-				// Seek to the first key
-				iter.seek_first()?;
-				// Consume the iterator
-				let mut cursor = HistoryCursor {
-					inner: iter,
-					dir: Direction::Forward,
-					ts,
-				};
-				consume_vals(&mut cursor, limit)?
-			}
-			None => {
-				// Create the iterator
-				let mut iter = inner.range(&beg, &end)?;
-				// Seek to the first key
-				iter.seek_first()?;
-				// Consume the iterator
-				let mut cursor = RangeCursor {
-					inner: iter,
-					dir: Direction::Forward,
-				};
-				consume_vals(&mut cursor, limit)?
-			}
-		};
+		// Check for a version
+		let mut opts = ReadOptions::default().with_timestamp(version);
+		// Set the lower and upper bounds
+		opts.set_iterate_lower_bound(Some(beg));
+		opts.set_iterate_upper_bound(Some(end));
+		// Create the iterator
+		let mut iter = inner.range_with_options(&opts)?;
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, Direction::Forward)?;
 		// Return result
 		Ok(res)
 	}
@@ -560,34 +503,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => {
-				// Create the iterator
-				let mut iter = inner.history(&beg, &end)?;
-				// Seek to the last key
-				iter.seek_last()?;
-				// Consume the iterator
-				let mut cursor = HistoryCursor {
-					inner: iter,
-					dir: Direction::Backward,
-					ts,
-				};
-				consume_vals(&mut cursor, limit)?
-			}
-			None => {
-				// Create the iterator
-				let mut iter = inner.range(&beg, &end)?;
-				// Seek to the last key
-				iter.seek_last()?;
-				// Consume the iterator
-				let mut cursor = RangeCursor {
-					inner: iter,
-					dir: Direction::Backward,
-				};
-				consume_vals(&mut cursor, limit)?
-			}
-		};
+		// Check for a version
+		let mut opts = ReadOptions::default().with_timestamp(version);
+		// Set the lower and upper bounds
+		opts.set_iterate_lower_bound(Some(beg));
+		opts.set_iterate_upper_bound(Some(end));
+		// Create the iterator
+		let mut iter = inner.range_with_options(&opts)?;
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, Direction::Backward)?;
 		// Return result
 		Ok(res)
 	}
@@ -610,178 +534,18 @@ impl Transactable for Transaction {
 	}
 }
 
-// A cursor advances through entries and returns the next key or key-value pair.
-// The cursor abstraction allows consume_keys and consume_vals to work with
-// both range iterators and history iterators with timestamp filtering.
-trait Cursor {
-	/// Returns the next key from the cursor, or None if exhausted
-	fn next_key(&mut self) -> Result<Option<Key>>;
-	/// Returns the next key-value pair from the cursor, or None if exhausted
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>>;
-}
-
-// A cursor wrapping a range iterator
-struct RangeCursor<'a> {
-	inner: surrealkv::TransactionIterator<'a>,
-	dir: Direction,
-}
-
-impl Cursor for RangeCursor<'_> {
-	fn next_key(&mut self) -> Result<Option<Key>> {
-		while self.inner.valid() {
-			let key = self.inner.key();
-			match self.dir {
-				Direction::Forward => self.inner.next()?,
-				Direction::Backward => self.inner.prev()?,
-			};
-			return Ok(Some(key));
-		}
-		Ok(None)
-	}
-
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
-		while self.inner.valid() {
-			let key = self.inner.key();
-			let value = self.inner.value()?.unwrap_or_default();
-			match self.dir {
-				Direction::Forward => self.inner.next()?,
-				Direction::Backward => self.inner.prev()?,
-			};
-			return Ok(Some((key, value)));
-		}
-		Ok(None)
-	}
-}
-
-// A cursor wrapping a history iterator with timestamp filtering
-struct HistoryCursor<'a> {
-	inner: surrealkv::TransactionHistoryIterator<'a>,
-	dir: Direction,
-	ts: u64,
-}
-
-impl Cursor for HistoryCursor<'_> {
-	fn next_key(&mut self) -> Result<Option<Key>> {
-		// History entries are sorted (key ASC, timestamp DESC), so
-		// forward iteration yields newest versions first per key,
-		// and backward iteration yields oldest versions first per key.
-		match self.dir {
-			Direction::Forward => {
-				// Newest version first: the first entry with ts <= self.ts
-				// is the latest version. Then skip older versions of same key.
-				while self.inner.valid() {
-					if self.inner.timestamp() <= self.ts {
-						// Store the current key
-						let key = self.inner.key();
-						// Skip remaining older versions of this key
-						loop {
-							// Continue to the next version
-							self.inner.next()?;
-							// Check if we have proceeded to a new key
-							if !self.inner.valid() || self.inner.key() != key {
-								break;
-							}
-						}
-						// Return the key
-						return Ok(Some(key));
-					}
-					// Continue to the next version
-					self.inner.next()?;
-				}
-				// Return None if no key was matched
-				Ok(None)
-			}
-			Direction::Backward => {
-				// Oldest version first: scan all versions of the current
-				// key and keep the latest one with ts <= self.ts.
-				while self.inner.valid() {
-					// Track if matched
-					let mut matched = false;
-					// Store the current key
-					let key = self.inner.key();
-					// Scan all versions of the current key
-					while self.inner.valid() && self.inner.key() == key {
-						// Check the first version at or before the timestamp
-						if self.inner.timestamp() <= self.ts {
-							matched = true;
-						}
-						// Continue to the previous version
-						self.inner.prev()?;
-					}
-					// Return the key if matched
-					if matched {
-						return Ok(Some(key));
-					}
-				}
-				// Return None if no key was matched
-				Ok(None)
-			}
-		}
-	}
-
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
-		// History entries are sorted (key ASC, timestamp DESC), so
-		// forward iteration yields newest versions first per key,
-		// and backward iteration yields oldest versions first per key.
-		match self.dir {
-			Direction::Forward => {
-				// Newest version first: the first entry with ts <= self.ts
-				// is the latest version. Then skip older versions of same key.
-				while self.inner.valid() {
-					if self.inner.timestamp() <= self.ts {
-						// Store the current key
-						let key = self.inner.key();
-						// Store the current value
-						let value = self.inner.value()?;
-						// Skip remaining older versions of this key
-						loop {
-							// Continue to the next version
-							self.inner.next()?;
-							// Check if we have proceeded to a new key
-							if !self.inner.valid() || self.inner.key() != key {
-								break;
-							}
-						}
-						return Ok(Some((key, value)));
-					}
-					// Continue to the next version
-					self.inner.next()?;
-				}
-				// Return None if no entry was matched
-				Ok(None)
-			}
-			Direction::Backward => {
-				// Oldest version first: scan all versions of the current
-				// key and keep the latest one with ts <= self.ts.
-				while self.inner.valid() {
-					// Store the current key
-					let key = self.inner.key();
-					// Store the current value
-					let mut value: Option<Val> = None;
-					// Scan all versions of the current key
-					while self.inner.valid() && self.inner.key() == key {
-						// Check the first version at or before the timestamp
-						if self.inner.timestamp() <= self.ts {
-							// Store the current value
-							value = Some(self.inner.value()?);
-						}
-						// Continue to the previous version
-						self.inner.prev()?;
-					}
-					// Return the entry if matched
-					if let Some(value) = value {
-						return Ok(Some((key, value)));
-					}
-				}
-				// Return None if no entry was matched
-				Ok(None)
-			}
-		}
-	}
-}
-
 // Consume and iterate over only keys
-fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> {
+fn consume_keys(
+	iter: &mut surrealkv::TransactionIterator<'_>,
+	limit: ScanLimit,
+	dir: Direction,
+) -> Result<Vec<Key>> {
+	// Seek to the start or end of the range
+	match dir {
+		Direction::Forward => iter.seek_first()?,
+		Direction::Backward => iter.seek_last()?,
+	};
+	// Iterate over the keys
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -789,7 +553,12 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key
-				if let Some(key) = cursor.next_key()? {
+				if iter.valid() {
+					let key = iter.key();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
 					res.push(key);
 				} else {
 					break;
@@ -806,7 +575,12 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 			// Check that we don't exceed the byte limit
 			while bytes_fetched < b as usize {
 				// Check the key
-				if let Some(key) = cursor.next_key()? {
+				if iter.valid() {
+					let key = iter.key();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
 					bytes_fetched += key.len();
 					res.push(key);
 				} else {
@@ -824,7 +598,12 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 			// Check that we don't exceed the count limit AND the byte limit
 			while res.len() < c as usize && bytes_fetched < b as usize {
 				// Check the key
-				if let Some(key) = cursor.next_key()? {
+				if iter.valid() {
+					let key = iter.key();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
 					bytes_fetched += key.len();
 					res.push(key);
 				} else {
@@ -838,7 +617,17 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 }
 
 // Consume and iterate over keys and values
-fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, Val)>> {
+fn consume_vals(
+	iter: &mut surrealkv::TransactionIterator<'_>,
+	limit: ScanLimit,
+	dir: Direction,
+) -> Result<Vec<(Key, Val)>> {
+	// Seek to the start or end of the range
+	match dir {
+		Direction::Forward => iter.seek_first()?,
+		Direction::Backward => iter.seek_last()?,
+	};
+	// Iterate over the keys and values
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -846,8 +635,14 @@ fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, 
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key and value
-				if let Some(entry) = cursor.next_entry()? {
-					res.push(entry);
+				if iter.valid() {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
+					res.push((key, value));
 				} else {
 					break;
 				}
@@ -863,7 +658,13 @@ fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, 
 			// Check that we don't exceed the byte limit
 			while bytes_fetched < b as usize {
 				// Check the key and value
-				if let Some((key, value)) = cursor.next_entry()? {
+				if iter.valid() {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
 					bytes_fetched += key.len() + value.len();
 					res.push((key, value));
 				} else {
@@ -881,7 +682,13 @@ fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, 
 			// Check that we don't exceed the count limit AND the byte limit
 			while res.len() < c as usize && bytes_fetched < b as usize {
 				// Check the key and value
-				if let Some((key, value)) = cursor.next_entry()? {
+				if iter.valid() {
+					let key = iter.key();
+					let value = iter.value()?.unwrap_or_default();
+					match dir {
+						Direction::Forward => iter.next()?,
+						Direction::Backward => iter.prev()?,
+					};
 					bytes_fetched += key.len() + value.len();
 					res.push((key, value));
 				} else {

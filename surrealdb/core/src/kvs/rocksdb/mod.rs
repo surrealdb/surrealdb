@@ -957,7 +957,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
-				// Check the key and value
+				// Check the key
 				if let Some((k, _)) = iter.item() {
 					res.push(k.to_vec());
 					match dir {
@@ -978,7 +978,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the byte limit
 			while bytes_fetched < b as usize {
-				// Check the key and value
+				// Check the key
 				if let Some((k, _)) = iter.item() {
 					bytes_fetched += k.len();
 					res.push(k.to_vec());
@@ -1000,7 +1000,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the count limit AND the byte limit
 			while res.len() < c as usize && bytes_fetched < b as usize {
-				// Check the key and value
+				// Check the key
 				if let Some((k, _)) = iter.item() {
 					bytes_fetched += k.len();
 					res.push(k.to_vec());
