@@ -954,7 +954,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key and value
@@ -973,7 +973,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 		}
 		ScanLimit::Bytes(b) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(b as usize / 128); // Assuming 128 bytes per entry
+			let mut res = Vec::with_capacity((b as usize / 128).min(4096)); // Assuming 128 bytes per entry
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the byte limit
@@ -995,7 +995,7 @@ fn consume_keys<D: rocksdb::DBAccess>(
 		}
 		ScanLimit::BytesOrCount(b, c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the count limit AND the byte limit
@@ -1027,7 +1027,7 @@ fn consume_vals<D: rocksdb::DBAccess>(
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key and value
@@ -1046,7 +1046,7 @@ fn consume_vals<D: rocksdb::DBAccess>(
 		}
 		ScanLimit::Bytes(b) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(b as usize / 512); // Assuming 512 bytes per entry
+			let mut res = Vec::with_capacity((b as usize / 512).min(4096)); // Assuming 512 bytes per entry
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the byte limit
@@ -1068,7 +1068,7 @@ fn consume_vals<D: rocksdb::DBAccess>(
 		}
 		ScanLimit::BytesOrCount(b, c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the count limit AND the byte limit

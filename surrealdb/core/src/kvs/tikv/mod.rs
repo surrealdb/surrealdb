@@ -705,7 +705,7 @@ fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key
@@ -720,7 +720,7 @@ fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -
 		}
 		ScanLimit::Bytes(b) => {
 			// Create the result set
-			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_KEY) as usize);
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_KEY).min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the byte limit
@@ -738,7 +738,7 @@ fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -
 		}
 		ScanLimit::BytesOrCount(b, c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the count limit AND the byte limit
@@ -765,7 +765,7 @@ fn consume_vals<I: Iterator<Item = tikv::KvPair>>(
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Check that we don't exceed the count limit
 			while res.len() < c as usize {
 				// Check the key and value
@@ -780,7 +780,7 @@ fn consume_vals<I: Iterator<Item = tikv::KvPair>>(
 		}
 		ScanLimit::Bytes(b) => {
 			// Create the result set
-			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_VAL) as usize);
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_VAL).min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the byte limit
@@ -798,7 +798,7 @@ fn consume_vals<I: Iterator<Item = tikv::KvPair>>(
 		}
 		ScanLimit::BytesOrCount(b, c) => {
 			// Create the result set
-			let mut res = Vec::with_capacity(c as usize);
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
 			// Count the bytes fetched
 			let mut bytes_fetched = 0usize;
 			// Check that we don't exceed the count limit AND the byte limit
