@@ -22,7 +22,7 @@ impl Set {
 		Self(BTreeSet::new())
 	}
 
-	/// Convert into the inner BTreeSet<Value>
+	/// Convert into the inner `BTreeSet<Value>`
 	pub fn into_inner(self) -> BTreeSet<Value> {
 		self.0
 	}

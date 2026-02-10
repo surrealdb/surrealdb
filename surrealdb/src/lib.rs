@@ -50,6 +50,7 @@ pub mod parse {
 	pub use surrealdb_core::syn::value;
 }
 
+pub use method::Stats;
 pub use method::query::IndexedResults;
 #[doc(inline)]
 pub use surrealdb_types as types;

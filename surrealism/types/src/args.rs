@@ -1,7 +1,7 @@
 //! Function argument marshalling for SurrealDB values.
 //!
-//! This module provides the [`Args`] trait for converting between typed tuples and
-//! vectors of [`surrealdb_types::Value`]. This enables type-safe function signatures
+//! This module provides the [`Args`](crate::args::Args) trait for converting between typed tuples
+//! and vectors of [`surrealdb_types::Value`]. This enables type-safe function signatures
 //! while maintaining a uniform representation for cross-language communication.
 //!
 //! # Type Safety
