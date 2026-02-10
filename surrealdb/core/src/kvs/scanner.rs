@@ -87,11 +87,7 @@ impl<'a, I> Scanner<'a, I> {
 			version: None,
 			enable_prefetch: false,
 			initial_batch_size: ScanLimit::Count(100),
-			subsequent_batch_size: if store.is_local() {
-				ScanLimit::Bytes(16 * 1024 * 1024)
-			} else {
-				ScanLimit::Bytes(4 * 1024 * 1024)
-			},
+			subsequent_batch_size: ScanLimit::Bytes(4 * 1024 * 1024),
 		}
 	}
 
@@ -125,7 +121,7 @@ impl<'a, I> Scanner<'a, I> {
 	/// Set the subsequent batch size for subsequent batches.
 	///
 	/// After the first batch, subsequent batches will fetch up to this many items or bytes of data.
-	/// Default: 16 MiB for local storage engines, 4 MiB for remote engines
+	/// Default: 4 MiB
 	pub fn subsequent_batch_size(mut self, size: ScanLimit) -> Self {
 		self.subsequent_batch_size = size;
 		self
