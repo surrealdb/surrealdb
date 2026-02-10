@@ -27,8 +27,6 @@ const BATCH_SIZE: usize = 1000;
 /// What kind of output the GraphEdgeScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphScanOutput {
-	/// Return the edge record IDs (e.g., `knows:1`)
-	EdgeId,
 	/// Return the target record IDs (e.g., `person:bob`)
 	#[default]
 	TargetId,
@@ -351,17 +349,6 @@ async fn decode_graph_key(
 
 	match output_mode {
 		GraphScanOutput::TargetId => Ok(Value::RecordId(target_rid)),
-		GraphScanOutput::EdgeId => {
-			// When scanning from a node table (e.g., person:alice->knows), the foreign
-			// record in the graph key IS the edge record (e.g., knows:xxx).
-			// When scanning from an edge table (e.g., knows:xxx->person), the foreign
-			// record is the target node.
-			//
-			// In SurrealDB's graph model, `->edge_table` returns edge records, and
-			// `->edge_table->node_table` performs a two-hop traversal through the edge.
-			// So EdgeId and TargetId return the same value for a single-hop scan.
-			Ok(Value::RecordId(target_rid))
-		}
 		GraphScanOutput::FullEdge => {
 			// Fetch the full edge record
 			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;

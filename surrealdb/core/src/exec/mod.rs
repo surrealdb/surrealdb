@@ -81,7 +81,7 @@ pub struct ValueBatch {
 	pub(crate) values: Vec<Value>,
 }
 
-pub type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
+pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
 
 /// A trait for execution plans that can be executed and produce a stream of value batches.
 ///

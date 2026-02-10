@@ -5,8 +5,5 @@
 //! support the streaming executor model.
 
 pub mod btree;
-pub mod count;
-pub mod fulltext;
-pub mod hnsw;
 
 pub use btree::{IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator};

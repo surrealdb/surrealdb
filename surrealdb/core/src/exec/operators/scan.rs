@@ -240,8 +240,8 @@ impl ExecOperator for Scan {
 
 			// === POINT LOOKUP (single record by ID) ===
 			// Handled inline - single record, no limit/start or pipeline needed.
-			if let Some(ref rid) = rid {
-				if !matches!(rid.key, RecordIdKey::Range(_)) {
+			if let Some(ref rid) = rid
+				&& !matches!(rid.key, RecordIdKey::Range(_)) {
 					let record = txn
 						.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
 						.await
@@ -266,7 +266,6 @@ impl ExecOperator for Scan {
 					}
 					return;
 				}
-			}
 
 			// === STREAM-BASED PATHS (range scan and table scan) ===
 			// All use the unified ScanPipeline consumption loop.
@@ -528,14 +527,9 @@ async fn resolve_table_scan_stream(
 			.await
 			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}")))?;
 
-		let analyzer = IndexAnalyzer::new(&cfg.table_name, indexes, cfg.with.as_ref());
+		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
-		Some(select_access_path(
-			cfg.table_name.clone(),
-			candidates,
-			cfg.with.as_ref(),
-			cfg.direction,
-		))
+		Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
 	};
 
 	match access_path {

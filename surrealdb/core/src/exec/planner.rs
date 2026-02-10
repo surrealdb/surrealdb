@@ -571,12 +571,12 @@ impl<'ctx> Planner<'ctx> {
 	> {
 		match bound {
 			std::ops::Bound::Unbounded => Ok(std::ops::Bound::Unbounded),
-			std::ops::Bound::Included(key) => Ok(std::ops::Bound::Included(Box::new(
-				self.convert_record_key_to_physical(key)?,
-			))),
-			std::ops::Bound::Excluded(key) => Ok(std::ops::Bound::Excluded(Box::new(
-				self.convert_record_key_to_physical(key)?,
-			))),
+			std::ops::Bound::Included(key) => {
+				Ok(std::ops::Bound::Included(Box::new(self.convert_record_key_to_physical(key)?)))
+			}
+			std::ops::Bound::Excluded(key) => {
+				Ok(std::ops::Bound::Excluded(Box::new(self.convert_record_key_to_physical(key)?)))
+			}
 		}
 	}
 

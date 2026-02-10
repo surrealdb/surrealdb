@@ -104,9 +104,7 @@ impl ExecOperator for IndexScan {
 			BTreeAccess::FullText {
 				..
 			}
-			| BTreeAccess::Knn {
-				..
-			} => {
+			| BTreeAccess::Knn => {
 				unreachable!("IndexScan does not support FullText or KNN access")
 			}
 		};
@@ -399,7 +397,7 @@ impl ExecOperator for IndexScan {
 				}
 
 				// FullText and KNN should use dedicated operators
-				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn { .. }, _) => {
+				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn, _) => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
 						"IndexScan does not support FullText or KNN access - use dedicated operators"
 					)))?

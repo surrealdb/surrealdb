@@ -104,10 +104,7 @@ impl PhysicalExpr for RecursePart {
 		if self.has_repeat_recurse {
 			let rec_ctx = RecursionCtx {
 				path: &self.path,
-				min_depth: self.min_depth,
 				max_depth: Some(max_depth),
-				instruction: &self.instruction,
-				inclusive: self.inclusive,
 				depth: 0,
 			};
 			return evaluate_recurse_with_plan(&value, &self.path, ctx.with_recursion_ctx(rec_ctx))

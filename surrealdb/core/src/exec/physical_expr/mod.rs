@@ -7,11 +7,9 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::parts::PhysicalRecurseInstruction;
 use crate::exec::{AccessMode, ContextLevel, ExecutionContext};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
-use crate::iam::Auth;
 use crate::kvs::Transaction;
 use crate::val::Value;
 
@@ -51,14 +49,8 @@ pub(crate) use subquery::ScalarSubquery;
 pub struct RecursionCtx<'a> {
 	/// The recursion's inner path (containing Destructure with RepeatRecurse)
 	pub path: &'a [Arc<dyn PhysicalExpr>],
-	/// Minimum recursion depth
-	pub min_depth: u32,
 	/// Maximum recursion depth (None = system limit)
 	pub max_depth: Option<u32>,
-	/// How to handle recursion results
-	pub instruction: &'a PhysicalRecurseInstruction,
-	/// Whether to include starting node
-	pub inclusive: bool,
 	/// Current recursion depth (incremented at each RepeatRecurse call)
 	pub depth: u32,
 }
@@ -114,16 +106,6 @@ impl<'a> EvalContext<'a> {
 		}
 	}
 
-	/// Create a new context with block-local parameters.
-	///
-	/// Local parameters shadow global parameters with the same name.
-	pub fn with_local_params(&self, params: &'a HashMap<String, Value>) -> Self {
-		Self {
-			local_params: Some(params),
-			..*self
-		}
-	}
-
 	// =========================================================================
 	// Session accessors
 	// =========================================================================
@@ -133,16 +115,6 @@ impl<'a> EvalContext<'a> {
 		self.exec_ctx.session()
 	}
 
-	/// Get the session namespace (if available).
-	pub fn session_ns(&self) -> Option<&str> {
-		self.session().and_then(|s| s.ns.as_deref())
-	}
-
-	/// Get the session database (if available).
-	pub fn session_db(&self) -> Option<&str> {
-		self.session().and_then(|s| s.db.as_deref())
-	}
-
 	// =========================================================================
 	// Context accessors (shortcuts)
 	// =========================================================================
@@ -150,16 +122,6 @@ impl<'a> EvalContext<'a> {
 	/// Get the transaction (delegates to FrozenContext).
 	pub fn txn(&self) -> Arc<Transaction> {
 		self.exec_ctx.txn()
-	}
-
-	/// Look up a parameter value by name (delegates to FrozenContext).
-	pub fn value(&self, key: &str) -> Option<&Value> {
-		self.exec_ctx.value(key)
-	}
-
-	/// Get the authentication context.
-	pub fn auth(&self) -> &Auth {
-		self.exec_ctx.auth()
 	}
 
 	/// Get the capabilities as an Arc.

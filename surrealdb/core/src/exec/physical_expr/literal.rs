@@ -150,10 +150,10 @@ impl PhysicalExpr for Param {
 					return Ok(v.clone());
 				}
 				// Check if $this was explicitly bound as a parameter (e.g. by subquery)
-				if let Some(local_params) = ctx.local_params {
-					if let Some(v) = local_params.get(&self.0) {
-						return Ok(v.clone());
-					}
+				if let Some(local_params) = ctx.local_params
+					&& let Some(v) = local_params.get(&self.0)
+				{
+					return Ok(v.clone());
 				}
 				if let Some(v) = ctx.exec_ctx.value(&self.0) {
 					return Ok(v.clone());

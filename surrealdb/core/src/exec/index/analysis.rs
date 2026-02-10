@@ -3,22 +3,19 @@
 //! The [`IndexAnalyzer`] examines query conditions and ORDER BY clauses to find
 //! indexes that can accelerate the query.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound};
 use crate::catalog::{Index, IndexDefinition};
-use crate::expr::operator::{MatchesOperator, NearestNeighbor};
+use crate::expr::operator::MatchesOperator;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
 use crate::idx::planner::ScanDirection;
-use crate::val::{Number, TableName, Value};
+use crate::val::Value;
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
-	/// The table being queried
-	pub table: &'a TableName,
 	/// Available indexes for the table
 	pub indexes: Arc<[IndexDefinition]>,
 	/// Optional WITH INDEX/NOINDEX hints
@@ -27,13 +24,8 @@ pub struct IndexAnalyzer<'a> {
 
 impl<'a> IndexAnalyzer<'a> {
 	/// Create a new analyzer for the given table and indexes.
-	pub fn new(
-		table: &'a TableName,
-		indexes: Arc<[IndexDefinition]>,
-		with_hints: Option<&'a With>,
-	) -> Self {
+	pub fn new(indexes: Arc<[IndexDefinition]>, with_hints: Option<&'a With>) -> Self {
 		Self {
-			table,
 			indexes,
 			with_hints,
 		}
@@ -222,7 +214,7 @@ impl<'a> IndexAnalyzer<'a> {
 				let candidate = IndexCandidate {
 					index_ref,
 					access,
-					matched_exprs: HashSet::new(),
+
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -268,8 +260,8 @@ impl<'a> IndexAnalyzer<'a> {
 						self.try_match_fulltext(left, mo, right, candidates);
 					}
 					// KNN operator for vector search
-					BinaryOperator::NearestNeighbor(nn) => {
-						self.try_match_knn(left, nn, right, candidates);
+					BinaryOperator::NearestNeighbor(_) => {
+						self.try_match_knn(left, right, candidates);
 					}
 					_ => {
 						// Check if this is an indexable comparison
@@ -339,7 +331,6 @@ impl<'a> IndexAnalyzer<'a> {
 				let candidate = IndexCandidate {
 					index_ref,
 					access,
-					matched_exprs: HashSet::new(), // TODO: Track matched expressions
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -459,7 +450,7 @@ impl<'a> IndexAnalyzer<'a> {
 						query: query.clone(),
 						operator: operator.clone(),
 					},
-					matched_exprs: HashSet::new(),
+
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -468,40 +459,18 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Try to match a KNN expression to an HNSW index.
-	fn try_match_knn(
-		&self,
-		left: &Expr,
-		nn: &NearestNeighbor,
-		right: &Expr,
-		candidates: &mut Vec<IndexCandidate>,
-	) {
-		// Extract idiom from left side and vector from right side
+	fn try_match_knn(&self, left: &Expr, right: &Expr, candidates: &mut Vec<IndexCandidate>) {
+		// Extract idiom from left side
 		let idiom = match left {
 			Expr::Idiom(idiom) => idiom,
 			_ => return,
 		};
 
-		// Get k and ef from the NearestNeighbor operator
-		let (k, ef) = match nn {
-			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			NearestNeighbor::K(k, _) => (*k, k * 2), // Use 2*k as default ef for brute force
-			NearestNeighbor::KTree(k) => (*k, k * 2), // Use 2*k as default ef for tree-based
-		};
-
-		// Extract vector from right side
-		let vector = match right {
+		// Validate right side is a numeric vector
+		match right {
 			Expr::Literal(lit) => {
 				if let Some(Value::Array(arr)) = literal_to_value(lit) {
-					let nums: Vec<Number> = arr
-						.iter()
-						.filter_map(|v| match v {
-							Value::Number(n) => Some(*n),
-							_ => None,
-						})
-						.collect();
-					if nums.len() == arr.len() {
-						nums
-					} else {
+					if !arr.iter().all(|v| matches!(v, Value::Number(_))) {
 						return;
 					}
 				} else {
@@ -528,12 +497,7 @@ impl<'a> IndexAnalyzer<'a> {
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
-					access: BTreeAccess::Knn {
-						vector: vector.clone(),
-						k,
-						ef,
-					},
-					matched_exprs: HashSet::new(),
+					access: BTreeAccess::Knn,
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -583,7 +547,7 @@ impl<'a> IndexAnalyzer<'a> {
 							from: None,
 							to: None,
 						},
-						matched_exprs: HashSet::new(),
+
 						covers_order: true,
 					};
 					candidates.push(candidate);
@@ -600,8 +564,6 @@ pub struct IndexCandidate {
 	pub index_ref: IndexRef,
 	/// How to access the index
 	pub access: BTreeAccess,
-	/// Expressions covered by this index access
-	pub matched_exprs: HashSet<Arc<Expr>>,
 	/// Whether this index can satisfy ORDER BY
 	pub covers_order: bool,
 }
@@ -653,9 +615,7 @@ impl IndexCandidate {
 				// when the query uses MATCHES
 				score += 800;
 			}
-			BTreeAccess::Knn {
-				..
-			} => {
+			BTreeAccess::Knn => {
 				// KNN search is specialized and should be preferred
 				// when the query uses nearest neighbor operators
 				score += 800;
@@ -680,16 +640,6 @@ impl IndexCandidate {
 				index_ref: self.index_ref.clone(),
 				query: query.clone(),
 				operator: operator.clone(),
-			},
-			BTreeAccess::Knn {
-				vector,
-				k,
-				ef,
-			} => AccessPath::KnnSearch {
-				index_ref: self.index_ref.clone(),
-				vector: vector.clone(),
-				k: *k,
-				ef: *ef,
 			},
 			_ => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),

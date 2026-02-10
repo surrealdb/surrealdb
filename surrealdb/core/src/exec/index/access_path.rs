@@ -11,7 +11,7 @@ use crate::expr::BinaryOperator;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
 use crate::idx::planner::ScanDirection;
-use crate::val::{Number, RecordId, TableName, Value};
+use crate::val::Value;
 
 /// A reference to an index definition with its position in the schema.
 ///
@@ -73,15 +73,7 @@ impl Eq for IndexRef {}
 #[derive(Debug, Clone)]
 pub enum AccessPath {
 	/// Full table scan - iterate all records in storage order.
-	TableScan {
-		table: TableName,
-		direction: ScanDirection,
-	},
-
-	/// Point lookup by record ID - single record retrieval.
-	PointLookup {
-		rid: RecordId,
-	},
+	TableScan,
 
 	/// B-tree index scan (Idx or Uniq).
 	///
@@ -92,32 +84,11 @@ pub enum AccessPath {
 		direction: ScanDirection,
 	},
 
-	/// Union of multiple values using the same index.
-	///
-	/// Used for IN clauses and OR conditions on the same indexed field.
-	IndexUnion {
-		index_ref: IndexRef,
-		values: Vec<Value>,
-	},
-
 	/// Full-text search using MATCHES operator.
 	FullTextSearch {
 		index_ref: IndexRef,
 		query: String,
 		operator: MatchesOperator,
-	},
-
-	/// K-nearest neighbor vector search.
-	KnnSearch {
-		index_ref: IndexRef,
-		vector: Vec<Number>,
-		k: u32,
-		ef: u32,
-	},
-
-	/// Count index for COUNT(*) optimization.
-	CountIndex {
-		index_ref: IndexRef,
 	},
 }
 
@@ -153,14 +124,7 @@ pub enum BTreeAccess {
 	},
 
 	/// KNN vector search access
-	Knn {
-		/// The query vector
-		vector: Vec<crate::val::Number>,
-		/// Number of nearest neighbors to return
-		k: u32,
-		/// Exploration factor for HNSW search
-		ef: u32,
-	},
+	Knn,
 }
 
 /// A bound for a range scan.
@@ -201,17 +165,13 @@ impl RangeBound {
 ///    - Prefer index that covers ORDER BY
 ///    - Otherwise, pick first matching index
 pub fn select_access_path(
-	table: TableName,
 	candidates: Vec<IndexCandidate>,
 	with_hints: Option<&With>,
 	direction: ScanDirection,
 ) -> AccessPath {
 	// WITH NOINDEX forces table scan
 	if matches!(with_hints, Some(With::NoIndex)) {
-		return AccessPath::TableScan {
-			table,
-			direction,
-		};
+		return AccessPath::TableScan;
 	}
 
 	// WITH INDEX names - find the hinted index
@@ -225,19 +185,15 @@ pub fn select_access_path(
 
 	// No candidates - table scan
 	if candidates.is_empty() {
-		return AccessPath::TableScan {
-			table,
-			direction,
-		};
+		return AccessPath::TableScan;
 	}
 
 	// Best effort: score and pick the best candidate
-	candidates.into_iter().max_by_key(|c| c.score()).map(|c| c.to_access_path(direction)).unwrap_or(
-		AccessPath::TableScan {
-			table,
-			direction,
-		},
-	)
+	candidates
+		.into_iter()
+		.max_by_key(|c| c.score())
+		.map(|c| c.to_access_path(direction))
+		.unwrap_or(AccessPath::TableScan)
 }
 
 /// Find a candidate matching one of the hinted index names.

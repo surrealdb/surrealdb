@@ -52,35 +52,21 @@ impl FunctionRegistry {
 		self.functions.insert(name, Arc::new(func));
 	}
 
-	/// Register a scalar function wrapped in an Arc.
-	pub fn register_arc(&mut self, func: Arc<dyn ScalarFunction>) {
-		let name = func.name();
-		self.functions.insert(name, func);
-	}
-
 	/// Look up a scalar function by name.
 	pub fn get(&self, name: &str) -> Option<&Arc<dyn ScalarFunction>> {
 		self.functions.get(name)
 	}
 
 	/// Check if a scalar function exists.
+	#[cfg(test)]
 	pub fn contains(&self, name: &str) -> bool {
 		self.functions.contains_key(name)
 	}
 
 	/// Get the number of registered scalar functions.
+	#[cfg(test)]
 	pub fn len(&self) -> usize {
 		self.functions.len()
-	}
-
-	/// Check if the scalar function registry is empty.
-	pub fn is_empty(&self) -> bool {
-		self.functions.is_empty()
-	}
-
-	/// Iterate over all registered scalar functions.
-	pub fn iter(&self) -> impl Iterator<Item = (&'static str, &Arc<dyn ScalarFunction>)> {
-		self.functions.iter().map(|(k, v)| (*k, v))
 	}
 
 	// =========================================================================
@@ -93,32 +79,21 @@ impl FunctionRegistry {
 		self.aggregates.insert(name, Arc::new(func));
 	}
 
-	/// Register an aggregate function wrapped in an Arc.
-	pub fn register_aggregate_arc(&mut self, func: Arc<dyn AggregateFunction>) {
-		let name = func.name();
-		self.aggregates.insert(name, func);
-	}
-
 	/// Look up an aggregate function by name.
 	pub fn get_aggregate(&self, name: &str) -> Option<&Arc<dyn AggregateFunction>> {
 		self.aggregates.get(name)
 	}
 
 	/// Check if a function is registered as an aggregate.
+	#[cfg(test)]
 	pub fn is_aggregate(&self, name: &str) -> bool {
 		self.aggregates.contains_key(name)
 	}
 
 	/// Get the number of registered aggregate functions.
+	#[cfg(test)]
 	pub fn aggregate_len(&self) -> usize {
 		self.aggregates.len()
-	}
-
-	/// Iterate over all registered aggregate functions.
-	pub fn iter_aggregates(
-		&self,
-	) -> impl Iterator<Item = (&'static str, &Arc<dyn AggregateFunction>)> {
-		self.aggregates.iter().map(|(k, v)| (*k, v))
 	}
 
 	/// Get the appropriate aggregate function for "count", handling the special case:
@@ -144,12 +119,6 @@ impl FunctionRegistry {
 		self.projections.insert(name, Arc::new(func));
 	}
 
-	/// Register a projection function wrapped in an Arc.
-	pub fn register_projection_arc(&mut self, func: Arc<dyn ProjectionFunction>) {
-		let name = func.name();
-		self.projections.insert(name, func);
-	}
-
 	/// Look up a projection function by name.
 	pub fn get_projection(&self, name: &str) -> Option<&Arc<dyn ProjectionFunction>> {
 		self.projections.get(name)
@@ -161,15 +130,9 @@ impl FunctionRegistry {
 	}
 
 	/// Get the number of registered projection functions.
+	#[cfg(test)]
 	pub fn projection_len(&self) -> usize {
 		self.projections.len()
-	}
-
-	/// Iterate over all registered projection functions.
-	pub fn iter_projections(
-		&self,
-	) -> impl Iterator<Item = (&'static str, &Arc<dyn ProjectionFunction>)> {
-		self.projections.iter().map(|(k, v)| (*k, v))
 	}
 
 	// =========================================================================
@@ -182,12 +145,6 @@ impl FunctionRegistry {
 		self.index_functions.insert(name, Arc::new(func));
 	}
 
-	/// Register an index function wrapped in an Arc.
-	pub fn register_index_function_arc(&mut self, func: Arc<dyn IndexFunction>) {
-		let name = func.name();
-		self.index_functions.insert(name, func);
-	}
-
 	/// Look up an index function by name.
 	pub fn get_index_function(&self, name: &str) -> Option<&Arc<dyn IndexFunction>> {
 		self.index_functions.get(name)
@@ -196,18 +153,6 @@ impl FunctionRegistry {
 	/// Check if a function is registered as an index function.
 	pub fn is_index_function(&self, name: &str) -> bool {
 		self.index_functions.contains_key(name)
-	}
-
-	/// Get the number of registered index functions.
-	pub fn index_function_len(&self) -> usize {
-		self.index_functions.len()
-	}
-
-	/// Iterate over all registered index functions.
-	pub fn iter_index_functions(
-		&self,
-	) -> impl Iterator<Item = (&'static str, &Arc<dyn IndexFunction>)> {
-		self.index_functions.iter().map(|(k, v)| (*k, v))
 	}
 
 	// =========================================================================

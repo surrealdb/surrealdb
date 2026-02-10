@@ -6,12 +6,10 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
-use crate::expr::record_id::RecordIdKeyGen;
 use crate::expr::FlowResult;
+use crate::expr::record_id::RecordIdKeyGen;
 use crate::fmt::EscapeRidKey;
-use crate::val::{
-	Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, TableName, Uuid, Value,
-};
+use crate::val::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, TableName, Uuid, Value};
 
 // ============================================================================
 // PhysicalRecordIdKey
@@ -88,11 +86,9 @@ impl PhysicalRecordIdKey {
 			| PhysicalRecordIdKey::String(_)
 			| PhysicalRecordIdKey::Uuid(_)
 			| PhysicalRecordIdKey::Generate(_) => ContextLevel::Root,
-			PhysicalRecordIdKey::Array(elements) => elements
-				.iter()
-				.map(|e| e.required_context())
-				.max()
-				.unwrap_or(ContextLevel::Root),
+			PhysicalRecordIdKey::Array(elements) => {
+				elements.iter().map(|e| e.required_context()).max().unwrap_or(ContextLevel::Root)
+			}
 			PhysicalRecordIdKey::Object(entries) => entries
 				.iter()
 				.map(|(_, e)| e.required_context())

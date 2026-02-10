@@ -117,9 +117,6 @@ pub struct IndexRangeIterator {
 	/// Current scan range
 	beg: Key,
 	end: Key,
-	/// Inclusivity flags
-	beg_inclusive: bool,
-	end_inclusive: bool,
 	/// Whether we've checked the begin boundary
 	beg_checked: bool,
 	/// Whether iteration is complete
@@ -146,30 +143,23 @@ impl IndexRangeIterator {
 			(Index::prefix_beg(ns, db, &ix.table_name, ix.index_id)?, true)
 		};
 
-		let (end, end_inclusive) = if let Some(to) = to {
+		let end = if let Some(to) = to {
 			let array = Array::from(vec![to.value.clone()]);
 			if to.inclusive {
-				(Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?, true)
+				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?
 			} else {
-				(Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?, false)
+				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
 			}
 		} else {
-			(Index::prefix_end(ns, db, &ix.table_name, ix.index_id)?, true)
+			Index::prefix_end(ns, db, &ix.table_name, ix.index_id)?
 		};
 
 		Ok(Self {
 			beg,
 			end,
-			beg_inclusive,
-			end_inclusive,
 			beg_checked: beg_inclusive, // If inclusive, no need to check
 			done: false,
 		})
-	}
-
-	/// Create a full-range iterator (all values in the index).
-	pub fn full_range(ns: NamespaceId, db: DatabaseId, ix: &IndexDefinition) -> Result<Self> {
-		Self::new(ns, db, ix, None, None)
 	}
 
 	/// Fetch the next batch of record IDs.
@@ -300,59 +290,5 @@ impl UniqueRangeIterator {
 		self.beg_inclusive = true;
 
 		Ok(records)
-	}
-}
-
-/// Iterator for union of multiple equality lookups.
-///
-/// Used for IN clauses: `field IN [a, b, c]`
-pub struct IndexUnionIterator {
-	/// Namespace ID
-	ns: NamespaceId,
-	/// Database ID
-	db: DatabaseId,
-	/// Index definition
-	ix: IndexDefinition,
-	/// Values to look up
-	values: Vec<Value>,
-	/// Current position in values
-	current_idx: usize,
-	/// Current sub-iterator
-	current_iter: Option<IndexEqualIterator>,
-}
-
-impl IndexUnionIterator {
-	/// Create a new union iterator.
-	pub fn new(ns: NamespaceId, db: DatabaseId, ix: IndexDefinition, values: Vec<Value>) -> Self {
-		Self {
-			ns,
-			db,
-			ix,
-			values,
-			current_idx: 0,
-			current_iter: None,
-		}
-	}
-
-	/// Fetch the next batch of record IDs.
-	pub async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		loop {
-			// Try current iterator
-			if let Some(ref mut iter) = self.current_iter {
-				let batch = iter.next_batch(tx).await?;
-				if !batch.is_empty() {
-					return Ok(batch);
-				}
-			}
-
-			// Move to next value
-			if self.current_idx >= self.values.len() {
-				return Ok(Vec::new());
-			}
-
-			let value = &self.values[self.current_idx];
-			self.current_idx += 1;
-			self.current_iter = Some(IndexEqualIterator::new(self.ns, self.db, &self.ix, value)?);
-		}
 	}
 }

@@ -189,8 +189,8 @@ mod tests {
 		);
 
 		assert_eq!(compute.name(), "Compute");
-		assert_eq!(compute.len(), 2);
-		assert!(!compute.is_empty());
+		assert_eq!(compute.fields.len(), 2);
+		assert!(!compute.fields.is_empty());
 
 		let attrs = compute.attrs();
 		assert_eq!(attrs.len(), 1);
@@ -208,7 +208,7 @@ mod tests {
 
 		let compute = Compute::new(source, vec![]);
 
-		assert!(compute.is_empty());
-		assert_eq!(compute.len(), 0);
+		assert!(compute.fields.is_empty());
+		assert_eq!(compute.fields.len(), 0);
 	}
 }

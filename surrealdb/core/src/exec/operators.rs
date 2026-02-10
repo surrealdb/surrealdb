@@ -10,7 +10,6 @@ mod graph_edge_scan;
 mod ifelse;
 mod index_scan;
 mod info;
-mod knn_scan;
 mod let_plan;
 mod limit;
 mod project;
