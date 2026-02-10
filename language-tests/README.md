@@ -359,10 +359,13 @@ default namespace and database name: `"test"`. Defaults to `true`
 #### `[env.imports]`
 
 An array of string which you can use to specify files to run before running the
-test. Each string is a path to a file relative to the root of the test
-directory. Each of these files will be run in a database with full capabilities
-and the given namespace and database. The test is only run after the files in
-imports are run to completion.
+test. Each string is a path to a file and is either a path relative to the root of 
+the test directory or if the path starts with `./` relative to the importing test 
+directory. Each of these files will be run in a database with the configured capabilities
+and the namespace and database. If the imported test also specifies imports those tests 
+will be run first, each imported file will only be run once, even if specified multiple 
+times directly or indirectly. The test is only run after the files in imports are run 
+to completion.
 
 When importing a test the `[test.version]` field of the imported test is
 checked against the version of the importing datastore. If it does not match

@@ -1,6 +1,6 @@
 /**
 [env]
-imports = ["language/permissions/table/basic_import.surql"]
+imports = ["./basic_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "user:test" }
 
 [test]
@@ -103,6 +103,7 @@ value = "[]"
 
 [[test.results]]
 value = "[{ id: delete_select:1 }]"
+
 */
 
 (INFO FOR DB).tables;

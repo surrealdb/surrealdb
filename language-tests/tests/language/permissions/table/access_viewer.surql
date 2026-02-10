@@ -48,7 +48,7 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[{ id: update:1, v: 1 }]"
+value = "[{ id: update:1, secret: 'hunter2', v: 1 }]"
 
 [[test.results]]
 value = "[]"
@@ -72,7 +72,7 @@ value = "[{ id: select:1 }]"
 value = "[{ id: create:1 }, { id: create:2 }]"
 
 [[test.results]]
-value = "[{ id: update:1, v: 1 }]"
+value = "[{ id: update:1, secret: 'hunter2', v: 1 }]"
 
 [[test.results]]
 value = "[{ id: delete:1 }]"

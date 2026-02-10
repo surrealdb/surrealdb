@@ -47,7 +47,7 @@ value = "[{ id: select:1, v: 1 }]"
 value = "[{ id: create:1, v: 1 }]"
 
 [[test.results]]
-value = "[{ id: update:1, v: 1 }]"
+value = "[{ id: update:1, secret: 'hunter2', v: 1 }]"
 
 [[test.results]]
 value = "[{ id: delete:1, v: 1 }]"
@@ -71,7 +71,7 @@ value = "[{ id: select:1, v: 1 }, { id: select:2 }]"
 value = "[{ id: create:1, v: 1 }, { id: create:2 }]"
 
 [[test.results]]
-value = "[{ id: update:1, v: 1 }, { id: update:2 }]"
+value = "[{ id: update:1, secret: 'hunter2', v: 1 }, { id: update:2 }]"
 
 [[test.results]]
 value = "[{ id: delete:1, v: 1 }, { id: delete:2 }]"
@@ -95,7 +95,7 @@ value = "[{ id: select:1, v: 1 }]"
 value = "[{ id: create:1, v: 1 }]"
 
 [[test.results]]
-value = "[{ id: update:1, v: 1 }]"
+value = "[{ id: update:1, secret: 'hunter2', v: 1 }]"
 
 [[test.results]]
 value = "[{ id: delete:1, v: 1 }]"

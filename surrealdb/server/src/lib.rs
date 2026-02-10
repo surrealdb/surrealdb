@@ -2,10 +2,6 @@
 //! Exposes the same init() used by the `surreal` binary so external apps can
 //! start SurrealDB within their own `main()`.
 
-// Temporarily allow deprecated items until version 3.0 for backward compatibility
-#![allow(deprecated)]
-#![deny(clippy::mem_forget)]
-
 #[macro_use]
 pub extern crate surrealdb_core;
 

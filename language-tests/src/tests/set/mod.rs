@@ -109,17 +109,6 @@ impl TestSet {
 		}
 	}
 
-	pub fn find_all<S>(&self, name: &S) -> Option<TestId>
-	where
-		S: AsRef<str>,
-	{
-		let mut name = Cow::Borrowed(name.as_ref());
-		if !name.starts_with(path::MAIN_SEPARATOR) {
-			name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
-		}
-		self.all_map.get(name.as_ref()).copied()
-	}
-
 	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();

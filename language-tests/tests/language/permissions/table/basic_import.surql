@@ -29,7 +29,7 @@ value = "[{ id: create:1 }]"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: update:1 }]"
+value = "[{ id: update:1, secret: 'hunter2' }]"
 
 [[test.results]]
 value = "NONE"

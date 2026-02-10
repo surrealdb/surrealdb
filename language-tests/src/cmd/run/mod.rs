@@ -411,7 +411,9 @@ async fn run_test_with_dbs(
 			continue;
 		}
 
-		let mut import_session = util::session_from_test_config(&set[id].config);
+		let config = &set[import].config;
+
+		let mut import_session = util::session_from_test_config(config);
 		dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 		if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
