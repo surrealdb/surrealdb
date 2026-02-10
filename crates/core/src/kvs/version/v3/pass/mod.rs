@@ -105,6 +105,7 @@ impl fmt::Write for PassWriter<'_> {
 pub struct PassState {
 	pub breaking_futures: bool,
 	pub breaking_closures: bool,
+	pub non_expression_idiom: bool,
 	pub mock_allowed: bool,
 	pub _tmp: (),
 }
@@ -1151,7 +1152,13 @@ impl Visitor for MigratorPass<'_> {
 				if idx != 0 {
 					self.w.write_str(", ")?;
 				}
-				self.visit_idiom(i)?;
+				self.with_state(
+					|p| PassState {
+						non_expression_idiom: true,
+						..p
+					},
+					|this| this.visit_idiom(i),
+				)?;
 			}
 		}
 		if Index::Idx != d.index {
@@ -1250,7 +1257,13 @@ impl Visitor for MigratorPass<'_> {
 		}
 
 		self.w.write_str(" ")?;
-		self.visit_idiom(&d.name)?;
+		self.with_state(
+			|p| PassState {
+				non_expression_idiom: true,
+				..p
+			},
+			|this| this.visit_idiom(&d.name),
+		)?;
 
 		write!(self.w, " ON {}", d.what)?;
 
@@ -1631,7 +1644,7 @@ impl Visitor for MigratorPass<'_> {
 					}) = v.0.first()
 					{
 						// Avoid conflict between the value NONE with the `Output::None`.
-						if expr.has_left_none() {
+						if expr.has_left_none_or_null() {
 							self.w.write_char('(')?;
 							self.visit_value(expr)?;
 							self.w.write_char(')')?;
@@ -2308,7 +2321,13 @@ impl Visitor for MigratorPass<'_> {
 		let parts = match idiom.0.first() {
 			Some(Part::Start(value)) => {
 				self.w.write_str("(")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str(")")?;
 				&idiom.0[1..]
 			}
@@ -2317,7 +2336,7 @@ impl Visitor for MigratorPass<'_> {
 				last_field = Some(loc);
 				write!(self.w, "{}", value)?;
 
-				if value.as_str() == "id" && idiom.0.len() > 1 {
+				if value.as_str() == "id" && idiom.0.len() > 1 && !self.state.non_expression_idiom {
 					let after = self.w.location();
 					self.issues.push(MigrationIssue {
 						severity: Severity::CanBreak,
@@ -2353,7 +2372,7 @@ impl Visitor for MigratorPass<'_> {
 			self.visit_part(p)?;
 
 			if let Part::Field(x) = p {
-				if x.as_str() == "id" && parts.len() > idx + 1 {
+				if x.as_str() == "id" && parts.len() > idx + 1 && !self.state.non_expression_idiom {
 					let after = self.w.location();
 					self.issues.push(MigrationIssue {
 						severity: Severity::CanBreak,
@@ -2375,7 +2394,7 @@ impl Visitor for MigratorPass<'_> {
 			}
 
 			if let Some(field) = prev_field {
-				if last_field.is_none() {
+				if last_field.is_none() && !self.state.non_expression_idiom {
 					let after = self.w.location();
 					self.issues.push(MigrationIssue {
 						severity: Severity::CanBreak,
@@ -2404,37 +2423,56 @@ impl Visitor for MigratorPass<'_> {
 			Part::All => {
 				let before = self.w.location();
 				self.w.write_str(".*")?;
-				let after = self.w.location();
-
-				self.issues.push(MigrationIssue {
-					severity: Severity::CanBreak,
-					error: "Found usage of all idiom `.*` behavior of which has changed when used on an array or object".to_string(),
-					details: String::new(),
-					kind: IssueKind::AllIdiom,
-					origin: self.path.clone(),
-					error_location: Some(Snippet::from_source_location_range(
-							self.w.flush_source(),
-							before..after,
-							None,
-							MessageKind::Error,
-					)),
-					resolution: None,
-				})
+				if !self.state.non_expression_idiom {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error: "Found usage of all idiom `.*` behavior of which has changed when used on an array or object".to_string(),
+						details: String::new(),
+						kind: IssueKind::AllIdiom,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+								self.w.flush_source(),
+								before..after,
+								None,
+								MessageKind::Error,
+						)),
+						resolution: None,
+					})
+				}
 			}
 			Part::Where(value) => {
 				self.w.write_str("[? ")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str("]")?;
 			}
 			Part::Graph(graph) => self.visit_graph(graph)?,
 			Part::Value(value) => {
 				self.w.write_str("[")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str("]")?;
 			}
 			Part::Start(value) => {
 				// Shouldn't happen.
-				self.visit_value(value)?
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 			}
 			Part::Method(name, values) => {
 				write!(self.w, ".{}(", EscapeKwFreeIdent(name))?;
@@ -2442,7 +2480,13 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(",")?;
 					}
-					self.visit_value(v)?;
+					self.with_state(
+						|s| PassState {
+							non_expression_idiom: false,
+							..s
+						},
+						|this| this.visit_value(v),
+					)?;
 				}
 				self.w.write_char(')')?;
 			}
@@ -2478,7 +2522,9 @@ impl Visitor for MigratorPass<'_> {
 
 				if let Some(i) = idiom {
 					self.w.write_str("(")?;
-					self.visit_idiom(i)?;
+					for p in i.0.iter() {
+						self.visit_part(p)?;
+					}
 					self.w.write_str(")")?;
 				}
 			}
@@ -2675,7 +2721,24 @@ impl Visitor for MigratorPass<'_> {
 				)?;
 				if let Some(alias) = alias {
 					self.w.write_str(" AS ")?;
-					self.visit_idiom(alias)?;
+					for (idx, p) in alias.0.iter().enumerate() {
+						match p {
+							Part::Field(ident) => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								write!(self.w, "{ident}")?;
+							}
+							Part::All | Part::Last | Part::Index(_) => self.visit_part(p)?,
+							x => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								let part = x.to_string();
+								write!(self.w, "{}", EscapeKwFreeIdent(&part))?;
+							}
+						}
+					}
 				}
 			}
 		}
