@@ -251,6 +251,28 @@ pub trait PhysicalExpr: ToSql + Send + Sync + Debug {
 		false
 	}
 
+	/// Evaluate this expression against a batch of row values.
+	///
+	/// `ctx` should be the base context (without `current_value` set).
+	/// Each element of `values` becomes the `current_value` for one evaluation.
+	///
+	/// The default implementation evaluates sequentially. Override for expressions
+	/// that can benefit from batching I/O (e.g., parallel record fetches, subqueries).
+	///
+	/// Control flow: uses `?` propagation, so the first ControlFlow signal
+	/// (BREAK/CONTINUE/RETURN/Err) aborts the batch -- matching current operator behavior.
+	async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
+		let mut results = Vec::with_capacity(values.len());
+		for value in values {
+			results.push(self.evaluate(ctx.with_value(value)).await?);
+		}
+		Ok(results)
+	}
+
 	/// Evaluate this expression as a projection function, returning field bindings.
 	///
 	/// Only meaningful for expressions where `is_projection_function()` returns true.

@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ExecOperator};
+use crate::expr::FlowResult;
 use crate::val::{Array, Value};
 
 /// Scalar subquery - (SELECT ... LIMIT 1)
@@ -59,10 +60,34 @@ impl PhysicalExpr for ScalarSubquery {
 		}
 	}
 
+	/// Parallel batch evaluation for subqueries.
+	///
+	/// Read-only subqueries can run in parallel across rows since each row's
+	/// subquery execution is independent. Falls back to sequential for
+	/// mutation subqueries (ReadWrite) to preserve side-effect ordering.
+	async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
+		if values.len() < 2 || self.plan.access_mode() == AccessMode::ReadWrite {
+			// Sequential for small batches or mutation subqueries
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value(value)).await?);
+			}
+			return Ok(results);
+		}
+		let futures: Vec<_> =
+			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+		futures::future::try_join_all(futures).await
+	}
+
 	fn references_current_value(&self) -> bool {
-		// For now, assume subqueries don't reference current value
-		// TODO: Track if plan references outer scope for correlated subqueries
-		false
+		// Conservative: subqueries may be correlated (e.g. SELECT ... FROM $this.field),
+		// and we can't statically determine this from the plan tree.
+		// Returning true ensures correlated subqueries get the correct per-row context.
+		true
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -74,6 +99,10 @@ impl PhysicalExpr for ScalarSubquery {
 
 impl ToSql for ScalarSubquery {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, _fmt, "TODO: Not implemented")
+		// ExecOperator doesn't require ToSql, so we use the plan name
+		// as a best-effort representation for display/EXPLAIN output.
+		f.push('(');
+		f.push_str(self.plan.name());
+		f.push(')');
 	}
 }

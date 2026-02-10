@@ -76,6 +76,29 @@ impl PhysicalExpr for LookupPart {
 		Ok(evaluate_lookup(&value, self, ctx).await?)
 	}
 
+	/// Parallel batch evaluation for graph/reference lookups.
+	///
+	/// Each lookup executes a plan per RecordId, which involves I/O.
+	/// Parallelizing across rows lets multiple lookups proceed concurrently.
+	/// Falls back to sequential for ReadWrite plans to preserve mutation ordering.
+	async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
+		if values.len() < 2 || self.access_mode() == AccessMode::ReadWrite {
+			// Sequential for small batches or mutation plans
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value(value)).await?);
+			}
+			return Ok(results);
+		}
+		let futures: Vec<_> =
+			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+		futures::future::try_join_all(futures).await
+	}
+
 	fn references_current_value(&self) -> bool {
 		true
 	}

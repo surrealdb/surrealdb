@@ -142,7 +142,8 @@ async fn execute_foreach(
 
 	// Iterate over each value
 	for v in iter {
-		// Check timeout (TODO: needs proper timeout integration with ExecutionContext)
+		// Check timeout (also yields for cooperative scheduling)
+		ctx.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
 
 		// Create a new context with the loop variable bound
 		// This is the base context for this iteration - LET statements will build on this
@@ -173,9 +174,6 @@ async fn execute_foreach(
 				}
 			}
 		}
-
-		// Cooperative yielding for long-running loops
-		tokio::task::yield_now().await;
 	}
 
 	// Loop completed normally - return NONE

@@ -101,19 +101,28 @@ impl ExecOperator for Sort {
 				});
 			}
 
-			// Pre-compute sort keys for each value
+			// Pre-compute sort keys using per-field batch evaluation
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let mut keyed: Vec<(Vec<Value>, Value)> = Vec::with_capacity(all_values.len());
 
+			// Evaluate each sort key expression across all rows in one batch call
+			let num_fields = order_by.len();
+			let num_values = all_values.len();
+			let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
+			for field in &order_by {
+				let keys = field.expr.evaluate_batch(eval_ctx.clone(), &all_values).await?;
+				key_columns.push(keys);
+			}
+
+			// Transpose from column-oriented to row-oriented keyed tuples,
+			// consuming the column vectors to avoid cloning values.
+			let mut key_iters: Vec<std::vec::IntoIter<Value>> =
+				key_columns.into_iter().map(|col| col.into_iter()).collect();
+			let mut keyed: Vec<(Vec<Value>, Value)> = Vec::with_capacity(num_values);
 			for value in all_values {
-				let row_ctx = eval_ctx.clone().with_value(&value);
-				let mut keys = Vec::with_capacity(order_by.len());
-
-				for field in &order_by {
-					let key = field.expr.evaluate(row_ctx.clone()).await?;
-					keys.push(key);
-				}
-
+				let keys: Vec<Value> = key_iters
+					.iter_mut()
+					.map(|iter| iter.next().expect("key column length matches batch size"))
+					.collect();
 				keyed.push((keys, value));
 			}
 

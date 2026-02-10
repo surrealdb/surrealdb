@@ -9,6 +9,9 @@ use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+/// Threshold below which we evaluate sequentially (no parallelism overhead).
+const PARALLEL_BATCH_THRESHOLD: usize = 2;
+
 // ============================================================================
 // AllPart -- [*] or .*
 // ============================================================================
@@ -34,6 +37,27 @@ impl PhysicalExpr for AllPart {
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let value = ctx.current_value.cloned().unwrap_or(Value::None);
 		Ok(evaluate_all(&value, ctx).await?)
+	}
+
+	/// Parallel batch evaluation for `[*]` / `.*`.
+	///
+	/// When applied to arrays of RecordIds, this triggers record fetches.
+	/// Parallelizing across rows lets multiple fetches proceed concurrently.
+	async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
+		if values.len() < PARALLEL_BATCH_THRESHOLD {
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value(value)).await?);
+			}
+			return Ok(results);
+		}
+		let futures: Vec<_> =
+			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+		futures::future::try_join_all(futures).await
 	}
 
 	fn references_current_value(&self) -> bool {

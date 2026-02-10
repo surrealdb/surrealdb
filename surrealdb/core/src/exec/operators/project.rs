@@ -145,43 +145,36 @@ impl ExecOperator for Project {
 
 			async move {
 				let batch = batch_result?;
-				let mut projected_values = Vec::with_capacity(batch.values.len());
+				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				for value in batch.values {
-					// Build evaluation context with current value
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
+				let projected_values = if include_all {
+					// --- include_all path: per-row processing ---
+					// RecordId dereferencing and row-skipping requires per-row handling.
+					let mut values = Vec::with_capacity(batch.values.len());
+					for value in batch.values {
+						let row_ctx = eval_ctx.with_value(&value);
 
-					// Build the projected object
-					// If include_all is true, start with the original object's fields
-					// If the value is a RecordId, dereference it to get the full record
-					// If the value is a scalar (not Object/RecordId), pass through as-is
-					let mut output_value = if include_all {
-						match &value {
+						let mut output_value = match &value {
 							Value::Object(original) => {
 								let mut obj = original.clone();
-								// Add/override with explicit field selections
 								for field in &fields {
-									evaluate_and_set_field(&mut obj, field, eval_ctx.clone())
+									evaluate_and_set_field(&mut obj, field, row_ctx.clone())
 										.await?;
 								}
 								Value::Object(obj)
 							}
 							Value::RecordId(rid) => {
-								// Dereference RecordId to full record with computed fields
-								let fetched = fetch_record_with_computed_fields(
-									rid,
-									EvalContext::from_exec_ctx(&ctx),
-								)
-								.await
-								.map_err(crate::expr::ControlFlow::Err)?;
+								let fetched =
+									fetch_record_with_computed_fields(rid, eval_ctx.clone())
+										.await
+										.map_err(crate::expr::ControlFlow::Err)?;
 								match fetched {
 									Value::Object(mut obj) => {
-										// Add/override with explicit field selections
 										for field in &fields {
 											evaluate_and_set_field(
 												&mut obj,
 												field,
-												eval_ctx.clone(),
+												row_ctx.clone(),
 											)
 											.await?;
 										}
@@ -189,45 +182,75 @@ impl ExecOperator for Project {
 									}
 									Value::None => {
 										// Record doesn't exist - skip this row.
-										// This matches legacy behavior where non-existent
-										// records (e.g. from mock ranges) are excluded.
 										continue;
 									}
-									other => other, // Pass through other values
+									other => other,
 								}
 							}
-							// For scalars (integers, strings, etc.), pass through as-is
-							// unless there are explicit fields to add
 							other => {
 								if fields.is_empty() {
 									other.clone()
 								} else {
-									// If there are explicit fields, we need to create an object
 									let mut obj = Object::default();
 									for field in &fields {
-										evaluate_and_set_field(&mut obj, field, eval_ctx.clone())
+										evaluate_and_set_field(&mut obj, field, row_ctx.clone())
 											.await?;
 									}
 									Value::Object(obj)
 								}
 							}
-						}
-					} else {
-						// Not include_all - build object from explicit fields only
-						let mut obj = Object::default();
-						for field in &fields {
-							evaluate_and_set_field(&mut obj, field, eval_ctx.clone()).await?;
-						}
-						Value::Object(obj)
-					};
+						};
 
-					// Apply omit fields if present
-					for field in &omit {
-						omit_field_sync(&mut output_value, field);
+						for field in &omit {
+							omit_field_sync(&mut output_value, field);
+						}
+						values.push(output_value);
+					}
+					values
+				} else {
+					// --- Batch per-field evaluation for non-include_all ---
+					// Evaluate each field expression across all rows in one batch call,
+					// then assemble per-row objects from the results.
+					let batch_len = batch.values.len();
+					let mut objects: Vec<Object> =
+						(0..batch_len).map(|_| Object::default()).collect();
+
+					for field in &fields {
+						if field.expr.is_projection_function() {
+							// Projection functions return multiple field bindings;
+							// handle per-row since they need special object assembly.
+							for (i, value) in batch.values.iter().enumerate() {
+								evaluate_and_set_field(
+									&mut objects[i],
+									field,
+									eval_ctx.with_value(value),
+								)
+								.await?;
+							}
+						} else {
+							// Batch evaluate this field across all rows
+							let field_values =
+								field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+							for (i, field_value) in field_values.into_iter().enumerate() {
+								let mut target = Value::Object(std::mem::take(&mut objects[i]));
+								target.set_at_field_path(&field.output_path, field_value);
+								if let Value::Object(obj) = target {
+									objects[i] = obj;
+								}
+							}
+						}
 					}
 
-					projected_values.push(output_value);
-				}
+					let mut values: Vec<Value> = objects.into_iter().map(Value::Object).collect();
+					if !omit.is_empty() {
+						for val in &mut values {
+							for field in &omit {
+								omit_field_sync(val, field);
+							}
+						}
+					}
+					values
+				};
 
 				Ok(ValueBatch {
 					values: projected_values,

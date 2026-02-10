@@ -249,45 +249,95 @@ impl ExecOperator for Aggregate {
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
-				for value in batch.values {
-					// Create evaluation context for this row
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
+				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-					// Compute the group key by evaluating group-by expressions
-					let key = compute_group_key_async(&group_by_exprs, eval_ctx.clone()).await;
+				// Phase 1: Batch evaluate group-by key expressions across all rows
+				let mut group_key_columns: Vec<Vec<Value>> =
+					Vec::with_capacity(group_by_exprs.len());
+				for expr in &group_by_exprs {
+					let keys = match expr
+						.evaluate_batch(eval_ctx.clone(), &batch.values)
+						.await
+					{
+						Ok(v) => v,
+						Err(_) => {
+							// Fallback: evaluate per-row, replacing errors with None
+							let mut keys = Vec::with_capacity(batch.values.len());
+							for value in &batch.values {
+								let v = expr
+									.evaluate(eval_ctx.with_value(value))
+									.await
+									.unwrap_or(Value::None);
+								keys.push(v);
+							}
+							keys
+						}
+					};
+					group_key_columns.push(keys);
+				}
 
-					// Get or create the group state
-					let state = groups.entry(key).or_insert_with(|| create_group_state(&aggregates, &evaluated_extra_args));
+				// Phase 2: Batch evaluate aggregate argument expressions
+				let mut agg_arg_columns: Vec<Vec<Vec<Value>>> =
+					Vec::with_capacity(aggregates.len());
+				for agg in &aggregates {
+					if let Some(info) = &agg.aggregate_expr_info {
+						let mut field_cols = Vec::with_capacity(info.aggregates.len());
+						for extracted in &info.aggregates {
+							let col = match extracted
+								.argument_expr
+								.evaluate_batch(eval_ctx.clone(), &batch.values)
+								.await
+							{
+								Ok(v) => v,
+								Err(e) => {
+									tracing::debug!(error = %e, "Aggregate arg batch evaluation failed, using None for all");
+									vec![Value::None; batch.values.len()]
+								}
+							};
+							field_cols.push(col);
+						}
+						agg_arg_columns.push(field_cols);
+					} else {
+						agg_arg_columns.push(vec![]);
+					}
+				}
 
-					// Update aggregate states with this value
-					for (i, agg) in aggregates.iter().enumerate() {
+				// Phase 3: Dispatch rows to groups and update accumulators
+				for (row_idx, value) in batch.values.iter().enumerate() {
+					// Build group key from pre-computed columns
+					let key: GroupKey = group_key_columns
+						.iter()
+						.map(|col| col[row_idx].clone())
+						.collect();
+
+					let state = groups.entry(key).or_insert_with(|| {
+						create_group_state(&aggregates, &evaluated_extra_args)
+					});
+
+					for (field_idx, agg) in aggregates.iter().enumerate() {
 						if agg.is_group_key {
-							// Group keys are extracted from the key, not the value
 							continue;
 						}
 
-						if let Some(info) = &agg.aggregate_expr_info {
-							// Evaluate and update ALL aggregates for this field
-							for (agg_idx, extracted) in info.aggregates.iter().enumerate() {
-								match extracted.argument_expr.evaluate(eval_ctx.clone()).await {
-									Ok(arg_value) => {
-										if let Some(acc) = state.accumulators[i].get_mut(agg_idx)
-											&& let Err(e) = acc.update(arg_value)
-										{
-											tracing::debug!(error = %e, "Accumulator update failed, skipping value");
-										}
-									}
-									Err(e) => {
-										tracing::debug!(error = %e, "Aggregate argument evaluation failed, skipping value");
-									}
+						if agg.aggregate_expr_info.is_some() {
+							// Use pre-computed aggregate argument values
+							for (agg_idx, arg_col) in
+								agg_arg_columns[field_idx].iter().enumerate()
+							{
+								let arg_value = arg_col[row_idx].clone();
+								if let Some(acc) =
+									state.accumulators[field_idx].get_mut(agg_idx)
+									&& let Err(e) = acc.update(arg_value)
+								{
+									tracing::debug!(error = %e, "Accumulator update failed, skipping value");
 								}
 							}
 						} else if let Some(expr) = &agg.fallback_expr {
-							// Non-aggregate field - store first value
-							if state.first_values[i].is_none() {
-								match expr.evaluate(eval_ctx.clone()).await {
+							// Non-aggregate field - store first value (per-row, lazy)
+							if state.first_values[field_idx].is_none() {
+								match expr.evaluate(eval_ctx.with_value(value)).await {
 									Ok(field_value) => {
-										state.first_values[i] = field_value;
+										state.first_values[field_idx] = field_value;
 									}
 									Err(e) => {
 										tracing::debug!(error = %e, "Fallback expression evaluation failed");
@@ -357,27 +407,6 @@ fn create_group_state(
 		accumulators,
 		first_values,
 	}
-}
-
-/// Compute the group key by evaluating GROUP BY expressions.
-///
-/// Unlike simple idiom picking, this supports computed expressions like `time::year(time)`.
-async fn compute_group_key_async(
-	group_by_exprs: &[Arc<dyn PhysicalExpr>],
-	eval_ctx: EvalContext<'_>,
-) -> GroupKey {
-	let mut key = Vec::with_capacity(group_by_exprs.len());
-	for expr in group_by_exprs {
-		let value = match expr.evaluate(eval_ctx.clone()).await {
-			Ok(v) => v,
-			Err(e) => {
-				tracing::debug!(error = %e, "Group key expression evaluation failed, using None");
-				Value::None
-			}
-		};
-		key.push(value);
-	}
-	key
 }
 
 /// Compute the value for a single aggregate field.

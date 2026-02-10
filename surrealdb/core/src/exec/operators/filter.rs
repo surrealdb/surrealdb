@@ -91,14 +91,12 @@ async fn filter_batch_in_place(
 	predicate: &dyn PhysicalExpr,
 	exec_ctx: &ExecutionContext,
 ) -> FlowResult<()> {
-	let mut write_idx = 0;
-	for read_idx in 0..batch.values.len() {
-		let keep = {
-			let eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(&batch.values[read_idx]);
-			predicate.evaluate(eval_ctx).await?.is_truthy()
-		};
+	let eval_ctx = EvalContext::from_exec_ctx(exec_ctx);
+	let results = predicate.evaluate_batch(eval_ctx, &batch.values).await?;
 
-		if keep {
+	let mut write_idx = 0;
+	for (read_idx, result) in results.into_iter().enumerate() {
+		if result.is_truthy() {
 			if write_idx != read_idx {
 				batch.values.swap(write_idx, read_idx);
 			}

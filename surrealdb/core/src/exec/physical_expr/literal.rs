@@ -75,9 +75,39 @@ impl Param {
 								name: self.0.clone()
 							})
 						}
-						Permission::Specific(_) => {
-							// TODO: Evaluate permission expression
-							// For now, allow access (matches Permission::Full behavior)
+						Permission::Specific(perm_expr) => {
+							// Plan and evaluate the permission expression
+							match crate::exec::planner::expr_to_physical_expr(
+								perm_expr.clone(),
+								ctx.exec_ctx.ctx(),
+							) {
+								Ok(phys_expr) => {
+									match phys_expr.evaluate(ctx.clone()).await {
+										Ok(result) if result.is_truthy() => {
+											// Permission granted
+										}
+										Ok(_) => {
+											bail!(Error::ParamPermissions {
+												name: self.0.clone()
+											})
+										}
+										Err(crate::expr::ControlFlow::Err(e)) => {
+											return Err(e);
+										}
+										Err(_) => {
+											bail!(Error::ParamPermissions {
+												name: self.0.clone()
+											})
+										}
+									}
+								}
+								Err(_) => {
+									// If we can't plan the expression, deny by default
+									bail!(Error::ParamPermissions {
+										name: self.0.clone()
+									})
+								}
+							}
 						}
 					}
 				}
