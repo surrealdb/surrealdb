@@ -157,7 +157,7 @@ use crate::val::{Datetime, TableName, Value};
 	depth_limit: None,
 	complexity_limit: None,
 	introspection: GraphQLIntrospectionConfig::default(),
-}), 7)]
+}), 11)]
 #[case::event(EventDefinition {
 	name: "test".to_string(),
 	target_table: TableName::from("test"),
