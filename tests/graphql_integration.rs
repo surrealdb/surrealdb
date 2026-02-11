@@ -1401,4 +1401,319 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn filters() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema and data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE product SCHEMAFUL;
+					DEFINE FIELD name ON product TYPE string;
+					DEFINE FIELD price ON product TYPE float;
+					DEFINE FIELD quantity ON product TYPE int;
+					DEFINE FIELD created ON product TYPE datetime;
+
+					CREATE product:1 SET name = "Alpha Widget", price = 9.99, quantity = 100, created = d"2024-01-15T00:00:00Z";
+					CREATE product:2 SET name = "Beta Widget", price = 19.99, quantity = 50, created = d"2024-03-20T00:00:00Z";
+					CREATE product:3 SET name = "Gamma Tool", price = 29.99, quantity = 200, created = d"2024-06-01T00:00:00Z";
+					CREATE product:4 SET name = "Delta Tool", price = 4.99, quantity = 10, created = d"2024-09-10T00:00:00Z";
+					CREATE product:5 SET name = "Epsilon Widget", price = 49.99, quantity = 0, created = d"2025-01-05T00:00:00Z";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// --- Test `where` is an alias for `filter` ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(where: { name: { eq: "Alpha Widget" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			assert_eq!(products.len(), 1);
+			assert_eq!(products[0]["id"], "product:1");
+		}
+
+		// --- eq / ne ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { ne: "Alpha Widget" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			assert_eq!(products.len(), 4);
+		}
+
+		// --- gt / lt on int ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { quantity: { gt: 50 } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// quantity > 50: product:1 (100), product:3 (200)
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- gte / lte on float ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { price: { gte: 19.99 } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// price >= 19.99: product:2 (19.99), product:3 (29.99), product:5 (49.99)
+			assert_eq!(products.len(), 3);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { price: { lte: 9.99 } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// price <= 9.99: product:1 (9.99), product:4 (4.99)
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- contains (string) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { contains: "Widget" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// Widget: product:1, product:2, product:5
+			assert_eq!(products.len(), 3);
+		}
+
+		// --- startsWith ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { startsWith: "Delta" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			assert_eq!(products.len(), 1);
+			assert_eq!(products[0]["id"], "product:4");
+		}
+
+		// --- endsWith ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { endsWith: "Tool" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// "Gamma Tool", "Delta Tool"
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- regex ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { regex: "^(Alpha|Gamma)" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// Alpha Widget, Gamma Tool
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- in (string list) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { in: ["Alpha Widget", "Delta Tool"] } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- in (int list) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { quantity: { in: [100, 200] } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// product:1 (100), product:3 (200)
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- Implicit AND: multiple fields in one filter object ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { name: { contains: "Widget" }, price: { lt: 10 } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// Widget AND price < 10: product:1 (Alpha Widget, 9.99)
+			assert_eq!(products.len(), 1);
+			assert_eq!(products[0]["id"], "product:1");
+		}
+
+		// --- Multiple operators on the same field (implicit AND) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { price: { gte: 10, lte: 30 } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// 10 <= price <= 30: product:2 (19.99), product:3 (29.99)
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- not operator ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { not: { name: { contains: "Widget" } } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// NOT Widget: product:3, product:4
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- and / or logical operators ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { or: [{ price: { lt: 5 } }, { price: { gt: 40 } }] }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// price < 5 OR price > 40: product:4 (4.99), product:5 (49.99)
+			assert_eq!(products.len(), 2);
+		}
+
+		// --- gt/lt on datetime ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query { product(filter: { created: { gt: "2024-06-01T00:00:00Z" } }) { id } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let products = body["data"]["product"].as_array().unwrap();
+			// after 2024-06-01: product:4, product:5
+			assert_eq!(products.len(), 2);
+		}
+
+		Ok(())
+	}
 }

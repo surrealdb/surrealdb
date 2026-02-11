@@ -20,8 +20,8 @@ use crate::expr::field::Selector;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
-	self, BinaryOperator, Cond, Expr, Fields, Idiom, Kind, Limit, Literal, LogicalPlan, Start,
-	TopLevelExpr,
+	self, BinaryOperator, Cond, Expr, Fields, Function, FunctionCall, Idiom, Kind, Limit, Literal,
+	LogicalPlan, Start, TopLevelExpr,
 };
 use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
@@ -129,8 +129,9 @@ pub async fn process_tbs(
 						.get("limit")
 						.and_then(|v| v.as_i64())
 						.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-					let order = args.get("order");
-					let filter = args.get("filter");
+				let order = args.get("order");
+				// Accept both `filter` and `where` (aliases of each other)
+				let filter = args.get("filter").or_else(|| args.get("where"));
 
 					let orders = match order {
 						Some(GqlValue::Object(o)) => {
@@ -272,7 +273,8 @@ pub async fn process_tbs(
 			.argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
 			.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
+			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
+		.argument(InputValue::new("where", TypeRef::named(&table_filter_name))),
 		);
 
 		let kvs2 = datastore.to_owned();
@@ -664,6 +666,7 @@ fn make_relation_field(
 	.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
 	.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
 	.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
+	.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
 }
 
 /// Create a resolver for a relation field.
@@ -740,8 +743,8 @@ fn make_relation_field_resolver(
 				right: Box::new(Value::RecordId(rid.clone()).into_literal()),
 			};
 
-			// Parse and combine user-supplied filter
-			let filter = args.get("filter");
+			// Parse and combine user-supplied filter (accept both `filter` and `where`)
+			let filter = args.get("filter").or_else(|| args.get("where"));
 			if let Some(f) = filter {
 				if let Some(ref fds) = fds {
 					let o = match f {
@@ -834,6 +837,9 @@ fn filter_id() -> InputObject {
 	let ty = TypeRef::named(TypeRef::ID);
 	filter_impl!(filter, ty, "eq");
 	filter_impl!(filter, ty, "ne");
+	// `in` accepts a list of IDs
+	let list_ty = TypeRef::named_nn_list(TypeRef::ID);
+	filter_impl!(filter, list_ty, "in");
 	filter
 }
 
@@ -852,36 +858,90 @@ fn filter_from_type(
 		k => unwrap_type(kind_to_type(k.clone(), types, true)?),
 	};
 
+	// All types get eq and ne
 	let mut filter = InputObject::new(filter_name);
 	filter_impl!(filter, ty, "eq");
 	filter_impl!(filter, ty, "ne");
 
 	match kind {
-		Kind::Any => {}
-		Kind::None => {}
-		Kind::Null => {}
-		Kind::Bool => {}
-		Kind::Bytes => {}
-		Kind::Datetime => {}
-		Kind::Decimal => {}
-		Kind::Duration => {}
-		Kind::Float => {}
-		Kind::Int => {}
-		Kind::Number => {}
-		Kind::Object => {}
-		Kind::String => {}
-		Kind::Uuid => {}
-		Kind::Regex => {}
-		Kind::Table(_) => {}
-		Kind::Record(_) => {}
-		Kind::Geometry(_) => {}
-		Kind::Either(_) => {}
-		Kind::Set(_, _) => {}
-		Kind::Array(_, _) => {}
-		Kind::Function(_, _) => {}
-		Kind::Range => {}
-		Kind::Literal(_) => {}
-		Kind::File(_) => {}
+		// String: contains, startsWith, endsWith, regex, in
+		Kind::String => {
+			let str_ty = TypeRef::named(TypeRef::STRING);
+			filter_impl!(filter, str_ty, "contains");
+			filter_impl!(filter, str_ty, "startsWith");
+			filter_impl!(filter, str_ty, "endsWith");
+			filter_impl!(filter, str_ty, "regex");
+			let list_ty = TypeRef::named_nn_list(TypeRef::STRING);
+			filter_impl!(filter, list_ty, "in");
+		}
+		// Numeric types: gt, gte, lt, lte, in
+		Kind::Int => {
+			let num_ty = TypeRef::named(TypeRef::INT);
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::INT);
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::Float => {
+			let num_ty = TypeRef::named(TypeRef::FLOAT);
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list(TypeRef::FLOAT);
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::Number => {
+			let num_ty = TypeRef::named("number");
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list("number");
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::Decimal => {
+			let num_ty = TypeRef::named("decimal");
+			filter_impl!(filter, num_ty, "gt");
+			filter_impl!(filter, num_ty, "gte");
+			filter_impl!(filter, num_ty, "lt");
+			filter_impl!(filter, num_ty, "lte");
+			let list_ty = TypeRef::named_nn_list("decimal");
+			filter_impl!(filter, list_ty, "in");
+		}
+		// Datetime: gt, gte, lt, lte
+		Kind::Datetime => {
+			let dt_ty = TypeRef::named("datetime");
+			filter_impl!(filter, dt_ty, "gt");
+			filter_impl!(filter, dt_ty, "gte");
+			filter_impl!(filter, dt_ty, "lt");
+			filter_impl!(filter, dt_ty, "lte");
+		}
+		// Record: in (list of IDs)
+		Kind::Record(_) => {
+			let list_ty = TypeRef::named_nn_list(TypeRef::ID);
+			filter_impl!(filter, list_ty, "in");
+		}
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Duration
+		| Kind::Object
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Table(_)
+		| Kind::Geometry(_)
+		| Kind::Either(_)
+		| Kind::Set(_, _)
+		| Kind::Array(_, _)
+		| Kind::Function(_, _)
+		| Kind::Range
+		| Kind::Literal(_)
+		| Kind::File(_) => {}
 	};
 	Ok(filter)
 }
@@ -897,25 +957,72 @@ fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
 ) -> Result<Expr, GqlError> {
-	if filter.len() != 1 {
-		return Err(resolver_error("Table Filter must have one item"));
+	if filter.is_empty() {
+		return Err(resolver_error("Table filter must have at least one item"));
 	}
 
-	let (k, v) = filter.iter().next().expect("filter has exactly one item");
+	// If there is exactly one key, use the original dispatch logic
+	if filter.len() == 1 {
+		let (k, v) = filter.iter().next().expect("filter has exactly one item");
 
-	match k.as_str().to_lowercase().as_str() {
-		"or" => aggregate(v, AggregateOp::Or, fds),
-		"and" => aggregate(v, AggregateOp::And, fds),
-		"not" => negate(v, fds),
-		_ => binop(k.as_str(), v, fds),
+		return match k.as_str().to_lowercase().as_str() {
+			"or" => aggregate(v, AggregateOp::Or, fds),
+			"and" => aggregate(v, AggregateOp::And, fds),
+			"not" => negate(v, fds),
+			_ => binop(k.as_str(), v, fds),
+		};
+	}
+
+	// Multiple fields: implicit AND across all entries.
+	// Separate logical operators (and/or/not) from field conditions.
+	let mut exprs = Vec::with_capacity(filter.len());
+
+	for (k, v) in filter.iter() {
+		let expr = match k.as_str().to_lowercase().as_str() {
+			"or" => aggregate(v, AggregateOp::Or, fds)?,
+			"and" => aggregate(v, AggregateOp::And, fds)?,
+			"not" => negate(v, fds)?,
+			_ => binop(k.as_str(), v, fds)?,
+		};
+		exprs.push(expr);
+	}
+
+	let mut iter = exprs.into_iter();
+	let mut combined = iter.next().expect("at least one filter entry");
+	for next_expr in iter {
+		combined = Expr::Binary {
+			left: Box::new(combined),
+			op: BinaryOperator::And,
+			right: Box::new(next_expr),
+		};
+	}
+
+	Ok(combined)
+}
+
+/// Operators that map directly to SurrealDB binary operators.
+fn parse_binary_op(name: &str) -> Option<expr::BinaryOperator> {
+	match name {
+		"eq" => Some(expr::BinaryOperator::Equal),
+		"ne" => Some(expr::BinaryOperator::NotEqual),
+		"gt" => Some(expr::BinaryOperator::MoreThan),
+		"gte" => Some(expr::BinaryOperator::MoreThanEqual),
+		"lt" => Some(expr::BinaryOperator::LessThan),
+		"lte" => Some(expr::BinaryOperator::LessThanEqual),
+		"in" => Some(expr::BinaryOperator::Inside),
+		_ => None,
 	}
 }
 
-fn parse_op(name: impl AsRef<str>) -> Result<expr::BinaryOperator, GqlError> {
-	match name.as_ref() {
-		"eq" => Ok(expr::BinaryOperator::Equal),
-		"ne" => Ok(expr::BinaryOperator::NotEqual),
-		op => Err(resolver_error(format!("Unsupported op: {op}"))),
+/// Operators that map to SurrealDB function calls.
+/// Returns the fully-qualified function name.
+fn parse_function_op(name: &str) -> Option<&'static str> {
+	match name {
+		"contains" => Some("string::contains"),
+		"startsWith" => Some("string::starts_with"),
+		"endsWith" => Some("string::ends_with"),
+		"regex" => Some("string::matches"),
+		_ => None,
 	}
 }
 
@@ -976,25 +1083,102 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
 	let Some(fd) = fds.iter().find(|fd| fd.name.to_sql() == field_name) else {
+		// Check if this is the `id` field (always present even if not in fds)
+		if field_name == "id" {
+			return binop_for_id(obj);
+		}
 		return Err(resolver_error(format!("Field `{field_name}` not found")));
 	};
 
-	if obj.len() != 1 {
-		return Err(resolver_error("Field Filter must have one item"));
+	if obj.is_empty() {
+		return Err(resolver_error("Field filter must have at least one operator"));
 	}
 
-	let lhs = Expr::Idiom(Idiom::field(field_name.to_string()));
+	// Support multiple operators on the same field (implicit AND)
+	let field_kind = fd.field_kind.clone().unwrap_or_default();
+	let mut exprs = Vec::with_capacity(obj.len());
 
-	let (k, v) = obj.iter().next().expect("field filter has exactly one item");
-	let op = parse_op(k)?;
+	for (k, v) in obj.iter() {
+		let op_name = k.as_str();
+		let lhs = Expr::Idiom(Idiom::field(field_name.to_string()));
 
-	let rhs = gql_to_sql_kind(v, fd.field_kind.clone().unwrap_or_default())?;
+		if let Some(binary_op) = parse_binary_op(op_name) {
+			// For `in` operator, the RHS is a list -- parse it as an array
+			let rhs_kind = if op_name == "in" {
+				Kind::Array(Box::new(field_kind.clone()), None)
+			} else {
+				field_kind.clone()
+			};
+			let rhs = gql_to_sql_kind(v, rhs_kind)?;
+			exprs.push(Expr::Binary {
+				left: Box::new(lhs),
+				op: binary_op,
+				right: Box::new(rhs.into_literal()),
+			});
+		} else if let Some(fn_name) = parse_function_op(op_name) {
+			// Function-call operators: string::contains(field, value)
+			let rhs = gql_to_sql_kind(v, Kind::String)?;
+			exprs.push(Expr::FunctionCall(Box::new(FunctionCall {
+				receiver: Function::Normal(fn_name.to_string()),
+				arguments: vec![lhs, rhs.into_literal()],
+			})));
+		} else {
+			return Err(resolver_error(format!("Unsupported filter operator: {op_name}")));
+		}
+	}
 
-	let expr = Expr::Binary {
-		left: Box::new(lhs),
-		op,
-		right: Box::new(rhs.into_literal()),
-	};
+	// Combine multiple operators with AND
+	let mut iter = exprs.into_iter();
+	let mut combined = iter.next().expect("at least one operator");
+	for next_expr in iter {
+		combined = Expr::Binary {
+			left: Box::new(combined),
+			op: BinaryOperator::And,
+			right: Box::new(next_expr),
+		};
+	}
 
-	Ok(expr)
+	Ok(combined)
+}
+
+/// Handle binary operators for the `id` field which doesn't appear in field definitions.
+fn binop_for_id(obj: &IndexMap<Name, GqlValue>) -> Result<Expr, GqlError> {
+	if obj.is_empty() {
+		return Err(resolver_error("ID filter must have at least one operator"));
+	}
+
+	let mut exprs = Vec::with_capacity(obj.len());
+
+	for (k, v) in obj.iter() {
+		let op_name = k.as_str();
+		let lhs = Expr::Idiom(Idiom::field("id".to_string()));
+
+		if let Some(binary_op) = parse_binary_op(op_name) {
+			let rhs_kind = if op_name == "in" {
+				Kind::Array(Box::new(Kind::Record(vec![])), None)
+			} else {
+				Kind::Record(vec![])
+			};
+			let rhs = gql_to_sql_kind(v, rhs_kind)?;
+			exprs.push(Expr::Binary {
+				left: Box::new(lhs),
+				op: binary_op,
+				right: Box::new(rhs.into_literal()),
+			});
+		} else {
+			return Err(resolver_error(format!("Unsupported ID filter operator: {op_name}")));
+		}
+	}
+
+	let mut iter = exprs.into_iter();
+	let mut combined = iter.next().expect("at least one operator");
+	for next_expr in iter {
+		combined = Expr::Binary {
+			left: Box::new(combined),
+			op: BinaryOperator::And,
+			right: Box::new(next_expr),
+		};
+	}
+
+	Ok(combined)
 }
