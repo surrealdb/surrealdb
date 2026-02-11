@@ -103,6 +103,190 @@ fn parse_version_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Datetime>
 }
 
 // ---------------------------------------------------------------------------
+// Query argument parsing helpers
+// ---------------------------------------------------------------------------
+
+/// Parse the optional `start` argument from GraphQL query arguments.
+fn parse_start_arg(args: &IndexMap<Name, GqlValue>) -> Option<Start> {
+	args.get("start").and_then(|v| v.as_i64()).map(|s| Start(Expr::Literal(Literal::Integer(s))))
+}
+
+/// Parse the optional `limit` argument from GraphQL query arguments.
+fn parse_limit_arg(args: &IndexMap<Name, GqlValue>) -> Option<Limit> {
+	args.get("limit").and_then(|v| v.as_i64()).map(|l| Limit(Expr::Literal(Literal::Integer(l))))
+}
+
+/// Parse the optional `order` argument from GraphQL query arguments.
+///
+/// The order argument is a linked-list structure:
+/// ```graphql
+/// { asc: "name", then: { desc: "age" } }
+/// ```
+/// Each node has exactly one of `asc` or `desc` (an enum value naming the
+/// field) and an optional `then` link to the next ordering criterion.
+fn parse_order_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Ordering>, GqlError> {
+	let order = args.get("order");
+	match order {
+		Some(GqlValue::Object(o)) => {
+			let mut orders = vec![];
+			let mut current = o;
+			loop {
+				let asc = current.get("asc");
+				let desc = current.get("desc");
+				match (asc, desc) {
+					(Some(_), Some(_)) => {
+						return Err(resolver_error("Found both ASC and DESC in order"));
+					}
+					(Some(GqlValue::Enum(a)), None) => {
+						orders.push(order_asc(a.as_str().to_string()))
+					}
+					(None, Some(GqlValue::Enum(d))) => {
+						orders.push(order_desc(d.as_str().to_string()))
+					}
+					(_, _) => break,
+				}
+				if let Some(GqlValue::Object(next)) = current.get("then") {
+					current = next;
+				} else {
+					break;
+				}
+			}
+			Ok(Some(Ordering::Order(OrderList(orders))))
+		}
+		_ => Ok(None),
+	}
+}
+
+/// Parse the optional `filter` / `where` argument from GraphQL query arguments.
+///
+/// Accepts either `filter` or `where` (aliases of each other). The value must
+/// be a GraphQL input object whose shape matches the generated filter type for
+/// the table.
+fn parse_filter_arg(
+	args: &IndexMap<Name, GqlValue>,
+	fds: &[FieldDefinition],
+) -> Result<Option<Cond>, GqlError> {
+	let filter = args.get("filter").or_else(|| args.get("where"));
+	match filter {
+		Some(GqlValue::Object(o)) => Ok(Some(cond_from_filter(o, fds)?)),
+		Some(f) => {
+			error!(
+				"Found filter {f}, which should be object and should have \
+				 been rejected by async graphql."
+			);
+			Err(resolver_error("Value in cond doesn't fit schema"))
+		}
+		None => Ok(None),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SelectStatement builder helpers
+// ---------------------------------------------------------------------------
+
+/// Build a `SELECT * FROM ONLY <record_id>` statement with an optional version.
+///
+/// Used by `_get_`, `_get`, and record-link dereferencing to fetch a single
+/// record's full data for caching.
+fn select_all_from_record(rid: &RecordId, version: &Option<Datetime>) -> SelectStatement {
+	SelectStatement {
+		what: vec![Value::RecordId(rid.clone()).into_literal()],
+		fields: Fields::all(),
+		only: true,
+		version: version_to_expr(version),
+		timeout: Expr::Literal(Literal::None),
+		omit: vec![],
+		with: None,
+		cond: None,
+		split: None,
+		group: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		explain: None,
+		tempfiles: false,
+	}
+}
+
+/// Build a `SELECT VALUE <field> FROM ONLY <record_id>` statement with an
+/// optional version.
+///
+/// Used by field resolvers and nested-object resolvers to fetch a single
+/// field's value when the record data is not cached.
+fn select_field_from_record(
+	rid: &RecordId,
+	field_name: &str,
+	version: &Option<Datetime>,
+) -> SelectStatement {
+	SelectStatement {
+		what: vec![Value::RecordId(rid.clone()).into_literal()],
+		fields: Fields::Value(Box::new(Selector {
+			expr: Expr::Idiom(Idiom::field(field_name.to_string())),
+			alias: None,
+		})),
+		only: true,
+		version: version_to_expr(version),
+		timeout: Expr::Literal(Literal::None),
+		omit: vec![],
+		with: None,
+		cond: None,
+		split: None,
+		group: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		explain: None,
+		tempfiles: false,
+	}
+}
+
+/// Build a `SELECT * FROM <table>` statement with optional filtering,
+/// ordering, pagination, and versioning.
+///
+/// Used by the table list query and relation field resolvers.
+fn select_all_from_table(
+	what: Expr,
+	cond: Option<Cond>,
+	order: Option<Ordering>,
+	limit: Option<Limit>,
+	start: Option<Start>,
+	version: &Option<Datetime>,
+) -> SelectStatement {
+	SelectStatement {
+		what: vec![what],
+		fields: Fields::all(),
+		order,
+		cond,
+		limit,
+		start,
+		version: version_to_expr(version),
+		timeout: Expr::Literal(Literal::None),
+		omit: vec![],
+		only: false,
+		with: None,
+		split: None,
+		group: None,
+		fetch: None,
+		explain: None,
+		tempfiles: false,
+	}
+}
+
+/// Execute a `SelectStatement` via `LogicalPlan` and return the result.
+async fn execute_select(
+	ds: &Datastore,
+	sess: &Session,
+	stmt: SelectStatement,
+) -> Result<Value, GqlError> {
+	let plan = LogicalPlan {
+		expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(stmt)))],
+	};
+	execute_plan(ds, sess, plan).await
+}
+
+// ---------------------------------------------------------------------------
 // Nested object and array sub-field resolution
 // ---------------------------------------------------------------------------
 
@@ -354,33 +538,8 @@ fn make_nested_object_field_resolver(
 			};
 
 			// Build SELECT VALUE <field> FROM ONLY <record_id>
-			let select_stmt = SelectStatement {
-				what: vec![Value::RecordId(rid.clone()).into_literal()],
-				fields: Fields::Value(Box::new(Selector {
-					expr: Expr::Idiom(Idiom::field(fd_name.clone())),
-					alias: None,
-				})),
-				only: true,
-				omit: vec![],
-				with: None,
-				cond: None,
-				split: None,
-				group: None,
-				order: None,
-				limit: None,
-				start: None,
-				fetch: None,
-				version: version_to_expr(&version),
-				timeout: Expr::Literal(Literal::None),
-				explain: None,
-				tempfiles: false,
-			};
-
-			let plan = LogicalPlan {
-				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
-			};
-
-			let val = execute_plan(ds, sess, plan).await?;
+			let stmt = select_field_from_record(&rid, &fd_name, &version);
+			let val = execute_select(ds, sess, stmt).await?;
 			resolve_nested_object_value(val, is_array)
 		})
 	}
@@ -503,113 +662,35 @@ pub async fn process_tbs(
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
 
-						let start = args
-							.get("start")
-							.and_then(|v| v.as_i64())
-							.map(|s| Start(Expr::Literal(Literal::Integer(s))));
-						let limit = args
-							.get("limit")
-							.and_then(|v| v.as_i64())
-							.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+						let start = parse_start_arg(args);
+						let limit = parse_limit_arg(args);
 						let version = parse_version_arg(args)?;
-						let order = args.get("order");
-						// Accept both `filter` and `where` (aliases of each other)
-						let filter = args.get("filter").or_else(|| args.get("where"));
+						let order = parse_order_arg(args)?;
+						let cond = parse_filter_arg(args, &fds1)?;
 
-						let orders = match order {
-							Some(GqlValue::Object(o)) => {
-								let mut orders = vec![];
-								let mut current = o;
-								loop {
-									let asc = current.get("asc");
-									let desc = current.get("desc");
-									match (asc, desc) {
-									(Some(_), Some(_)) => {
-										return Err(resolver_error(
-											"Found both ASC and DESC in order",
-										)
-										.into());
-									}
-									(Some(GqlValue::Enum(a)), None) => {
-										orders.push(order_asc(a.as_str().to_string()))
-									}
-									(None, Some(GqlValue::Enum(d))) => {
-										orders.push(order_desc(d.as_str().to_string()))
-									}
-									(_, _) => {
-										break;
-									}
-								}
-								if let Some(GqlValue::Object(next)) = current.get("then") {
-									current = next;
-								} else {
-									break;
-								}
-							}
-							Some(orders)
-						}
-						_ => None,
-					};
+						trace!("parsed order: {order:?}");
+						trace!("parsed filter: {cond:?}");
 
-					trace!("parsed orders: {orders:?}");
+						// SELECT * FROM <table> with optional filtering, ordering,
+						// pagination and versioning. We select * (not just id) so
+						// that permissions are properly checked.
+						let stmt = select_all_from_table(
+							Expr::Table(tb_name),
+							cond,
+							order,
+							limit,
+							start,
+							&version,
+						);
 
-					let cond = match filter {
-						Some(f) => {
-							let o = match f {
-								GqlValue::Object(o) => o,
-								f => {
-									error!(
-									"Found filter {f}, which should be object and should have been rejected by async graphql."
-								);
-									return Err(resolver_error(
-										"Value in cond doesn't fit schema",
-									)
-									.into());
-								}
-							};
+						let res = execute_select(&kvs1, sess1, stmt).await?;
 
-							let cond = cond_from_filter(o, &fds1)?;
-
-							Some(cond)
-						}
-						None => None,
-					};
-
-					trace!("parsed filter: {cond:?}");
-
-					// SELECT * FROM ...
-					// Note: We select * (not just id) so that permissions are properly checked
-					let expr = expr::Expr::Select(Box::new(SelectStatement {
-						what: vec![Expr::Table(tb_name)],
-						fields: Fields::all(),
-						order: orders.map(|x| Ordering::Order(OrderList(x))),
-						cond,
-						limit,
-						start,
-						omit: vec![],
-						only: false,
-						with: None,
-						split: None,
-						group: None,
-						fetch: None,
-						version: version_to_expr(&version),
-						timeout: Expr::Literal(Literal::None),
-						explain: None,
-						tempfiles: false,
-					}));
-
-					// Convert to LogicalPlan and execute
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(expr)],
-					};
-
-					let res = execute_plan(&kvs1, sess1, plan).await?;
-
-					let res_vec =
-						match res {
+						let res_vec = match res {
 							Value::Array(a) => a,
 							v => {
-								error!("Found top level value, in result which should be array: {v:?}");
+								error!(
+									"Found top level value, in result which should be array: {v:?}"
+								);
 								return Err(internal_error(
 									"Unexpected result type from table query",
 								)
@@ -707,32 +788,8 @@ pub async fn process_tbs(
 
 							// Build SELECT * FROM ONLY <record_id> and cache
 							// the full record for field resolvers.
-							let select_stmt = SelectStatement {
-								what: vec![Value::RecordId(record_id.clone()).into_literal()],
-								fields: Fields::all(),
-								only: true,
-								omit: vec![],
-								with: None,
-								cond: None,
-								split: None,
-								group: None,
-								order: None,
-								limit: None,
-								start: None,
-								fetch: None,
-								version: version_to_expr(&version),
-								timeout: Expr::Literal(Literal::None),
-								explain: None,
-								tempfiles: false,
-							};
-
-							let plan = LogicalPlan {
-								expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(
-									select_stmt,
-								)))],
-							};
-
-							let res = execute_plan(&kvs2, sess2, plan).await?;
+							let stmt = select_all_from_record(&record_id, &version);
+							let res = execute_select(&kvs2, sess2, stmt).await?;
 
 							match res {
 								Value::Object(obj) => {
@@ -971,30 +1028,8 @@ pub async fn process_tbs(
 
 					// Build SELECT * FROM ONLY <record_id> and cache
 					// the full record for field resolvers.
-					let select_stmt = SelectStatement {
-						what: vec![Value::RecordId(record_id.clone()).into_literal()],
-						fields: Fields::all(),
-						only: true,
-						omit: vec![],
-						with: None,
-						cond: None,
-						split: None,
-						group: None,
-						order: None,
-						limit: None,
-						start: None,
-						fetch: None,
-						version: version_to_expr(&version),
-						timeout: Expr::Literal(Literal::None),
-						explain: None,
-						tempfiles: false,
-					};
-
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
-					};
-
-					let res = execute_plan(&kvs3, sess3, plan).await?;
+					let stmt = select_all_from_record(&record_id, &version);
+					let res = execute_select(&kvs3, sess3, stmt).await?;
 
 					match res {
 						Value::Object(obj) => {
@@ -1063,33 +1098,8 @@ fn make_table_field_resolver(
 				};
 
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
-				let select_stmt = SelectStatement {
-					what: vec![Value::RecordId(rid.clone()).into_literal()],
-					fields: Fields::Value(Box::new(Selector {
-						expr: expr::Expr::Idiom(Idiom::field(fd_name.clone())),
-						alias: None,
-					})),
-					only: true,
-					omit: vec![],
-					with: None,
-					cond: None,
-					split: None,
-					group: None,
-					order: None,
-					limit: None,
-					start: None,
-					fetch: None,
-					version: version_to_expr(&version),
-					timeout: Expr::Literal(Literal::None),
-					explain: None,
-					tempfiles: false,
-				};
-
-				let plan = LogicalPlan {
-					expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
-				};
-
-				let val = execute_plan(ds, sess, plan).await?;
+				let stmt = select_field_from_record(&rid, &fd_name, &version);
+				let val = execute_select(ds, sess, stmt).await?;
 				resolve_field_value(&ctx, val, &fd_name, &field_kind, &version).await
 			}
 		})
@@ -1116,30 +1126,8 @@ async fn resolve_field_value(
 			let ds = ctx.data::<Arc<Datastore>>()?;
 			let sess = ctx.data::<Arc<Session>>()?;
 
-			let select_stmt = SelectStatement {
-				what: vec![Value::RecordId(target_rid.clone()).into_literal()],
-				fields: Fields::all(),
-				only: true,
-				omit: vec![],
-				with: None,
-				cond: None,
-				split: None,
-				group: None,
-				order: None,
-				limit: None,
-				start: None,
-				fetch: None,
-				version: version_to_expr(version),
-				timeout: Expr::Literal(Literal::None),
-				explain: None,
-				tempfiles: false,
-			};
-
-			let plan = LogicalPlan {
-				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
-			};
-
-			let target_val = execute_plan(ds, sess, plan).await?;
+			let stmt = select_all_from_record(&target_rid, version);
+			let target_val = execute_select(ds, sess, stmt).await?;
 
 			match target_val {
 				Value::Object(obj) => {
@@ -1263,49 +1251,9 @@ fn make_relation_field_resolver(
 				};
 			let args = ctx.args.as_index_map();
 
-			// Parse limit/start arguments
-			let start = args
-				.get("start")
-				.and_then(|v| v.as_i64())
-				.map(|s| Start(Expr::Literal(Literal::Integer(s))));
-			let limit = args
-				.get("limit")
-				.and_then(|v| v.as_i64())
-				.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-
-			// Parse order argument
-			let order = args.get("order");
-			let orders = match order {
-				Some(GqlValue::Object(o)) => {
-					let mut orders = vec![];
-					let mut current = o;
-					loop {
-						let asc = current.get("asc");
-						let desc = current.get("desc");
-						match (asc, desc) {
-							(Some(_), Some(_)) => {
-								return Err(
-									resolver_error("Found both ASC and DESC in order").into()
-								);
-							}
-							(Some(GqlValue::Enum(a)), None) => {
-								orders.push(order_asc(a.as_str().to_string()))
-							}
-							(None, Some(GqlValue::Enum(d))) => {
-								orders.push(order_desc(d.as_str().to_string()))
-							}
-							(_, _) => break,
-						}
-						if let Some(GqlValue::Object(next)) = current.get("then") {
-							current = next;
-						} else {
-							break;
-						}
-					}
-					Some(orders)
-				}
-				_ => None,
-			};
+			let start = parse_start_arg(args);
+			let limit = parse_limit_arg(args);
+			let order = parse_order_arg(args)?;
 
 			// Build the base condition: WHERE in = $record or WHERE out = $record
 			let filter_field = match direction {
@@ -1318,57 +1266,31 @@ fn make_relation_field_resolver(
 				right: Box::new(Value::RecordId(rid.clone()).into_literal()),
 			};
 
-			// Parse and combine user-supplied filter (accept both `filter` and `where`)
-			let filter = args.get("filter").or_else(|| args.get("where"));
-			if let Some(f) = filter
-				&& let Some(ref fds) = fds
-			{
-				let o = match f {
-					GqlValue::Object(o) => o,
-					f => {
-						error!(
-							"Found filter {f}, which should be object and should have \
-						 been rejected by async graphql."
-						);
-						return Err(resolver_error("Value in cond doesn't fit schema").into());
-					}
-				};
-				let user_cond = cond_from_filter(o, fds)?;
-				base_cond = Expr::Binary {
-					left: Box::new(base_cond),
-					op: BinaryOperator::And,
-					right: Box::new(user_cond.0),
-				};
+			// Parse and combine user-supplied filter
+			if let Some(ref fds) = fds {
+				if let Some(user_cond) = parse_filter_arg(args, fds)? {
+					base_cond = Expr::Binary {
+						left: Box::new(base_cond),
+						op: BinaryOperator::And,
+						right: Box::new(user_cond.0),
+					};
+				}
 			}
 
 			let cond = Some(Cond(base_cond));
 
 			// Build SELECT * FROM <relation_table> WHERE ...
 			// Propagate version from parent for consistent temporal queries
-			let select_stmt = SelectStatement {
-				what: vec![Expr::Table(relation_table)],
-				fields: Fields::all(),
-				order: orders.map(|x| Ordering::Order(OrderList(x))),
+			let stmt = select_all_from_table(
+				Expr::Table(relation_table),
 				cond,
+				order,
 				limit,
 				start,
-				omit: vec![],
-				only: false,
-				with: None,
-				split: None,
-				group: None,
-				fetch: None,
-				version: version_to_expr(&version),
-				timeout: Expr::Literal(Literal::None),
-				explain: None,
-				tempfiles: false,
-			};
+				&version,
+			);
 
-			let plan = LogicalPlan {
-				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
-			};
-
-			let res = execute_plan(ds, sess, plan).await?;
+			let res = execute_select(ds, sess, stmt).await?;
 
 			let res_vec = match res {
 				Value::Array(a) => a,
