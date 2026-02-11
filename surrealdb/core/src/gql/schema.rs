@@ -508,8 +508,8 @@ macro_rules! either_try_kind {
 		}
 	};
 	($ks:ident, $val:expr_2021, Record) => {
-		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
-			either_try_kind!($ks, $val, arr_kind);
+		for rec_kind in $ks.iter().filter(|k| matches!(k, Kind::Record(_))).cloned() {
+			either_try_kind!($ks, $val, rec_kind);
 		}
 	};
 	($ks:ident, $val:expr_2021, AllNumbers) => {
@@ -872,7 +872,8 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 				}
 				string @ GqlValue::String(_) => {
 					either_try_kinds!(
-						ks, string, Datetime, Duration, AllNumbers, Uuid, Array, Any, String
+						ks, string, Datetime, Duration, AllNumbers, Uuid, Record, Array, Any,
+						String
 					);
 					either_try_kind!(ks, string, Kind::Object);
 					Err(type_error(kind, val))
