@@ -1,3 +1,15 @@
+//! GraphQL schema cache.
+//!
+//! Generated `async_graphql::dynamic::Schema` instances are expensive to build
+//! (they require reading all table/field/access definitions from the datastore).
+//! This module provides [`GraphQLSchemaCache`] which caches schemas keyed by
+//! `(namespace, database, GraphQLConfig)` so that repeated requests to the same
+//! database reuse the previously generated schema.
+//!
+//! Cache entries are transparently invalidated when schema generation fails with
+//! a database or schema error, ensuring stale entries do not persist after DDL
+//! changes.
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -11,8 +23,16 @@ use crate::catalog::GraphQLConfig;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 
+/// Cache key: (namespace name, database name, GraphQL configuration).
+///
+/// The configuration is included so that a `DEFINE CONFIG GRAPHQL` change
+/// naturally produces a different key and triggers regeneration.
 type CacheKey = (String, String, GraphQLConfig);
 
+/// In-memory cache of generated GraphQL schemas.
+///
+/// Thread-safe via `Arc<RwLock<...>>` -- multiple readers can share a cached
+/// schema concurrently, and writes (insert/remove) acquire exclusive access.
 #[derive(Clone, Default)]
 pub struct GraphQLSchemaCache {
 	ns_db_schema_cache: Arc<RwLock<HashMap<CacheKey, Schema>>>,
@@ -25,6 +45,14 @@ impl Debug for GraphQLSchemaCache {
 }
 
 impl GraphQLSchemaCache {
+	/// Retrieve a cached schema or generate a new one.
+	///
+	/// 1. Reads the current `GraphQLConfig` from the datastore to form the cache key.
+	/// 2. Returns the cached schema if one exists for this key.
+	/// 3. Otherwise, generates the schema via [`generate_schema`], caches it, and returns it.
+	///
+	/// On generation failure, stale cache entries are removed if the error
+	/// indicates a database or schema-level problem.
 	pub async fn get_schema(
 		&self,
 		datastore: &Arc<Datastore>,

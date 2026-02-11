@@ -1,3 +1,43 @@
+//! GraphQL table query generation and type construction.
+//!
+//! This module is responsible for generating the Query root fields and
+//! Object types that correspond to each database table exposed via GraphQL.
+//!
+//! ## Generated Query fields
+//!
+//! For each table (e.g. `person`), the following Query fields are created:
+//!
+//! - `person(limit, start, order, filter/where, version)` -- list query returning `[person!]!`
+//! - `_get_person(id, version)` -- single-record fetch returning `person`
+//!
+//! A generic `_get(id, version)` field is also added to fetch any record by
+//! its full ID string (e.g. `"person:alice"`).
+//!
+//! ## Generated types
+//!
+//! For each table, the module generates:
+//!
+//! - An **Object type** with a field for each defined column, plus an `id` field and any relation
+//!   fields.
+//! - An **orderable enum** (`_orderable_<table>`) listing sortable fields.
+//! - An **order input** (`_order_<table>`) for specifying sort criteria.
+//! - A **filter input** (`_filter_<table>`) with per-field comparison operators.
+//!
+//! ## Performance: CachedRecord
+//!
+//! List and get queries issue `SELECT *` and wrap the full result objects in
+//! [`CachedRecord`] instances.  Field resolvers then extract values directly
+//! from the in-memory cache, eliminating the N+1 query problem.  Record-link
+//! fields (`TYPE record<target>`) issue a single additional `SELECT *` on
+//! the target and wrap it in a new `CachedRecord`.
+//!
+//! ## Nested objects
+//!
+//! Fields of `TYPE object` (or `TYPE array<object>`) that have sub-field
+//! definitions (e.g. `DEFINE FIELD time.createdAt`) are detected and
+//! represented as dedicated GraphQL Object types rather than the opaque
+//! `object` scalar.
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::sync::Arc;
@@ -30,6 +70,7 @@ use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::Datastore;
 use crate::val::{Array as SurArray, Datetime, Object as SurObject, RecordId, TableName, Value};
 
+/// Create an ascending `ORDER BY` clause for the given field.
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
 		value: Idiom::field(field_name),
@@ -38,6 +79,7 @@ fn order_asc(field_name: String) -> expr::Order {
 	}
 }
 
+/// Create a descending `ORDER BY` clause for the given field.
 fn order_desc(field_name: String) -> expr::Order {
 	expr::Order {
 		value: Idiom::field(field_name),
@@ -581,6 +623,7 @@ fn resolve_nested_object_value(
 	}
 }
 
+/// Derive the GraphQL filter input type name for a table (e.g. `_filter_person`).
 fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
@@ -1079,6 +1122,20 @@ pub async fn process_tbs(
 	Ok(query)
 }
 
+/// Create a field resolver for a column on a table Object type.
+///
+/// The resolver has two execution paths:
+///
+/// 1. **Fast path** -- if the parent value is a [`CachedRecord`] (the common case for list queries,
+///    `_get_` fetches, and mutations), the field value is extracted directly from the in-memory
+///    record data.
+/// 2. **Slow path** -- if the parent is a [`VersionedRecord`] or plain `RecordId` (e.g. from a
+///    custom function return), the resolver issues a `SELECT VALUE <field> FROM ONLY <record_id>`
+///    query.
+///
+/// Record-link fields (`TYPE record<target>`) are dereferenced: the resolver
+/// fetches the target record's full data and wraps it in a new `CachedRecord`
+/// so the target's own field resolvers also benefit from caching.
 fn make_table_field_resolver(
 	fd_name: impl Into<String>,
 	kind: Option<Kind>,
@@ -1338,6 +1395,17 @@ fn filter_id() -> InputObject {
 	filter
 }
 
+/// Generate a filter InputObject for a field's type.
+///
+/// All types get `eq` and `ne` operators.  Additional operators are added
+/// based on the kind:
+/// - **String** -- `contains`, `startsWith`, `endsWith`, `regex`, `in`
+/// - **Numeric** (Int, Float, Number, Decimal) -- `gt`, `gte`, `lt`, `lte`, `in`
+/// - **Datetime** -- `gt`, `gte`, `lt`, `lte`
+/// - **Record** -- `in` (list of IDs)
+///
+/// `option<record<T>>` is normalised to the inner record kind so filters
+/// use the target table's filter type rather than a plain ID filter.
 fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
@@ -1456,6 +1524,11 @@ fn filter_from_type(
 	Ok(filter)
 }
 
+/// Convert a GraphQL filter input object into a SurrealQL `WHERE` condition.
+///
+/// The filter object may contain field-level comparison operators (`eq`, `gt`,
+/// etc.), logical combinators (`and`, `or`, `not`), or a mix of both.
+/// Multiple top-level keys are combined with implicit AND.
 pub(super) fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
@@ -1463,6 +1536,11 @@ pub(super) fn cond_from_filter(
 	val_from_filter(filter, fds).map(Cond)
 }
 
+/// Recursive filter-to-expression converter.
+///
+/// Single-key filters dispatch directly to the appropriate handler (field
+/// comparison, AND/OR aggregation, or NOT negation).  Multi-key filters are
+/// treated as implicit AND across all entries.
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
@@ -1589,6 +1667,12 @@ fn aggregate(
 	Ok(cond)
 }
 
+/// Convert a single field's filter object to a SurrealQL expression.
+///
+/// The filter object maps operator names (`eq`, `gt`, `contains`, etc.) to
+/// values.  Binary operators produce `field <op> value` expressions; function
+/// operators produce `fn(field, value)` calls.  Multiple operators on the
+/// same field are combined with AND.
 fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 

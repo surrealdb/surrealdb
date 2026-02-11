@@ -1,3 +1,23 @@
+//! GraphQL schema generation and type conversion.
+//!
+//! This is the main orchestration module for the GraphQL subsystem.  The entry
+//! point is [`generate_schema`], which reads database metadata (tables, fields,
+//! functions, access definitions) and produces a complete
+//! `async_graphql::dynamic::Schema`.
+//!
+//! ## Key responsibilities
+//!
+//! - **Schema orchestration** -- assembles Query, Mutation, and type definitions by delegating to
+//!   [`super::tables`], [`super::mutations`], [`super::functions`], and [`super::auth`].
+//! - **Type mapping** -- [`kind_to_type`] converts SurrealDB `Kind` descriptors to GraphQL
+//!   `TypeRef`s; [`gql_to_sql_kind`] does the reverse conversion for input values.
+//! - **Value conversion** -- [`sql_value_to_gql_value`] converts SurrealDB runtime values to
+//!   GraphQL output values.
+//! - **Geometry support** -- registers GeoJSON-compatible output and input types for all geometry
+//!   variants.
+//! - **Custom scalars** -- registers scalars like `uuid`, `decimal`, `datetime`, `duration`,
+//!   `bytes`, `object`, `any`, `JSON`, and `null`.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -47,6 +67,21 @@ pub(crate) struct SchemaContext<'a> {
 	pub datastore: &'a Arc<Datastore>,
 }
 
+/// Generate a complete GraphQL schema from database metadata.
+///
+/// Reads table definitions, field types, function signatures, and access
+/// definitions for the namespace/database specified in `session`, then builds
+/// a dynamic `async_graphql::Schema` with:
+///
+/// - A **Query** root containing list and get fields for each table, plus custom function fields
+///   and a generic `_get` field.
+/// - An optional **Mutation** root containing CRUD operations for each table and authentication
+///   mutations (`signIn`, `signUp`).
+/// - All supporting types: table Object types, filter/order inputs, scalars, geometry types, enums,
+///   unions, and interfaces.
+///
+/// The `gql_config` controls which tables and functions are exposed, and
+/// sets depth/complexity limits and introspection behaviour.
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
@@ -266,6 +301,12 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
+/// Convert a SurrealDB runtime value to a GraphQL output value.
+///
+/// Handles all common value types: booleans, numbers (int/float/decimal),
+/// strings, datetimes, durations, UUIDs, arrays, objects, geometry, bytes
+/// (base64-encoded), and record IDs.  Unrecognised variants fall back to
+/// their string representation.
 pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SurValue::None => GqlValue::Null,
@@ -324,6 +365,18 @@ fn record_id_to_raw(t: &SurRecordId) -> String {
 	format!("{}:{}", t.table, key_str)
 }
 
+/// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`].
+///
+/// This is the central type-mapping function: it translates SurrealDB's type
+/// system (int, float, string, record, array, geometry, either/union, etc.)
+/// into the corresponding `async_graphql` dynamic type references.
+///
+/// - `is_input` controls whether the type is used in an input position (e.g. mutation arguments) or
+///   an output position (e.g. query return types). Geometry types produce `*Input` type names in
+///   input context.
+/// - Union / Either types with multiple members are registered as GraphQL `Union` types;
+///   single-member eithers are simplified.
+/// - `option<T>` (represented as `Either([None, T])`) produces a nullable type reference.
 pub fn kind_to_type(
 	kind: Kind,
 	types: &mut Vec<Type>,
@@ -489,6 +542,10 @@ pub fn kind_to_type(
 	Ok(out)
 }
 
+/// Strip `NonNull` wrappers from a [`TypeRef`], making it nullable.
+///
+/// Used when generating update input types (all fields become optional) and
+/// when simplifying `option<T>` unions.
 pub fn unwrap_type(ty: TypeRef) -> TypeRef {
 	match ty {
 		TypeRef::NonNull(t) => unwrap_type(*t),
@@ -496,6 +553,15 @@ pub fn unwrap_type(ty: TypeRef) -> TypeRef {
 	}
 }
 
+/// Try to convert a GraphQL value using one kind from an `Either` type list.
+///
+/// Special token arms:
+/// - `Kind::Array` / `Array` -- iterates all `Kind::Array(_, _)` variants in `$ks`.
+/// - `Record` -- iterates all `Kind::Record(_)` variants in `$ks`.
+/// - `AllNumbers` -- expands to tries for Int, Float, Decimal, Number.
+/// - Any other expression -- checks containment then attempts conversion.
+///
+/// On success, `return Ok(out)` exits the enclosing function immediately.
 macro_rules! either_try_kind {
 	($ks:ident, $val:expr_2021, Kind::Array) => {
 		for arr_kind in $ks.iter().filter(|k| matches!(k, Kind::Array(_, _))).cloned() {
@@ -635,6 +701,17 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 	}
 }
 
+/// Convert a GraphQL input value to a SurrealDB value, guided by the expected [`Kind`].
+///
+/// This is the reverse of [`sql_value_to_gql_value`]: it takes a GraphQL input
+/// value (from a query argument, filter, or mutation input) and converts it to
+/// the appropriate SurrealDB value type.  The `kind` parameter tells the function
+/// what type to expect, enabling proper parsing of strings as datetimes, record
+/// IDs, durations, etc.
+///
+/// For `Kind::Any`, the function uses heuristics: strings are tried as datetime,
+/// duration, uuid, then parsed as SurrealQL expressions.  For `Kind::Either`,
+/// each constituent kind is tried in turn until one succeeds.
 pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
 	use crate::syn;
 	match kind {
