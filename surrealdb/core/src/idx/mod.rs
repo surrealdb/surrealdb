@@ -22,6 +22,7 @@ use crate::key::index::he::He;
 use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
+use crate::key::index::hn::HnswNode;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::ib::Ib;
@@ -77,6 +78,21 @@ impl IndexKeyBase {
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {
 		Hl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, chunk)
+	}
+
+	/// Returns a key range covering all legacy `Hl` chunk entries for the given HNSW layer.
+	fn new_hl_layer_range(&self, layer: u16) -> Result<Range<Key>> {
+		Hl::new_layer_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer)
+	}
+
+	/// Creates a per-node `Hn` key for storing a single node's edge list in an HNSW layer.
+	fn new_hn_key(&self, layer: u16, node: ElementId) -> HnswNode<'_> {
+		HnswNode::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, node)
+	}
+
+	/// Returns a key range covering all per-node `Hn` entries for the given HNSW layer.
+	fn new_hn_layer_range(&self, layer: u16) -> Result<Range<Key>> {
+		HnswNode::new_layer_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer)
 	}
 
 	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> Hv<'a> {
