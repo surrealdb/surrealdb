@@ -441,9 +441,7 @@ where
 		while let Some(res) = stream.next().await {
 			let (k, v) = res?;
 			// Check if the context is finished
-			if ctx.is_done(count % 100 == 0)? {
-				return Ok(false);
-			}
+			ctx.is_done(count % 100 == 0)?;
 			let key = HnswNode::decode_key(&k)?;
 			self.graph.load_node(key.node, &v);
 			count += 1;
