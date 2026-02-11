@@ -81,12 +81,19 @@ impl ExecOperator for RandomShuffle {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let limit = self.limit;
+		let cancellation = ctx.cancellation().clone();
 
 		let shuffled_stream = futures::stream::once(async move {
 			// Collect all values from input
 			let mut all_values: Vec<Value> = Vec::new();
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
+				// Check for cancellation between batches
+				if cancellation.is_cancelled() {
+					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						crate::err::Error::QueryCancelled
+					)));
+				}
 				match batch_result {
 					Ok(batch) => all_values.extend(batch.values),
 					Err(e) => return Err(e),

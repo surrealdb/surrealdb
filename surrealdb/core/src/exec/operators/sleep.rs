@@ -71,9 +71,26 @@ impl ExecOperator for SleepPlan {
 		Ok(Box::pin(stream::once(async move {
 			ctx.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
 
-			// Perform the sleep, respecting any query timeout
-			// The timeout operator wrapping this plan will handle timeout enforcement
-			sleep_for_duration(&duration).await;
+			// Cap the sleep duration to the context timeout (if any),
+			// matching the legacy SleepStatement::compute timeout behavior.
+			let effective_duration = match ctx.ctx().timeout() {
+				Some(remaining) if remaining < duration.0 => remaining,
+				_ => duration.0,
+			};
+
+			// Sleep with cancellation support.
+			// On WASM we use wasmtimer (no CancellationToken support).
+			// On native we race against the CancellationToken so that
+			// client disconnects and query cancellations stop the sleep
+			// promptly.
+			#[cfg(target_family = "wasm")]
+			wasmtimer::tokio::sleep(effective_duration).await;
+
+			#[cfg(not(target_family = "wasm"))]
+			tokio::select! {
+				_ = tokio::time::sleep(effective_duration) => {},
+				_ = ctx.cancellation().cancelled() => {},
+			}
 
 			// Return Value::None as the result
 			Ok(ValueBatch {
@@ -85,16 +102,6 @@ impl ExecOperator for SleepPlan {
 	fn is_scalar(&self) -> bool {
 		true
 	}
-}
-
-/// Sleep for the specified duration.
-///
-/// Uses the appropriate sleep implementation based on the target platform.
-async fn sleep_for_duration(duration: &Duration) {
-	#[cfg(target_family = "wasm")]
-	wasmtimer::tokio::sleep(duration.0).await;
-	#[cfg(not(target_family = "wasm"))]
-	tokio::time::sleep(duration.0).await;
 }
 
 impl ToSql for SleepPlan {

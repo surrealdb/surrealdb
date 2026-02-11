@@ -369,6 +369,12 @@ impl ExecOperator for Scan {
 
 			// Unified consumption loop for all stream-based sources.
 			while let Some(batch_result) = source.next().await {
+				// Check for cancellation between batches
+				if ctx.cancellation().is_cancelled() {
+					Err(ControlFlow::Err(
+						anyhow::anyhow!(crate::err::Error::QueryCancelled),
+					))?;
+				}
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
 				if !batch.values.is_empty() {
@@ -465,9 +471,15 @@ impl ScanPipeline {
 		if self.has_limit() && !batch.is_empty() {
 			// Apply start offset
 			if self.skipped < self.start {
-				let to_skip = (self.start - self.skipped).min(batch.len());
-				self.skipped += to_skip;
-				batch.drain(..to_skip);
+				let remaining_to_skip = self.start - self.skipped;
+				if batch.len() <= remaining_to_skip {
+					// Entire batch falls within the start offset -- discard it
+					self.skipped += batch.len();
+					batch.clear();
+					return Ok(true);
+				}
+				self.skipped = self.start;
+				batch.drain(..remaining_to_skip);
 			}
 			// Apply limit
 			if let Some(limit) = self.limit {
@@ -525,7 +537,14 @@ fn kv_scan_stream(
 		while let Some(result) = kv_stream.next().await {
 			let entries = result
 				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
-			let mut batch = Vec::with_capacity(entries.len());
+			// Fast path: skip entire batch when all entries fall within pre_skip
+			let remaining_to_skip = pre_skip - skipped;
+			if entries.len() <= remaining_to_skip {
+				skipped += entries.len();
+				continue;
+			}
+			// Allocate only for entries that will actually be decoded
+			let mut batch = Vec::with_capacity(entries.len() - remaining_to_skip);
 			for (key, val) in entries {
 				if skipped < pre_skip {
 					skipped += 1;

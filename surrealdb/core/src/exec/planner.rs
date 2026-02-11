@@ -942,7 +942,7 @@ mod planner_tests {
 		}));
 
 		let ctx = Arc::new(Context::background());
-		let plan = try_plan_expr(expr, &ctx).expect("Planning failed");
+		let plan = try_plan_expr(&expr, &ctx).expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
 		assert!(plan.mutates_context());
@@ -953,7 +953,7 @@ mod planner_tests {
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
 		let ctx = Arc::new(Context::background());
-		let plan = try_plan_expr(expr, &ctx).expect("Planning failed");
+		let plan = try_plan_expr(&expr, &ctx).expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");
 		assert!(plan.is_scalar());

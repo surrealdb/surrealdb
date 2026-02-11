@@ -164,6 +164,10 @@ async fn execute_foreach(
 	for v in iter {
 		// Check timeout (also yields for cooperative scheduling)
 		ctx.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
+		// Check for cancellation via the streaming executor's token
+		if ctx.cancellation().is_cancelled() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)));
+		}
 
 		// Create a new context with the loop variable bound
 		// This is the base context for this iteration - LET statements will build on this

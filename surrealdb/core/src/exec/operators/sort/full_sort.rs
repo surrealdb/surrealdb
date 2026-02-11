@@ -110,6 +110,12 @@ impl ExecOperator for Sort {
 			let mut all_values: Vec<Value> = Vec::new();
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
+				// Check for cancellation between batches
+				if ctx.cancellation().is_cancelled() {
+					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						crate::err::Error::QueryCancelled
+					)));
+				}
 				match batch_result {
 					Ok(batch) => all_values.extend(batch.values),
 					Err(e) => return Err(e),
@@ -270,6 +276,7 @@ impl ExecOperator for SortByKey {
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let sort_keys = self.sort_keys.clone();
+		let cancellation = ctx.cancellation().clone();
 
 		// Sort requires collecting all input first, then sorting, then emitting
 		let sorted_stream = futures::stream::once(async move {
@@ -277,6 +284,12 @@ impl ExecOperator for SortByKey {
 			let mut all_values: Vec<Value> = Vec::new();
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
+				// Check for cancellation between batches
+				if cancellation.is_cancelled() {
+					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						crate::err::Error::QueryCancelled
+					)));
+				}
 				match batch_result {
 					Ok(batch) => all_values.extend(batch.values),
 					Err(e) => return Err(e),

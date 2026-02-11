@@ -6940,6 +6940,7 @@ dependencies = [
  "hex",
  "http 1.4.0",
  "humantime",
+ "indexmap 2.13.0",
  "indxdb",
  "ipnet",
  "jsonwebtoken",

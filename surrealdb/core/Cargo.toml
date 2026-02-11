@@ -125,6 +125,7 @@ geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
+indexmap.workspace = true
 humantime.workspace = true
 ipnet.workspace = true
 md-5.workspace = true

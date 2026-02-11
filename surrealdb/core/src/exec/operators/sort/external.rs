@@ -134,6 +134,12 @@ impl ExecOperator for ExternalSort {
 
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
+				// Check for cancellation between batches
+				if ctx.cancellation().is_cancelled() {
+					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						Error::QueryCancelled
+					)));
+				}
 				let batch = match batch_result {
 					Ok(b) => b,
 					Err(e) => return Err(e),

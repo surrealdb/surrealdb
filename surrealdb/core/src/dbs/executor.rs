@@ -181,6 +181,30 @@ impl Executor {
 			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
 		};
 
+		/// Guard that aborts a spawned task when dropped, ensuring the
+		/// timeout task is cleaned up when execution finishes or errors.
+		struct AbortOnDrop(tokio::task::JoinHandle<()>);
+		impl Drop for AbortOnDrop {
+			fn drop(&mut self) {
+				self.0.abort();
+			}
+		}
+
+		let cancellation = CancellationToken::new();
+
+		// If a query timeout is configured, spawn a task that cancels the
+		// token when the timeout expires. This lets operators that check
+		// the cancellation token (e.g. SleepPlan, long-running scans)
+		// stop promptly instead of running to completion.
+		// AbortOnDrop ensures the task is cleaned up when execution finishes.
+		let _timeout_guard = self.ctx.timeout().map(|timeout| {
+			let token = cancellation.clone();
+			AbortOnDrop(tokio::spawn(async move {
+				tokio::time::sleep(timeout).await;
+				token.cancel();
+			}))
+		});
+
 		// Build the root context.
 		// The FrozenContext is the single source of truth for params, txn,
 		// capabilities, and other context fields. We only extract auth and
@@ -189,7 +213,7 @@ impl Executor {
 			ctx: self.ctx.clone(),
 			options: Some(self.opt.clone()),
 			datastore: None,
-			cancellation: CancellationToken::new(),
+			cancellation,
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
 			session: self.extract_session_info(),

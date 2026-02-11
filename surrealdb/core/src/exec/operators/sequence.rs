@@ -16,7 +16,7 @@ use futures::stream;
 use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::collect_stream;
@@ -24,8 +24,8 @@ use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
-use crate::expr::Block;
-use crate::val::Value;
+use crate::expr::{Block, ControlFlow, Expr};
+use crate::val::{Array, Value};
 
 /// Sequence operator with deferred planning.
 ///
@@ -57,14 +57,6 @@ impl SequencePlan {
 	}
 }
 
-/// Get the FrozenContext for planning from the ExecutionContext.
-///
-/// Since ExecutionContext's FrozenContext is the single source of truth
-/// for parameters and other context fields, we can use it directly.
-fn planning_context(exec_ctx: &ExecutionContext) -> &FrozenContext {
-	exec_ctx.ctx()
-}
-
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SequencePlan {
@@ -83,7 +75,6 @@ impl ExecOperator for SequencePlan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Use the block's read_only analysis
 		if self.block.read_only() {
 			AccessMode::ReadOnly
 		} else {
@@ -92,43 +83,36 @@ impl ExecOperator for SequencePlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// We need to execute each statement in sequence with deferred planning
-		// Since execute() is sync but we need async, we create a stream that
-		// will do the work when polled
-
 		let block = self.block.clone();
 		let initial_ctx = ctx.clone();
 
-		let stream =
-			stream::once(async move { execute_block_sequence(&block, &initial_ctx).await });
+		let stream = stream::once(async move {
+			let (result, _) = execute_block_with_context(&block, &initial_ctx).await?;
+			Ok(ValueBatch {
+				values: vec![result],
+			})
+		});
 
 		Ok(Box::pin(stream))
 	}
 
 	fn mutates_context(&self) -> bool {
-		// Check if any expression in the block is a LET statement
-		self.block.0.iter().any(|expr| matches!(expr, crate::expr::Expr::Let(_)))
+		self.block.0.iter().any(|expr| matches!(expr, Expr::Let(_)))
 	}
 
 	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
-		// Execute all statements and return the final context
 		let (_result, final_ctx) =
 			execute_block_with_context(&self.block, input).await.map_err(|ctrl| match ctrl {
-				crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue => {
-					// BREAK/CONTINUE at top-level LET binding context is invalid
+				ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
+					// BREAK/CONTINUE/RETURN at top-level LET binding context is invalid
 					Error::InvalidControlFlow
 				}
-				crate::expr::ControlFlow::Return(_) => {
-					// RETURN during output_context is also invalid
-					Error::InvalidControlFlow
-				}
-				crate::expr::ControlFlow::Err(e) => Error::Thrown(e.to_string()),
+				ControlFlow::Err(e) => Error::Thrown(e.to_string()),
 			})?;
 		Ok(final_ctx)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		// With deferred planning, we don't have pre-built children
 		vec![]
 	}
 
@@ -137,21 +121,8 @@ impl ExecOperator for SequencePlan {
 	}
 
 	fn is_scalar(&self) -> bool {
-		// Blocks are scalar expressions - they return a single value
 		true
 	}
-}
-
-/// Execute a block sequence and return the result as a ValueBatch
-async fn execute_block_sequence(
-	block: &Block,
-	ctx: &ExecutionContext,
-) -> crate::expr::FlowResult<ValueBatch> {
-	let (result, _final_ctx) = execute_block_with_context(block, ctx).await?;
-
-	Ok(ValueBatch {
-		values: vec![result],
-	})
 }
 
 /// Execute a block and return both the result and the final execution context.
@@ -162,8 +133,6 @@ async fn execute_block_with_context(
 	block: &Block,
 	initial_ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<(Value, ExecutionContext)> {
-	use crate::expr::ControlFlow;
-
 	// Empty block returns NONE
 	if block.0.is_empty() {
 		return Ok((Value::None, initial_ctx.clone()));
@@ -176,31 +145,27 @@ async fn execute_block_with_context(
 	let mut legacy_ctx: Option<FrozenContext> = None;
 
 	for expr in block.0.iter() {
-		// Get the frozen context for planning (FrozenContext is the source of truth)
-		let frozen_ctx = planning_context(&current_ctx).clone();
+		// Check for cancellation between statements
+		if current_ctx.cancellation().is_cancelled() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+		}
+
+		let frozen_ctx = current_ctx.ctx().clone();
 
 		// Try to plan the expression with current context
-		match try_plan_expr(&expr, &frozen_ctx) {
+		match try_plan_expr(expr, &frozen_ctx) {
 			Ok(plan) => {
-				// Handle context-mutating operators (like LET)
 				if plan.mutates_context() {
-					// Get the output context (this also executes the plan)
 					current_ctx = plan.output_context(&current_ctx).await?;
-					result = Value::None; // Context-mutating statements return NONE
+					result = Value::None;
 				} else {
-					// Execute the plan and get the result
-					// Control flow signals (BREAK/CONTINUE/RETURN) propagate directly
 					let stream = plan.execute(&current_ctx)?;
-
 					let values = collect_stream(stream).await?;
 
-					// For scalar expressions, return the single value
-					// For queries, the result is already an array from the plan
 					result = if plan.is_scalar() {
 						values.into_iter().next().unwrap_or(Value::None)
 					} else {
-						// Queries return an array
-						Value::Array(crate::val::Array(values))
+						Value::Array(Array(values))
 					};
 				}
 			}
@@ -209,10 +174,8 @@ async fn execute_block_with_context(
 				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
 					.map_err(|e| ControlFlow::Err(e.into()))?;
 
-				// Handle LET statements specially - only compute the value expression
-				if let crate::expr::Expr::Let(set_stmt) = expr {
+				if let Expr::Let(set_stmt) = expr {
 					let mut stack = TreeStack::new();
-					// Legacy compute returns FlowResult directly - propagate as-is
 					let value = stack
 						.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, None))
 						.finish()
@@ -222,14 +185,12 @@ async fn execute_block_with_context(
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
 					// Update the legacy context too
 					if let Some(ref mut ctx) = legacy_ctx {
-						let mut new_ctx = crate::ctx::Context::new(ctx);
-						new_ctx.add_value(set_stmt.name.clone(), std::sync::Arc::new(value));
+						let mut new_ctx = Context::new(ctx);
+						new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
 						*ctx = new_ctx.freeze();
 					}
 					result = Value::None;
 				} else {
-					// For other expressions, compute the whole expression
-					// Legacy compute returns FlowResult directly - propagate as-is
 					let mut stack = TreeStack::new();
 					result =
 						stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await?;
@@ -250,17 +211,11 @@ fn get_legacy_context_cached<'a>(
 	exec_ctx: &'a ExecutionContext,
 	cached_ctx: &mut Option<FrozenContext>,
 ) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
+	let options = exec_ctx.options().ok_or_else(|| {
+		Error::Internal("Options not available for legacy compute fallback".into())
+	})?;
 
-	// Use or create a cached context for legacy compute
-	let frozen = if let Some(ctx) = cached_ctx.take() {
-		ctx
-	} else {
-		exec_ctx.ctx().clone()
-	};
-
+	let frozen = cached_ctx.clone().unwrap_or_else(|| exec_ctx.ctx().clone());
 	*cached_ctx = Some(frozen.clone());
 
 	Ok((options, frozen))

@@ -293,6 +293,12 @@ impl ExecOperator for Aggregate {
 			// Consume all input batches
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
+				// Check for cancellation between batches
+				if ctx.cancellation().is_cancelled() {
+					Err(crate::expr::ControlFlow::Err(
+						anyhow::anyhow!(crate::err::Error::QueryCancelled),
+					))?;
+				}
 				let batch = batch_result?;
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
