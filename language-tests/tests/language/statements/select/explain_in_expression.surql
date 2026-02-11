@@ -9,7 +9,13 @@ value = "[{ id: person:1, name: 'Alice' }]"
 value = "[{ id: person:2, name: 'Bob' }]"
 
 [[test.results]]
-value = '''{ agg: 'Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: person]\n', select: 'Project [ctx: Db]\n└────> Scan [ctx: Db] [source: person]\n' }'''
+value = '''{
+	"agg": "Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: person]
+",
+	"select": "Project [ctx: Db]
+└────> Scan [ctx: Db] [source: person]
+" }'''
 
 */
 

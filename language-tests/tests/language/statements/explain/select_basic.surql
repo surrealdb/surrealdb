@@ -6,19 +6,33 @@ reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specif
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: item]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: item]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: item, predicate: score > 15]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: item, predicate: score > 15]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: item:1]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: item:1]
+"'''
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name]\n└────> Scan [ctx: Db] [source: item]\n''''
+value = '''
+"ProjectValue [ctx: Db] [expr: name]
+└────> Scan [ctx: Db] [source: item]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: item]\n''''
+value = '''"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: item]
+"'''
 */
 
 -- Setup test data

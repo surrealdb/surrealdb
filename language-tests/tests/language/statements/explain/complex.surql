@@ -6,25 +6,57 @@ reason = "Test EXPLAIN with complex queries that combine multiple planner operat
 value = "'OK'"
 
 [[test.results]]
-value = ''''Limit [ctx: Db] [limit: 2]\n└────> SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]\n       └────> Aggregate [ctx: Db] [by: category]\n              └────> Scan [ctx: Db] [source: product]\n''''
+value = '''
+"Limit [ctx: Db] [limit: 2]
+└────> SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]
+       └────> Aggregate [ctx: Db] [by: category]
+              └────> Scan [ctx: Db] [source: product]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 5]\n       └────> SortByKey [ctx: Db] [sort_keys: rating DESC]\n              └────> Split [ctx: Db] [on: tags]\n                     └────> Scan [ctx: Db] [source: product, predicate: price < 50]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 5]
+       └────> SortByKey [ctx: Db] [sort_keys: rating DESC]
+              └────> Split [ctx: Db] [on: tags]
+                     └────> Scan [ctx: Db] [source: product, predicate: price < 50]
+"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 1, offset: 0]\n       └────> SortByKey [ctx: Db] [sort_keys: price ASC]\n              └────> Scan [ctx: Db] [source: product, predicate: category = 'electronics' AND brand = 'Acme']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 1, offset: 0]
+       └────> SortByKey [ctx: Db] [sort_keys: price ASC]
+              └────> Scan [ctx: Db] [source: product, predicate: category = 'electronics' AND brand = 'Acme']
+"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: product, predicate: name @1@ 'Widget']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: product, predicate: name @1@ 'Widget']
+"'''
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: product, predicate: category = 'electronics']\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: product, predicate: category = 'electronics']
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 5]\n       └────> SortByKey [ctx: Db] [sort_keys: id ASC]\n              └────> Union [ctx: Db]\n                     ├────> Scan [ctx: Db] [source: product]\n                     └────> Scan [ctx: Db] [source: review]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 5]
+       └────> SortByKey [ctx: Db] [sort_keys: id ASC]
+              └────> Union [ctx: Db]
+                     ├────> Scan [ctx: Db] [source: product]
+                     └────> Scan [ctx: Db] [source: review]
+"'''
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name]\n└────> Scan [ctx: Db] [source: product, predicate: rating >= 4f, limit: 3]\n''''
+value = '''
+"ProjectValue [ctx: Db] [expr: name]
+└────> Scan [ctx: Db] [source: product, predicate: rating >= 4f, limit: 3]
+"'''
 
 [[test.results]]
 value = '''

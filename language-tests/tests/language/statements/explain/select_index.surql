@@ -6,16 +6,28 @@ reason = "Test EXPLAIN with index-backed queries: standard index, unique index, 
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
+"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active']
+"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
+"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: user, predicate: region = 'NA']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: user, predicate: region = 'NA']
+"'''
 */
 
 -- Setup schema and data

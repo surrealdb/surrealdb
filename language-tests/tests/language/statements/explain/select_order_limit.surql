@@ -6,19 +6,37 @@ reason = "Test EXPLAIN with ORDER BY, LIMIT, and START clauses"
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: val ASC]\n       └────> Scan [ctx: Db] [source: record]\n''''
+value = '''
+"Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: val ASC]
+       └────> Scan [ctx: Db] [source: record]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: val DESC]\n       └────> Scan [ctx: Db] [source: record]\n''''
+value = '''
+"Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: val DESC]
+       └────> Scan [ctx: Db] [source: record]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: record, limit: 5]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: record, limit: 5]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: record, limit: 3, offset: 2]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: record, limit: 3, offset: 2]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 2, offset: 1]\n       └────> SortByKey [ctx: Db] [sort_keys: val DESC]\n              └────> Scan [ctx: Db] [source: record]\n''''
+value = '''"Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 2, offset: 1]
+       └────> SortByKey [ctx: Db] [sort_keys: val DESC]
+              └────> Scan [ctx: Db] [source: record]
+"'''
 */
 
 -- Setup test data

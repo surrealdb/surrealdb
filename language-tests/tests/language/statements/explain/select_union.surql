@@ -6,13 +6,24 @@ reason = "Test EXPLAIN with multiple FROM sources and expression sources"
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Union [ctx: Db]\n       ├────> Scan [ctx: Db] [source: cat]\n       └────> Scan [ctx: Db] [source: dog]\n''''
+value = '''
+"Project [ctx: Db]
+└────> Union [ctx: Db]
+       ├────> Scan [ctx: Db] [source: cat]
+       └────> Scan [ctx: Db] [source: dog]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SourceExpr [ctx: Rt] [expr: [1, 2, 3]]\n''''
+value = '''
+"Project [ctx: Db]
+└────> SourceExpr [ctx: Rt] [expr: [1, 2, 3]]
+"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SourceExpr [ctx: Rt] [expr: <array>  0 .. 5]\n''''
+value = '''
+"Project [ctx: Db]
+└────> SourceExpr [ctx: Rt] [expr: <array>  0 .. 5]
+"'''
 */
 
 -- Setup test data
