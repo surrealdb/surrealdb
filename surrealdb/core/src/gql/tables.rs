@@ -798,10 +798,22 @@ pub async fn process_tbs(
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
 
-			let type_filter =
-				Type::InputObject(filter_from_type(kind.clone(), type_filter_name.clone(), types)?);
-			trace!("\n{type_filter:?}\n");
-			types.push(type_filter);
+			// Only create a new filter type if one with this name hasn't been registered yet.
+			// This prevents record-link fields (e.g. `TYPE record<department>`) from
+			// overwriting the target table's own, richer filter type.
+			let filter_already_exists = types.iter().any(|t| match t {
+				Type::InputObject(io) => io.type_name() == type_filter_name,
+				_ => false,
+			});
+			if !filter_already_exists {
+				let type_filter = Type::InputObject(filter_from_type(
+					kind.clone(),
+					type_filter_name.clone(),
+					types,
+				)?);
+				trace!("\n{type_filter:?}\n");
+				types.push(type_filter);
+			}
 
 			table_filter = table_filter
 				.field(InputValue::new(fd.name.to_sql(), TypeRef::named(type_filter_name)));
@@ -1296,7 +1308,22 @@ fn filter_from_type(
 	filter_name: String,
 	types: &mut Vec<Type>,
 ) -> Result<InputObject, GqlError> {
-	let ty = match &kind {
+	// Normalise `option<record<T>>` (Kind::Either([None, Record([T])])) down to the
+	// inner record kind so filters are generated correctly with ID-based filtering.
+	let effective_kind = match &kind {
+		Kind::Either(ks) => {
+			let non_none: Vec<&Kind> =
+				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+			if non_none.len() == 1 {
+				non_none[0].clone()
+			} else {
+				kind.clone()
+			}
+		}
+		_ => kind.clone(),
+	};
+
+	let ty = match &effective_kind {
 		Kind::Record(ts) => match ts.len() {
 			1 => TypeRef::named(filter_name_from_table(
 				ts.first().expect("ts should have exactly one element").as_str(),
@@ -1311,7 +1338,7 @@ fn filter_from_type(
 	filter_impl!(filter, ty, "eq");
 	filter_impl!(filter, ty, "ne");
 
-	match kind {
+	match effective_kind {
 		// String: contains, startsWith, endsWith, regex, in
 		Kind::String => {
 			let str_ty = TypeRef::named(TypeRef::STRING);

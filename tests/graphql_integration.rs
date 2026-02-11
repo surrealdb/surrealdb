@@ -2320,4 +2320,333 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn serialization() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with various field types to test serialization
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE department SCHEMAFULL;
+					DEFINE FIELD name ON department TYPE string;
+
+					DEFINE TABLE widget SCHEMAFULL;
+					DEFINE FIELD name ON widget TYPE string;
+					DEFINE FIELD created ON widget TYPE datetime;
+					DEFINE FIELD lifespan ON widget TYPE duration;
+					DEFINE FIELD tracking ON widget TYPE uuid;
+					DEFINE FIELD payload ON widget TYPE bytes;
+					DEFINE FIELD tags ON widget TYPE array<string>;
+					DEFINE FIELD dept ON widget TYPE option<record<department>>;
+
+					CREATE department:eng SET name = "Engineering";
+					CREATE department:mkt SET name = "Marketing";
+
+					CREATE widget:alpha SET
+						name = "Alpha",
+						created = d"2024-06-15T10:30:00Z",
+						lifespan = 1h30m,
+						tracking = u"550e8400-e29b-41d4-a716-446655440000",
+						payload = <bytes>"Hello",
+						tags = ["urgent", "review"],
+						dept = department:eng;
+
+					CREATE widget:beta SET
+						name = "Beta",
+						created = d"2025-01-01T00:00:00Z",
+						lifespan = 2d12h,
+						tracking = u"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+						payload = <bytes>"AB",
+						tags = [],
+						dept = NONE;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "SQL setup failed");
+			let sql_body = res.text().await?;
+			// Verify no errors in SQL setup
+			assert!(!sql_body.contains("\"status\":\"ERR\""), "SQL setup had errors: {sql_body}");
+		}
+
+		// --- Test 1: Datetime is serialized as RFC 3339 string ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") { created }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			let status = res.status();
+			let body = res.json::<serde_json::Value>().await?;
+			assert_eq!(status, 200, "Expected 200, body: {body}");
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let created = body["data"]["_get_widget"]["created"]
+				.as_str()
+				.unwrap_or_else(|| panic!("created should be a string, body: {body}"));
+			assert!(
+				created.contains("2024-06-15"),
+				"Expected RFC 3339 datetime containing '2024-06-15', got: {created}"
+			);
+			// Should not have SurrealQL d'...' wrapping
+			assert!(
+				!created.starts_with("d'"),
+				"Datetime should not have SurrealQL d'' prefix, got: {created}"
+			);
+		}
+
+		// --- Test 2: Duration is serialized as a clean string ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") { lifespan }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let lifespan = body["data"]["_get_widget"]["lifespan"].as_str().unwrap();
+			// Duration should be a clean string like "1h30m" without quotes/wrapping
+			assert!(!lifespan.is_empty(), "Duration should not be empty");
+			assert!(
+				!lifespan.starts_with("d'") && !lifespan.starts_with('\''),
+				"Duration should not have SurrealQL wrapping, got: {lifespan}"
+			);
+		}
+
+		// --- Test 3: UUID is serialized as a standard UUID string ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") { tracking }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let tracking = body["data"]["_get_widget"]["tracking"].as_str().unwrap();
+			assert_eq!(
+				tracking, "550e8400-e29b-41d4-a716-446655440000",
+				"UUID should be in standard format"
+			);
+			// Should not have SurrealQL u'...' wrapping
+			assert!(
+				!tracking.starts_with("u'"),
+				"UUID should not have SurrealQL u'' prefix, got: {tracking}"
+			);
+		}
+
+		// --- Test 4: Bytes are serialized as base64 string ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") { payload }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let payload = body["data"]["_get_widget"]["payload"].as_str().unwrap();
+			// "Hello" → base64 = "SGVsbG8="
+			assert_eq!(payload, "SGVsbG8=", "Bytes should be base64 encoded, got: {payload}");
+		}
+
+		// --- Test 5: RecordId in arrays/objects uses raw format ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						widget(order: {asc: id}) { id }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let widgets = body["data"]["widget"].as_array().unwrap();
+			assert_eq!(widgets[0]["id"], "widget:alpha");
+			assert_eq!(widgets[1]["id"], "widget:beta");
+		}
+
+		// --- Test 6: Arrays with nested values propagate correctly ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") { tags }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let tags = body["data"]["_get_widget"]["tags"].as_array().unwrap();
+			assert_eq!(tags.len(), 2);
+			assert_eq!(tags[0], "urgent");
+			assert_eq!(tags[1], "review");
+		}
+
+		// --- Test 7: Empty arrays don't cause panics ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "beta") { tags }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let tags = body["data"]["_get_widget"]["tags"].as_array().unwrap();
+			assert_eq!(tags.len(), 0);
+		}
+
+		// --- Test 8: option<record> field — set to a value ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "alpha") {
+							name
+							dept {
+								id
+								name
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let widget = &body["data"]["_get_widget"];
+			assert_eq!(widget["name"], "Alpha");
+			assert_eq!(widget["dept"]["id"], "department:eng");
+			assert_eq!(widget["dept"]["name"], "Engineering");
+		}
+
+		// --- Test 9: option<record> field — set to NONE (null) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_widget(id: "beta") {
+							name
+							dept {
+								id
+								name
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let widget = &body["data"]["_get_widget"];
+			assert_eq!(widget["name"], "Beta");
+			assert!(
+				widget["dept"].is_null(),
+				"Expected dept to be null for NONE value, got: {:?}",
+				widget["dept"]
+			);
+		}
+
+		// --- Test 10: Schema introspection shows option<record> as nullable type ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "widget") {
+							fields {
+								name
+								type {
+									name
+									kind
+									ofType { name kind }
+								}
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let dept_field = fields.iter().find(|f| f["name"] == "dept").unwrap();
+			let type_info = &dept_field["type"];
+			// option<record<department>> should be nullable (not NON_NULL),
+			// and the inner type should be "department" (not a union like "none_or_department")
+			assert_ne!(
+				type_info["kind"], "NON_NULL",
+				"option<record> should be nullable, got: {type_info:?}"
+			);
+			// The type should resolve to the department table type (not a union)
+			let type_name = type_info["name"].as_str().unwrap_or("");
+			assert_eq!(
+				type_name, "department",
+				"option<record<department>> should resolve to 'department' type, got: {type_name}"
+			);
+		}
+
+		Ok(())
+	}
 }

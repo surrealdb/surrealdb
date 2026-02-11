@@ -189,6 +189,7 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "null", Kind::Null);
 	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
 	scalar_debug_validated!(schema, "duration", Kind::Duration);
+	scalar_debug_validated!(schema, "bytes", Kind::Bytes);
 	scalar_debug_validated!(schema, "object", Kind::Object);
 	scalar_debug_validated!(schema, "any", Kind::Any);
 
@@ -222,30 +223,48 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SurValue::String(s) => GqlValue::String(s),
-		d @ SurValue::Duration(_) => GqlValue::String(d.to_sql()),
+		SurValue::Duration(d) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
-		SurValue::Array(a) => GqlValue::List(
-			a.into_iter()
-				.map(|v| sql_value_to_gql_value(v).expect("value conversion should succeed"))
-				.collect(),
-		),
-		SurValue::Object(o) => GqlValue::Object(
-			o.0.into_iter()
-				.map(|(k, v)| {
-					(
-						Name::new(k),
-						sql_value_to_gql_value(v).expect("value conversion should succeed"),
-					)
-				})
-				.collect(),
-		),
+		SurValue::Array(a) => {
+			let items: Result<Vec<GqlValue>, GqlError> =
+				a.into_iter().map(sql_value_to_gql_value).collect();
+			GqlValue::List(items?)
+		}
+		SurValue::Object(o) => {
+			let entries: Result<IndexMap<Name, GqlValue>, GqlError> =
+				o.0.into_iter()
+					.map(|(k, v)| sql_value_to_gql_value(v).map(|gv| (Name::new(k), gv)))
+					.collect();
+			GqlValue::Object(entries?)
+		}
 		SurValue::Geometry(ref g) => return geometry_to_gql_object(g),
-		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner()),
-		SurValue::RecordId(t) => GqlValue::String(t.to_sql()),
-		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
+		SurValue::Bytes(b) => {
+			use base64::Engine;
+			GqlValue::String(base64::engine::general_purpose::STANDARD.encode(b.into_inner()))
+		}
+		SurValue::RecordId(t) => GqlValue::String(record_id_to_raw(&t)),
+		// Fallback: convert unhandled variants to their string representation
+		// rather than returning an error, to be resilient to new Value variants
+		v => GqlValue::String(v.to_raw_string()),
 	};
 	Ok(out)
+}
+
+/// Formats a `RecordId` as a raw string without SQL-specific escaping.
+///
+/// Produces `table:key` where the key is the raw value (no backtick/angle-bracket
+/// escaping). This is the format GraphQL clients expect, e.g. `"person:alice"`,
+/// `"item:1"`.
+fn record_id_to_raw(t: &SurRecordId) -> String {
+	let key_str = match &t.key {
+		SurRecordIdKey::Number(n) => n.to_string(),
+		SurRecordIdKey::String(s) => s.clone(),
+		SurRecordIdKey::Uuid(u) => u.to_string(),
+		// For complex keys (arrays, objects, ranges), fall back to SQL format
+		_ => t.key.to_sql(),
+	};
+	format!("{}:{}", t.table, key_str)
 }
 
 pub fn kind_to_type(
@@ -324,6 +343,31 @@ pub fn kind_to_type(
 			}
 		}
 		Kind::Either(ks) => {
+			// Strip None/Null from the Either variants — they are already handled
+			// by the `optional` flag at the top of kind_to_type() which makes the
+			// resulting TypeRef nullable. This prevents spurious unions like
+			// `none_or_foo` for `option<record<foo>>`.
+			let ks: Vec<Kind> =
+				ks.into_iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
+
+			// If nothing remains after stripping None/Null, it's just a nullable null.
+			if ks.is_empty() {
+				return Ok(TypeRef::named("null"));
+			}
+
+			// If only one kind remains after stripping None/Null, delegate directly
+			// to avoid creating a single-member union.
+			if ks.len() == 1 {
+				let inner = ks.into_iter().next().expect("checked len == 1");
+				let inner_ty = kind_to_type(inner, types, is_input)?;
+				// Unwrap any NonNull wrapper — the outer optional flag will re-apply
+				// nullability as needed.
+				return Ok(match optional {
+					true => unwrap_type(inner_ty),
+					false => inner_ty,
+				});
+			}
+
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(KindLiteral::String(_))));
 
@@ -566,6 +610,13 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 		},
 		Kind::Bytes => match val {
 			GqlValue::Binary(b) => Ok(SurValue::Bytes(bytes::Bytes::copy_from_slice(b).into())),
+			GqlValue::String(s) => {
+				use base64::Engine;
+				let decoded = base64::engine::general_purpose::STANDARD
+					.decode(s.as_bytes())
+					.map_err(|_| type_error(kind, val))?;
+				Ok(SurValue::Bytes(bytes::Bytes::from(decoded).into()))
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Datetime => match val {
