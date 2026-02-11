@@ -652,7 +652,15 @@ pub async fn process_tbs(
 							};
 							let version = parse_version_arg(args)?;
 
-							let record_id = RecordId::new(tb_name, id);
+							// Parse the full record id string so that numeric
+							// keys like "1" are correctly interpreted as Number(1)
+							// rather than String("1"). Fall back to a plain string
+							// key if parsing fails.
+							let rid_str = format!("{tb_name}:{id}");
+							let record_id: RecordId = match crate::syn::record_id(&rid_str) {
+								Ok(x) => x.into(),
+								Err(_) => RecordId::new(tb_name, id),
+							};
 
 							// Build SELECT VALUE id FROM ONLY <record_id>
 							let select_stmt = SelectStatement {
