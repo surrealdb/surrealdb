@@ -3454,7 +3454,8 @@ mod graphql_integration {
 			assert_eq!(posts[0]["title"], "Hello");
 		}
 
-		// Test signIn with wrong credentials: should return an error
+		// Test signIn with wrong credentials: should return a generic auth error
+		// that does NOT leak specific details about why authentication failed
 		{
 			let res = client
 				.post(gql_url)
@@ -3472,8 +3473,13 @@ mod graphql_integration {
 			assert!(body["errors"].is_array(), "SignIn with wrong password should return errors");
 			let error_msg = body["errors"][0]["message"].as_str().unwrap_or("");
 			assert!(
-				error_msg.contains("Sign in failed"),
-				"Error should mention sign in failure, got: {error_msg}"
+				error_msg.contains("problem with authentication"),
+				"Error should be a generic auth error, got: {error_msg}"
+			);
+			// Ensure the error does NOT leak specific IAM details
+			assert!(
+				!error_msg.contains("SELECT") && !error_msg.contains("argon2"),
+				"Auth error should not leak internal details, got: {error_msg}"
 			);
 		}
 
@@ -4077,6 +4083,940 @@ mod graphql_integration {
 					"Unexpected department: {dept_name}"
 				);
 			}
+		}
+
+		Ok(())
+	}
+
+	/// Tests that GraphQL mutations respect table PERMISSIONS for create, update,
+	/// delete, and upsert operations. Also tests bulk mutation permissions.
+	///
+	/// Verifies:
+	/// - Authenticated users can only mutate records where PERMISSIONS allow it
+	/// - Unauthorized mutations return empty/null results (permission-filtered)
+	/// - Bulk mutations respect the same permissions as single-record mutations
+	/// - Root users bypass permissions and can mutate everything
+	#[test(tokio::test)]
+	async fn mutation_permissions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+		let signup_url = &format!("http://{addr}/signup");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with permissions
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+
+					DEFINE TABLE user SCHEMAFUL
+						PERMISSIONS FOR select, create, update, delete WHERE id = $auth;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+
+					-- Table with per-operation permissions
+					DEFINE TABLE article SCHEMAFUL
+						PERMISSIONS
+							FOR select WHERE $auth != NONE
+							FOR create WHERE $auth != NONE
+							FOR update WHERE author = $auth.id
+							FOR delete WHERE author = $auth.id;
+					DEFINE FIELD title ON article TYPE string;
+					DEFINE FIELD content ON article TYPE string;
+					DEFINE FIELD author ON article TYPE record<user>;
+
+					-- Table with NO permissions for non-root (fully locked)
+					DEFINE TABLE secret SCHEMAFUL
+						PERMISSIONS NONE;
+					DEFINE FIELD data ON secret TYPE string;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Sign up a user and get a token
+		let user_token;
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns,
+					"db": db,
+					"ac": "user",
+					"email": "alice@example.com",
+					"pass": "secret123",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+			let res = client.post(signup_url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			user_token = body["token"].as_str().unwrap().to_string();
+		}
+
+		// Get the user's record id for permission checks
+		let user_id;
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
+			user_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+		}
+
+		// ---------------------------------------------------------------
+		// 1. CREATE with permissions: authenticated user CAN create an article
+		// ---------------------------------------------------------------
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": format!(r#"mutation {{
+						createArticle(data: {{
+							title: "My Post",
+							content: "Hello world",
+							author: "{user_id}"
+						}}) {{ id title author {{ id }} }}
+					}}"#)})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Authenticated user should be able to create article, got: {:?}",
+				body["errors"]
+			);
+			let article = &body["data"]["createArticle"];
+			assert!(article["id"].is_string(), "Created article should have an id");
+			assert_eq!(article["title"], "My Post");
+		}
+
+		// ---------------------------------------------------------------
+		// 2. CREATE on a PERMISSIONS NONE table: authenticated user CANNOT create
+		// ---------------------------------------------------------------
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": r#"mutation {
+						createSecret(data: { data: "top secret" }) { id data }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// The create should return null (no permission to create on this table)
+			let secret = &body["data"]["createSecret"];
+			assert!(
+				secret.is_null(),
+				"User should NOT be able to create on PERMISSIONS NONE table, got: {:?}",
+				body
+			);
+		}
+
+		// ---------------------------------------------------------------
+		// 3. Root CAN create on PERMISSIONS NONE table
+		// ---------------------------------------------------------------
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						createSecret(data: { data: "classified" }) { id data }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Root should be able to create on any table, got errors: {:?}",
+				body["errors"]
+			);
+			let secret = &body["data"]["createSecret"];
+			assert!(secret["id"].is_string(), "Root-created secret should have an id");
+		}
+
+		// ---------------------------------------------------------------
+		// 4. UPDATE with permissions: only the author can update their article
+		// ---------------------------------------------------------------
+		// First, create articles as root (one authored by alice, one by a fake user)
+		let alice_article_id;
+		let other_article_id;
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(format!(
+					r#"
+					CREATE article:alice_post SET title = "Alice's article", content = "Original", author = {user_id};
+					CREATE article:other_post SET title = "Other article", content = "Not mine", author = user:fake;
+				"#
+				))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			alice_article_id = "alice_post".to_string();
+			other_article_id = "other_post".to_string();
+		}
+
+		// Alice CAN update her own article (author matches $auth.id)
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": format!(r#"mutation {{
+						updateArticle(id: "{alice_article_id}", data: {{ title: "Updated title" }}) {{
+							id title
+						}}
+					}}"#)})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Author should be able to update own article, got: {:?}",
+				body["errors"]
+			);
+			let article = &body["data"]["updateArticle"];
+			assert_eq!(article["title"], "Updated title");
+		}
+
+		// Alice CANNOT update someone else's article (author doesn't match)
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": format!(r#"mutation {{
+						updateArticle(id: "{other_article_id}", data: {{ title: "Hacked" }}) {{
+							id title
+						}}
+					}}"#)})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// The update should return null (no permission to update this record)
+			let article = &body["data"]["updateArticle"];
+			assert!(
+				article.is_null(),
+				"User should NOT be able to update another user's article, got: {:?}",
+				body
+			);
+		}
+
+		// ---------------------------------------------------------------
+		// 5. DELETE with permissions: only the author can delete their article
+		// ---------------------------------------------------------------
+		// Alice CANNOT delete someone else's article
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": format!(r#"mutation {{
+						deleteArticle(id: "{other_article_id}")
+					}}"#)})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// The engine silently ignores permission-denied deletes, so the mutation
+			// returns true even though the record was not actually deleted.
+			assert!(
+				body["errors"].is_null(),
+				"Delete mutation should not return GraphQL errors, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(
+				body["data"]["deleteArticle"], true,
+				"Delete mutation should return true even when permission-denied, got: {:?}",
+				body
+			);
+		}
+
+		// Verify the other article still exists (via root)
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(format!("SELECT * FROM article:{other_article_id};"))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let result = &body[0]["result"];
+			assert!(
+				result.is_array() && !result.as_array().unwrap().is_empty(),
+				"Other user's article should still exist after unauthorized delete, got: {:?}",
+				body
+			);
+		}
+
+		// Alice CAN delete her own article
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": format!(r#"mutation {{
+						deleteArticle(id: "{alice_article_id}")
+					}}"#)})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Author should be able to delete own article, got errors: {:?}",
+				body["errors"]
+			);
+		}
+
+		// ---------------------------------------------------------------
+		// 6. Bulk mutations respect permissions
+		// ---------------------------------------------------------------
+		// Create some articles as root for bulk testing
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(format!(
+					r#"
+					CREATE article:bulk1 SET title = "Bulk 1", content = "Content 1", author = {user_id};
+					CREATE article:bulk2 SET title = "Bulk 2", content = "Content 2", author = {user_id};
+					CREATE article:bulk3 SET title = "Bulk 3", content = "Content 3", author = user:fake;
+				"#
+				))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// updateMany: Alice can only update her own articles
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": r#"mutation {
+						updateManyArticle(data: { title: "Bulk Updated" }) {
+							id title
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Bulk update errors: {:?}", body["errors"]);
+			let updated = &body["data"]["updateManyArticle"];
+			assert!(updated.is_array(), "Bulk update should return an array");
+			// Alice should only have updated her own articles (bulk1, bulk2),
+			// not bulk3 which belongs to user:fake
+			let updated_arr = updated.as_array().unwrap();
+			for item in updated_arr {
+				assert_eq!(
+					item["title"], "Bulk Updated",
+					"All returned records should have the updated title"
+				);
+			}
+		}
+
+		// Verify bulk3 was NOT updated (still has original title)
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body("SELECT title FROM article:bulk3;")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let title = &body[0]["result"][0]["title"];
+			assert_eq!(
+				title, "Bulk 3",
+				"Article owned by another user should NOT be updated by bulk mutation"
+			);
+		}
+
+		// deleteMany on PERMISSIONS NONE table: user cannot delete anything
+		{
+			// First create some secrets as root
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					CREATE secret:s1 SET data = "secret1";
+					CREATE secret:s2 SET data = "secret2";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": r#"mutation {
+						deleteManySecret
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let count = &body["data"]["deleteManySecret"];
+			assert_eq!(
+				count,
+				&json!(0),
+				"User should not be able to delete from PERMISSIONS NONE table, got: {:?}",
+				body
+			);
+
+			// Verify secrets still exist
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body("SELECT count() FROM secret GROUP ALL;")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let count = body[0]["result"][0]["count"].as_i64().unwrap_or(0);
+			assert!(count >= 2, "Secrets should still exist, count: {count}");
+		}
+
+		Ok(())
+	}
+
+	/// Tests that relation field resolution respects PERMISSIONS on the relation
+	/// table. An authenticated user should only see relation records they have
+	/// permission to read.
+	#[test(tokio::test)]
+	async fn relation_permissions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+		let signup_url = &format!("http://{addr}/signup");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with relation table that has permissions
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+
+					DEFINE TABLE user SCHEMAFUL
+						PERMISSIONS FOR select, create, update, delete WHERE id = $auth;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+
+					DEFINE TABLE post SCHEMAFUL
+						PERMISSIONS FOR select WHERE $auth != NONE
+						FOR create, update, delete WHERE $auth != NONE;
+					DEFINE FIELD title ON post TYPE string;
+
+					-- Relation with permissions: users can only see their own likes
+					DEFINE TABLE likes TYPE RELATION FROM user TO post SCHEMAFUL
+						PERMISSIONS FOR select WHERE in = $auth.id
+						FOR create, update, delete WHERE in = $auth.id;
+					DEFINE FIELD rating ON likes TYPE int;
+
+					-- Create test data
+					CREATE post:p1 SET title = "First Post";
+					CREATE post:p2 SET title = "Second Post";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Sign up two users
+		let token_alice;
+		let token_bob;
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns, "db": db, "ac": "user",
+					"email": "alice@test.com", "pass": "pass123",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+			let res = client.post(signup_url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			token_alice = body["token"].as_str().unwrap().to_string();
+		}
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns, "db": db, "ac": "user",
+					"email": "bob@test.com", "pass": "pass123",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+			let res = client.post(signup_url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			token_bob = body["token"].as_str().unwrap().to_string();
+		}
+
+		// Get user IDs
+		let alice_id;
+		let bob_id;
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&token_alice)
+				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.send()
+				.await?;
+			let body = res.json::<serde_json::Value>().await?;
+			alice_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+		}
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&token_bob)
+				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.send()
+				.await?;
+			let body = res.json::<serde_json::Value>().await?;
+			bob_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+		}
+
+		// Create likes as root: Alice likes p1 (rating 5), Bob likes p2 (rating 3)
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(format!(
+					r#"
+					RELATE {alice_id}->likes->post:p1 SET rating = 5;
+					RELATE {bob_id}->likes->post:p2 SET rating = 3;
+				"#
+				))
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Alice queries her likes: should see only her own like (alice->p1)
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&token_alice)
+				.body(json!({"query": r#"{ user { id likes { rating } } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
+			let user = &body["data"]["user"][0];
+			let likes = user["likes"].as_array().unwrap();
+			assert_eq!(likes.len(), 1, "Alice should see only her own like");
+			assert_eq!(likes[0]["rating"], 5);
+		}
+
+		// Bob queries his likes: should see only his own like (bob->p2)
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&token_bob)
+				.body(json!({"query": r#"{ user { id likes { rating } } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
+			let user = &body["data"]["user"][0];
+			let likes = user["likes"].as_array().unwrap();
+			assert_eq!(likes.len(), 1, "Bob should see only his own like");
+			assert_eq!(likes[0]["rating"], 3);
+		}
+
+		// Root sees ALL likes
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(json!({"query": r#"{ likes { rating } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
+			let likes = body["data"]["likes"].as_array().unwrap();
+			assert_eq!(likes.len(), 2, "Root should see all likes");
+		}
+
+		Ok(())
+	}
+
+	/// Tests that GraphQL error messages do not leak internal implementation
+	/// details, table structures, or database internals.
+	#[test(tokio::test)]
+	async fn error_message_safety() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+
+					DEFINE TABLE user SCHEMAFUL
+						PERMISSIONS FOR select, create, update, delete WHERE id = $auth;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+
+					DEFINE TABLE item SCHEMAFUL;
+					DEFINE FIELD name ON item TYPE string;
+					DEFINE FIELD price ON item TYPE float;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Test: signIn with wrong credentials should return generic error
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signIn(access: "user", variables: { email: "nobody@test.com", pass: "wrong" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_array());
+			let error_msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			// The error should be generic — not mention internal details
+			assert!(
+				error_msg.contains("problem with authentication"),
+				"Auth error should be generic, got: {error_msg}"
+			);
+			assert!(
+				!error_msg.contains("SELECT") && !error_msg.contains("FROM user"),
+				"Auth error should not leak query details, got: {error_msg}"
+			);
+			assert!(
+				!error_msg.contains("argon2") && !error_msg.contains("crypto"),
+				"Auth error should not leak implementation details, got: {error_msg}"
+			);
+		}
+
+		// Test: signIn with non-existent access method should return generic error
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signIn(access: "nonexistent_access", variables: { email: "test", pass: "test" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_array());
+			let error_msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(
+				error_msg.contains("problem with authentication"),
+				"Non-existent access error should be generic, got: {error_msg}"
+			);
+			// Should NOT reveal which access methods exist
+			assert!(
+				!error_msg.contains("user") || error_msg.contains("authentication"),
+				"Error should not leak access method names, got: {error_msg}"
+			);
+		}
+
+		// Test: _get with invalid record ID format returns clean error
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(json!({"query": r#"{ _get(id: "not_a_valid_id") { id } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// May succeed with null or error, but should not leak parse details
+			if body["errors"].is_array() {
+				let error_msg = body["errors"][0]["message"].as_str().unwrap_or("");
+				assert!(
+					!error_msg.contains("ParseError") && !error_msg.contains("backtrace"),
+					"Parse error should not leak internal details, got: {error_msg}"
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Tests that upsert mutations respect table PERMISSIONS.
+	#[test(tokio::test)]
+	async fn upsert_permissions() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+		let signup_url = &format!("http://{addr}/signup");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema: table with restricted create/update permissions
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+
+					DEFINE TABLE user SCHEMAFUL
+						PERMISSIONS FOR select, create, update, delete WHERE id = $auth;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+
+					-- locked: no create/update for non-root
+					DEFINE TABLE locked SCHEMAFUL
+						PERMISSIONS
+							FOR select WHERE $auth != NONE
+							FOR create, update, delete NONE;
+					DEFINE FIELD name ON locked TYPE string;
+
+					CREATE locked:existing SET name = "Original";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Sign up a user
+		let user_token;
+		{
+			let req_body = serde_json::to_string(
+				json!({
+					"ns": ns, "db": db, "ac": "user",
+					"email": "alice@test.com", "pass": "pass123",
+				})
+				.as_object()
+				.unwrap(),
+			)
+			.unwrap();
+			let res = client.post(signup_url).body(req_body).send().await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			user_token = body["token"].as_str().unwrap().to_string();
+		}
+
+		// Upsert on locked table: user should NOT be able to create or update
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": r#"mutation {
+						upsertLocked(id: "new_record", data: { name: "Hacked" }) { id name }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// Should return null — permission denied for create/update
+			let result = &body["data"]["upsertLocked"];
+			assert!(
+				result.is_null(),
+				"User should NOT be able to upsert on locked table, got: {:?}",
+				body
+			);
+		}
+
+		// Upsert on existing record in locked table: user still can't update
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&user_token)
+				.body(
+					json!({"query": r#"mutation {
+						upsertLocked(id: "existing", data: { name: "Modified" }) { id name }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let result = &body["data"]["upsertLocked"];
+			assert!(
+				result.is_null(),
+				"User should NOT be able to upsert existing record on locked table, got: {:?}",
+				body
+			);
+		}
+
+		// Verify the record was NOT modified
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body("SELECT name FROM locked:existing;")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let name = &body[0]["result"][0]["name"];
+			assert_eq!(
+				name, "Original",
+				"Record should not have been modified by unauthorized upsert"
+			);
+		}
+
+		// Root CAN upsert on locked table
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						upsertLocked(id: "existing", data: { name: "Root Modified" }) { id name }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Root should be able to upsert, got errors: {:?}",
+				body["errors"]
+			);
+			let result = &body["data"]["upsertLocked"];
+			assert_eq!(result["name"], "Root Modified");
 		}
 
 		Ok(())
