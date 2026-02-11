@@ -12,10 +12,11 @@ use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
 use surrealdb_types::ToSql;
 
+use super::auth::add_auth_mutations;
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
-use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, TableProvider};
 use crate::catalog::{GraphQLConfig, GraphQLFunctionsConfig, GraphQLTablesConfig};
 use crate::dbs::Session;
 use crate::expr::kind::{GeometryKind, KindLiteral};
@@ -138,6 +139,16 @@ pub async fn generate_schema(
 		_ => {}
 	}
 
+	// Generate auth mutations (signIn/signUp) from access definitions
+	{
+		let accesses = tx.all_db_accesses(db_def.namespace_id, db_def.database_id).await?;
+		if !accesses.is_empty() {
+			let mut auth_mutation = mutation_obj.take().unwrap_or_else(|| Object::new("Mutation"));
+			auth_mutation = add_auth_mutations(auth_mutation, &accesses, ns, db, datastore);
+			mutation_obj = Some(auth_mutation);
+		}
+	}
+
 	if let Some(fns) = fns {
 		query = process_fns(fns, query, &mut types, session, datastore).await?;
 	}
@@ -227,6 +238,13 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "bytes", Kind::Bytes);
 	scalar_debug_validated!(schema, "object", Kind::Object);
 	scalar_debug_validated!(schema, "any", Kind::Any);
+
+	// JSON scalar: accepts arbitrary JSON values (including objects and arrays)
+	// as input arguments. Used for dynamic data like auth variables.
+	schema = schema.register(Type::Scalar(
+		Scalar::new("JSON")
+			.description("Arbitrary JSON value (object, array, string, number, or boolean)"),
+	));
 
 	let id_interface =
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));

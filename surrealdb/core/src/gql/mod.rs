@@ -1,5 +1,6 @@
 #![cfg(not(target_family = "wasm"))]
 
+mod auth;
 pub mod cache;
 pub mod error;
 mod ext;

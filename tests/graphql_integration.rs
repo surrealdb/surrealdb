@@ -3279,4 +3279,356 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn auth_mutations() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with an access method that has both SIGNIN and SIGNUP
+		{
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+
+					DEFINE TABLE user SCHEMAFUL
+						PERMISSIONS FOR select, create, update, delete WHERE id = $auth;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+
+					DEFINE TABLE post SCHEMAFUL
+						PERMISSIONS FOR select WHERE $auth != NONE
+						FOR create, update, delete WHERE $auth != NONE;
+					DEFINE FIELD title ON post TYPE string;
+					DEFINE FIELD content ON post TYPE string;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		// Test schema introspection: signIn and signUp should appear in Mutation type
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"{
+						__type(name: "Mutation") {
+							fields { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Introspection errors: {:?}", body["errors"]);
+			let fields = &body["data"]["__type"]["fields"];
+			let field_names: Vec<&str> =
+				fields.as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(
+				field_names.contains(&"signIn"),
+				"Mutation should have signIn field, got: {field_names:?}"
+			);
+			assert!(
+				field_names.contains(&"signUp"),
+				"Mutation should have signUp field, got: {field_names:?}"
+			);
+		}
+
+		// Test signUp: create a new user via GraphQL mutation
+		let signup_token;
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signUp(access: "user", variables: { email: "alice@example.com", pass: "secret123" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "SignUp errors: {:?}", body["errors"]);
+			let token = body["data"]["signUp"].as_str().unwrap();
+			assert!(!token.is_empty(), "SignUp should return a non-empty JWT token");
+			// JWT tokens have 3 parts separated by dots
+			assert_eq!(token.split('.').count(), 3, "Token should be a valid JWT format");
+			signup_token = token.to_string();
+		}
+
+		// Test that the signup token works for authentication
+		{
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&signup_token)
+				.body(json!({"query": r#"{ post { id } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Authenticated query should succeed, got errors: {:?}",
+				body["errors"]
+			);
+		}
+
+		// Test signIn: authenticate with the newly created user
+		let signin_token;
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signIn(access: "user", variables: { email: "alice@example.com", pass: "secret123" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "SignIn errors: {:?}", body["errors"]);
+			let token = body["data"]["signIn"].as_str().unwrap();
+			assert!(!token.is_empty(), "SignIn should return a non-empty JWT token");
+			assert_eq!(token.split('.').count(), 3, "Token should be a valid JWT format");
+			signin_token = token.to_string();
+		}
+
+		// Test that the signin token works for querying data
+		{
+			// First create a post using root to have some data
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(r#"CREATE post:1 SET title = "Hello", content = "World";"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+
+			// Then query using the signin token
+			let res = client
+				.post(gql_url)
+				.bearer_auth(&signin_token)
+				.body(json!({"query": r#"{ post { id title content } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Query with signin token should succeed, got errors: {:?}",
+				body["errors"]
+			);
+			let posts = &body["data"]["post"];
+			assert!(posts.is_array(), "Expected array of posts");
+			assert_eq!(posts.as_array().unwrap().len(), 1);
+			assert_eq!(posts[0]["title"], "Hello");
+		}
+
+		// Test signIn with wrong credentials: should return an error
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signIn(access: "user", variables: { email: "alice@example.com", pass: "wrongpassword" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_array(), "SignIn with wrong password should return errors");
+			let error_msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(
+				error_msg.contains("Sign in failed"),
+				"Error should mention sign in failure, got: {error_msg}"
+			);
+		}
+
+		// Test signIn with non-existent access method: should return an error
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signIn(access: "nonexistent", variables: { email: "alice@example.com", pass: "secret123" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"SignIn with non-existent access should return errors"
+			);
+		}
+
+		// Test signUp with duplicate email: should still work (creates another user record)
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"mutation {
+						signUp(access: "user", variables: { email: "bob@example.com", pass: "bobpass" })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Second signUp should succeed: {:?}", body["errors"]);
+			let token = body["data"]["signUp"].as_str().unwrap();
+			assert!(!token.is_empty());
+		}
+
+		// Test signIn field arguments via introspection
+		{
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.body(
+					json!({"query": r#"{
+						__type(name: "Mutation") {
+							fields {
+								name
+								args { name type { name kind ofType { name } } }
+								type { name kind ofType { name } }
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Introspection errors: {:?}", body["errors"]);
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let sign_in = fields.iter().find(|f| f["name"] == "signIn").unwrap();
+			let sign_up = fields.iter().find(|f| f["name"] == "signUp").unwrap();
+
+			// signIn should return String! (NON_NULL String)
+			assert_eq!(sign_in["type"]["kind"], "NON_NULL");
+			assert_eq!(sign_in["type"]["ofType"]["name"], "String");
+
+			// signUp should return String! (NON_NULL String)
+			assert_eq!(sign_up["type"]["kind"], "NON_NULL");
+			assert_eq!(sign_up["type"]["ofType"]["name"], "String");
+
+			// signIn should have 'access' and 'variables' arguments
+			let sign_in_args = sign_in["args"].as_array().unwrap();
+			let arg_names: Vec<&str> =
+				sign_in_args.iter().map(|a| a["name"].as_str().unwrap()).collect();
+			assert!(arg_names.contains(&"access"), "signIn should have 'access' arg");
+			assert!(arg_names.contains(&"variables"), "signIn should have 'variables' arg");
+
+			// access should be String! (NON_NULL)
+			let access_arg = sign_in_args.iter().find(|a| a["name"] == "access").unwrap();
+			assert_eq!(access_arg["type"]["kind"], "NON_NULL");
+			assert_eq!(access_arg["type"]["ofType"]["name"], "String");
+
+			// variables should be JSON! (NON_NULL)
+			let variables_arg = sign_in_args.iter().find(|a| a["name"] == "variables").unwrap();
+			assert_eq!(variables_arg["type"]["kind"], "NON_NULL");
+			assert_eq!(variables_arg["type"]["ofType"]["name"], "JSON");
+		}
+
+		// Test that when no signup clause exists, signUp is not available
+		// (This test uses a separate ns/db with signin-only access)
+		{
+			let ns2 = Ulid::new().to_string();
+			let db2 = Ulid::new().to_string();
+
+			// Set up a signin-only access method in a new db
+			let res = client
+				.post(sql_url)
+				.basic_auth(USER, Some(PASS))
+				.header("surreal-ns", &ns2)
+				.header("surreal-db", &db2)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE ACCESS readonly_user ON DATABASE TYPE RECORD
+						SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+						DURATION FOR SESSION 60s, FOR TOKEN 1d;
+					DEFINE TABLE user SCHEMAFUL;
+					DEFINE FIELD email ON user TYPE string;
+					DEFINE FIELD pass ON user TYPE string;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			// Check that signIn exists but signUp does NOT
+			let res = client
+				.post(gql_url)
+				.basic_auth(USER, Some(PASS))
+				.header("surreal-ns", &ns2)
+				.header("surreal-db", &db2)
+				.body(
+					json!({"query": r#"{
+						__type(name: "Mutation") {
+							fields { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Introspection errors: {:?}", body["errors"]);
+			let fields = &body["data"]["__type"]["fields"];
+			let field_names: Vec<&str> =
+				fields.as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(
+				field_names.contains(&"signIn"),
+				"Mutation should have signIn field when signin clause exists"
+			);
+			assert!(
+				!field_names.contains(&"signUp"),
+				"Mutation should NOT have signUp when no signup clause exists, got: {field_names:?}"
+			);
+		}
+
+		Ok(())
+	}
 }

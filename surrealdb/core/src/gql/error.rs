@@ -30,6 +30,9 @@ pub enum GqlError {
 	#[error("Internal Error: {0}")]
 	InternalError(String),
 
+	#[error("Authentication error: {0}")]
+	AuthError(String),
+
 	#[error("Error converting value: {val} to type: {}", target.to_sql())]
 	TypeError {
 		target: Kind,
@@ -43,6 +46,10 @@ pub fn schema_error(msg: impl Into<String>) -> GqlError {
 
 pub fn resolver_error(msg: impl Into<String>) -> GqlError {
 	GqlError::ResolverError(msg.into())
+}
+
+pub fn auth_error(msg: impl Into<String>) -> GqlError {
+	GqlError::AuthError(msg.into())
 }
 pub fn internal_error(msg: impl Into<String>) -> GqlError {
 	let msg = msg.into();
