@@ -1525,11 +1525,12 @@ impl Parser<'_> {
 	}
 
 	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
-		use graphql::{FunctionsConfig, TablesConfig};
+		use graphql::{FunctionsConfig, IntrospectionConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
 		let mut tmp_depth = Option::<u32>::None;
 		let mut tmp_complexity = Option::<u32>::None;
+		let mut tmp_introspection = Option::<IntrospectionConfig>::None;
 		loop {
 			match self.peek_kind() {
 				t!("NONE") => {
@@ -1588,6 +1589,18 @@ impl Parser<'_> {
 					} else if ident.eq_ignore_ascii_case("COMPLEXITY") {
 						self.pop_peek();
 						tmp_complexity = Some(self.next_token_value::<u32>()?);
+					} else if ident.eq_ignore_ascii_case("INTROSPECTION") {
+						self.pop_peek();
+						let next = self.next();
+						match next.kind {
+							t!("AUTO") => {
+								tmp_introspection = Some(IntrospectionConfig::Auto);
+							}
+							t!("NONE") => {
+								tmp_introspection = Some(IntrospectionConfig::None);
+							}
+							_ => unexpected!(self, next, "`AUTO` or `NONE`"),
+						}
 					} else {
 						break;
 					}
@@ -1601,6 +1614,7 @@ impl Parser<'_> {
 			functions: tmp_fncs.unwrap_or_default(),
 			depth_limit: tmp_depth,
 			complexity_limit: tmp_complexity,
+			introspection: tmp_introspection.unwrap_or_default(),
 		})
 	}
 

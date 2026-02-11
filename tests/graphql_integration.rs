@@ -3281,6 +3281,227 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn introspection_control() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with introspection enabled (default)
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE person SCHEMAFUL;
+					DEFINE FIELD name ON person TYPE string;
+					DEFINE FIELD age ON person TYPE int;
+					CREATE person:1 SET name = 'Alice', age = 30;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Introspection should work by default
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ __schema { queryType { fields { name } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Introspection should be allowed by default, got errors: {:?}",
+				body["errors"]
+			);
+			let fields = &body["data"]["__schema"]["queryType"]["fields"];
+			assert!(fields.is_array(), "Expected query type fields from introspection");
+		}
+
+		// __type introspection query should also work
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ __type(name: "person") { name fields { name } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected no errors for __type query, got: {:?}",
+				body
+			);
+			assert_eq!(body["data"]["__type"]["name"], "person");
+		}
+
+		// Normal data queries should work
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"{ person { id, name, age } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors for data query, got: {:?}", body);
+			assert!(body["data"]["person"].is_array(), "Expected person data");
+		}
+
+		// Disable introspection
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO INTROSPECTION NONE;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// __schema introspection should now be blocked
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ __schema { queryType { fields { name } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let schema_data = &body["data"]["__schema"];
+			// When introspection is disabled, __schema should return null or produce an error
+			assert!(
+				schema_data.is_null() || body["errors"].is_array(),
+				"Expected introspection to be blocked, got: {:?}",
+				body
+			);
+		}
+
+		// __type introspection should also be blocked
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ __type(name: "person") { name fields { name } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let type_data = &body["data"]["__type"];
+			assert!(
+				type_data.is_null() || body["errors"].is_array(),
+				"Expected __type introspection to be blocked, got: {:?}",
+				body
+			);
+		}
+
+		// Normal data queries should still work even with introspection disabled
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"{ person { id, name, age } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Normal queries should still work with introspection disabled, got: {:?}",
+				body["errors"]
+			);
+			assert!(body["data"]["person"].is_array(), "Expected person data");
+		}
+
+		// Re-enable introspection
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO INTROSPECTION AUTO;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Introspection should work again
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ __schema { queryType { fields { name } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Introspection should work after re-enabling, got: {:?}",
+				body["errors"]
+			);
+			let fields = &body["data"]["__schema"]["queryType"]["fields"];
+			assert!(fields.is_array(), "Expected query type fields from introspection");
+		}
+
+		// Verify DEFINE CONFIG GRAPHQL round-trip preserves INTROSPECTION setting
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO INTROSPECTION NONE;
+					INFO FOR DB;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let info_result = &body[1]["result"];
+			let config_str = info_result["configs"]["GraphQL"].as_str().unwrap_or("");
+			assert!(
+				config_str.contains("INTROSPECTION NONE"),
+				"Expected 'INTROSPECTION NONE' in config, got: {config_str}"
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn auth_mutations() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_gql().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");

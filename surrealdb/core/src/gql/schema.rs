@@ -17,7 +17,9 @@ use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, TableProvider};
-use crate::catalog::{GraphQLConfig, GraphQLFunctionsConfig, GraphQLTablesConfig};
+use crate::catalog::{
+	GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig, GraphQLTablesConfig,
+};
 use crate::dbs::Session;
 use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::{Expr, Kind, Literal};
@@ -173,6 +175,10 @@ pub async fn generate_schema(
 	}
 	if let Some(complexity) = gql_config.complexity_limit {
 		schema = schema.limit_complexity(complexity as usize);
+	}
+	// Disable introspection when configured to do so
+	if matches!(gql_config.introspection, GraphQLIntrospectionConfig::None) {
+		schema = schema.disable_introspection();
 	}
 
 	if let Some(mutation) = mutation_obj {

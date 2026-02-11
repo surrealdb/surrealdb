@@ -9,6 +9,7 @@ pub struct GraphQLConfig {
 	pub functions: FunctionsConfig,
 	pub depth_limit: Option<u32>,
 	pub complexity_limit: Option<u32>,
+	pub introspection: IntrospectionConfig,
 }
 
 impl From<GraphQLConfig> for crate::catalog::GraphQLConfig {
@@ -18,6 +19,7 @@ impl From<GraphQLConfig> for crate::catalog::GraphQLConfig {
 			functions: v.functions.into(),
 			depth_limit: v.depth_limit,
 			complexity_limit: v.complexity_limit,
+			introspection: v.introspection.into(),
 		}
 	}
 }
@@ -29,6 +31,7 @@ impl From<crate::catalog::GraphQLConfig> for GraphQLConfig {
 			functions: v.functions.into(),
 			depth_limit: v.depth_limit,
 			complexity_limit: v.complexity_limit,
+			introspection: v.introspection.into(),
 		}
 	}
 }
@@ -106,6 +109,48 @@ pub enum FunctionsConfig {
 	Exclude(Vec<String>),
 }
 
+/// Controls whether GraphQL schema introspection is enabled.
+///
+/// When set to `None`, introspection queries (`__schema`, `__type`, etc.) are disabled,
+/// preventing clients from discovering the schema structure. This is useful in production
+/// to avoid leaking table/field names to unauthorized users.
+///
+/// Defaults to `Auto` (introspection enabled).
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum IntrospectionConfig {
+	#[default]
+	Auto,
+	None,
+}
+
+impl From<IntrospectionConfig> for crate::catalog::GraphQLIntrospectionConfig {
+	fn from(v: IntrospectionConfig) -> Self {
+		match v {
+			IntrospectionConfig::Auto => Self::Auto,
+			IntrospectionConfig::None => Self::None,
+		}
+	}
+}
+
+impl From<crate::catalog::GraphQLIntrospectionConfig> for IntrospectionConfig {
+	fn from(v: crate::catalog::GraphQLIntrospectionConfig) -> Self {
+		match v {
+			crate::catalog::GraphQLIntrospectionConfig::Auto => Self::Auto,
+			crate::catalog::GraphQLIntrospectionConfig::None => Self::None,
+		}
+	}
+}
+
+impl ToSql for IntrospectionConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			IntrospectionConfig::Auto => f.push_str("AUTO"),
+			IntrospectionConfig::None => f.push_str("NONE"),
+		}
+	}
+}
+
 impl ToSql for GraphQLConfig {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("GRAPHQL");
@@ -118,6 +163,11 @@ impl ToSql for GraphQLConfig {
 		}
 		if let Some(complexity) = self.complexity_limit {
 			f.push_str(&format!(" COMPLEXITY {complexity}"));
+		}
+		// Only emit INTROSPECTION clause when it differs from the default (AUTO)
+		if matches!(self.introspection, IntrospectionConfig::None) {
+			f.push_str(" INTROSPECTION ");
+			self.introspection.fmt_sql(f, fmt);
 		}
 	}
 }
