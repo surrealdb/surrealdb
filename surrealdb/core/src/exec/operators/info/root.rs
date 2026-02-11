@@ -20,7 +20,9 @@ use crate::catalog::providers::{
 	AuthorisationProvider, NamespaceProvider, NodeProvider, RootProvider, UserProvider,
 };
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
 use crate::sys::INFORMATION;
@@ -34,6 +36,7 @@ use crate::val::{Object, Value};
 pub struct RootInfoPlan {
 	/// Whether to return structured output
 	pub structured: bool,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -53,6 +56,10 @@ impl ExecOperator for RootInfoPlan {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(self.metrics.as_ref())
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

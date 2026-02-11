@@ -36,7 +36,6 @@
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
@@ -77,6 +76,7 @@ pub(crate) mod expression_registry;
 pub(crate) mod field_path;
 pub(crate) mod function;
 pub(crate) mod index;
+pub(crate) mod metrics;
 pub(crate) mod operators;
 pub(crate) mod parts;
 pub(crate) mod permission;
@@ -88,6 +88,8 @@ pub(crate) mod planner;
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
+// Re-export metrics types
+pub(crate) use metrics::{OperatorMetrics, monitor_stream};
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
@@ -194,54 +196,23 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	fn is_scalar(&self) -> bool {
 		false
 	}
-}
 
-/// A stream wrapper that creates a per-batch tracing span on each poll.
-///
-/// Each `poll_next` creates a new `trace`-level span named `"batch"` with:
-/// - `op`: the operator name (e.g. "Scan", "Filter")
-/// - `idx`: the batch index (incremented on each yielded batch)
-/// - `size`: the number of values in the batch (recorded after yield)
-///
-/// Because the pipeline is pull-based, these spans nest naturally:
-/// `batch(op=Project) > batch(op=Limit) > batch(op=Filter) > batch(op=Scan)`.
-struct InstrumentedStream {
-	inner: ValueBatchStream,
-	name: &'static str,
-	batch_idx: u64,
-}
-
-impl Stream for InstrumentedStream {
-	type Item = FlowResult<ValueBatch>;
-
-	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-		let this = self.get_mut(); // safe: InstrumentedStream is Unpin
-		let span = tracing::trace_span!(
-			"batch",
-			op = this.name,
-			idx = this.batch_idx,
-			size = tracing::field::Empty,
-		);
-		let _enter = span.enter();
-
-		let result = this.inner.as_mut().poll_next(cx);
-
-		if let Poll::Ready(Some(Ok(ref batch))) = result {
-			span.record("size", batch.values.len() as u64);
-			this.batch_idx += 1;
-		}
-
-		result
+	/// Returns the operator-level metrics for this node, if available.
+	///
+	/// Used by `EXPLAIN ANALYZE` to collect runtime statistics after
+	/// the plan has been fully consumed.
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		None
 	}
-}
 
-/// Wrap a `ValueBatchStream` so that a per-batch tracing span is created on every poll.
-pub(crate) fn instrument_stream(stream: ValueBatchStream, name: &'static str) -> ValueBatchStream {
-	Box::pin(InstrumentedStream {
-		inner: stream,
-		name,
-		batch_idx: 0,
-	})
+	/// Returns named references to physical expressions owned by this operator.
+	///
+	/// Used by `EXPLAIN` / `EXPLAIN ANALYZE` to display the expression tree
+	/// beneath each operator. The name describes the role of the expression
+	/// (e.g. "predicate", "projection", "sort_key").
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![]
+	}
 }
 
 // #[cfg(test)]

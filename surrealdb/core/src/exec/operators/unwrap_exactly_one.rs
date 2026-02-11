@@ -12,8 +12,8 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -32,6 +32,8 @@ pub struct UnwrapExactlyOne {
 	/// If true, return NONE when input produces 0 results (used for table scans).
 	/// If false, return an error when input produces 0 results (used for array sources).
 	pub(crate) none_on_empty: bool,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -51,6 +53,10 @@ impl ExecOperator for UnwrapExactlyOne {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn is_scalar(&self) -> bool {
@@ -100,6 +106,6 @@ impl ExecOperator for UnwrapExactlyOne {
 			}
 		};
 
-		Ok(Box::pin(unwrap_stream))
+		Ok(monitor_stream(Box::pin(unwrap_stream), "UnwrapExactlyOne", &self.metrics))
 	}
 }

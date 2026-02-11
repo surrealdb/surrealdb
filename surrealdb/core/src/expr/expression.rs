@@ -85,6 +85,7 @@ pub(crate) enum Expr {
 	Sleep(Box<SleepStatement>),
 	Explain {
 		format: ExplainFormat,
+		analyze: bool,
 		statement: Box<Expr>,
 	},
 }

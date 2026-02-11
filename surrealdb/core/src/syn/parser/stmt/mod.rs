@@ -15,7 +15,6 @@ use crate::sql::statements::{
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
 use crate::sql::{AssignOperator, ExplainFormat, Expr, Literal, Param, TopLevelExpr};
-use crate::syn::error::{MessageKind, SyntaxError};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -303,17 +302,22 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `EXPLAIN` to already be consumed.
 	pub(super) async fn parse_explain_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
-		// Check for optional ANALYZE keyword (not yet supported)
+		// Check for optional ANALYZE keyword
 		// ANALYZE is not a reserved keyword, so we need to check if it's an identifier
-		let peek = self.peek();
-		if matches!(peek.kind, TokenKind::Identifier) {
-			let ident_str = self.lexer.span_str(peek.span);
-			if ident_str.eq_ignore_ascii_case("ANALYZE") {
-				self.pop_peek();
-				return Err(SyntaxError::new("EXPLAIN ANALYZE is not yet supported")
-					.with_span(peek.span, MessageKind::Error));
+		let analyze = {
+			let peek = self.peek();
+			if matches!(peek.kind, TokenKind::Identifier) {
+				let ident_str = self.lexer.span_str(peek.span);
+				if ident_str.eq_ignore_ascii_case("ANALYZE") {
+					self.pop_peek();
+					true
+				} else {
+					false
+				}
+			} else {
+				false
 			}
-		}
+		};
 
 		// Check for optional FORMAT keyword
 		let format = {
@@ -351,6 +355,7 @@ impl Parser<'_> {
 
 		Ok(Expr::Explain {
 			format,
+			analyze,
 			statement: Box::new(statement),
 		})
 	}

@@ -11,7 +11,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 
 /// Expr operator - evaluates a scalar expression.
 ///
@@ -21,6 +23,8 @@ use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchSt
 pub struct ExprPlan {
 	/// The expression to evaluate
 	pub expr: Arc<dyn PhysicalExpr>,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -40,6 +44,10 @@ impl ExecOperator for ExprPlan {
 
 	fn access_mode(&self) -> AccessMode {
 		self.expr.access_mode()
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

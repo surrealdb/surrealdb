@@ -16,7 +16,9 @@ use surrealdb_types::ToSql;
 use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Datetime, Object, TableName, Value};
@@ -33,6 +35,7 @@ pub struct TableInfoPlan {
 	pub structured: bool,
 	/// Optional version timestamp to filter schema by
 	pub version: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -59,6 +62,10 @@ impl ExecOperator for TableInfoPlan {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(self.metrics.as_ref())
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

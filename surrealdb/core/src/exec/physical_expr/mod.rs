@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::{AccessMode, ContextLevel, ExecutionContext, SendSyncRequirement};
+use crate::exec::{AccessMode, ContextLevel, ExecOperator, ExecutionContext, SendSyncRequirement};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
@@ -287,6 +287,24 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	) -> FlowResult<Option<Vec<(Idiom, Value)>>> {
 		let _ = ctx; // silence unused warning
 		Ok(None)
+	}
+
+	/// Returns references to child physical expressions for tree traversal.
+	///
+	/// Used by `EXPLAIN` / `EXPLAIN ANALYZE` to display expression trees
+	/// beneath each operator. Each element is `(role, expr)` where `role`
+	/// describes the relationship (e.g. "left", "right", "operand").
+	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![]
+	}
+
+	/// Returns embedded operator sub-trees owned by this expression.
+	///
+	/// Some expressions (e.g. `ScalarSubquery`, `LookupPart`) wrap entire
+	/// execution plan trees. This method exposes those trees so that
+	/// `EXPLAIN` / `EXPLAIN ANALYZE` can recursively format them.
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		vec![]
 	}
 }
 

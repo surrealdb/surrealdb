@@ -12,7 +12,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::evaluate_expr;
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::Expr;
 use crate::val::Value;
 
@@ -36,6 +38,8 @@ use crate::val::Value;
 pub struct IfElsePlan {
 	/// Condition-body pairs: Vec<(condition_expr, body_expr)>
 	pub branches: Vec<(Expr, Expr)>,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// Optional else body
 	pub else_body: Option<Expr>,
 }
@@ -87,6 +91,10 @@ impl ExecOperator for IfElsePlan {
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// With deferred planning, we don't have pre-built children
 		vec![]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn is_scalar(&self) -> bool {

@@ -21,7 +21,9 @@ use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::collect_stream;
 use crate::exec::planner::try_plan_expr;
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::Block;
 use crate::val::Value;
 
@@ -42,6 +44,8 @@ use crate::val::Value;
 pub struct SequencePlan {
 	/// The original block containing Expr values
 	pub block: Block,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 /// Get the FrozenContext for planning from the ExecutionContext.
@@ -117,6 +121,10 @@ impl ExecOperator for SequencePlan {
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// With deferred planning, we don't have pre-built children
 		vec![]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn is_scalar(&self) -> bool {

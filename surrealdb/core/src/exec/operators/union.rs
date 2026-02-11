@@ -5,7 +5,7 @@ use futures::stream::{self, StreamExt};
 
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	ValueBatchStream,
+	OperatorMetrics, ValueBatchStream, monitor_stream,
 };
 
 /// Union operator - combines results from multiple execution plans.
@@ -23,6 +23,7 @@ use crate::exec::{
 #[derive(Debug, Clone)]
 pub struct Union {
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -46,13 +47,18 @@ impl ExecOperator for Union {
 		self.inputs.iter().collect()
 	}
 
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		if self.inputs.is_empty() {
-			return Ok(Box::pin(stream::empty()));
+			return Ok(monitor_stream(Box::pin(stream::empty()), "Union", &self.metrics));
 		}
 
 		if self.inputs.len() == 1 {
-			return self.inputs[0].execute(ctx);
+			let stream = self.inputs[0].execute(ctx)?;
+			return Ok(monitor_stream(stream, "Union", &self.metrics));
 		}
 
 		// Execute inputs lazily and sequentially. Each input's stream is only
@@ -94,6 +100,6 @@ impl ExecOperator for Union {
 			},
 		);
 
-		Ok(Box::pin(combined))
+		Ok(monitor_stream(Box::pin(combined), "Union", &self.metrics))
 	}
 }

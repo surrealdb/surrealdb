@@ -71,6 +71,7 @@ pub(crate) enum Expr {
 	Sleep(Box<SleepStatement>),
 	Explain {
 		format: ExplainFormat,
+		analyze: bool,
 		statement: Box<Expr>,
 	},
 }
@@ -548,9 +549,13 @@ impl ToSql for Expr {
 			Expr::Sleep(s) => s.fmt_sql(f, fmt),
 			Expr::Explain {
 				format: explain_format,
+				analyze,
 				statement,
 			} => {
 				f.push_str("EXPLAIN");
+				if *analyze {
+					f.push_str(" ANALYZE");
+				}
 				match explain_format {
 					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
 					ExplainFormat::Json => f.push_str(" FORMAT JSON"),
@@ -620,9 +625,11 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Sleep(s) => crate::expr::Expr::Sleep(Box::new((*s).into())),
 			Expr::Explain {
 				format,
+				analyze,
 				statement,
 			} => crate::expr::Expr::Explain {
 				format: format.into(),
+				analyze,
 				statement: Box::new((*statement).into()),
 			},
 		}
@@ -687,9 +694,11 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Sleep(s) => Expr::Sleep(Box::new((*s).into())),
 			crate::expr::Expr::Explain {
 				format,
+				analyze,
 				statement,
 			} => Expr::Explain {
 				format: format.into(),
+				analyze,
 				statement: Box::new((*statement).into()),
 			},
 		}

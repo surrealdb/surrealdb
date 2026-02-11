@@ -19,8 +19,8 @@ use crate::exec::permission::{
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
@@ -44,6 +44,8 @@ pub struct IndexScan {
 	pub direction: ScanDirection,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -122,6 +124,10 @@ impl ExecOperator for IndexScan {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -406,7 +412,7 @@ impl ExecOperator for IndexScan {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(monitor_stream(Box::pin(stream), "IndexScan", &self.metrics))
 	}
 }
 

@@ -96,6 +96,10 @@ impl PhysicalExpr for ScalarSubquery {
 		// This is why `SELECT *, (UPSERT person) FROM person` is ReadWrite
 		self.plan.access_mode()
 	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		vec![("subquery", &self.plan)]
+	}
 }
 
 impl ToSql for ScalarSubquery {

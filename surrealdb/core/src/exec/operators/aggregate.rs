@@ -7,7 +7,8 @@ use futures::StreamExt;
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	FlowResultExt as _, PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::val::{Object, Value};
@@ -32,6 +33,8 @@ pub struct Aggregate {
 	/// The aggregate expressions to compute for each group.
 	/// These are the selected fields that may contain aggregate functions.
 	pub(crate) aggregates: Vec<AggregateField>,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 /// Represents a field in the SELECT that may be an aggregate.
@@ -205,6 +208,34 @@ impl ExecOperator for Aggregate {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut exprs = Vec::new();
+		for expr in &self.group_by_exprs {
+			exprs.push(("group_by", expr));
+		}
+		for agg in &self.aggregates {
+			if let Some(info) = &agg.aggregate_expr_info {
+				for extracted in &info.aggregates {
+					exprs.push(("agg_arg", &extracted.argument_expr));
+					for extra in &extracted.extra_args {
+						exprs.push(("agg_extra", extra));
+					}
+				}
+				if let Some(post) = &info.post_expr {
+					exprs.push(("agg_post_expr", post));
+				}
+			}
+			if let Some(fallback) = &agg.fallback_expr {
+				exprs.push(("agg_fallback", fallback));
+			}
+		}
+		exprs
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -385,7 +416,7 @@ impl ExecOperator for Aggregate {
 			yield ValueBatch { values: results };
 		};
 
-		Ok(Box::pin(aggregate_stream))
+		Ok(monitor_stream(Box::pin(aggregate_stream), "Aggregate", &self.metrics))
 	}
 }
 

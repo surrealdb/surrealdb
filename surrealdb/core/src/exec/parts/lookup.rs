@@ -107,6 +107,10 @@ impl PhysicalExpr for LookupPart {
 	fn access_mode(&self) -> AccessMode {
 		self.plan.access_mode()
 	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		vec![("lookup", &self.plan)]
+	}
 }
 
 impl ToSql for LookupPart {

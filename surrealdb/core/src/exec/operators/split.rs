@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
@@ -20,6 +20,7 @@ use crate::val::Value;
 pub struct Split {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) idioms: Vec<Idiom>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -49,6 +50,10 @@ impl ExecOperator for Split {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -84,7 +89,7 @@ impl ExecOperator for Split {
 			}
 		});
 
-		Ok(Box::pin(split_stream))
+		Ok(monitor_stream(Box::pin(split_stream), "Split", &self.metrics))
 	}
 }
 

@@ -17,8 +17,8 @@ use crate::exec::permission::{
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::expr::operator::MatchesOperator;
@@ -45,6 +45,8 @@ pub struct FullTextScan {
 	pub operator: MatchesOperator,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -67,6 +69,10 @@ impl ExecOperator for FullTextScan {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -218,7 +224,7 @@ impl ExecOperator for FullTextScan {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
 	}
 }
 

@@ -13,7 +13,6 @@ use super::util::{
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
-use crate::exec::ExecOperator;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
 #[cfg(all(storage, not(target_family = "wasm")))]
@@ -23,6 +22,7 @@ use crate::exec::operators::{
 	RandomShuffle, Scan, SelectProject, Sort, SortByKey, SortDirection, SortKey, SortTopK,
 	SourceExpr, Split, Timeout, Union, UnwrapExactlyOne,
 };
+use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
 use crate::expr::{Cond, Expr, Idiom, Literal};
 
@@ -220,6 +220,7 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(Timeout {
 					input: fetched,
 					timeout: Some(timeout_phys),
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>
 			}
 		};
@@ -228,6 +229,7 @@ impl<'ctx> Planner<'ctx> {
 			Ok(Arc::new(UnwrapExactlyOne {
 				input: timed,
 				none_on_empty: !is_value_source,
+				metrics: Arc::new(OperatorMetrics::new()),
 			}))
 		} else {
 			Ok(timed)
@@ -259,6 +261,7 @@ impl<'ctx> Planner<'ctx> {
 			Arc::new(Filter {
 				input: source,
 				predicate,
+				metrics: Arc::new(OperatorMetrics::new()),
 			}) as Arc<dyn ExecOperator>
 		} else {
 			source
@@ -269,6 +272,7 @@ impl<'ctx> Planner<'ctx> {
 			Arc::new(Split {
 				input: filtered,
 				idioms,
+				metrics: Arc::new(OperatorMetrics::new()),
 			}) as Arc<dyn ExecOperator>
 		} else {
 			filtered
@@ -288,6 +292,7 @@ impl<'ctx> Planner<'ctx> {
 					group_by,
 					group_by_exprs,
 					aggregates,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>,
 				true,
 			)
@@ -312,6 +317,7 @@ impl<'ctx> Planner<'ctx> {
 				input: sorted,
 				limit: limit_expr,
 				offset: offset_expr,
+				metrics: Arc::new(OperatorMetrics::new()),
 			}) as Arc<dyn ExecOperator>
 		} else {
 			sorted
@@ -330,6 +336,7 @@ impl<'ctx> Planner<'ctx> {
 					fields: vec![],
 					omit: omit_fields,
 					include_all: true,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>
 			} else {
 				limited
@@ -382,6 +389,7 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			Ok(Arc::new(Union {
 				inputs: source_plans,
+				metrics: Arc::new(OperatorMetrics::new()),
 			}))
 		}
 	}
@@ -415,6 +423,7 @@ impl<'ctx> Planner<'ctx> {
 					predicate: scan_predicate,
 					limit: scan_limit,
 					start: scan_start,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -432,6 +441,7 @@ impl<'ctx> Planner<'ctx> {
 					predicate: None,
 					limit: None,
 					start: None,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -441,6 +451,7 @@ impl<'ctx> Planner<'ctx> {
 				let phys_expr = self.physical_expr(expr)?;
 				Ok(Arc::new(SourceExpr {
 					expr: phys_expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -457,6 +468,7 @@ impl<'ctx> Planner<'ctx> {
 						predicate: scan_predicate,
 						limit: scan_limit,
 						start: scan_start,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
@@ -471,12 +483,14 @@ impl<'ctx> Planner<'ctx> {
 						predicate: None,
 						limit: None,
 						start: None,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
 					let phys_expr = self.physical_expr(Expr::Param(param))?;
 					Ok(Arc::new(SourceExpr {
 						expr: phys_expr,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>)
 				}
 			},
@@ -493,6 +507,7 @@ impl<'ctx> Planner<'ctx> {
 					predicate: scan_predicate,
 					limit: scan_limit,
 					start: scan_start,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -510,6 +525,7 @@ impl<'ctx> Planner<'ctx> {
 					predicate: scan_predicate,
 					limit: scan_limit,
 					start: scan_start,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -517,6 +533,7 @@ impl<'ctx> Planner<'ctx> {
 				let phys_expr = self.physical_expr(other)?;
 				Ok(Arc::new(SourceExpr {
 					expr: phys_expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 		}
@@ -536,6 +553,7 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(ProjectValue {
 					input,
 					expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -554,6 +572,7 @@ impl<'ctx> Planner<'ctx> {
 						fields: vec![],
 						omit: omit_fields,
 						include_all: true,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>);
 				}
 
@@ -570,6 +589,7 @@ impl<'ctx> Planner<'ctx> {
 					return Ok(Arc::new(ProjectValue {
 						input,
 						expr,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>);
 				}
 
@@ -610,6 +630,7 @@ impl<'ctx> Planner<'ctx> {
 					fields: field_selections,
 					omit: omit_fields,
 					include_all: has_wildcard,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 		}
@@ -647,6 +668,7 @@ impl<'ctx> Planner<'ctx> {
 		Ok(Arc::new(Fetch {
 			input,
 			fields,
+			metrics: Arc::new(OperatorMetrics::new()),
 		}) as Arc<dyn ExecOperator>)
 	}
 
@@ -667,6 +689,7 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(RandomShuffle {
 					input,
 					limit: effective_limit,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 			Ordering::Order(order_list) => {
@@ -678,6 +701,7 @@ impl<'ctx> Planner<'ctx> {
 						input,
 						order_by,
 						temp_dir: temp_dir.to_path_buf(),
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>);
 				}
 
@@ -688,12 +712,14 @@ impl<'ctx> Planner<'ctx> {
 						input,
 						order_by,
 						limit: effective_limit,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>);
 				}
 
 				Ok(Arc::new(Sort {
 					input,
 					order_by,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 		}
@@ -719,6 +745,7 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(RandomShuffle {
 						input,
 						limit: effective_limit,
+						metrics: Arc::new(OperatorMetrics::new()),
 					}) as Arc<dyn ExecOperator>,
 					vec![],
 				))
@@ -800,13 +827,15 @@ impl<'ctx> Planner<'ctx> {
 
 				let computed = if registry.has_expressions_for_point(ComputePoint::Sort) {
 					let compute_fields = registry.get_expressions_for_point(ComputePoint::Sort);
-					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+					Arc::new(Compute::new(input, compute_fields, Arc::new(OperatorMetrics::new())))
+						as Arc<dyn ExecOperator>
 				} else {
 					input
 				};
 
 				Ok((
-					Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
+					Arc::new(SortByKey::new(computed, sort_keys, Arc::new(OperatorMetrics::new())))
+						as Arc<dyn ExecOperator>,
 					sort_only_fields,
 				))
 			}
@@ -833,6 +862,7 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(ProjectValue {
 					input,
 					expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>)
 			}
 
@@ -854,9 +884,11 @@ impl<'ctx> Planner<'ctx> {
 					let projections: Vec<Projection> = std::iter::once(Projection::All)
 						.chain(omit_names.into_iter().map(Projection::Omit))
 						.collect();
-					return Ok(
-						Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>
-					);
+					return Ok(Arc::new(SelectProject::new(
+						input,
+						projections,
+						Arc::new(OperatorMetrics::new()),
+					)) as Arc<dyn ExecOperator>);
 				}
 
 				let mut projections = Vec::with_capacity(field_list.len());
@@ -903,7 +935,11 @@ impl<'ctx> Planner<'ctx> {
 					}
 				}
 
-				Ok(Arc::new(SelectProject::new(input, projections)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(SelectProject::new(
+					input,
+					projections,
+					Arc::new(OperatorMetrics::new()),
+				)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -962,6 +998,7 @@ impl<'ctx> Planner<'ctx> {
 				}
 				Arc::new(ExprPlan {
 					expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				}) as Arc<dyn ExecOperator>
 			}
 		};
@@ -969,6 +1006,7 @@ impl<'ctx> Planner<'ctx> {
 		Ok(Arc::new(LetPlan {
 			name,
 			value,
+			metrics: Arc::new(OperatorMetrics::new()),
 		}) as Arc<dyn ExecOperator>)
 	}
 

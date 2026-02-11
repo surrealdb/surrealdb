@@ -17,7 +17,7 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -33,6 +33,8 @@ pub struct Compute {
 	pub input: Arc<dyn ExecOperator>,
 	/// Fields to compute: (internal_name, expression)
 	pub fields: Vec<(String, Arc<dyn PhysicalExpr>)>,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -75,6 +77,14 @@ impl ExecOperator for Compute {
 		vec![&self.input]
 	}
 
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.fields.iter().map(|(name, expr)| (name.as_str(), expr)).collect()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// If there are no fields to compute, just pass through
 		if self.fields.is_empty() {
@@ -98,7 +108,7 @@ impl ExecOperator for Compute {
 			}
 		});
 
-		Ok(Box::pin(computed))
+		Ok(monitor_stream(Box::pin(computed), "Compute", &self.metrics))
 	}
 }
 
@@ -155,10 +165,15 @@ async fn compute_batch(
 
 impl Compute {
 	/// Create a new Compute operator.
-	pub fn new(input: Arc<dyn ExecOperator>, fields: Vec<(String, Arc<dyn PhysicalExpr>)>) -> Self {
+	pub fn new(
+		input: Arc<dyn ExecOperator>,
+		fields: Vec<(String, Arc<dyn PhysicalExpr>)>,
+		metrics: Arc<OperatorMetrics>,
+	) -> Self {
 		Self {
 			input,
 			fields,
+			metrics,
 		}
 	}
 }
@@ -187,6 +202,7 @@ mod tests {
 		let compute = Compute::new(
 			source,
 			vec![("a".to_string(), literal_expr(42)), ("b".to_string(), literal_expr(100))],
+			Arc::new(crate::exec::OperatorMetrics::new()),
 		);
 
 		assert_eq!(compute.name(), "Compute");
@@ -207,7 +223,7 @@ mod tests {
 			expr: literal_expr(1),
 		});
 
-		let compute = Compute::new(source, vec![]);
+		let compute = Compute::new(source, vec![], Arc::new(crate::exec::OperatorMetrics::new()));
 
 		assert!(compute.fields.is_empty());
 		assert_eq!(compute.fields.len(), 0);

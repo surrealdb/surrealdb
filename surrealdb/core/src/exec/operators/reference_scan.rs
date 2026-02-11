@@ -13,7 +13,7 @@ use futures::StreamExt;
 use crate::catalog::providers::TableProvider;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
@@ -63,6 +63,9 @@ pub struct ReferenceScan {
 	/// Range end bound for the referencing record IDs.
 	/// When `Unbounded`, ends at the field/table suffix.
 	pub(crate) range_end: Bound<Arc<dyn PhysicalExpr>>,
+
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -105,6 +108,10 @@ impl ExecOperator for ReferenceScan {
 	fn access_mode(&self) -> AccessMode {
 		// Reference scan is read-only, but propagate source expression's access mode
 		self.source.access_mode()
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -375,7 +382,7 @@ impl ExecOperator for ReferenceScan {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(monitor_stream(Box::pin(stream), "ReferenceScan", &self.metrics))
 	}
 }
 
@@ -411,6 +418,7 @@ mod tests {
 			output_mode: ReferenceScanOutput::RecordId,
 			range_start: Bound::Unbounded,
 			range_end: Bound::Unbounded,
+			metrics: Arc::new(crate::exec::OperatorMetrics::new()),
 		};
 
 		assert_eq!(scan.name(), "ReferenceScan");

@@ -12,7 +12,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	monitor_stream,
+};
 use crate::val::Value;
 
 /// SourceExpr operator - evaluates an expression and yields values for iteration.
@@ -26,6 +29,8 @@ use crate::val::Value;
 pub struct SourceExpr {
 	/// The expression to evaluate
 	pub expr: Arc<dyn PhysicalExpr>,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -48,6 +53,10 @@ impl ExecOperator for SourceExpr {
 	fn access_mode(&self) -> AccessMode {
 		// Delegate to the wrapped expression
 		self.expr.access_mode()
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -80,7 +89,7 @@ impl ExecOperator for SourceExpr {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(monitor_stream(Box::pin(stream), "SourceExpr", &self.metrics))
 	}
 
 	fn is_scalar(&self) -> bool {

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -22,6 +22,7 @@ pub struct Fetch {
 	/// The fields to fetch. Each idiom points to a field that may contain
 	/// record IDs to be resolved.
 	pub(crate) fields: Vec<Idiom>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -51,6 +52,10 @@ impl ExecOperator for Fetch {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn is_scalar(&self) -> bool {
@@ -84,7 +89,7 @@ impl ExecOperator for Fetch {
 			}
 		});
 
-		Ok(Box::pin(fetch_stream))
+		Ok(monitor_stream(Box::pin(fetch_stream), "Fetch", &self.metrics))
 	}
 }
 
@@ -358,11 +363,13 @@ mod tests {
 			predicate: None,
 			limit: None,
 			start: None,
+			metrics: std::sync::Arc::new(crate::exec::OperatorMetrics::new()),
 		});
 
 		let fetch = Fetch {
 			input: scan,
 			fields,
+			metrics: std::sync::Arc::new(crate::exec::OperatorMetrics::new()),
 		};
 
 		assert_eq!(fetch.name(), "Fetch");

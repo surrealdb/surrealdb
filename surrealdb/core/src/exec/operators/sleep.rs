@@ -3,12 +3,16 @@
 //! This operator implements the SLEEP statement, which pauses query execution
 //! for a given duration. It returns Value::None after the sleep completes.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Duration, Value};
@@ -22,6 +26,8 @@ use crate::val::{Duration, Value};
 pub struct SleepPlan {
 	/// The duration to sleep for
 	pub duration: Duration,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -43,6 +49,10 @@ impl ExecOperator for SleepPlan {
 	fn access_mode(&self) -> AccessMode {
 		// Sleep has a side effect (pausing execution) and requires edit permissions
 		AccessMode::ReadWrite
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -89,19 +99,22 @@ impl ToSql for SleepPlan {
 mod tests {
 	use super::*;
 
+	fn test_sleep_plan(duration: Duration) -> SleepPlan {
+		SleepPlan {
+			duration,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+
 	#[test]
 	fn test_sleep_plan_name() {
-		let plan = SleepPlan {
-			duration: Duration(std::time::Duration::from_millis(100)),
-		};
+		let plan = test_sleep_plan(Duration(std::time::Duration::from_millis(100)));
 		assert_eq!(plan.name(), "Sleep");
 	}
 
 	#[test]
 	fn test_sleep_plan_attrs() {
-		let plan = SleepPlan {
-			duration: Duration(std::time::Duration::from_secs(1)),
-		};
+		let plan = test_sleep_plan(Duration(std::time::Duration::from_secs(1)));
 		let attrs = plan.attrs();
 		assert_eq!(attrs.len(), 1);
 		assert_eq!(attrs[0].0, "duration");
@@ -109,17 +122,13 @@ mod tests {
 
 	#[test]
 	fn test_sleep_plan_is_scalar() {
-		let plan = SleepPlan {
-			duration: Duration(std::time::Duration::from_millis(100)),
-		};
+		let plan = test_sleep_plan(Duration(std::time::Duration::from_millis(100)));
 		assert!(plan.is_scalar());
 	}
 
 	#[test]
 	fn test_sleep_plan_access_mode() {
-		let plan = SleepPlan {
-			duration: Duration(std::time::Duration::from_millis(100)),
-		};
+		let plan = test_sleep_plan(Duration(std::time::Duration::from_millis(100)));
 		assert_eq!(plan.access_mode(), AccessMode::ReadWrite);
 	}
 }

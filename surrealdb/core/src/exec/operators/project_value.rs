@@ -10,7 +10,7 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 
@@ -25,6 +25,8 @@ pub struct ProjectValue {
 	pub input: Arc<dyn ExecOperator>,
 	/// The expression to evaluate for each record
 	pub expr: Arc<dyn PhysicalExpr>,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -46,6 +48,10 @@ impl ExecOperator for ProjectValue {
 	fn access_mode(&self) -> AccessMode {
 		// Combine input's mode with expression's mode
 		self.input.access_mode().combine(self.expr.access_mode())
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -81,6 +87,6 @@ impl ExecOperator for ProjectValue {
 			}
 		});
 
-		Ok(Box::pin(projected))
+		Ok(monitor_stream(Box::pin(projected), "ProjectValue", &self.metrics))
 	}
 }

@@ -6,7 +6,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 
 /// Filters a stream of values based on a predicate.
@@ -17,6 +17,7 @@ use crate::exec::{
 pub struct Filter {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) predicate: Arc<dyn PhysicalExpr>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -44,6 +45,14 @@ impl ExecOperator for Filter {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("predicate", &self.predicate)]
 	}
 
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
@@ -82,7 +91,7 @@ impl ExecOperator for Filter {
 			}
 		});
 
-		Ok(instrument_stream(Box::pin(filtered), "Filter"))
+		Ok(monitor_stream(Box::pin(filtered), "Filter", &self.metrics))
 	}
 }
 

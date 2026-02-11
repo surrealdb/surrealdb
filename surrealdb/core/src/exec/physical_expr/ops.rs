@@ -169,6 +169,10 @@ impl PhysicalExpr for BinaryOp {
 		// Combine both sides' access modes
 		self.left.access_mode().combine(self.right.access_mode())
 	}
+
+	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("left", &self.left), ("right", &self.right)]
+	}
 }
 
 impl ToSql for BinaryOp {
@@ -237,6 +241,10 @@ impl PhysicalExpr for UnaryOp {
 	fn access_mode(&self) -> AccessMode {
 		// Propagate inner expression's access mode
 		self.expr.access_mode()
+	}
+
+	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("operand", &self.expr)]
 	}
 }
 
@@ -308,6 +316,10 @@ impl PhysicalExpr for PostfixOp {
 	fn access_mode(&self) -> AccessMode {
 		// Propagate inner expression's access mode
 		self.expr.access_mode()
+	}
+
+	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("operand", &self.expr)]
 	}
 }
 

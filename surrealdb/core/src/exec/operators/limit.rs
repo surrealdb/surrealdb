@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatchStream, instrument_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 
@@ -23,6 +23,7 @@ pub struct Limit {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Number of values to skip (START/OFFSET clause)
 	pub(crate) offset: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -62,6 +63,21 @@ impl ExecOperator for Limit {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut exprs = Vec::new();
+		if let Some(limit) = &self.limit {
+			exprs.push(("limit", limit));
+		}
+		if let Some(offset) = &self.offset {
+			exprs.push(("offset", offset));
+		}
+		exprs
 	}
 
 	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
@@ -150,7 +166,7 @@ impl ExecOperator for Limit {
 			}
 		};
 
-		Ok(instrument_stream(Box::pin(limited), "Limit"))
+		Ok(monitor_stream(Box::pin(limited), "Limit", &self.metrics))
 	}
 }
 

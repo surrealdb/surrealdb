@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatchStream};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
@@ -24,6 +24,8 @@ use crate::val::Value;
 #[derive(Debug)]
 pub struct ReturnPlan {
 	pub inner: Arc<dyn ExecOperator>,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -97,5 +99,9 @@ impl ExecOperator for ReturnPlan {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.inner]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 }

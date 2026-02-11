@@ -5,8 +5,8 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, PhysicalExpr,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Duration;
@@ -20,6 +20,7 @@ pub struct Timeout {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	/// The timeout duration. If None, no timeout is applied.
 	pub(crate) timeout: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -51,12 +52,24 @@ impl ExecOperator for Timeout {
 		vec![&self.input]
 	}
 
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		if let Some(timeout) = &self.timeout {
+			vec![("timeout", timeout)]
+		} else {
+			vec![]
+		}
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 
 		// If no timeout is specified, just pass through the input stream
 		let Some(timeout_expr) = &self.timeout else {
-			return Ok(input_stream);
+			return Ok(monitor_stream(input_stream, "Timeout", &self.metrics));
 		};
 
 		// Evaluate the timeout expression to get the duration
@@ -112,6 +125,6 @@ impl ExecOperator for Timeout {
 			}
 		};
 
-		Ok(Box::pin(timeout_stream))
+		Ok(monitor_stream(Box::pin(timeout_stream), "Timeout", &self.metrics))
 	}
 }

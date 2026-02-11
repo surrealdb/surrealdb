@@ -14,7 +14,7 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::parts::LookupDirection;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
@@ -67,6 +67,9 @@ pub struct GraphEdgeScan {
 
 	/// What to output: EdgeId, TargetId, or FullEdge
 	pub(crate) output_mode: GraphScanOutput,
+
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -104,6 +107,10 @@ impl ExecOperator for GraphEdgeScan {
 	fn access_mode(&self) -> AccessMode {
 		// Graph scan is read-only, but propagate source expression's access mode
 		self.source.access_mode()
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -332,7 +339,7 @@ impl ExecOperator for GraphEdgeScan {
 			}
 		};
 
-		Ok(Box::pin(stream))
+		Ok(monitor_stream(Box::pin(stream), "GraphEdgeScan", &self.metrics))
 	}
 }
 
@@ -422,6 +429,7 @@ mod tests {
 				},
 			],
 			output_mode: GraphScanOutput::TargetId,
+			metrics: Arc::new(crate::exec::OperatorMetrics::new()),
 		};
 
 		assert_eq!(scan.name(), "GraphEdgeScan");

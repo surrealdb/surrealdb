@@ -19,7 +19,7 @@ use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -99,6 +99,8 @@ pub struct Project {
 	pub omit: Vec<Idiom>,
 	/// Whether to include all fields from input (for SELECT *, field1, field2)
 	pub include_all: bool,
+	/// Per-operator metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -128,6 +130,10 @@ impl ExecOperator for Project {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -265,7 +271,7 @@ impl ExecOperator for Project {
 			}
 		});
 
-		Ok(instrument_stream(Box::pin(projected), "Project"))
+		Ok(monitor_stream(Box::pin(projected), "Project", &self.metrics))
 	}
 }
 
@@ -497,14 +503,21 @@ pub struct SelectProject {
 	pub input: Arc<dyn ExecOperator>,
 	/// The projections to apply
 	pub projections: Vec<Projection>,
+	/// Per-operator metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl SelectProject {
 	/// Create a new SelectProject operator.
-	pub fn new(input: Arc<dyn ExecOperator>, projections: Vec<Projection>) -> Self {
+	pub fn new(
+		input: Arc<dyn ExecOperator>,
+		projections: Vec<Projection>,
+		metrics: Arc<OperatorMetrics>,
+	) -> Self {
 		Self {
 			input,
 			projections,
+			metrics,
 		}
 	}
 }
@@ -554,6 +567,10 @@ impl ExecOperator for SelectProject {
 		vec![&self.input]
 	}
 
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
@@ -584,7 +601,7 @@ impl ExecOperator for SelectProject {
 			}
 		});
 
-		Ok(instrument_stream(Box::pin(projected), "SelectProject"))
+		Ok(monitor_stream(Box::pin(projected), "SelectProject", &self.metrics))
 	}
 }
 

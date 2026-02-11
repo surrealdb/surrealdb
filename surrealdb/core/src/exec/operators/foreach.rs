@@ -13,7 +13,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{evaluate_body_expr, evaluate_expr};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
+use crate::exec::{
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+};
 use crate::expr::{Block, ControlFlow, Expr, Param};
 use crate::val::Value;
 use crate::val::range::IntegerRangeIter;
@@ -33,6 +35,8 @@ use crate::val::range::IntegerRangeIter;
 pub struct ForeachPlan {
 	/// Loop variable parameter
 	pub param: Param,
+	/// Metrics for EXPLAIN ANALYZE
+	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// Range expression (evaluates to Array or Range)
 	pub range: Expr,
 	/// Loop body block
@@ -103,6 +107,10 @@ impl ExecOperator for ForeachPlan {
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		// With deferred planning, we don't have pre-built children
 		vec![]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn is_scalar(&self) -> bool {

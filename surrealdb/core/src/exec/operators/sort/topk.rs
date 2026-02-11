@@ -14,7 +14,7 @@ use futures::StreamExt;
 use super::common::{OrderByField, SortDirection, compare_keys};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, ValueBatch, ValueBatchStream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -64,6 +64,7 @@ pub struct SortTopK {
 	pub(crate) order_by: Vec<OrderByField>,
 	/// The effective limit (start + limit from query)
 	pub(crate) limit: usize,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -100,6 +101,14 @@ impl ExecOperator for SortTopK {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -179,6 +188,6 @@ impl ExecOperator for SortTopK {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(monitor_stream(Box::pin(filtered), "SortTopK", &self.metrics))
 	}
 }

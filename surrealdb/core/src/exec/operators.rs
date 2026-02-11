@@ -30,7 +30,7 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 pub use compute::Compute;
-pub use explain::ExplainPlan;
+pub use explain::{AnalyzePlan, ExplainPlan};
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
 pub use filter::Filter;

@@ -15,8 +15,8 @@ use rand::{Rng, thread_rng};
 use tokio::task::spawn_blocking;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, ValueBatch,
-	ValueBatchStream,
+	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -33,6 +33,7 @@ pub struct RandomShuffle {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	/// If set, use reservoir sampling to select this many values
 	pub(crate) limit: Option<usize>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -60,6 +61,10 @@ impl ExecOperator for RandomShuffle {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -103,7 +108,7 @@ impl ExecOperator for RandomShuffle {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(monitor_stream(Box::pin(filtered), "RandomShuffle", &self.metrics))
 	}
 }
 

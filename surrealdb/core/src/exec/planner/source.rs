@@ -7,13 +7,13 @@ use std::sync::Arc;
 use super::Planner;
 use super::util::{extract_table_from_context, key_lit_to_expr};
 use crate::err::Error;
-use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
 	ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
+use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::{Expr, Literal};
 
 /// Special parameter name for passing the lookup source at execution time.
@@ -193,6 +193,7 @@ impl<'ctx> Planner<'ctx> {
 					direction: LookupDirection::from(dir),
 					edge_tables,
 					output_mode,
+					metrics: Arc::new(OperatorMetrics::new()),
 				})
 			}
 			crate::expr::lookup::LookupKind::Reference => {
@@ -235,6 +236,7 @@ impl<'ctx> Planner<'ctx> {
 					output_mode: ref_output_mode,
 					range_start,
 					range_end,
+					metrics: Arc::new(OperatorMetrics::new()),
 				})
 			}
 		};
@@ -259,6 +261,7 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(Filter {
 					input: base_scan,
 					predicate,
+					metrics: Arc::new(OperatorMetrics::new()),
 				})
 			} else {
 				base_scan
@@ -268,6 +271,7 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(crate::exec::operators::Split {
 					input: filtered,
 					idioms: splits.into_iter().map(|s| s.0).collect(),
+					metrics: Arc::new(crate::exec::OperatorMetrics::new()),
 				})
 			} else {
 				filtered
@@ -279,6 +283,7 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(crate::exec::operators::Sort {
 						input: split_op,
 						order_by,
+						metrics: Arc::new(crate::exec::OperatorMetrics::new()),
 					})
 				} else {
 					split_op
@@ -291,6 +296,7 @@ impl<'ctx> Planner<'ctx> {
 					input: sorted,
 					limit: limit_expr,
 					offset: offset_expr,
+					metrics: Arc::new(OperatorMetrics::new()),
 				})
 			} else {
 				sorted

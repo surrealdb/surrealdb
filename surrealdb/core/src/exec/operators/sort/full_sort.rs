@@ -20,7 +20,7 @@ use tokio::task::spawn_blocking;
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_records_by_keys};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, ValueBatch, ValueBatchStream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -39,6 +39,7 @@ use crate::val::Value;
 pub struct Sort {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -77,6 +78,14 @@ impl ExecOperator for Sort {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -143,7 +152,7 @@ impl ExecOperator for Sort {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(monitor_stream(Box::pin(filtered), "Sort", &self.metrics))
 	}
 }
 
@@ -191,14 +200,20 @@ async fn sort_keyed_values(
 pub struct SortByKey {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) sort_keys: Vec<SortKey>,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl SortByKey {
 	/// Create a new SortByKey operator.
-	pub fn new(input: Arc<dyn ExecOperator>, sort_keys: Vec<SortKey>) -> Self {
+	pub fn new(
+		input: Arc<dyn ExecOperator>,
+		sort_keys: Vec<SortKey>,
+		metrics: Arc<OperatorMetrics>,
+	) -> Self {
 		Self {
 			input,
 			sort_keys,
+			metrics,
 		}
 	}
 }
@@ -241,6 +256,10 @@ impl ExecOperator for SortByKey {
 		vec![&self.input]
 	}
 
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let sort_keys = self.sort_keys.clone();
@@ -279,7 +298,7 @@ impl ExecOperator for SortByKey {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(monitor_stream(Box::pin(filtered), "SortByKey", &self.metrics))
 	}
 }
 

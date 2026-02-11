@@ -24,7 +24,7 @@ use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, ValueBatch, ValueBatchStream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -40,6 +40,7 @@ pub struct ExternalSort {
 	pub(crate) input: Arc<dyn ExecOperator>,
 	pub(crate) order_by: Vec<OrderByField>,
 	pub(crate) temp_dir: PathBuf,
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -79,6 +80,14 @@ impl ExecOperator for ExternalSort {
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -211,7 +220,7 @@ impl ExecOperator for ExternalSort {
 			}
 		});
 
-		Ok(Box::pin(filtered))
+		Ok(monitor_stream(Box::pin(filtered), "ExternalSort", &self.metrics))
 	}
 }
 

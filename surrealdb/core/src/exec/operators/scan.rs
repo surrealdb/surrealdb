@@ -19,7 +19,7 @@ use crate::exec::permission::{
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	PhysicalExpr, ValueBatch, ValueBatchStream, instrument_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -89,6 +89,8 @@ pub struct Scan {
 	/// START offset expression pushed down from the Limit operator.
 	/// Number of rows to skip (after filtering) before emitting.
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
+	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
+	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -114,6 +116,24 @@ impl ExecOperator for Scan {
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Database
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut exprs = vec![("source", &self.source)];
+		if let Some(ref pred) = self.predicate {
+			exprs.push(("predicate", pred));
+		}
+		if let Some(ref limit) = self.limit {
+			exprs.push(("limit", limit));
+		}
+		if let Some(ref start) = self.start {
+			exprs.push(("start", start));
+		}
+		exprs
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -331,7 +351,7 @@ impl ExecOperator for Scan {
 			}
 		};
 
-		Ok(instrument_stream(Box::pin(stream), "Scan"))
+		Ok(monitor_stream(Box::pin(stream), "Scan", &self.metrics))
 	}
 }
 
@@ -541,6 +561,7 @@ async fn resolve_table_scan_stream(
 				access,
 				direction,
 				table_name: cfg.table_name,
+				metrics: Arc::new(OperatorMetrics::new()),
 			};
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
@@ -557,6 +578,7 @@ async fn resolve_table_scan_stream(
 				query,
 				operator,
 				table_name: cfg.table_name,
+				metrics: Arc::new(OperatorMetrics::new()),
 			};
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
@@ -967,6 +989,7 @@ mod tests {
 			predicate: None,
 			limit: None,
 			start: None,
+			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 
