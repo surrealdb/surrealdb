@@ -1,6 +1,7 @@
 mod aggregate;
 mod common;
 mod compute;
+mod count_scan;
 mod explain;
 mod expr;
 mod fetch;
@@ -31,6 +32,7 @@ pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 pub use compute::Compute;
+pub use count_scan::CountScan;
 pub use explain::{AnalyzePlan, ExplainPlan};
 pub use expr::ExprPlan;
 pub use fetch::Fetch;

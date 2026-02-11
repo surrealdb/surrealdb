@@ -483,3 +483,58 @@ pub(super) fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPat
 
 	FieldPath(parts)
 }
+
+// ============================================================================
+// COUNT() Fast-Path Detection
+// ============================================================================
+
+/// Check if a SELECT statement is eligible for the CountScan optimisation.
+///
+/// Returns `true` when the query matches:
+///   `SELECT count() FROM <single-table-or-range> GROUP ALL`
+/// with no WHERE, SPLIT, ORDER BY, FETCH, or OMIT clauses.
+///
+/// The CountScan operator replaces the entire Scan -> Aggregate -> Project
+/// pipeline with a single `txn.count()` call on the KV key range.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn is_count_all_eligible(
+	fields: &Fields,
+	group: &Option<crate::expr::group::Groups>,
+	cond: &Option<crate::expr::cond::Cond>,
+	split: &Option<crate::expr::split::Splits>,
+	order: &Option<crate::expr::order::Ordering>,
+	fetch: &Option<crate::expr::fetch::Fetchs>,
+	omit: &[Expr],
+	what: &[Expr],
+) -> bool {
+	// Must be count()-only fields (no arguments, no other fields).
+	if !fields.is_count_all_only() {
+		return false;
+	}
+	// Must have GROUP ALL (explicit `GROUP ALL` in the AST = Some(Groups(vec![]))).
+	let Some(groups) = group else {
+		return false;
+	};
+	if !groups.is_group_all_only() {
+		return false;
+	}
+	// No WHERE clause (index-accelerated WHERE is a follow-up).
+	if cond.is_some() {
+		return false;
+	}
+	// No SPLIT, ORDER BY, FETCH, or OMIT.
+	if split.is_some() || order.is_some() || fetch.is_some() || !omit.is_empty() {
+		return false;
+	}
+	// Source must be a single table, record-id, or param (resolving to table).
+	if what.len() != 1 {
+		return false;
+	}
+	matches!(
+		&what[0],
+		Expr::Table(_)
+			| Expr::Literal(crate::expr::literal::Literal::RecordId(_))
+			| Expr::Param(_)
+			| Expr::Postfix { .. }
+	)
+}

@@ -9,7 +9,7 @@ use super::Planner;
 use super::util::{
 	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params,
 	contains_knn_operator, derive_field_name, extract_matches_context, extract_version,
-	get_effective_limit_literal, idiom_to_field_name, idiom_to_field_path,
+	get_effective_limit_literal, idiom_to_field_name, idiom_to_field_path, is_count_all_eligible,
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
@@ -87,6 +87,34 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		let version = extract_version(version)?;
+
+		// ── COUNT fast-path ─────────────────────────────────────────
+		// Detect `SELECT count() FROM <table> GROUP ALL` (no WHERE,
+		// SPLIT, ORDER, FETCH, OMIT) and replace the entire pipeline
+		// with a single CountScan operator that calls txn.count().
+		if is_count_all_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what) {
+			use crate::exec::operators::CountScan;
+			// SAFETY: is_count_all_eligible verifies what.len() == 1
+			let table_expr =
+				self.physical_expr(what.into_iter().next().expect("what verified non-empty"))?;
+			let count_scan: Arc<dyn ExecOperator> = Arc::new(CountScan::new(table_expr, version));
+
+			let timed = match timeout {
+				Expr::Literal(Literal::None) => count_scan,
+				timeout_expr => {
+					let timeout_phys = self.physical_expr(timeout_expr)?;
+					Arc::new(Timeout::new(count_scan, Some(timeout_phys))) as Arc<dyn ExecOperator>
+				}
+			};
+
+			return if only {
+				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+			} else {
+				Ok(timed)
+			};
+		}
+		// ── end COUNT fast-path ─────────────────────────────────────
+
 		let is_value_source = all_value_sources(&what);
 
 		let primary_table = what.iter().find_map(|expr| {

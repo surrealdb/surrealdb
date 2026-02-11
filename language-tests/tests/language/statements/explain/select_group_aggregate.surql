@@ -6,7 +6,7 @@ reason = "Test EXPLAIN with GROUP BY and GROUP ALL aggregation"
 value = "'OK'"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: sale]\n''''
+value = ''''CountScan [ctx: Db] [source: sale]\n''''
 
 [[test.results]]
 value = ''''Aggregate [ctx: Db] [by: region]\n└────> Scan [ctx: Db] [source: sale]\n''''

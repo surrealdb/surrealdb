@@ -15,8 +15,7 @@ value = "{ events: [], fields: [], indexes: [{ cols: [], index: 'COUNT', name: '
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: test]
+"CountScan [ctx: Db] [source: test]
 "'''
 
 [[test.results]]
@@ -30,8 +29,7 @@ value = "{ events: [], fields: [], indexes: [{ cols: [], comment: 'may rebuild i
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: test]
+"CountScan [ctx: Db] [source: test]
 "'''
 
 [[test.results]]

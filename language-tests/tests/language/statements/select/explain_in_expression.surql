@@ -10,8 +10,7 @@ value = "[{ id: person:2, name: 'Bob' }]"
 
 [[test.results]]
 value = '''{
-	"agg": "Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: person]
+	"agg": "CountScan [ctx: Db] [source: person]
 ",
 	"select": "Project [ctx: Db]
 └────> Scan [ctx: Db] [source: person]

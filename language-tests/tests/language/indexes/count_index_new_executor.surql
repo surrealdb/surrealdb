@@ -18,8 +18,7 @@ value = "'OK'"
 
 [[test.results]]
 value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: t]
+"CountScan [ctx: Db] [source: t]
 "'''
 
 [[test.results]]
