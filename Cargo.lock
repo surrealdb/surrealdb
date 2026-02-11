@@ -830,12 +830,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit-vec"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1311,12 +1305,6 @@ dependencies = [
  "bytes",
  "memchr",
 ]
-
-[[package]]
-name = "compare"
-version = "0.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea0095f6103c2a8b44acd6fd15960c801dafebf02e21940360833e0673f48ba7"
 
 [[package]]
 name = "compression-codecs"
@@ -2092,12 +2080,6 @@ name = "doc-comment"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "780955b8b195a21ab8e4ac6b60dd1dbdcec1dc6c51c0617964b08c81785e12c9"
-
-[[package]]
-name = "double-ended-peekable"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0d05e1c0dbad51b52c38bda7adceef61b9efc2baf04acfe8726a8c4630a6f57"
 
 [[package]]
 name = "dtoa"
@@ -3608,15 +3590,6 @@ name = "integer-encoding"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14c00403deb17c3221a1fe4fb571b9ed0370b3dcd116553c77fa294a3d918699"
-
-[[package]]
-name = "interval-heap"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11274e5e8e89b8607cfedc2910b6626e998779b48a019151c7604d0adcb86ac6"
-dependencies = [
- "compare",
-]
 
 [[package]]
 name = "io-extras"
@@ -7291,27 +7264,20 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87c031cc950b13784130688a2538358a387f5eaaa203e0b5bb5bfbf2a1c6e0fb"
+checksum = "c2f7d74f51208e21c096ea79815cd461aa72627ff2110145fb6c91b4d7d7937a"
 dependencies = [
  "arc-swap",
- "async-channel",
  "async-trait",
- "bit-vec",
  "byteorder",
  "bytes",
  "chrono",
  "crc32fast",
- "crossbeam",
- "crossbeam-skiplist",
- "double-ended-peekable",
  "fs2",
- "futures",
  "getrandom 0.3.4",
  "guardian",
  "integer-encoding",
- "interval-heap",
  "log",
  "lz4_flex",
  "memmap2",
@@ -7341,9 +7307,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbe0aa6326a59dbc86821220a1e9d9a2f46a354deaadd93637cdfac1862e6b0e"
+checksum = "471704eb963b9b4545d0f32bd910466201b3eb2b259565332b5775684628a454"
 dependencies = [
  "arc-swap",
  "bincode",

@@ -16,7 +16,7 @@ use super::transaction::WithTransaction;
 use crate::conn::Command;
 use crate::err::Error;
 use crate::method::live::Stream;
-use crate::method::{BoxFuture, OnceLockExt, WithStats};
+use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal, opt};
@@ -235,8 +235,8 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
-	pub live_queries: IndexMap<usize, Result<Stream<Value>>>,
+	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
+	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
 /// A `LIVE SELECT` stream from the `query` method
@@ -402,7 +402,7 @@ impl IndexedResults {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, DbResultError> {
+	pub fn take_errors(&mut self) -> HashMap<usize, Error> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.results {
 			if result.1.is_err() {
@@ -412,7 +412,7 @@ impl IndexedResults {
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				errors.insert(key, error);
+				errors.insert(key, error.into());
 			}
 		}
 		errors
@@ -433,7 +433,7 @@ impl IndexedResults {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn check(mut self) -> std::result::Result<Self, DbResultError> {
+	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
 			if result.1.is_err() {
@@ -444,7 +444,7 @@ impl IndexedResults {
 		if let Some(key) = first_error
 			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
 		{
-			return Err(error);
+			return Err(error.into());
 		}
 		Ok(self)
 	}
@@ -529,11 +529,14 @@ impl WithStats<IndexedResults> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Option<(DbResultStats, Result<R>)>
+	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Option<(Stats, Result<R>)>
 	where
 		R: SurrealValue,
 	{
-		let stats = index.stats(&self.0)?;
+		let db_stats = index.stats(&self.0)?;
+		let stats = Stats {
+			execution_time: db_stats.execution_time,
+		};
 		let result = index.query_result(&mut self.0);
 		Some((stats, result))
 	}
@@ -556,7 +559,7 @@ impl WithStats<IndexedResults> {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn take_errors(&mut self) -> HashMap<usize, (DbResultStats, DbResultError)> {
+	pub fn take_errors(&mut self) -> HashMap<usize, (Stats, Error)> {
 		let mut keys = Vec::new();
 		for (key, result) in &self.0.results {
 			if result.1.is_err() {
@@ -565,8 +568,11 @@ impl WithStats<IndexedResults> {
 		}
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
-			if let Some((stats, Err(error))) = self.0.results.swap_remove(&key) {
-				errors.insert(key, (stats, error));
+			if let Some((db_stats, Err(error))) = self.0.results.swap_remove(&key) {
+				let stats = Stats {
+					execution_time: db_stats.execution_time,
+				};
+				errors.insert(key, (stats, error.into()));
 			}
 		}
 		errors
@@ -935,7 +941,7 @@ mod tests {
 		};
 		let err = response.check().unwrap_err();
 
-		assert_eq!(err, DbResultError::InternalError("test".to_string()));
+		assert!(matches!(err, Error::InternalError(msg) if msg == "test"));
 	}
 
 	#[test]
@@ -960,9 +966,9 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		assert_eq!(errors[&10], DbResultError::InternalError("test".to_string()));
-		assert_eq!(errors[&7], DbResultError::InternalError("test".to_string()));
-		assert_eq!(errors[&3], DbResultError::InternalError("test".to_string()));
+		assert!(matches!(&errors[&10], Error::InternalError(msg) if msg == "test"));
+		assert!(matches!(&errors[&7], Error::InternalError(msg) if msg == "test"));
+		assert!(matches!(&errors[&3], Error::InternalError(msg) if msg == "test"));
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};

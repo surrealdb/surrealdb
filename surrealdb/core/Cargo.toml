@@ -261,3 +261,7 @@ harness = false
 [[bench]]
 name = "functions"
 harness = false
+
+[[bench]]
+name = "scanner"
+harness = false

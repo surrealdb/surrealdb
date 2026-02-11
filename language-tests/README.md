@@ -383,6 +383,7 @@ The value should be an array of strings with valid backend identifiers:
 - `"mem"`: In-memory storage engine
 - `"rocksdb"`: RocksDB embedded storage engine
 - `"surrealkv"`: SurrealKV file-based storage engine
+- `"surrealkv+versioned"`: SurrealKV file-based storage engine with versioned history support
 - `"tikv"`: TiKV distributed storage engine
 
 **Behavior:**

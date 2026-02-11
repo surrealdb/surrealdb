@@ -21,7 +21,7 @@ use crate::types::{
 pub struct DbResultStats {
 	/// The time taken to execute the query.
 	///
-	/// Note: This comes from the `time` field of the [`crate::dbs::Response`] struct.
+	/// Note: This comes from the `time` field of the [`crate::dbs::QueryResult`] struct.
 	pub execution_time: Option<Duration>,
 	pub query_type: Option<QueryType>,
 }

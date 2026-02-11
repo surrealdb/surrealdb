@@ -78,6 +78,12 @@ impl CreateInfo {
 				path = Some(p);
 				ds
 			}
+			Backend::SurrealKvVersioned => {
+				let p = self.produce_path();
+				let ds = Datastore::new(&format!("surrealkv+versioned://{p}")).await?;
+				path = Some(p);
+				ds
+			}
 			Backend::TikV => {
 				let p = "127.0.0.1:2379";
 				let ds = Datastore::new(&format!("tikv://{p}")).await?;

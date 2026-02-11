@@ -14,13 +14,17 @@ use savepoint::{Operation, Savepoint};
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
 
+use super::api::ScanLimit;
 use super::err::{Error, Result};
+use crate::cnf::COUNT_BATCH_SIZE;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
-use crate::kvs::{Key, Timestamp, Val};
+use crate::kvs::{Key, TimeStamp, TimeStampImpl, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
+const ESTIMATED_BYTES_PER_KEY: u32 = 128;
+const ESTIMATED_BYTES_PER_VAL: u32 = 512;
 pub struct Datastore {
 	db: Pin<Arc<TransactionClient>>,
 }
@@ -37,41 +41,6 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<TransactionClient>>,
-}
-
-pub struct Timecode(tikv::Timestamp);
-
-impl Timestamp for Timecode {
-	/// Convert the timestamp to a version
-	fn to_versionstamp(&self) -> u128 {
-		self.0.version() as u128
-	}
-	/// Create a timestamp from a version
-	fn from_versionstamp(version: u128) -> Result<Self> {
-		Ok(Timecode(tikv::Timestamp::from_version(version as u64)))
-	}
-	/// Convert the timestamp to a datetime
-	fn to_datetime(&self) -> DateTime<Utc> {
-		DateTime::from_timestamp_nanos(self.0.physical)
-	}
-	/// Create a timestamp from a datetime
-	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
-		Ok(Timecode(tikv::Timestamp {
-			physical: datetime.timestamp_millis(),
-			..Default::default()
-		}))
-	}
-	/// Convert the timestamp to a byte array
-	fn to_ts_bytes(&self) -> Vec<u8> {
-		self.0.version().to_be_bytes().to_vec()
-	}
-	/// Create a timestamp from a byte array
-	fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
-		match bytes.try_into() {
-			Ok(v) => Ok(Timecode(tikv::Timestamp::from_version(u64::from_be_bytes(v)))),
-			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
-		}
-	}
 }
 
 struct TransactionInner {
@@ -462,9 +431,9 @@ impl Transactable for Transaction {
 		Ok(())
 	}
 
-	/// Retrieve a range of keys from the database
+	/// Count the total number of keys within a range in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -475,15 +444,85 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Scan the keys
-		let res = inner.tx.scan_keys(rng, limit).await?.map(Key::from).collect();
+		// Store the total count
+		let mut total = 0usize;
+		// Store the end range key
+		let end = rng.end.clone();
+		// Store the next start key
+		let mut start = rng.start;
+		// Loop until we have exhausted the range
+		loop {
+			// Scan keys in key-only mode (no values fetched)
+			let iter = inner.tx.scan_keys(start..end.clone(), *COUNT_BATCH_SIZE).await?;
+			// Count the items, tracking the last key seen
+			let mut key: Option<tikv::Key> = None;
+			// Count the items in this batch
+			let mut count = 0u32;
+			// Loop over the iterator
+			for k in iter {
+				count += 1;
+				key = Some(k);
+			}
+			// Increment the total count
+			total += count as usize;
+			// If we got fewer than batch_size, we've exhausted the range
+			if count < *COUNT_BATCH_SIZE {
+				break;
+			}
+			// Advance past the last key for the next batch
+			match key {
+				Some(k) => {
+					let mut k = Key::from(k);
+					super::util::advance_key(&mut k);
+					start = k;
+				}
+				None => break,
+			}
+		}
+		// Return the total count
+		Ok(total)
+	}
+
+	/// Retrieve a range of keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
+		// Create the iterator
+		let mut iter = inner.tx.scan_keys(rng, count).await?;
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit);
 		// Return result
 		Ok(res)
 	}
 
 	/// Retrieve a range of keys from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -494,8 +533,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Scan the keys
-		let res = inner.tx.scan_keys_reverse(rng, limit).await?.map(Key::from).collect();
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
+		// Create the iterator
+		let mut iter = inner.tx.scan_keys_reverse(rng, count).await?;
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit);
 		// Return result
 		Ok(res)
 	}
@@ -505,7 +552,7 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
@@ -518,8 +565,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Scan the keys
-		let res = inner.tx.scan(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
+		// Create the iterator
+		let mut iter = inner.tx.scan(rng, count).await?;
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit);
 		// Return result
 		Ok(res)
 	}
@@ -529,7 +584,7 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
@@ -542,9 +597,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Scan the keys
-		let res =
-			inner.tx.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
+		// Create the iterator
+		let mut iter = inner.tx.scan_reverse(rng, count).await?;
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit);
 		// Return result
 		Ok(res)
 	}
@@ -641,17 +703,165 @@ impl Transactable for Transaction {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(Timecode(self.inner.write().await.tx.current_timestamp().await?)))
+	async fn timestamp(&self) -> Result<TimeStamp> {
+		let ts = self.inner.write().await.tx.current_timestamp().await?;
+		Ok(TimeStamp::TiKV(TiKVStamp(ts)))
 	}
 
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		Ok(<Timecode as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
+	fn timestamp_impl(&self) -> TimeStampImpl {
+		TimeStampImpl::TiKV
 	}
+}
 
-	/// Convert a datetime to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		Ok(<Timecode as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
+#[derive(Debug, Clone, PartialEq)]
+pub struct TiKVStamp(tikv::Timestamp);
+
+impl TiKVStamp {
+	/// Convert the timestamp to a version
+	pub(crate) fn as_versionstamp(&self) -> u128 {
+		self.0.version() as u128
+	}
+	/// Create a timestamp from a version
+	pub(crate) fn from_versionstamp(version: u128) -> Result<Self> {
+		Ok(Self(tikv::Timestamp::from_version(version as u64)))
+	}
+	/// Convert the timestamp to a datetime
+	pub(crate) fn as_datetime(&self) -> DateTime<Utc> {
+		DateTime::from_timestamp_nanos(self.0.physical)
+	}
+	/// Create a timestamp from a datetime
+	pub(crate) fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
+		Ok(Self(tikv::Timestamp {
+			physical: datetime.timestamp_millis(),
+			..Default::default()
+		}))
+	}
+	/// Convert the timestamp to a byte array
+	pub(crate) fn as_ts_bytes(&self) -> Vec<u8> {
+		self.0.version().to_be_bytes().to_vec()
+	}
+	/// Create a timestamp from a byte array
+	pub(crate) fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
+		match bytes.try_into() {
+			Ok(v) => Ok(Self(tikv::Timestamp::from_version(u64::from_be_bytes(v)))),
+			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
+		}
+	}
+}
+
+// Consume and iterate over only keys
+fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -> Vec<Key> {
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					res.push(Key::from(k));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_KEY).min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					bytes_fetched += k.len();
+					res.push(Key::from(k));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					bytes_fetched += k.len();
+					res.push(Key::from(k));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+	}
+}
+
+// Consume and iterate over keys and values
+fn consume_vals<I: Iterator<Item = tikv::KvPair>>(
+	iter: &mut I,
+	limit: ScanLimit,
+) -> Vec<(Key, Val)> {
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some(kv) = iter.next() {
+					res.push((Key::from(kv.0), kv.1));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_VAL).min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some(kv) = iter.next() {
+					bytes_fetched += kv.0.len() + kv.1.len();
+					res.push((Key::from(kv.0), kv.1));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some(kv) = iter.next() {
+					bytes_fetched += kv.0.len() + kv.1.len();
+					res.push((Key::from(kv.0), kv.1));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
 	}
 }

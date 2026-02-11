@@ -106,6 +106,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
+		#[cfg(feature = "backend-surrealkv")]
+		Backend::SurrealKvVersioned => {}
+		#[cfg(not(feature = "backend-surrealkv"))]
+		Backend::SurrealKvVersioned => bail!("SurrealKV backend feature is not enabled"),
 		#[cfg(feature = "backend-tikv")]
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
@@ -420,11 +424,7 @@ async fn run_test_with_dbs(
 	let timeout_duration = config
 		.env
 		.as_ref()
-		.map(|x| {
-			x.timeout(Some(&backend_str))
-				.map(Duration::from_millis)
-				.unwrap_or(Duration::MAX)
-		})
+		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();

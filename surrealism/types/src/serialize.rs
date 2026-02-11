@@ -1,7 +1,8 @@
 //! Core serialization traits and binary wire format implementations.
 //!
-//! This module defines the [`Serializable`] trait and implements it for common Rust types,
-//! providing a language-agnostic binary protocol for WASM guest-host communication.
+//! This module defines the [`Serializable`](crate::serialize::Serializable) trait and implements it
+//! for common Rust types, providing a language-agnostic binary protocol for WASM guest-host
+//! communication.
 //!
 //! # Wire Format
 //!

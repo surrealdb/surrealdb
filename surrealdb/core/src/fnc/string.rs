@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
+use crate::cnf::{GENERATION_ALLOCATION_LIMIT, STRING_SIMILARITY_LIMIT};
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;
@@ -17,6 +17,26 @@ fn limit(name: &str, n: usize) -> Result<()> {
 		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
+		}
+	);
+	Ok(())
+}
+
+/// Checks that both input strings are within the configured length limit for
+/// similarity/distance functions. These functions have O(n*m) complexity, so
+/// unbounded input could cause denial of service.
+fn check_similarity_input_length(name: &str, a: &str, b: &str) -> Result<()> {
+	let max = *STRING_SIMILARITY_LIMIT;
+	ensure!(
+		a.len() <= max && b.len() <= max,
+		Error::InvalidArguments {
+			name: name.to_owned(),
+			message: format!(
+				"Input strings must not exceed {} bytes (got {} and {}).",
+				max,
+				a.len(),
+				b.len()
+			),
 		}
 	);
 	Ok(())
@@ -272,24 +292,44 @@ pub mod distance {
 	use crate::err::Error;
 	use crate::val::Value;
 
-	/// Calculate the Damerau-Levenshtein distance between two strings
-	/// via [`strsim::damerau_levenshtein`].
+	/// Calculate the Damerau-Levenshtein distance between two strings.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n * m).
+	///
+	/// Uses [`strsim::damerau_levenshtein`].
 	pub fn damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::damerau_levenshtein", &a, &b)?;
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two
-	/// strings via [`strsim::normalized_damerau_levenshtein`].
+	/// Calculate the normalized Damerau-Levenshtein distance between two strings.
+	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n * m).
+	///
+	/// Uses [`strsim::normalized_damerau_levenshtein`].
 	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::normalized_damerau_levenshtein",
+			&a,
+			&b,
+		)?;
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the Hamming distance between two strings
-	/// via [`strsim::hamming`].
+	/// Calculate the Hamming distance between two strings.
+	///
+	/// Time complexity: O(n) where n is the string length.
+	/// Space complexity: O(1).
+	///
+	/// Uses [`strsim::hamming`].
 	///
 	/// Will result in an [`Error::InvalidFunctionArguments`] if the given strings are
 	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::hamming", &a, &b)?;
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
 			Err(_) => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
@@ -299,22 +339,38 @@ pub mod distance {
 		}
 	}
 
-	/// Calculate the Levenshtein distance between two strings
-	/// via [`strsim::levenshtein`].
+	/// Calculate the Levenshtein distance between two strings.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(min(n, m)).
+	///
+	/// Uses [`strsim::levenshtein`].
 	pub fn levenshtein((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::levenshtein", &a, &b)?;
 		Ok(strsim::levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Levenshtein distance between two strings
-	/// via [`strsim::normalized_levenshtein`].
+	/// Calculate the normalized Levenshtein distance between two strings.
+	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(min(n, m)).
+	///
+	/// Uses [`strsim::normalized_levenshtein`].
 	pub fn normalized_levenshtein((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::normalized_levenshtein", &a, &b)?;
 		Ok(strsim::normalized_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
-	/// that allows for transposition of adjacent characters &ndash; between two
-	/// strings via [`strsim::osa_distance`].
+	/// Calculate the OSA distance between two strings. This is a variant of
+	/// Levenshtein distance that also allows transposition of adjacent characters.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(min(n, m)).
+	///
+	/// Uses [`strsim::osa_distance`].
 	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::distance::osa_distance", &a, &b)?;
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }
@@ -485,29 +541,61 @@ pub mod similarity {
 
 	use strsim;
 
+	/// Calculate fuzzy similarity between two strings using the Smith-Waterman algorithm.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n * m).
+	///
+	/// Returns a score where higher values indicate greater similarity.
 	pub fn fuzzy(arg: (String, String)) -> Result<Value> {
 		smithwaterman(arg)
 	}
 
-	/// Calculate the Jaro similarity between two strings
-	/// via [`strsim::jaro`].
+	/// Calculate the Jaro similarity between two strings.
+	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n + m).
+	///
+	/// Uses [`strsim::jaro`].
 	pub fn jaro((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::similarity::jaro", &a, &b)?;
 		Ok(strsim::jaro(&a, &b).into())
 	}
 
-	/// Calculate the Jaro-Winkler similarity between two strings
-	/// via [`strsim::jaro_winkler`].
+	/// Calculate the Jaro-Winkler similarity between two strings.
+	/// This is a variant of Jaro similarity that gives more weight to common prefixes.
+	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n + m).
+	///
+	/// Uses [`strsim::jaro_winkler`].
 	pub fn jaro_winkler((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::similarity::jaro_winkler", &a, &b)?;
 		Ok(strsim::jaro_winkler(&a, &b).into())
 	}
 
+	/// Calculate fuzzy similarity between two strings using the Smith-Waterman algorithm.
+	///
+	/// Time complexity: O(n * m) where n and m are the string lengths.
+	/// Space complexity: O(n * m).
+	///
+	/// Returns a score where higher values indicate greater similarity.
 	pub fn smithwaterman((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::similarity::smithwaterman", &a, &b)?;
 		Ok(MATCHER.fuzzy_match(&a, &b).unwrap_or(0).into())
 	}
 
-	/// Calculate the Sørensen-Dice similarity between two strings
-	/// via [`strsim::sorensen_dice`].
+	/// Calculate the Sørensen-Dice similarity coefficient between two strings.
+	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
+	///
+	/// Time complexity: O(n + m) where n and m are the string lengths.
+	/// Space complexity: O(n + m).
+	///
+	/// Uses [`strsim::sorensen_dice`].
 	pub fn sorensen_dice((a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length("string::similarity::sorensen_dice", &a, &b)?;
 		Ok(strsim::sorensen_dice(&a, &b).into())
 	}
 }
@@ -774,5 +862,42 @@ mod tests {
 
 		let value = super::semver::set::patch((String::from("1.2.3"), 9)).unwrap();
 		assert_eq!(value, Value::from("1.2.9"));
+	}
+
+	#[test]
+	fn similarity_distance_length_limit() {
+		use crate::cnf::STRING_SIMILARITY_LIMIT;
+
+		// Normal strings under limit should work
+		let a = "hello".to_string();
+		let b = "world".to_string();
+		assert!(super::distance::levenshtein((a.clone(), b.clone())).is_ok());
+		assert!(super::distance::hamming((a.clone(), a.clone())).is_ok());
+		assert!(super::similarity::jaro((a.clone(), b.clone())).is_ok());
+		assert!(super::similarity::fuzzy((a, b)).is_ok());
+
+		// Strings exceeding limit should error
+		let limit = *STRING_SIMILARITY_LIMIT;
+		let long_a = "a".repeat(limit + 1);
+		let long_b = "b".repeat(limit + 1);
+		let short = "x".to_string();
+
+		// First argument too long
+		assert!(super::distance::levenshtein((long_a.clone(), short.clone())).is_err());
+		assert!(super::similarity::jaro((long_a.clone(), short.clone())).is_err());
+
+		// Second argument too long
+		assert!(super::distance::levenshtein((short.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro((short, long_b.clone())).is_err());
+
+		// Both arguments too long
+		assert!(super::distance::levenshtein((long_a.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro((long_a, long_b)).is_err());
+
+		// Strings at exactly the limit should work
+		let at_limit_a = "a".repeat(limit);
+		let at_limit_b = "b".repeat(limit);
+		assert!(super::distance::levenshtein((at_limit_a.clone(), at_limit_b.clone())).is_ok());
+		assert!(super::similarity::jaro((at_limit_a, at_limit_b)).is_ok());
 	}
 }
