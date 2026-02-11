@@ -101,33 +101,6 @@ pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
 	}
 }
 
-/// Check if an expression contains MATCHES operators that cannot be indexed.
-pub(super) fn contains_non_indexable_matches(expr: &Expr) -> bool {
-	contains_matches_in_or(expr, false)
-}
-
-fn contains_matches_in_or(expr: &Expr, inside_or: bool) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			if inside_or && matches!(op, BinaryOperator::Matches(_)) {
-				return true;
-			}
-			let new_inside_or = inside_or || matches!(op, BinaryOperator::Or);
-			contains_matches_in_or(left, new_inside_or)
-				|| contains_matches_in_or(right, new_inside_or)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => contains_matches_in_or(inner, inside_or),
-		_ => false,
-	}
-}
-
 /// Check if a source expression represents a "value source" (array, primitive).
 pub(super) fn is_value_source_expr(expr: &Expr) -> bool {
 	match expr {

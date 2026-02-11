@@ -12,11 +12,11 @@ use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
-use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
+use crate::core::dbs::{NewPlannerStrategy, Session};
 
 const TARGET: &str = "surreal::dbs";
 
@@ -77,6 +77,12 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
+	#[arg(
+		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
+	)]
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
+	#[arg(default_value = "best-effort")]
+	planner_strategy: NewPlannerStrategy,
 }
 
 #[derive(Args, Debug)]
@@ -691,6 +697,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
+		planner_strategy,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
@@ -732,6 +739,8 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
+	// Log the planner strategy
+	debug!("Planner strategy: {planner_strategy}");
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
 		.await?
@@ -740,6 +749,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
 		.with_capabilities(capabilities)
+		.with_planner_strategy(planner_strategy)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	#[cfg(storage)]
 	let dbs = dbs.with_temporary_directory(temporary_directory);

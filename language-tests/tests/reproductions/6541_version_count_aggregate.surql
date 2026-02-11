@@ -98,4 +98,4 @@ SELECT count() FROM (SELECT * FROM something) GROUP ALL VERSION $ts;
 SELECT count() FROM (SELECT * FROM something VERSION $ts) GROUP ALL;
 
 -- Query 8: VERSION in subquery should be used instead of VERSION from outer statement
-SELECT count() FROM (SELECT * FROM something VERSION $ts) GROUP ALL VERSION "1970-01-01T00:00:00Z";
+SELECT count() FROM (SELECT * FROM something VERSION $ts, something VERSION ) GROUP ALL;

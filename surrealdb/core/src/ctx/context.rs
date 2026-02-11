@@ -670,11 +670,21 @@ impl Context {
 		)
 	}
 
+	/// Set the planner strategy for this context.
+	pub(crate) fn set_planner_strategy(&mut self, strategy: NewPlannerStrategy) {
+		self.new_planner_strategy = strategy;
+	}
+
 	/// Attach a session to the context and add any session variables to the
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
-		self.new_planner_strategy = session.new_planner_strategy.clone();
+		// Only override the planner strategy if the session explicitly sets a
+		// non-default value (e.g. language tests). Otherwise the Datastore-level
+		// strategy (set via setup_ctx) is preserved.
+		if session.new_planner_strategy != NewPlannerStrategy::default() {
+			self.new_planner_strategy = session.new_planner_strategy.clone();
+		}
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}

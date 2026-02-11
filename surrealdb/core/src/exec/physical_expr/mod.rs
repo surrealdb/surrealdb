@@ -20,6 +20,7 @@ mod control_flow;
 pub(crate) mod function;
 mod idiom;
 mod literal;
+mod matches;
 mod ops;
 pub(crate) mod record_id;
 mod subquery;
@@ -35,6 +36,7 @@ pub(crate) use function::{
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, MockExpr, Param};
+pub(crate) use matches::MatchesOp;
 pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
 pub(crate) use record_id::RecordIdExpr;
 pub(crate) use subquery::ScalarSubquery;

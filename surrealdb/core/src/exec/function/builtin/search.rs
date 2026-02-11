@@ -357,7 +357,10 @@ impl PartialOrd for FusionDoc {
 
 impl Ord for FusionDoc {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+		// Reversed comparison for min-heap behavior with BinaryHeap.
+		// peek() returns the smallest element, enabling correct top-k selection:
+		// evict the smallest when a higher-scoring element arrives.
+		other.0.partial_cmp(&self.0).unwrap_or(std::cmp::Ordering::Equal)
 	}
 }
 
@@ -467,8 +470,8 @@ impl ScalarFunction for SearchRrf {
 			for (id, (score, objects)) in documents {
 				if scored_docs.len() < limit {
 					scored_docs.push(FusionDoc(score, id, objects));
-				} else if let Some(FusionDoc(min_score, _, _)) = scored_docs.peek()
-					&& score > *min_score
+				} else if let Some(FusionDoc(worst_score, _, _)) = scored_docs.peek()
+					&& score > *worst_score
 				{
 					scored_docs.pop();
 					scored_docs.push(FusionDoc(score, id, objects));
@@ -489,6 +492,8 @@ impl ScalarFunction for SearchRrf {
 				obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 				result_array.push(Value::Object(obj));
 			}
+			// Min-heap pop yields ascending order; reverse for descending score order
+			result_array.0.reverse();
 
 			Ok(Value::Array(result_array))
 		})
@@ -717,8 +722,8 @@ impl ScalarFunction for SearchLinear {
 
 				if scored_docs.len() < limit {
 					scored_docs.push(FusionDoc(combined_score, id, objects));
-				} else if let Some(FusionDoc(min_score, _, _)) = scored_docs.peek()
-					&& combined_score > *min_score
+				} else if let Some(FusionDoc(worst_score, _, _)) = scored_docs.peek()
+					&& combined_score > *worst_score
 				{
 					scored_docs.pop();
 					scored_docs.push(FusionDoc(combined_score, id, objects));
@@ -739,6 +744,8 @@ impl ScalarFunction for SearchLinear {
 				obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
 				result_array.push(Value::Object(obj));
 			}
+			// Min-heap pop yields ascending order; reverse for descending score order
+			result_array.0.reverse();
 
 			Ok(Value::Array(result_array))
 		})

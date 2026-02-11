@@ -194,6 +194,36 @@ impl<'ctx> Planner<'ctx> {
 				op,
 				right,
 			} => {
+				// For MATCHES operators with idiom left and string-literal right,
+				// create a MatchesOp that evaluates via the full-text index.
+				if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
+					&& let Expr::Idiom(idiom) = *left
+				{
+					if let Expr::Literal(crate::expr::literal::Literal::String(query)) = *right {
+						let idiom_clone = idiom.clone();
+						let query_clone = query.clone();
+						let left_phys = self.physical_expr(Expr::Idiom(idiom))?;
+						let right_phys = self.physical_expr(Expr::Literal(
+							crate::expr::literal::Literal::String(query),
+						))?;
+						return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
+							left_phys,
+							right_phys,
+							matches_op.clone(),
+							idiom_clone,
+							query_clone,
+						)));
+					}
+					// Left was idiom but right wasn't a string literal — reassemble
+					let left_phys = self.physical_expr(Expr::Idiom(idiom))?;
+					let right_phys = self.physical_expr(*right)?;
+					return Ok(Arc::new(BinaryOp {
+						left: left_phys,
+						op,
+						right: right_phys,
+					}));
+				}
+				// All other binary operators (and non-standard MATCHES patterns)
 				let left_phys = self.physical_expr(*left)?;
 				let right_phys = self.physical_expr(*right)?;
 				Ok(Arc::new(BinaryOp {
@@ -468,10 +498,14 @@ impl<'ctx> Planner<'ctx> {
 				"LET statements cannot be used in expression context".to_string(),
 			)),
 			Expr::Explain {
-				..
-			} => Err(Error::PlannerUnimplemented(
-				"EXPLAIN statements cannot be used in expression context".to_string(),
-			)),
+				format,
+				statement,
+			} => {
+				let plan = self.plan_explain_statement(format, *statement)?;
+				Ok(Arc::new(ScalarSubquery {
+					plan,
+				}))
+			}
 
 			Expr::Mock(mock) => Ok(Arc::new(MockExpr(mock))),
 			Expr::Block(block) => Ok(Arc::new(BlockPhysicalExpr {

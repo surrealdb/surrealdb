@@ -20,10 +20,10 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
-value = "[]"
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Tobie' OR securityNumber == '123456']\n"'''
 
 [[test.results]]
-value = "[{ name: 'Jaime' }]"
+value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 
 */
 DEFINE TABLE person;

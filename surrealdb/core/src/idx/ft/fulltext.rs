@@ -100,7 +100,7 @@ impl QueryTerms {
 		self.tokens.list().is_empty()
 	}
 
-	pub(in crate::idx) fn contains_doc(&self, doc_id: DocId) -> bool {
+	pub(crate) fn contains_doc(&self, doc_id: DocId) -> bool {
 		for d in self.docs.iter().flatten() {
 			if d.contains(doc_id) {
 				return true;

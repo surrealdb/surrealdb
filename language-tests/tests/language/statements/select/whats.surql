@@ -11,7 +11,7 @@ value = "1"
 
 # 2
 [[test.results]]
-value = "NONE"
+error = "Expected a single result output when using the ONLY keyword"
 
 # 3
 [[test.results]]
@@ -79,19 +79,19 @@ value = "['bob']"
 
 # 19
 [[test.results]]
-value = "[NONE]"
+value = "[]"
 
 # 20
 [[test.results]]
-value = "[NULL]"
+value = "[]"
 
 # 21
 [[test.results]]
-value = "NONE"
+error = "Expected a single result output when using the ONLY keyword"
 
 # 22
 [[test.results]]
-value = "NULL"
+error = "Expected a single result output when using the ONLY keyword"
 */
 
 # 0: Setup

@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'blog' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 1 }, operation: 'Fetch' }]"
+value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: blog, predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99]\n"'''
 
 [[test.results]]
 value = "[{ id: blog:1, title: 'Hello <em>World</em>!' }]"

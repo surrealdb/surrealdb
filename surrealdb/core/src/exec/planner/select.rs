@@ -8,9 +8,8 @@ use std::sync::Arc;
 use super::Planner;
 use super::util::{
 	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params,
-	contains_knn_operator, contains_non_indexable_matches, derive_field_name,
-	extract_matches_context, extract_version, get_effective_limit_literal, idiom_to_field_name,
-	idiom_to_field_path,
+	contains_knn_operator, derive_field_name, extract_matches_context, extract_version,
+	get_effective_limit_literal, idiom_to_field_name, idiom_to_field_path,
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
@@ -78,19 +77,13 @@ impl<'ctx> Planner<'ctx> {
 			));
 		}
 
-		if let Some(ref c) = cond {
-			if contains_knn_operator(&c.0) {
-				return Err(Error::PlannerUnimplemented(
-					"WHERE clause with KNN operators not yet supported in streaming executor"
-						.to_string(),
-				));
-			}
-			if contains_non_indexable_matches(&c.0) {
-				return Err(Error::PlannerUnimplemented(
-					"WHERE clause with MATCHES in OR conditions not yet supported in streaming executor"
-						.to_string(),
-				));
-			}
+		if let Some(ref c) = cond
+			&& contains_knn_operator(&c.0)
+		{
+			return Err(Error::PlannerUnimplemented(
+				"WHERE clause with KNN operators not yet supported in streaming executor"
+					.to_string(),
+			));
 		}
 
 		let version = extract_version(version)?;
