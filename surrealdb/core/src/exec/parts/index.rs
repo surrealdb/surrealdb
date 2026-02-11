@@ -29,7 +29,17 @@ impl PhysicalExpr for IndexPart {
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		let index = self.expr.evaluate(ctx).await?;
+		// Evaluate the index expression against the document root (if available)
+		// so that dynamic key references like `[field]` or `[$param]` resolve
+		// against the full document rather than the chain's current position.
+		// This matches the old compute path where Part::Value evaluates the
+		// expression with `doc` (the full cursor document).
+		let index_ctx = if let Some(doc) = ctx.document_root {
+			ctx.with_value(doc)
+		} else {
+			ctx
+		};
+		let index = self.expr.evaluate(index_ctx).await?;
 		Ok(evaluate_index(&value, &index)?)
 	}
 

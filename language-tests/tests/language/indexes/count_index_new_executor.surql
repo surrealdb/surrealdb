@@ -17,7 +17,10 @@ value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 value = "'OK'"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: t]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: t]
+"'''
 
 [[test.results]]
 value = "[{ count: 4 }]"

@@ -59,12 +59,20 @@ impl ExecOperator for SourceExpr {
 			let value = expr.evaluate(eval_ctx).await?;
 
 			match value {
-				// Arrays yield their elements
+				// Arrays yield their elements, filtering out NONE/NULL
+				// entries to match the old compute path's behaviour.
 				Value::Array(arr) => {
-					if !arr.is_empty() {
-						yield ValueBatch { values: arr.into() };
+					let filtered: Vec<Value> = arr
+						.into_iter()
+						.filter(|v| !matches!(v, Value::None | Value::Null))
+						.collect();
+					if !filtered.is_empty() {
+						yield ValueBatch { values: filtered };
 					}
 				}
+				// NONE and NULL yield no rows (empty source), matching
+				// the behaviour of the old compute path.
+				Value::None | Value::Null => {}
 				// Everything else yields a single row
 				other => {
 					yield ValueBatch { values: vec![other] };

@@ -67,14 +67,58 @@ impl<'ctx> Planner<'ctx> {
 		while let Some(part) = iter.next() {
 			// Handle implicit recursion (Recurse with no inner path absorbs remaining parts)
 			if let Part::Recurse(recurse, None, instruction) = part {
+				let system_limit = *crate::cnf::IDIOM_RECURSION_LIMIT as u32;
 				let (min_depth, max_depth) = match recurse {
 					crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 					crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
 				};
 
+				// Validate bounds (same checks as expr/part.rs)
+				if min_depth < 1 {
+					return Err(Error::InvalidBound {
+						found: min_depth.to_string(),
+						expected: "at least 1".into(),
+					});
+				}
+				if let Some(max) = max_depth
+					&& max > system_limit
+				{
+					return Err(Error::InvalidBound {
+						found: max.to_string(),
+						expected: format!("{} at most", system_limit),
+					});
+				}
+
 				let remaining: Vec<Part> = iter.collect();
 				let has_repeat_recurse = ast_contains_repeat_recurse(&remaining);
-				let path = self.convert_parts(remaining)?;
+
+				// When an instruction is provided (e.g. +path, +collect)
+				// AND the path contains a repeat recurse (@), the two
+				// conflict -- match the old compute path's check.
+				if instruction.is_some() && has_repeat_recurse {
+					return Err(Error::RecursionInstructionPlanConflict);
+				}
+
+				// When the path contains @, split at the @ marker.
+				// Parts up to and including @ form the recursion body.
+				// Parts after @ are a suffix applied once after recursion
+				// completes -- matching the old compute path's
+				// split_by_repeat_recurse semantics.
+				let (recurse_body, suffix) = if has_repeat_recurse {
+					match remaining.iter().position(|p| matches!(p, Part::RepeatRecurse)) {
+						Some(pos) => {
+							// Include everything up to and including @
+							let body = remaining[..=pos].to_vec();
+							let after = remaining[pos + 1..].to_vec();
+							(body, after)
+						}
+						None => (remaining, vec![]),
+					}
+				} else {
+					(remaining, vec![])
+				};
+
+				let path = self.convert_parts(recurse_body)?;
 				let inclusive = is_inclusive_recurse(&instruction);
 				let instr = self.convert_recurse_instruction(instruction)?;
 
@@ -86,6 +130,14 @@ impl<'ctx> Planner<'ctx> {
 					inclusive,
 					has_repeat_recurse,
 				}) as Arc<dyn PhysicalExpr>);
+
+				// Append suffix parts (parts after @) outside the
+				// recursion so they are evaluated once on the final
+				// result rather than at every recursion depth.
+				if !suffix.is_empty() {
+					let suffix_parts = self.convert_parts(suffix)?;
+					converted.extend(suffix_parts);
+				}
 
 				break;
 			}
@@ -194,10 +246,27 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			Part::Recurse(recurse, inner_path, instruction) => {
+				let system_limit = *crate::cnf::IDIOM_RECURSION_LIMIT as u32;
 				let (min_depth, max_depth) = match recurse {
 					crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 					crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
 				};
+
+				// Validate bounds (same checks as expr/part.rs)
+				if min_depth < 1 {
+					return Err(Error::InvalidBound {
+						found: min_depth.to_string(),
+						expected: "at least 1".into(),
+					});
+				}
+				if let Some(max) = max_depth
+					&& max > system_limit
+				{
+					return Err(Error::InvalidBound {
+						found: max.to_string(),
+						expected: format!("{} at most", system_limit),
+					});
+				}
 
 				let (path, has_repeat_recurse) = if let Some(p) = inner_path {
 					let has_rr = ast_contains_repeat_recurse(&p.0);

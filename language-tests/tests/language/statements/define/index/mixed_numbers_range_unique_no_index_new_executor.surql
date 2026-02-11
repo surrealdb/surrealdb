@@ -8,49 +8,81 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0 AND number < 2]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0 AND number < 2]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f AND number < 2]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f AND number < 2]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f AND number < 1.5f]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f AND number < 1.5f]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0 AND number < 1.5f]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0 AND number < 1.5f]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0.1f]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number > 0]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number > 0]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number < 2]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number < 2]
+''''
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: id ASC]\n       └────> Scan [ctx: Db] [source: test, predicate: number < 1.9f]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> Scan [ctx: Db] [source: test, predicate: number < 1.9f]
+''''
 
 */
 

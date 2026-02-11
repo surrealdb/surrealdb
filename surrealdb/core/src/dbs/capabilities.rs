@@ -1096,25 +1096,35 @@ mod tests {
 	#[tokio::test]
 	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 	async fn test_net_target_resolve_async() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
 		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 
 	#[test]
 	#[cfg(all(target_family = "wasm", feature = "http"))]
 	fn test_net_target_resolve_sync() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
 		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 
 	#[test]

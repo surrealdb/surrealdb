@@ -5,37 +5,64 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 3]\n       └────> SortByKey [ctx: Db] [sort_keys: time ASC]\n              └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 3]
+       └────> SortByKey [ctx: Db] [sort_keys: time ASC]
+              └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']
+"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: time ASC]\n       └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: time ASC]
+       └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']
+"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 3]\n       └────> SortByKey [ctx: Db] [sort_keys: time ASC]\n              └────> Scan [ctx: Db] [source: session]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 3]
+       └────> SortByKey [ctx: Db] [sort_keys: time ASC]
+              └────> Scan [ctx: Db] [source: session]
+''''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: time ASC]\n       └────> Scan [ctx: Db] [source: session]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: time ASC]
+       └────> Scan [ctx: Db] [source: session]
+''''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Limit [ctx: Db] [limit: 3]\n       └────> SortByKey [ctx: Db] [sort_keys: time DESC]\n              └────> Scan [ctx: Db] [source: session]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Limit [ctx: Db] [limit: 3]
+       └────> SortByKey [ctx: Db] [sort_keys: time DESC]
+              └────> Scan [ctx: Db] [source: session]
+''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: time DESC]\n       └────> Scan [ctx: Db] [source: session]\n''''
+value = '''
+'Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: time DESC]
+       └────> Scan [ctx: Db] [source: session]
+''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"

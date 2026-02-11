@@ -1102,19 +1102,23 @@ mod tests {
 			),
 			// - 17
 			(
-				// Ensure redirect fails
+				// Ensure connecting via localhost is denied when all IPs are blocked
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All)
 						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+							[
+								NetTarget::from_str("127.0.0.1/0").unwrap(),
+								NetTarget::from_str("::/0").unwrap(),
+							]
+							.into(),
 						)),
 				),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				"is not allowed".to_string(),
 			),
 			// 18 - Ensure redirect succeed
 			(

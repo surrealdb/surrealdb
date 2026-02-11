@@ -14,7 +14,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> SortByKey [ctx: Db] [sort_keys: name ASC]\n       └────> Scan [ctx: Db] [source: person]\n"'''
+value = '''
+"Project [ctx: Db]
+└────> SortByKey [ctx: Db] [sort_keys: name ASC]
+       └────> Scan [ctx: Db] [source: person]
+"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"

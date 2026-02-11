@@ -70,6 +70,7 @@ use std::sync::Arc;
 // Re-exports for external callers
 pub(crate) use self::source::LOOKUP_SOURCE_PARAM;
 use self::util::literal_to_value;
+use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
 use crate::err::Error;
@@ -209,6 +210,25 @@ impl<'ctx> Planner<'ctx> {
 				op,
 				expr,
 			} => {
+				// Check for excessively deep prefix/cast chains. The old
+				// compute path enforces a recursion depth limit via TreeStack;
+				// the new physical-expr evaluator does not track depth. Detect
+				// deep chains at planning time and reject with the same error.
+				{
+					let mut d = 0u32;
+					let mut cur = &*expr;
+					while let Expr::Prefix {
+						expr: inner,
+						..
+					} = cur
+					{
+						d += 1;
+						if d > *MAX_COMPUTATION_DEPTH {
+							return Err(Error::ComputationDepthExceeded);
+						}
+						cur = inner;
+					}
+				}
 				let inner = self.physical_expr(*expr)?;
 				Ok(Arc::new(UnaryOp {
 					op,

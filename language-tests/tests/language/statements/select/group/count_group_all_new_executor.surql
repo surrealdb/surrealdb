@@ -5,13 +5,19 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: `table`]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: `table`]
+"'''
 
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: `table`]\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: `table`]
+"'''
 
 [[test.results]]
 value = "[{ count: 1 }, { count: 1 }, { count: 1 }]"

@@ -14,7 +14,10 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], index: 'COUNT', name: 'count_idx', table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: test]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: test]
+"'''
 
 [[test.results]]
 value = "[{ count: 3 }]"
@@ -26,7 +29,10 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], comment: 'may rebuild instead', index: 'COUNT', name: 'count_idx', prepare_remove: true, table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: test]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: test]
+"'''
 
 [[test.results]]
 value = "[{ count: 3 }]"

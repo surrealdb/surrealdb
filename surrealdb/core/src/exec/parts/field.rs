@@ -107,6 +107,12 @@ pub(crate) async fn evaluate_field(
 			Ok(Value::Array(results.into()))
 		}
 
+		Value::Geometry(geo) => {
+			// Geometry values support GeoJSON field access (type, coordinates, geometries)
+			let obj = geo.as_object();
+			Ok(obj.get(name).cloned().unwrap_or(Value::None))
+		}
+
 		_ => Ok(Value::None),
 	}
 }

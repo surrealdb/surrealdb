@@ -68,12 +68,12 @@ impl PhysicalExpr for MethodPart {
 		match result {
 			Ok(v) => Ok(v),
 			Err(e) => {
-				if let Some(crate::err::Error::InvalidArguments {
+				if let Some(crate::err::Error::InvalidFunctionArguments {
 					message,
 					..
 				}) = e.downcast_ref::<crate::err::Error>()
 				{
-					Err(crate::err::Error::InvalidArguments {
+					Err(crate::err::Error::InvalidMethodArguments {
 						name: self.descriptor.name.to_string(),
 						message: message.clone(),
 					}
@@ -151,9 +151,10 @@ impl PhysicalExpr for ClosureFieldCallPart {
 		let closure = match field_value {
 			Some(Value::Closure(c)) => c,
 			_ => {
+				let type_name = value.kind_of().to_string();
 				return Err(Error::InvalidFunction {
 					name: self.field.clone(),
-					message: "no such method found for the object type".to_string(),
+					message: format!("no such method found for the {} type", type_name),
 				}
 				.into());
 			}
@@ -184,7 +185,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 					&& let Some((param, kind)) =
 						arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
 				{
-					return Err(Error::InvalidArguments {
+					return Err(Error::InvalidFunctionArguments {
 						name: "ANONYMOUS".to_string(),
 						message: format!(
 							"Expected a value of type '{}' for argument {}",
@@ -198,15 +199,16 @@ impl PhysicalExpr for ClosureFieldCallPart {
 				// Bind arguments to parameter names with type coercion
 				let mut local_params: HashMap<String, Value> = HashMap::new();
 				for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args.into_iter()) {
-					let coerced =
-						arg_value.coerce_to_kind(kind).map_err(|_| Error::InvalidArguments {
+					let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
+						Error::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
 								kind.to_sql(),
 								param.to_sql()
 							),
-						})?;
+						}
+					})?;
 					local_params.insert(param.clone().into_string(), coerced);
 				}
 
@@ -224,6 +226,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 					current_value: ctx.current_value,
 					local_params: Some(&local_params),
 					recursion_ctx: None,
+					document_root: ctx.document_root,
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

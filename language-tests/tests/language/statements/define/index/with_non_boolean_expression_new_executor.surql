@@ -20,31 +20,46 @@ value = "NONE"
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: v > math::max(...)]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: v > math::max(...)]
+''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...)]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...)]
+''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) - 1]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) - 1]
+''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) + 1]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) + 1]
+''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: v > $p3 - math::max(...) + $p1]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: v > $p3 - math::max(...) + $p1]
+''''
 
 */
 DEFINE INDEX idx ON t FIELDS v;

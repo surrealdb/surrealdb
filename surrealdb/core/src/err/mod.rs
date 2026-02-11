@@ -138,7 +138,15 @@ pub(crate) enum Error {
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
 	#[error("Incorrect arguments for function {name}(). {message}")]
-	InvalidArguments {
+	InvalidFunctionArguments {
+		name: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
+	#[error("Incorrect arguments for method {name}(). {message}")]
+	InvalidMethodArguments {
 		name: String,
 		message: String,
 	},
@@ -1210,7 +1218,7 @@ impl Error {
 			self,
 			Error::Coerce(_)
 				| Error::Cast(_)
-				| Error::InvalidArguments { .. }
+				| Error::InvalidFunctionArguments { .. }
 				| Error::TryAdd(..)
 				| Error::TrySub(..)
 				| Error::TryMul(..)

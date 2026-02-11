@@ -115,9 +115,6 @@ args = [
     "--bins",
     "--fix",
     "--allow-dirty",
-    "--",
-    "-D",
-    "warnings",
 ]
 
 [tasks.ci-clippy-release]

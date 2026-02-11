@@ -149,6 +149,13 @@ pub(crate) async fn evaluate_parts_with_continuation(
 	ctx: EvalContext<'_>,
 ) -> crate::expr::FlowResult<Value> {
 	let mut i = 0;
+	// Track the previous part name to distinguish array sources.
+	let mut prev_part_name: &str = "";
+	// Track whether the current array was produced by a Lookup/Flatten chain.
+	// When true, graph continuations should flatten their mapped results
+	// (matching the old compute path's inline flatten for Lookup→Lookup/Where).
+	// When false (array from literal / start expression), results are NOT flattened.
+	let mut array_from_lookup = false;
 	while i < parts.len() {
 		let part = &parts[i];
 
@@ -193,7 +200,67 @@ pub(crate) async fn evaluate_parts_with_continuation(
 			return Ok(Value::Array(results.into()));
 		}
 
+		// Graph continuation: when an array encounters a Lookup part and the
+		// array was NOT directly produced by a Lookup (i.e., there was an
+		// intervening Where/filter), map the full remaining chain over each
+		// element.  This matches the old compute path's default Array handler
+		// (val/value/get.rs line 374) which maps the full remaining path over
+		// array elements for graph-traversal chains.
+		//
+		// When the array originated from a Lookup chain (e.g., `->likes->person`
+		// followed by `[?true]`), the mapped results are flattened to match
+		// the old compute path's inline flatten (RecordId+Lookup handler).
+		// When the array is from a literal/start (e.g., `[person:1][?true]`),
+		// results are NOT flattened, preserving per-element nesting.
+		if matches!(&value, Value::Array(_))
+			&& part.name() == "Lookup"
+			&& i + 1 < parts.len()
+			&& !matches!(prev_part_name, "Lookup" | "Flatten")
+		{
+			let arr = match value {
+				Value::Array(a) => a,
+				_ => unreachable!(),
+			};
+			let remaining = &parts[i..];
+			let mut results = Vec::with_capacity(arr.len());
+			for elem in arr.iter() {
+				let mut v = elem.clone();
+				for rp in remaining {
+					v = rp.evaluate(ctx.with_value(&v)).await?;
+				}
+				results.push(v);
+			}
+			let result = Value::Array(results.into());
+			// Flatten when the array came from a Lookup chain (graph traversal),
+			// but not when it came from a literal/start expression.
+			return if array_from_lookup {
+				Ok(result.flatten())
+			} else {
+				Ok(result)
+			};
+		}
+
+		prev_part_name = part.name();
 		value = part.evaluate(ctx.with_value(&value)).await?;
+
+		// Update the Lookup-chain tracker:
+		// - Lookup/Flatten produce arrays from graph traversals
+		// - Where preserves the source (filters but doesn't change origin)
+		// - Other parts reset the tracker
+		match prev_part_name {
+			"Lookup" | "Flatten" => {
+				if matches!(&value, Value::Array(_)) {
+					array_from_lookup = true;
+				}
+			}
+			"Where" => {
+				// Where filters but preserves the array's origin
+			}
+			_ => {
+				array_from_lookup = false;
+			}
+		}
+
 		i += 1;
 	}
 	Ok(value)

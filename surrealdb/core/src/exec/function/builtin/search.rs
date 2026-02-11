@@ -403,14 +403,14 @@ impl ScalarFunction for SearchRrf {
 				Some(Value::Number(n)) => {
 					let l = n.as_int();
 					if l < 1 {
-						anyhow::bail!(Error::InvalidArguments {
+						anyhow::bail!(Error::InvalidFunctionArguments {
 							name: "search::rrf".to_string(),
 							message: "limit must be at least 1".to_string(),
 						});
 					}
 					l as usize
 				}
-				_ => anyhow::bail!(Error::InvalidArguments {
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::rrf".to_string(),
 					message: "limit must be a number".to_string(),
 				}),
@@ -419,7 +419,7 @@ impl ScalarFunction for SearchRrf {
 				Some(Value::Number(n)) => {
 					let k = n.as_int();
 					if k < 0 {
-						anyhow::bail!(Error::InvalidArguments {
+						anyhow::bail!(Error::InvalidFunctionArguments {
 							name: "search::rrf".to_string(),
 							message: "RRF constant must be at least 0".to_string(),
 						});
@@ -551,7 +551,7 @@ impl ScalarFunction for SearchLinear {
 			};
 			let weights = match args.next() {
 				Some(Value::Array(a)) => a,
-				_ => anyhow::bail!(Error::InvalidArguments {
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
 					message: "weights must be an array".to_string(),
 				}),
@@ -560,14 +560,14 @@ impl ScalarFunction for SearchLinear {
 				Some(Value::Number(n)) => {
 					let l = n.as_int();
 					if l < 1 {
-						anyhow::bail!(Error::InvalidArguments {
+						anyhow::bail!(Error::InvalidFunctionArguments {
 							name: "search::linear".to_string(),
 							message: "Limit must be at least 1".to_string(),
 						});
 					}
 					l as usize
 				}
-				_ => anyhow::bail!(Error::InvalidArguments {
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
 					message: "limit must be a number".to_string(),
 				}),
@@ -576,19 +576,19 @@ impl ScalarFunction for SearchLinear {
 				Some(Value::String(s)) => match s.as_str() {
 					"minmax" => LinearNorm::MinMax,
 					"zscore" => LinearNorm::ZScore,
-					_ => anyhow::bail!(Error::InvalidArguments {
+					_ => anyhow::bail!(Error::InvalidFunctionArguments {
 						name: "search::linear".to_string(),
 						message: "Norm must be 'minmax' or 'zscore'".to_string(),
 					}),
 				},
-				_ => anyhow::bail!(Error::InvalidArguments {
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
 					message: "norm must be a string".to_string(),
 				}),
 			};
 
 			if weights.len() != results.len() {
-				anyhow::bail!(Error::InvalidArguments {
+				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
 					message: "The results and the weights array should have the same length"
 						.to_string(),
@@ -596,7 +596,7 @@ impl ScalarFunction for SearchLinear {
 			}
 			for (i, weight) in weights.iter().enumerate() {
 				if !matches!(weight, Value::Number(_)) {
-					anyhow::bail!(Error::InvalidArguments {
+					anyhow::bail!(Error::InvalidFunctionArguments {
 						name: "search::linear".to_string(),
 						message: format!("Weight at index {} must be a number", i),
 					});

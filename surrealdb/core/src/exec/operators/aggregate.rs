@@ -356,6 +356,20 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
+			// GROUP ALL on empty input: produce one row with default aggregate
+			// values (e.g. COUNT() = 0) when the scan ran in an authorised
+			// context.  When permission checks are active and 0 rows passed
+			// filtering the old compute path returns [] — replicate that.
+			if group_by_exprs.is_empty() && groups.is_empty() {
+				let perms_active = ctx
+					.should_check_perms(crate::iam::Action::View)
+					.unwrap_or(true);
+				if !perms_active {
+					let state = create_group_state(&aggregates, &evaluated_extra_args);
+					groups.insert(vec![], state);
+				}
+			}
+
 			// Now compute final results for each group
 			let mut results = Vec::with_capacity(groups.len());
 			for (group_key, state) in groups {

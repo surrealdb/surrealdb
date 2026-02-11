@@ -3,19 +3,29 @@
 reason = "Test EXPLAIN with closure expressions"
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: |$x: any| { $x * 2 }]\n''''
+value = '''
+'Expr [ctx: Rt] [expr: |$x: any| { $x * 2 }]
+''''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: |$x: int| { $x * 2 }]\n''''
+value = '''
+'Expr [ctx: Rt] [expr: |$x: int| { $x * 2 }]
+''''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: |$x: int| -> int { $x * 2 }]\n''''
+value = '''
+'Expr [ctx: Rt] [expr: |$x: int| -> int { $x * 2 }]
+''''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int { $a + $b }]\n''''
+value = '''
+'Expr [ctx: Rt] [expr: |$a: int, $b: int| -> int { $a + $b }]
+''''
 
 [[test.results]]
-value = ''''Expr [ctx: Rt] [expr: || { 42 }]\n''''
+value = '''
+'Expr [ctx: Rt] [expr: || { 42 }]
+''''
 
 */
 

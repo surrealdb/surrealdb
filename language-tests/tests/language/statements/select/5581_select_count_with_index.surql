@@ -25,10 +25,10 @@ value = "[{ count: 10 }]"
 value = '''[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 */
 

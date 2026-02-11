@@ -26,25 +26,37 @@ value = "NONE"
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: links CONTAINSANY [a:2]]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: links CONTAINSANY [a:2]]
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: links CONTAINS a:2]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: links CONTAINS a:2]
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: a:2 INSIDE links]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: a:2 INSIDE links]
+''''
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]\n└────> Scan [ctx: Db] [source: t, predicate: [a:2] ANYINSIDE links]\n''''
+value = '''
+'Project [ctx: Db]
+└────> Scan [ctx: Db] [source: t, predicate: [a:2] ANYINSIDE links]
+''''
 
 */
 

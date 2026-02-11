@@ -153,7 +153,7 @@ impl ExecOperator for Project {
 					// RecordId dereferencing and row-skipping requires per-row handling.
 					let mut values = Vec::with_capacity(batch.values.len());
 					for value in batch.values {
-						let row_ctx = eval_ctx.with_value(&value);
+						let row_ctx = eval_ctx.with_value_and_doc(&value);
 
 						let mut output_value = match &value {
 							Value::Object(original) => {
@@ -224,14 +224,20 @@ impl ExecOperator for Project {
 								evaluate_and_set_field(
 									&mut objects[i],
 									field,
-									eval_ctx.with_value(value),
+									eval_ctx.with_value_and_doc(value),
 								)
 								.await?;
 							}
 						} else {
-							// Batch evaluate this field across all rows
-							let field_values =
-								field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+							// Per-row evaluation with document_root set so
+							// dynamic index expressions (e.g. `[field]`)
+							// resolve against the full document.
+							let mut field_values = Vec::with_capacity(batch_len);
+							for value in &batch.values {
+								let row_ctx = eval_ctx.with_value_and_doc(value);
+								field_values.push(field.expr.evaluate(row_ctx).await?);
+							}
+							let field_values = field_values;
 							for (i, field_value) in field_values.into_iter().enumerate() {
 								let mut target = Value::Object(std::mem::take(&mut objects[i]));
 								target.set_at_field_path(&field.output_path, field_value);
@@ -416,6 +422,36 @@ fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
 				} else {
 					omit_nested_field(nested, idiom, depth + 1);
 				}
+			}
+		}
+		Part::Destructure(destructure_parts) => {
+			// Destructure in OMIT: remove the listed fields from the current object.
+			// E.g., OMIT obj.c.{ d, f } removes d and f from obj.c.
+			if let Value::Object(obj) = value {
+				use crate::expr::part::DestructurePart;
+				fn omit_destructure_fields(
+					obj: &mut crate::val::Object,
+					parts: &[DestructurePart],
+				) {
+					for dp in parts {
+						match dp {
+							DestructurePart::Field(name) | DestructurePart::All(name) => {
+								obj.remove(name.as_str());
+							}
+							DestructurePart::Destructure(name, nested) => {
+								if let Some(crate::val::Value::Object(inner)) =
+									obj.get_mut(name.as_str())
+								{
+									omit_destructure_fields(inner, nested);
+								}
+							}
+							DestructurePart::Aliased(name, _) => {
+								obj.remove(name.as_str());
+							}
+						}
+					}
+				}
+				omit_destructure_fields(obj, destructure_parts);
 			}
 		}
 		_ => {

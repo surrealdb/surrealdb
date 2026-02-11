@@ -7,7 +7,7 @@ value = "1"
 
 # 1: Test ONLY with NONE
 [[test.results]]
-value = "NONE"
+error = "Expected a single result output when using the ONLY keyword"
 
 # 2: Test ONLY with an empty array
 [[test.results]]

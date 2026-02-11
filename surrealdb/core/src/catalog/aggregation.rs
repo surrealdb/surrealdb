@@ -273,7 +273,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				max,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -290,7 +290,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				min,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -307,7 +307,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				sum,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::sum".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -323,7 +323,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::mean".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -342,7 +342,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::stddev".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -362,7 +362,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::variance".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -380,7 +380,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				max,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "time::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -398,7 +398,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				min,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "time::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -572,7 +572,7 @@ impl AggregateExprCollector<'_> {
 	) -> Result<()> {
 		ensure!(
 			args.len() == 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: name.to_string(),
 				message: "Expected 1 argument".to_string()
 			}

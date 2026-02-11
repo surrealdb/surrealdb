@@ -425,6 +425,26 @@ impl ExecutionContext {
 		self.with_new_ctx(child.freeze())
 	}
 
+	/// Create a new context with auth limited by the given `AuthLimit`.
+	///
+	/// This is used by user-defined function execution to cap the caller's
+	/// privileges to the definer's auth level.
+	pub fn with_limited_auth(&self, limit: &crate::iam::AuthLimit) -> Self {
+		let mut new = self.clone();
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.auth = Arc::new(root.auth.new_limited(limit));
+		// Also update the legacy Options if present, so fallback compute
+		// sees the limited auth.
+		if let Some(ref opts) = root.options {
+			root.options = Some(opts.clone().with_auth(root.auth.clone()));
+		}
+		new
+	}
+
 	/// Create a new context at namespace level with the given namespace definition.
 	///
 	/// This is used by USE NS statements to switch namespace context.

@@ -615,16 +615,18 @@ async fn filter_and_process_batch(
 		}
 		// Computed fields (must run before predicate)
 		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
-		// WHERE predicate
+		// Field-level permissions (must run before the WHERE predicate so that
+		// restricted fields are removed before the condition is evaluated,
+		// matching the old compute path's behaviour).
+		if check_perms {
+			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
+		}
+		// WHERE predicate (evaluated on the permission-reduced document)
 		if let Some(pred) = predicate {
 			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&batch[write_idx]);
 			if !pred.evaluate(eval_ctx).await?.is_truthy() {
 				continue;
 			}
-		}
-		// Field-level permissions
-		if check_perms {
-			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
 		}
 		write_idx += 1;
 	}

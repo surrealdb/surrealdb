@@ -43,9 +43,9 @@ impl PhysicalExpr for OptionalChainPart {
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let value = ctx.current_value.cloned().unwrap_or(Value::None);
 
-		// Short-circuit on None/Null
+		// Short-circuit on None/Null, preserving the original kind
 		if matches!(value, Value::None | Value::Null) {
-			return Ok(Value::None);
+			return Ok(value);
 		}
 
 		// Evaluate the tail chain on the value

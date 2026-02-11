@@ -14,7 +14,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Jaime' AND genre = 'm']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Jaime' AND genre = 'm']
+"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"

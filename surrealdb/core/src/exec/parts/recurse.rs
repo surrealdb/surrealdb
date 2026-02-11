@@ -10,8 +10,27 @@ use super::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
-use crate::expr::FlowResult;
+use crate::expr::{ControlFlow, FlowResult};
 use crate::val::Value;
+
+/// Sentinel error type used to signal path elimination during recursion.
+///
+/// When a RepeatRecurse (`@`) finds that all recursive results are dead ends
+/// and the current depth is below `min_depth`, it raises this signal.
+/// The signal propagates through the Destructure (skipping remaining field
+/// evaluation) and is caught by `evaluate_recurse_with_plan`, which returns
+/// `Value::None` -- allowing the parent's `clean_iteration` to filter
+/// the eliminated sub-tree from the results.
+#[derive(Debug)]
+struct PathEliminationSignal;
+
+impl std::fmt::Display for PathEliminationSignal {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "path elimination signal")
+	}
+}
+
+impl std::error::Error for PathEliminationSignal {}
 
 // ============================================================================
 // PhysicalRecurseInstruction -- shared enum
@@ -106,6 +125,7 @@ impl PhysicalExpr for RecursePart {
 			let rec_ctx = RecursionCtx {
 				path: &self.path,
 				max_depth: Some(max_depth),
+				min_depth: self.min_depth,
 				depth: 0,
 			};
 			return evaluate_recurse_with_plan(&value, &self.path, ctx.with_recursion_ctx(rec_ctx))
@@ -114,7 +134,15 @@ impl PhysicalExpr for RecursePart {
 
 		match &self.instruction {
 			PhysicalRecurseInstruction::Default => {
-				evaluate_recurse_default(&value, &self.path, self.min_depth, max_depth, ctx).await
+				evaluate_recurse_default(
+					&value,
+					&self.path,
+					self.min_depth,
+					max_depth,
+					self.max_depth.is_some(),
+					ctx,
+				)
+				.await
 			}
 			PhysicalRecurseInstruction::Collect => {
 				evaluate_recurse_collect(
@@ -281,7 +309,17 @@ fn evaluate_recurse_with_plan<'a>(
 		// Evaluate the path once on the current value.
 		// RepeatRecurse markers within the path will recursively call back
 		// into evaluate_recurse_with_plan via evaluate_repeat_recurse.
-		evaluate_physical_path(value, path, ctx.with_value(value)).await
+		//
+		// If a nested RepeatRecurse detects a dead-end sub-tree below
+		// min_depth it raises PathEliminationSignal. Catch it here so
+		// the parent clean_iteration can filter this branch out.
+		match evaluate_physical_path(value, path, ctx.with_value(value)).await {
+			Ok(v) => Ok(v),
+			Err(ControlFlow::Err(ref e)) if e.downcast_ref::<PathEliminationSignal>().is_some() => {
+				Ok(Value::None)
+			}
+			Err(other) => Err(other),
+		}
 	})
 }
 
@@ -299,11 +337,7 @@ fn evaluate_repeat_recurse<'a>(
 			Some(rc) => *rc,
 			None => {
 				// RepeatRecurse outside recursion context is an error
-				return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-					crate::err::Error::Query {
-						message: "RepeatRecurse (@) used outside recursion context".to_string(),
-					}
-				)));
+				return Err(crate::err::Error::UnsupportedRepeatRecurse.into());
 			}
 		};
 
@@ -313,24 +347,46 @@ fn evaluate_repeat_recurse<'a>(
 			..rec_ctx
 		};
 
+		let next_depth = next_ctx.depth;
+
 		match value {
-			// For arrays, process each element individually and collect results
+			// For arrays, process each element individually and collect results.
 			Value::Array(arr) => {
 				let mut results = Vec::with_capacity(arr.len());
 				for elem in arr.iter() {
 					let elem_ctx = ctx.with_recursion_ctx(next_ctx);
 					let result = evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
-					// Filter out dead-end values
-					if !is_final(&result) {
-						results.push(result);
-					}
+					results.push(result);
 				}
-				Ok(Value::Array(results.into()))
+
+				// Apply clean_iteration: filter out dead-end values (None, Null,
+				// all-None arrays) and flatten.  This matches the old compute
+				// path's `clean_iteration` call inside the Destructure plan.
+				let result = clean_iteration(Value::Array(results.into()));
+
+				// Path elimination: when ALL recursive results are dead ends
+				// (cleaned result is final) and we haven't reached min_depth,
+				// signal elimination so the parent can prune this branch.
+				// Uses strict less-than (`<`) to match the old compute path's
+				// check: `rec.iterated < rec.min`.
+				if is_final(&result) && next_depth < rec_ctx.min_depth {
+					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+				}
+
+				Ok(result)
 			}
 			// For single values, recurse directly
 			_ => {
 				let elem_ctx = ctx.with_recursion_ctx(next_ctx);
-				evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await
+				let result = evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await?;
+
+				// Path elimination for single-value dead ends (e.g. a field
+				// that resolves to None because the record doesn't have it).
+				if is_final(&result) && next_depth < rec_ctx.min_depth {
+					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+				}
+
+				Ok(result)
 			}
 		}
 	})
@@ -345,8 +401,10 @@ async fn evaluate_recurse_default(
 	path: &[Arc<dyn PhysicalExpr>],
 	min_depth: u32,
 	max_depth: u32,
+	user_specified_max: bool,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let system_limit = *IDIOM_RECURSION_LIMIT as u32;
 	let mut current = start.clone();
 	let mut depth = 0u32;
 
@@ -368,11 +426,25 @@ async fn evaluate_recurse_default(
 			return if depth > min_depth {
 				Ok(current)
 			} else {
-				Ok(Value::None)
+				// Use get_final to preserve the value's type:
+				// Array → [], Null → Null, _ → None
+				Ok(get_final(&next))
 			};
 		}
 
 		current = next;
+	}
+
+	// If the user did NOT specify an explicit max bound, and we exhausted
+	// the system recursion limit, that means the recursion was unbounded
+	// and never resolved → error.  When the user DID specify max (e.g.
+	// `{..256}`), reaching that depth is a normal successful termination,
+	// matching the old compute path's `if let Some(max) = rec.max` branch.
+	if !user_specified_max && depth >= system_limit {
+		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+			limit: system_limit,
+		}
+		.into());
 	}
 
 	// Reached max depth
@@ -427,7 +499,10 @@ async fn evaluate_recurse_collect(
 
 				let hash = value_hash(&v);
 				if seen.insert(hash) {
-					// Only collect if we've reached minimum depth
+					// Only collect nodes discovered at or beyond
+					// min_depth. Nodes below the threshold still
+					// need to be traversed (they are intermediaries)
+					// but should not appear in the output.
 					if depth + 1 >= min_depth {
 						collected.push(v.clone());
 					}

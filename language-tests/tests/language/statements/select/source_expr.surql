@@ -19,11 +19,11 @@ value = "[2, 3]"
 
 # 4: Null source - should return empty array
 [[test.results]]
-value = "[NULL]"
+value = "[]"
 
 # 5: None source - should return empty array
 [[test.results]]
-value = "[NONE]"
+value = "[]"
 
 # 6: String source - should return single value
 [[test.results]]

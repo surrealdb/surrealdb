@@ -11,7 +11,10 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake']\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake']
+"'''
 
 [[test.results]]
 value = "[{ count: 10 }]"
@@ -20,13 +23,16 @@ value = "[{ count: 10 }]"
 value = "[{ count: 10 }]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]\n└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake' AND unindexedField = false]\n"'''
+value = '''
+"Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake' AND unindexedField = false]
+"'''
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 */
 

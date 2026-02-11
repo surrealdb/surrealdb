@@ -8,5 +8,5 @@ value = "[]"
 value = "[{ count: 1000 }]"
 
 */
-CREATE |test:1000| RETURN NONE;
+CREATE |test:1000| SET time = time::now() RETURN NONE;
 SELECT count() FROM test GROUP ALL;

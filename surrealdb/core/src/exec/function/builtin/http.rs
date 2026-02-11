@@ -25,14 +25,14 @@ async fn http_disabled() -> Result<Value> {
 fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	match args.first() {
 		Some(Value::String(s)) => Ok(s.clone()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidArguments {
+		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!(
 				"The first argument should be a string containing a valid URI, got: {}",
 				v.kind_of()
 			),
 		})),
-		None => Err(anyhow::anyhow!(crate::err::Error::InvalidArguments {
+		None => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: "Missing URI argument".to_string(),
 		})),
@@ -44,7 +44,7 @@ fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	match args.get(index) {
 		Some(Value::Object(o)) => Ok(o.clone()),
 		Some(Value::None) | None => Ok(Object::default()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidArguments {
+		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!("Options argument should be an object, got: {}", v.kind_of()),
 		})),

@@ -197,6 +197,7 @@ impl BlockPhysicalExpr {
 								Some(local_params)
 							},
 							recursion_ctx: None,
+							document_root: ctx.document_root,
 						};
 						phys_expr.evaluate(eval_ctx).await?
 					}
@@ -266,6 +267,7 @@ impl BlockPhysicalExpr {
 								Some(local_params)
 							},
 							recursion_ctx: None,
+							document_root: ctx.document_root,
 						};
 						phys_expr.evaluate(eval_ctx).await
 					}

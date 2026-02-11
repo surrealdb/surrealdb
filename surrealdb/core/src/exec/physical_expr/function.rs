@@ -94,7 +94,7 @@ fn validate_arg_count(
 	});
 
 	if !(min_args..=max_args).contains(&actual) {
-		return Err(Error::InvalidArguments {
+		return Err(Error::InvalidFunctionArguments {
 			name: func_name.to_string(),
 			message: match (min_args, max_args) {
 				(1, 1) => "The function expects 1 argument.".to_string(),
@@ -260,28 +260,43 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			.await
 			.map_err(|e| anyhow::anyhow!("Function '{}' not found: {}", func_name, e))?;
 
-		// 4. Check permissions
+		// 4. Apply auth limiting — cap the caller's privileges to the definer's auth level,
+		//    matching the old compute path behaviour.
+		let auth_limit = crate::iam::AuthLimit::try_from(&func_def.auth_limit).map_err(|e| {
+			anyhow::anyhow!("Invalid auth limit on function '{}': {}", func_name, e)
+		})?;
+		let limited_ctx = ctx.exec_ctx.with_limited_auth(&auth_limit);
+		let ctx = EvalContext {
+			exec_ctx: &limited_ctx,
+			current_value: ctx.current_value,
+			local_params: ctx.local_params,
+			recursion_ctx: ctx.recursion_ctx,
+			document_root: ctx.document_root,
+		};
+
+		// 5. Check permissions (with limited auth)
 		check_permission(&func_def.permissions, &func_name, &ctx).await?;
 
-		// 5. Evaluate all arguments
+		// 6. Evaluate all arguments
 		let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
-		// 6. Validate argument count
+		// 7. Validate argument count
 		validate_arg_count(&func_name, evaluated_args.len(), &func_def.args)?;
 
-		// 7. Create isolated context with function parameters bound
+		// 8. Create isolated context with function parameters bound
 		let mut local_params: HashMap<String, Value> = HashMap::new();
 		for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args.into_iter())
 		{
-			let coerced = arg_value.coerce_to_kind(kind).map_err(|e| Error::InvalidArguments {
-				name: func_name.clone(),
-				message: format!("Failed to coerce argument `${param_name}`: {e}"),
-			})?;
+			let coerced =
+				arg_value.coerce_to_kind(kind).map_err(|e| Error::InvalidFunctionArguments {
+					name: func_name.clone(),
+					message: format!("Failed to coerce argument `${param_name}`: {e}"),
+				})?;
 			local_params.insert(param_name.clone(), coerced);
 		}
 
-		// 8. Create a new execution context with the parameters
-		let mut isolated_ctx = ctx.exec_ctx.clone();
+		// 9. Create a new execution context with the parameters
+		let mut isolated_ctx = limited_ctx.clone();
 		for (name, value) in &local_params {
 			isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
 		}
@@ -295,6 +310,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			current_value: ctx.current_value,
 			local_params: Some(&local_params),
 			recursion_ctx: None,
+			document_root: None,
 		};
 		let result = match block_expr.evaluate(eval_ctx).await {
 			Ok(v) => v,
@@ -347,8 +363,10 @@ impl PhysicalExpr for JsFunctionExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Script functions require database context for full execution
-		crate::exec::ContextLevel::Database
+		// Script functions access database context through the frozen context
+		// when needed, so they can operate at root level. Requiring Database
+		// here would cause failures when no namespace/database is selected.
+		crate::exec::ContextLevel::Root
 	}
 
 	#[cfg(feature = "scripting")]
@@ -488,7 +506,7 @@ impl PhysicalExpr for ModelFunctionExec {
 
 		// Validate argument count
 		if args.len() != 1 {
-			return Err(Error::InvalidArguments {
+			return Err(Error::InvalidFunctionArguments {
 				name: format!("ml::{}<{}>", self.model.name, self.model.version),
 				message: ARGUMENTS.into(),
 			}
@@ -505,7 +523,7 @@ impl PhysicalExpr for ModelFunctionExec {
 					.into_iter()
 					.map(|(k, v)| {
 						v.coerce_to::<f64>().map(|f| (k, f as f32)).map_err(|_| {
-							Error::InvalidArguments {
+							Error::InvalidFunctionArguments {
 								name: format!("ml::{}<{}>", self.model.name, self.model.version),
 								message: ARGUMENTS.into(),
 							}
@@ -536,11 +554,12 @@ impl PhysicalExpr for ModelFunctionExec {
 			}
 			// Perform raw compute (number input)
 			Value::Number(v) => {
-				let args: f32 =
-					Value::Number(v).coerce_to::<f64>().map_err(|_| Error::InvalidArguments {
+				let args: f32 = Value::Number(v).coerce_to::<f64>().map_err(|_| {
+					Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.model.name, self.model.version),
 						message: ARGUMENTS.into(),
-					})? as f32;
+					}
+				})? as f32;
 
 				// Get the model file as bytes
 				let bytes = crate::obs::get(&path).await?;
@@ -572,7 +591,7 @@ impl PhysicalExpr for ModelFunctionExec {
 					.into_iter()
 					.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
 					.collect::<Result<Vec<f32>, _>>()
-					.map_err(|_| Error::InvalidArguments {
+					.map_err(|_| Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.model.name, self.model.version),
 						message: ARGUMENTS.into(),
 					})?;
@@ -602,7 +621,7 @@ impl PhysicalExpr for ModelFunctionExec {
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			// Invalid argument type
-			_ => Err(Error::InvalidArguments {
+			_ => Err(Error::InvalidFunctionArguments {
 				name: format!("ml::{}<{}>", self.model.name, self.model.version),
 				message: ARGUMENTS.into(),
 			}
@@ -702,7 +721,7 @@ impl PhysicalExpr for SurrealismModuleExec {
 
 		// Validate argument count against signature
 		if args.len() != signature.args.len() {
-			return Err(Error::InvalidArguments {
+			return Err(Error::InvalidFunctionArguments {
 				name: fnc_name,
 				message: format!(
 					"The function expects {} arguments, but {} were provided.",
@@ -716,10 +735,11 @@ impl PhysicalExpr for SurrealismModuleExec {
 		// Validate and coerce arguments to their expected types
 		let mut coerced_args = Vec::with_capacity(args.len());
 		for (arg, kind) in args.into_iter().zip(signature.args.iter()) {
-			let coerced = arg.coerce_to_kind(kind).map_err(|e| Error::InvalidArguments {
-				name: fnc_name.clone(),
-				message: format!("Failed to coerce argument: {e}"),
-			})?;
+			let coerced =
+				arg.coerce_to_kind(kind).map_err(|e| Error::InvalidFunctionArguments {
+					name: fnc_name.clone(),
+					message: format!("Failed to coerce argument: {e}"),
+				})?;
 			coerced_args.push(coerced);
 		}
 
@@ -986,7 +1006,7 @@ impl PhysicalExpr for ClosureCallExec {
 					&& let Some((param, kind)) =
 						arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
 				{
-					return Err(Error::InvalidArguments {
+					return Err(Error::InvalidFunctionArguments {
 						name: "ANONYMOUS".to_string(),
 						message: format!(
 							"Expected a value of type '{}' for argument {}",
@@ -1000,15 +1020,16 @@ impl PhysicalExpr for ClosureCallExec {
 				// Bind arguments to parameter names with type coercion
 				let mut local_params: HashMap<String, Value> = HashMap::new();
 				for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args.into_iter()) {
-					let coerced =
-						arg_value.coerce_to_kind(kind).map_err(|_| Error::InvalidArguments {
+					let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
+						Error::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
 								kind.to_sql(),
 								param.to_sql()
 							),
-						})?;
+						}
+					})?;
 					local_params.insert(param.clone().into_string(), coerced);
 				}
 
@@ -1026,6 +1047,7 @@ impl PhysicalExpr for ClosureCallExec {
 					current_value: ctx.current_value,
 					local_params: Some(&local_params),
 					recursion_ctx: None,
+					document_root: None,
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

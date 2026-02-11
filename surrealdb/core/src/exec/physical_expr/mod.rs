@@ -51,6 +51,11 @@ pub struct RecursionCtx<'a> {
 	pub path: &'a [Arc<dyn PhysicalExpr>],
 	/// Maximum recursion depth (None = system limit)
 	pub max_depth: Option<u32>,
+	/// Minimum recursion depth for path elimination.
+	/// When a RepeatRecurse produces only dead-end values at a depth
+	/// below this threshold, the entire sub-tree is eliminated (returns
+	/// `Value::None` so that the parent's `clean_iteration` can filter it).
+	pub min_depth: u32,
 	/// Current recursion depth (incremented at each RepeatRecurse call)
 	pub depth: u32,
 }
@@ -75,6 +80,11 @@ pub struct EvalContext<'a> {
 	/// Active recursion context for RepeatRecurse evaluation.
 	/// Set by evaluate_recurse_* when the inner path contains .@ markers.
 	pub recursion_ctx: Option<RecursionCtx<'a>>,
+
+	/// Original document root for the current row.  Needed by IndexPart to
+	/// evaluate dynamic key expressions (`[field]`, `[$param]`) against the
+	/// document rather than the chain's current position.
+	pub document_root: Option<&'a Value>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -87,6 +97,7 @@ impl<'a> EvalContext<'a> {
 			current_value: None,
 			local_params: None,
 			recursion_ctx: None,
+			document_root: None,
 		}
 	}
 
@@ -94,6 +105,17 @@ impl<'a> EvalContext<'a> {
 	pub fn with_value(&self, value: &'a Value) -> Self {
 		Self {
 			current_value: Some(value),
+			..*self
+		}
+	}
+
+	/// For per-row evaluation that also sets the document root
+	/// (used at the top level of idiom evaluation to provide the
+	/// original document for dynamic index expressions).
+	pub fn with_value_and_doc(&self, value: &'a Value) -> Self {
+		Self {
+			current_value: Some(value),
+			document_root: Some(value),
 			..*self
 		}
 	}
@@ -138,23 +160,36 @@ impl<'a> EvalContext<'a> {
 	/// Returns an error if the URL is not allowed by the capabilities.
 	#[cfg(feature = "http")]
 	pub async fn check_allowed_net(&self, url: &url::Url) -> anyhow::Result<()> {
-		use std::str::FromStr;
-
 		use crate::dbs::capabilities::NetTarget;
 		use crate::err::Error;
 
 		let capabilities = self.capabilities();
 
 		// Check if the URL host is allowed
-		let host = url.host_str().ok_or_else(|| Error::InvalidUrl(url.to_string()))?;
+		let host = url.host().ok_or_else(|| Error::InvalidUrl(url.to_string()))?;
 
-		let target = NetTarget::from_str(host)
-			.map_err(|_| Error::InvalidUrl(format!("Invalid host: {}", host)))?;
+		let target = NetTarget::Host(host.to_owned(), url.port_or_known_default());
 
-		if !capabilities.matches_any_allow_net(&target)
-			|| capabilities.matches_any_deny_net(&target)
-		{
-			return Err(Error::NetTargetNotAllowed(url.to_string()).into());
+		// Check the domain name (if any) matches the allow list
+		if !capabilities.matches_any_allow_net(&target) {
+			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+		}
+
+		// Check against the deny list by hostname
+		if capabilities.matches_any_deny_net(&target) {
+			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+		}
+
+		// Resolve the domain name to IP addresses and check each against the deny list
+		#[cfg(not(target_family = "wasm"))]
+		let resolved = target.resolve().await?;
+		#[cfg(target_family = "wasm")]
+		let resolved = target.resolve()?;
+
+		for t in &resolved {
+			if capabilities.matches_any_deny_net(t) {
+				return Err(Error::NetTargetNotAllowed(t.to_string()).into());
+			}
 		}
 
 		Ok(())

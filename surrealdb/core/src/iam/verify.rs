@@ -230,7 +230,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(anyhow::Error::new(Error::InvalidArguments {
+							Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string(),
 							}))
@@ -342,7 +342,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(anyhow::Error::new(Error::InvalidArguments {
+								Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 									name: "token".to_string(),
 									message: "Missing token header 'kid'".to_string(),
 								}))
@@ -414,7 +414,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(anyhow::Error::new(Error::InvalidArguments {
+									Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 										name: "token".to_string(),
 										message: "Missing token header 'kid'".to_string(),
 									}))
@@ -575,7 +575,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidArguments {
+							bail!(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
@@ -727,7 +727,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidArguments {
+							bail!(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
