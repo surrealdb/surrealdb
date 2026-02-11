@@ -387,7 +387,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-amd64-2xlarge ]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -559,9 +559,9 @@ jobs:
           cargo build --features upgrade
 
   #    - name: Run SurrealQL test suite
-        #run: |
-        #  cd language-tests
-        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+  #run: |
+  #  cd language-tests
+  #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
@@ -868,7 +868,7 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         run: >
-          dotnet test
+          dotnet run
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
@@ -877,7 +877,7 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
         run: >
-          dotnet test
+          dotnet run
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
