@@ -15,6 +15,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::SharedVector;
+use crate::key::index::hn::HnswNode;
 use crate::kvs::Transaction;
 
 #[revisioned(revision = 1)]
@@ -403,24 +404,23 @@ where
 	/// Loads the graph for this layer from the KV store.
 	///
 	/// First attempts to load from per-node `Hn` keys (new format).
-	/// If no `Hn` keys are found, falls back to chunk-based `Hl` keys (legacy format),
-	/// migrates all nodes to `Hn` keys, and deletes the old `Hl` chunk keys.
-	pub(super) async fn load(&mut self, tx: &Transaction, st: &LayerState) -> Result<()> {
+	/// If no `Hn` keys are found, falls back to chunk-based `Hl` keys (legacy format).
+	/// When loaded from legacy keys on a writable transaction, migrates all nodes
+	/// to `Hn` keys and deletes the old `Hl` chunk keys. On a read-only transaction,
+	/// the legacy data is loaded into memory without migration.
+	pub(super) async fn load(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<()> {
 		// First, try to load from new per-node Hn keys
 		self.graph.clear();
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let entries = tx.scan(range, u32::MAX, None).await?;
 		if !entries.is_empty() {
 			for (key, val) in entries {
-				if key.len() >= 4 {
-					let id_bytes: [u8; 4] = key[key.len() - 4..].try_into()?;
-					let element_id = u32::from_be_bytes(id_bytes) as ElementId;
-					self.graph.load_node(element_id, &val);
-				}
+				let key = HnswNode::decode_key(&key)?;
+				self.graph.load_node(key.node, &val);
 			}
 			return Ok(());
 		}
-		// Fallback: load from old chunk-based Hl keys and migrate
+		// Fallback: load from old chunk-based Hl keys
 		if st.chunks > 0 {
 			let mut val = Vec::new();
 			for i in 0..st.chunks {
@@ -430,18 +430,23 @@ where
 				val.extend(chunk);
 			}
 			self.graph.reload(&val)?;
-			// Migrate: write all nodes as new Hn keys
-			let node_ids: Vec<ElementId> = self.graph.node_ids();
-			for &node_id in &node_ids {
-				if let Some(node_val) = self.graph.node_to_val(&node_id) {
-					let key = self.ikb.new_hn_key(self.level, node_id);
-					tx.set(&key, &node_val, None).await?;
+			// Migrate to Hn keys only if the transaction is writable
+			if tx.writeable() {
+				let node_ids: Vec<ElementId> = self.graph.node_ids();
+				for &node_id in &node_ids {
+					if let Some(node_val) = self.graph.node_to_val(&node_id) {
+						let key = self.ikb.new_hn_key(self.level, node_id);
+						tx.set(&key, &node_val, None).await?;
+					}
 				}
-			}
-			// Delete old Hl chunk keys
-			for i in 0..st.chunks {
-				let key = self.ikb.new_hl_key(self.level, i);
-				tx.del(&key).await?;
+				// Delete old Hl chunk keys
+				for i in 0..st.chunks {
+					let key = self.ikb.new_hl_key(self.level, i);
+					tx.del(&key).await?;
+				}
+				// Reset the chunk count so subsequent reloads don't
+				// attempt to fetch the now-deleted Hl keys.
+				st.chunks = 0;
 			}
 		}
 		Ok(())

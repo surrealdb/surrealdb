@@ -16,7 +16,7 @@ use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "()")]
-pub(crate) struct Hn<'a> {
+pub(crate) struct HnswNode<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -33,9 +33,9 @@ pub(crate) struct Hn<'a> {
 	pub node: ElementId,
 }
 
-impl_kv_key_storekey!(Hn<'_> => Vec<u8>);
+impl_kv_key_storekey!(HnswNode<'_> => Vec<u8>);
 
-impl<'a> Hn<'a> {
+impl<'a> HnswNode<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -75,6 +75,9 @@ impl<'a> Hn<'a> {
 		let end = Self::new(ns, db, tb, ix, layer, u64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
+	pub(crate) fn decode_key(k: &[u8]) -> anyhow::Result<HnswNode<'_>> {
+		Ok(storekey::decode_borrow(k)?)
+	}
 }
 
 #[cfg(test)]
@@ -85,8 +88,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Hn::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7, 8);
-		let enc = Hn::encode_key(&val).unwrap();
+		let val = HnswNode::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7, 8);
+		let enc = HnswNode::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hn\0\x07\0\0\0\0\0\0\0\x08",

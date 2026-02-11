@@ -113,13 +113,13 @@ where
 
 	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
 		// Read the state
-		let st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
+		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Compare versions
 		if st.layer0.version != self.state.layer0.version {
-			self.layer0.load(tx, &st.layer0).await?;
+			self.layer0.load(tx, &mut st.layer0).await?;
 		}
 		for ((new_stl, stl), layer) in
-			st.layers.iter().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
+			st.layers.iter_mut().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
 		{
 			if new_stl.version != stl.version {
 				layer.load(tx, new_stl).await?;
@@ -128,7 +128,7 @@ where
 		// Retrieve missing layers
 		for i in self.layers.len()..st.layers.len() {
 			let mut l = HnswLayer::new(self.ikb.clone(), i + 1, self.m);
-			l.load(tx, &st.layers[i]).await?;
+			l.load(tx, &mut st.layers[i]).await?;
 			self.layers.push(l);
 		}
 		// Remove non-existing layers
