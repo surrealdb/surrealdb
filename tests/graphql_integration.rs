@@ -2649,4 +2649,412 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn mutations() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Setup schema
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE item SCHEMAFUL;
+					DEFINE FIELD name ON item TYPE string;
+					DEFINE FIELD price ON item TYPE int;
+					DEFINE TABLE person SCHEMAFUL;
+					DEFINE FIELD name ON person TYPE string;
+					DEFINE TABLE post SCHEMAFUL;
+					DEFINE FIELD title ON post TYPE string;
+					DEFINE TABLE likes TYPE RELATION FROM person TO post SCHEMAFUL;
+					DEFINE FIELD rating ON likes TYPE int;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// --- Test 1: createItem (single create with explicit id) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createItem(data: { id: "1", name: "Widget", price: 100 }) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let item = &body["data"]["createItem"];
+			assert_eq!(item["id"], "item:1");
+			assert_eq!(item["name"], "Widget");
+			assert_eq!(item["price"], 100);
+		}
+
+		// --- Test 2: createItem (auto-generated id) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createItem(data: { name: "Gadget", price: 200 }) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let item = &body["data"]["createItem"];
+			// id should be auto-generated
+			assert!(item["id"].as_str().unwrap().starts_with("item:"));
+			assert_eq!(item["name"], "Gadget");
+			assert_eq!(item["price"], 200);
+		}
+
+		// --- Test 3: updateItem ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						updateItem(id: "1", data: { name: "Super Widget" }) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let item = &body["data"]["updateItem"];
+			assert_eq!(item["id"], "item:1");
+			assert_eq!(item["name"], "Super Widget");
+			// price should be unchanged (MERGE, not CONTENT)
+			assert_eq!(item["price"], 100);
+		}
+
+		// --- Test 4: upsertItem (existing record) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						upsertItem(id: "1", data: { name: "Mega Widget", price: 150 }) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let item = &body["data"]["upsertItem"];
+			assert_eq!(item["id"], "item:1");
+			assert_eq!(item["name"], "Mega Widget");
+			assert_eq!(item["price"], 150);
+		}
+
+		// --- Test 5: upsertItem (new record) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						upsertItem(id: "99", data: { name: "New Item", price: 50 }) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let item = &body["data"]["upsertItem"];
+			assert_eq!(item["id"], "item:99");
+			assert_eq!(item["name"], "New Item");
+			assert_eq!(item["price"], 50);
+		}
+
+		// --- Test 6: deleteItem ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						deleteItem(id: "99")
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			assert_eq!(body["data"]["deleteItem"], true);
+		}
+
+		// Verify deletion via query
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_item(id: "99") { id }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			assert!(body["data"]["_get_item"].is_null());
+		}
+
+		// --- Test 7: createManyItem (bulk create) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createManyItem(data: [
+							{ id: "a", name: "Alpha", price: 10 },
+							{ id: "b", name: "Beta", price: 20 },
+							{ id: "c", name: "Gamma", price: 30 }
+						]) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let items = body["data"]["createManyItem"].as_array().unwrap();
+			assert_eq!(items.len(), 3);
+			assert_eq!(items[0]["id"], "item:a");
+			assert_eq!(items[1]["id"], "item:b");
+			assert_eq!(items[2]["id"], "item:c");
+		}
+
+		// --- Test 8: updateManyItem (bulk update with where) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						updateManyItem(
+							where: { price: { lt: 25 } },
+							data: { price: 25 }
+						) {
+							id
+							name
+							price
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let items = body["data"]["updateManyItem"].as_array().unwrap();
+			// items a (10) and b (20) should be updated, c (30) should not
+			assert_eq!(items.len(), 2);
+			for item in items {
+				assert_eq!(item["price"], 25);
+			}
+		}
+
+		// --- Test 9: deleteManyItem (bulk delete with where, returns count) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						deleteManyItem(where: { price: { eq: 25 } })
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			assert_eq!(body["data"]["deleteManyItem"], 2);
+		}
+
+		// --- Test 10: Relation table mutation (createLikes via RELATE) ---
+		{
+			// First create the records to relate
+			client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE person:alice SET name = "Alice";
+					CREATE post:1 SET title = "Hello World";
+				"#,
+				)
+				.send()
+				.await?;
+
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createLikes(data: {
+							in: "person:alice",
+							out: "post:1",
+							rating: 5
+						}) {
+							id
+							rating
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let likes = &body["data"]["createLikes"];
+			assert!(likes["id"].as_str().unwrap().starts_with("likes:"));
+			assert_eq!(likes["rating"], 5);
+		}
+
+		// --- Test 11: Schema introspection shows mutation type ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__schema {
+							mutationType {
+								name
+								fields { name }
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+			let mutation_type = &body["data"]["__schema"]["mutationType"];
+			assert_eq!(mutation_type["name"], "Mutation");
+
+			let fields = mutation_type["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+
+			// Check that all expected mutation fields exist
+			assert!(field_names.contains(&"createItem"), "Missing createItem");
+			assert!(field_names.contains(&"updateItem"), "Missing updateItem");
+			assert!(field_names.contains(&"upsertItem"), "Missing upsertItem");
+			assert!(field_names.contains(&"deleteItem"), "Missing deleteItem");
+			assert!(field_names.contains(&"createManyItem"), "Missing createManyItem");
+			assert!(field_names.contains(&"updateManyItem"), "Missing updateManyItem");
+			assert!(field_names.contains(&"upsertManyItem"), "Missing upsertManyItem");
+			assert!(field_names.contains(&"deleteManyItem"), "Missing deleteManyItem");
+		}
+
+		// --- Test 12: Input type introspection ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						createInput: __type(name: "CreateItemInput") {
+							kind
+							inputFields { name type { name kind ofType { name kind } } }
+						}
+						updateInput: __type(name: "UpdateItemInput") {
+							kind
+							inputFields { name type { name kind ofType { name kind } } }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			// CreateItemInput should exist as INPUT_OBJECT
+			let create_input = &body["data"]["createInput"];
+			assert_eq!(create_input["kind"], "INPUT_OBJECT");
+			let create_fields = create_input["inputFields"].as_array().unwrap();
+			let create_field_names: Vec<&str> =
+				create_fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(create_field_names.contains(&"id"), "CreateInput missing 'id'");
+			assert!(create_field_names.contains(&"name"), "CreateInput missing 'name'");
+			assert!(create_field_names.contains(&"price"), "CreateInput missing 'price'");
+
+			// UpdateItemInput should have all fields optional
+			let update_input = &body["data"]["updateInput"];
+			assert_eq!(update_input["kind"], "INPUT_OBJECT");
+			let update_fields = update_input["inputFields"].as_array().unwrap();
+			for field in update_fields {
+				// No field should be NON_NULL in update input
+				assert_ne!(
+					field["type"]["kind"], "NON_NULL",
+					"Update input field '{}' should be optional",
+					field["name"]
+				);
+			}
+		}
+
+		Ok(())
+	}
 }

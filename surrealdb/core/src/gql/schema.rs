@@ -22,6 +22,7 @@ use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::{Expr, Kind, Literal};
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::functions::process_fns;
+use crate::gql::mutations::process_mutations;
 use crate::gql::relations::collect_relations;
 use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
@@ -104,10 +105,12 @@ pub async fn generate_schema(
 		None => Vec::new(),
 	};
 
+	let mut mutation_obj: Option<Object> = None;
+
 	match tbs {
-		Some(tbs) if !tbs.is_empty() => {
+		Some(ref tbs) if !tbs.is_empty() => {
 			query = process_tbs(
-				tbs,
+				tbs.clone(),
 				query,
 				&mut types,
 				&tx,
@@ -118,6 +121,19 @@ pub async fn generate_schema(
 				&relations,
 			)
 			.await?;
+
+			// Generate mutations for all tables
+			mutation_obj = Some(
+				process_mutations(
+					tbs.clone(),
+					&mut types,
+					&tx,
+					db_def.namespace_id,
+					db_def.database_id,
+					datastore,
+				)
+				.await?,
+			);
 		}
 		_ => {}
 	}
@@ -131,7 +147,26 @@ pub async fn generate_schema(
 
 	trace!("current Query object for schema: {:?}", query);
 
-	let mut schema = Schema::build("Query", None, None).register(query);
+	let has_mutation = mutation_obj.is_some();
+	let mutation_name = if has_mutation {
+		Some("Mutation")
+	} else {
+		None
+	};
+
+	let mut schema = Schema::build("Query", mutation_name, None).register(query);
+
+	// Apply depth and complexity limits from the GraphQL config
+	if let Some(depth) = gql_config.depth_limit {
+		schema = schema.limit_depth(depth as usize);
+	}
+	if let Some(complexity) = gql_config.complexity_limit {
+		schema = schema.limit_complexity(complexity as usize);
+	}
+
+	if let Some(mutation) = mutation_obj {
+		schema = schema.register(mutation);
+	}
 	for ty in types {
 		trace!("adding type: {ty:?}");
 		schema = schema.register(ty);

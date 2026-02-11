@@ -1421,7 +1421,7 @@ fn filter_from_type(
 	Ok(filter)
 }
 
-fn cond_from_filter(
+pub(super) fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
 ) -> Result<Cond, GqlError> {

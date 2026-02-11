@@ -4,6 +4,7 @@ pub mod cache;
 pub mod error;
 mod ext;
 mod functions;
+mod mutations;
 mod relations;
 pub mod schema;
 mod tables;
