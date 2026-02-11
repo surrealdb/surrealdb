@@ -1,3 +1,4 @@
+use crate::ctx::reason::Reason;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
@@ -441,7 +442,15 @@ where
 		while let Some(res) = stream.next().await {
 			let (k, v) = res?;
 			// Check if the context is finished
-			ctx.is_done(count % 100 == 0)?;
+			match ctx.done(count % 100 == 0)? {
+				None => {}
+				Some(Reason::Timedout) => {
+					return Err(Error::QueryTimedout);
+				}
+				Some(Reason::Canceled) => {
+					return Err(Error::QueryCancelled);
+				}
+			}
 			let key = HnswNode::decode_key(&k)?;
 			self.graph.load_node(key.node, &v);
 			count += 1;
