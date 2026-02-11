@@ -22,6 +22,7 @@ use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::expr::{Expr, Kind, Literal};
 use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::functions::process_fns;
+use crate::gql::relations::collect_relations;
 use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::val::{
@@ -97,6 +98,12 @@ pub async fn generate_schema(
 		));
 	}
 
+	// Collect relation info from table definitions for relation field generation
+	let relations = match &tbs {
+		Some(tbs) => collect_relations(tbs),
+		None => Vec::new(),
+	};
+
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
 			query = process_tbs(
@@ -108,6 +115,7 @@ pub async fn generate_schema(
 				db_def.database_id,
 				session,
 				datastore,
+				&relations,
 			)
 			.await?;
 		}

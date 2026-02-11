@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::sync::Arc;
 
@@ -10,6 +11,7 @@ use async_graphql::{Name, Value as GqlValue};
 use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
+use super::relations::{RelationDirection, RelationInfo};
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition};
@@ -25,7 +27,7 @@ use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::{Datastore, Transaction};
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, TableName, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
@@ -56,7 +58,23 @@ pub async fn process_tbs(
 	db: DatabaseId,
 	_session: &Session,
 	datastore: &Arc<Datastore>,
+	relations: &[RelationInfo],
 ) -> Result<Object, GqlError> {
+	// Pre-fetch field definitions for relation tables (needed for filter support
+	// in relation field resolvers). These are captured by the resolver closures.
+	let mut relation_table_fds: HashMap<String, Arc<[FieldDefinition]>> = HashMap::new();
+	for rel in relations.iter() {
+		let rel_name = rel.table_name.clone().into_string();
+		if !relation_table_fds.contains_key(&rel_name) {
+			let fds = tx.all_tb_fields(ns, db, &rel.table_name, None).await?;
+			relation_table_fds.insert(rel_name, fds);
+		}
+	}
+
+	// Set of exposed table names for checking that relation targets are visible
+	let exposed_table_names: HashSet<String> =
+		tbs.iter().map(|t| t.name.clone().into_string()).collect();
+
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
 		let tb_name = tb.name.clone();
@@ -343,6 +361,10 @@ pub async fn process_tbs(
 			))
 			.implement("record");
 
+		// Track existing field names to detect conflicts with relation fields
+		let mut existing_field_names: HashSet<String> = HashSet::new();
+		existing_field_names.insert("id".to_string());
+
 		for fd in fds.iter() {
 			let Some(ref kind) = fd.field_kind else {
 				continue;
@@ -353,6 +375,7 @@ pub async fn process_tbs(
 				continue;
 			};
 			let fd_name = Name::new(fd.name.to_sql());
+			existing_field_names.insert(fd_name.to_string());
 			let fd_type = kind_to_type(kind.clone(), types, false)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
@@ -376,6 +399,66 @@ pub async fn process_tbs(
 				} else {
 					"".to_string()
 				});
+		}
+
+		// Add relation fields to this table's type.
+		// For each relation table where this table is in the FROM list, add an
+		// outgoing relation field. For each where this table is in the TO list,
+		// add an incoming relation field.
+		let tb_name_str = tb.name.clone().into_string();
+		for rel in relations.iter() {
+			let rel_table_str = rel.table_name.clone().into_string();
+
+			// Only add relation fields if the relation table is also exposed
+			if !exposed_table_names.contains(&rel_table_str) {
+				continue;
+			}
+
+			let rel_fds = relation_table_fds.get(&rel_table_str).cloned();
+
+			// Outgoing: this table is in the FROM list
+			if rel.from_tables.contains(&tb_name_str) {
+				let field_name = rel_table_str.clone();
+				if !existing_field_names.contains(&field_name) {
+					existing_field_names.insert(field_name.clone());
+					table_ty_obj = table_ty_obj.field(make_relation_field(
+						&field_name,
+						&rel_table_str,
+						rel.table_name.clone(),
+						RelationDirection::Outgoing,
+						rel_fds.clone(),
+					));
+				} else {
+					trace!(
+						"Skipping outgoing relation field '{}' on table '{}': \
+						 conflicts with existing field",
+						field_name,
+						tb_name_str
+					);
+				}
+			}
+
+			// Incoming: this table is in the TO list
+			if rel.to_tables.contains(&tb_name_str) {
+				let field_name = format!("{}_in", rel_table_str);
+				if !existing_field_names.contains(&field_name) {
+					existing_field_names.insert(field_name.clone());
+					table_ty_obj = table_ty_obj.field(make_relation_field(
+						&field_name,
+						&rel_table_str,
+						rel.table_name.clone(),
+						RelationDirection::Incoming,
+						rel_fds.clone(),
+					));
+				} else {
+					trace!(
+						"Skipping incoming relation field '{}' on table '{}': \
+						 conflicts with existing field",
+						field_name,
+						tb_name_str
+					);
+				}
+			}
 		}
 
 		types.push(Type::Object(table_ty_obj));
@@ -542,6 +625,200 @@ fn make_table_field_resolver(
 					}
 				}
 			}
+		})
+	}
+}
+
+/// Build a GraphQL field for a relation on a table type.
+///
+/// The field returns a list of records from the relation table, filtered by
+/// the current record's id on the appropriate side (`in` for outgoing, `out`
+/// for incoming). Supports `limit`, `start`, `order`, and `filter` arguments.
+fn make_relation_field(
+	field_name: &str,
+	rel_table_type_name: &str,
+	rel_table_name: TableName,
+	direction: RelationDirection,
+	rel_fds: Option<Arc<[FieldDefinition]>>,
+) -> Field {
+	let table_filter_name = filter_name_from_table(rel_table_type_name);
+	let table_order_name = format!("_order_{}", rel_table_type_name);
+
+	let desc = match direction {
+		RelationDirection::Outgoing => format!(
+			"Outgoing `{}` relations from this record",
+			rel_table_type_name
+		),
+		RelationDirection::Incoming => {
+			format!("Incoming `{}` relations to this record", rel_table_type_name)
+		}
+	};
+
+	Field::new(
+		field_name,
+		TypeRef::named_nn_list_nn(rel_table_type_name),
+		make_relation_field_resolver(rel_table_name, direction, rel_fds),
+	)
+	.description(desc)
+	.argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+	.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
+	.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+	.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
+}
+
+/// Create a resolver for a relation field.
+///
+/// The resolver:
+/// 1. Extracts the parent record's id
+/// 2. Builds `SELECT * FROM <relation_table> WHERE <in|out> = $current_record`
+/// 3. Optionally combines with user-supplied filter, ordering, and pagination
+/// 4. Returns the matching relation records as a list
+fn make_relation_field_resolver(
+	relation_table_name: TableName,
+	direction: RelationDirection,
+	rel_fds: Option<Arc<[FieldDefinition]>>,
+) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
+	move |ctx: ResolverContext| {
+		let relation_table = relation_table_name.clone();
+		let fds = rel_fds.clone();
+		FieldFuture::new(async move {
+			let ds = ctx.data::<Arc<Datastore>>()?;
+			let sess = ctx.data::<Arc<Session>>()?;
+			let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+			let args = ctx.args.as_index_map();
+
+			// Parse limit/start arguments
+			let start = args
+				.get("start")
+				.and_then(|v| v.as_i64())
+				.map(|s| Start(Expr::Literal(Literal::Integer(s))));
+			let limit = args
+				.get("limit")
+				.and_then(|v| v.as_i64())
+				.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+
+			// Parse order argument
+			let order = args.get("order");
+			let orders = match order {
+				Some(GqlValue::Object(o)) => {
+					let mut orders = vec![];
+					let mut current = o;
+					loop {
+						let asc = current.get("asc");
+						let desc = current.get("desc");
+						match (asc, desc) {
+							(Some(_), Some(_)) => {
+								return Err("Found both ASC and DESC in order".into());
+							}
+							(Some(GqlValue::Enum(a)), None) => {
+								orders.push(order_asc(a.as_str().to_string()))
+							}
+							(None, Some(GqlValue::Enum(d))) => {
+								orders.push(order_desc(d.as_str().to_string()))
+							}
+							(_, _) => break,
+						}
+						if let Some(GqlValue::Object(next)) = current.get("then") {
+							current = next;
+						} else {
+							break;
+						}
+					}
+					Some(orders)
+				}
+				_ => None,
+			};
+
+			// Build the base condition: WHERE in = $record or WHERE out = $record
+			let filter_field = match direction {
+				RelationDirection::Outgoing => "in",
+				RelationDirection::Incoming => "out",
+			};
+			let mut base_cond = Expr::Binary {
+				left: Box::new(Expr::Idiom(Idiom::field(filter_field.to_string()))),
+				op: BinaryOperator::Equal,
+				right: Box::new(Value::RecordId(rid.clone()).into_literal()),
+			};
+
+			// Parse and combine user-supplied filter
+			let filter = args.get("filter");
+			if let Some(f) = filter {
+				if let Some(ref fds) = fds {
+					let o = match f {
+						GqlValue::Object(o) => o,
+						f => {
+							error!(
+								"Found filter {f}, which should be object and should have \
+								 been rejected by async graphql."
+							);
+							return Err("Value in cond doesn't fit schema".into());
+						}
+					};
+					let user_cond = cond_from_filter(o, fds)?;
+					base_cond = Expr::Binary {
+						left: Box::new(base_cond),
+						op: BinaryOperator::And,
+						right: Box::new(user_cond.0),
+					};
+				}
+			}
+
+			let cond = Some(Cond(base_cond));
+
+			// Build SELECT * FROM <relation_table> WHERE ...
+			let select_stmt = SelectStatement {
+				what: vec![Expr::Table(relation_table)],
+				fields: Fields::all(),
+				order: orders.map(|x| Ordering::Order(OrderList(x))),
+				cond,
+				limit,
+				start,
+				omit: vec![],
+				only: false,
+				with: None,
+				split: None,
+				group: None,
+				fetch: None,
+				version: Expr::Literal(Literal::None),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
+			};
+
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
+			};
+
+			let res = execute_plan(ds, sess, plan).await?;
+
+			let res_vec = match res {
+				Value::Array(a) => a,
+				v => {
+					return Err(internal_error(format!(
+						"Expected array result for relation query, found: {v:?}"
+					))
+					.into());
+				}
+			};
+
+			let out: Result<Vec<FieldValue>, GqlError> = res_vec
+				.0
+				.into_iter()
+				.map(|v| match v {
+					Value::Object(obj) => match obj.get("id") {
+						Some(Value::RecordId(rid)) => Ok(FieldValue::owned_any(rid.clone())),
+						_ => Err(internal_error(format!(
+							"Relation object missing 'id' field or id is not a \
+							 RecordId: {obj:?}"
+						))),
+					},
+					_ => Err(internal_error(format!(
+						"Expected object in relation result, found: {v:?}"
+					))),
+				})
+				.collect();
+
+			Ok(Some(FieldValue::list(out?)))
 		})
 	}
 }

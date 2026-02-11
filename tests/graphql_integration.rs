@@ -764,4 +764,641 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn relations() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema: person -[likes]-> post, with rating on the relation
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE person SCHEMAFUL;
+					DEFINE FIELD name ON person TYPE string;
+
+					DEFINE TABLE post SCHEMAFUL;
+					DEFINE FIELD title ON post TYPE string;
+
+					DEFINE TABLE likes TYPE RELATION FROM person TO post SCHEMAFUL;
+					DEFINE FIELD rating ON likes TYPE int;
+					DEFINE FIELD in ON likes TYPE record<person>;
+					DEFINE FIELD out ON likes TYPE record<post>;
+
+					CREATE person:alice SET name = "Alice";
+					CREATE person:bob SET name = "Bob";
+					CREATE post:p1 SET title = "First Post";
+					CREATE post:p2 SET title = "Second Post";
+
+					RELATE person:alice->likes->post:p1 SET rating = 5;
+					RELATE person:alice->likes->post:p2 SET rating = 3;
+					RELATE person:bob->likes->post:p1 SET rating = 4;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Test 1: Query outgoing relation field on person (person -> likes)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_person(id: "alice") {
+							id
+							name
+							likes(order: {asc: rating}) {
+								id
+								rating
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let person = &body["data"]["_get_person"];
+			assert_eq!(person["id"], "person:alice");
+			assert_eq!(person["name"], "Alice");
+			let likes = person["likes"].as_array().unwrap();
+			assert_eq!(likes.len(), 2);
+			// Ordered by rating asc: 3 then 5
+			assert_eq!(likes[0]["rating"], 3);
+			assert_eq!(likes[1]["rating"], 5);
+		}
+
+		// Test 2: Query incoming relation field on post (likes -> post)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_post(id: "p1") {
+							id
+							title
+							likes_in {
+								id
+								rating
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let post = &body["data"]["_get_post"];
+			assert_eq!(post["id"], "post:p1");
+			assert_eq!(post["title"], "First Post");
+			let likes_in = post["likes_in"].as_array().unwrap();
+			assert_eq!(likes_in.len(), 2);
+			// Both alice (rating 5) and bob (rating 4) liked p1
+			let ratings: Vec<i64> =
+				likes_in.iter().map(|l| l["rating"].as_i64().unwrap()).collect();
+			assert!(ratings.contains(&5));
+			assert!(ratings.contains(&4));
+		}
+
+		// Test 3: Relation field with limit
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_person(id: "alice") {
+							likes(limit: 1, order: {desc: rating}) {
+								rating
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let likes = body["data"]["_get_person"]["likes"].as_array().unwrap();
+			assert_eq!(likes.len(), 1);
+			assert_eq!(likes[0]["rating"], 5);
+		}
+
+		// Test 4: Empty relation result
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_post(id: "p2") {
+							title
+							likes_in {
+								rating
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let post = &body["data"]["_get_post"];
+			assert_eq!(post["title"], "Second Post");
+			let likes_in = post["likes_in"].as_array().unwrap();
+			// Only alice liked p2
+			assert_eq!(likes_in.len(), 1);
+			assert_eq!(likes_in[0]["rating"], 3);
+		}
+
+		// Test 5: Relation fields in list query context
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						person(order: {asc: name}) {
+							name
+							likes {
+								rating
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let people = body["data"]["person"].as_array().unwrap();
+			assert_eq!(people.len(), 2);
+			// Alice has 2 likes, Bob has 1
+			assert_eq!(people[0]["name"], "Alice");
+			assert_eq!(people[0]["likes"].as_array().unwrap().len(), 2);
+			assert_eq!(people[1]["name"], "Bob");
+			assert_eq!(people[1]["likes"].as_array().unwrap().len(), 1);
+		}
+
+		// Test 6: Schema introspection shows relation fields
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "person") {
+							fields { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(field_names.contains(&"id"), "missing 'id' field: {field_names:?}");
+			assert!(field_names.contains(&"name"), "missing 'name' field: {field_names:?}");
+			assert!(
+				field_names.contains(&"likes"),
+				"missing 'likes' relation field: {field_names:?}"
+			);
+		}
+
+		// Test 7: Schema introspection shows incoming relation field on post
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "post") {
+							fields { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(field_names.contains(&"id"), "missing 'id' field: {field_names:?}");
+			assert!(field_names.contains(&"title"), "missing 'title' field: {field_names:?}");
+			assert!(
+				field_names.contains(&"likes_in"),
+				"missing 'likes_in' relation field: {field_names:?}"
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn record_links() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema: employee has a record<department> field
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE department SCHEMAFUL;
+					DEFINE FIELD name ON department TYPE string;
+					DEFINE FIELD location ON department TYPE string;
+
+					DEFINE TABLE employee SCHEMAFUL;
+					DEFINE FIELD name ON employee TYPE string;
+					DEFINE FIELD dept ON employee TYPE record<department>;
+
+					CREATE department:eng SET name = "Engineering", location = "Building A";
+					CREATE department:mkt SET name = "Marketing", location = "Building B";
+
+					CREATE employee:e1 SET name = "Alice", dept = department:eng;
+					CREATE employee:e2 SET name = "Bob", dept = department:mkt;
+					CREATE employee:e3 SET name = "Charlie", dept = department:eng;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Test 1: Record-link dereferencing with nested sub-field selection
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						employee(order: {asc: name}) {
+							name
+							dept {
+								id
+								name
+								location
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let employees = body["data"]["employee"].as_array().unwrap();
+			assert_eq!(employees.len(), 3);
+
+			// Alice -> Engineering
+			assert_eq!(employees[0]["name"], "Alice");
+			assert_eq!(employees[0]["dept"]["name"], "Engineering");
+			assert_eq!(employees[0]["dept"]["location"], "Building A");
+			assert_eq!(employees[0]["dept"]["id"], "department:eng");
+
+			// Bob -> Marketing
+			assert_eq!(employees[1]["name"], "Bob");
+			assert_eq!(employees[1]["dept"]["name"], "Marketing");
+
+			// Charlie -> Engineering
+			assert_eq!(employees[2]["name"], "Charlie");
+			assert_eq!(employees[2]["dept"]["name"], "Engineering");
+		}
+
+		// Test 2: Single record fetch with nested record-link
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_employee(id: "e2") {
+							name
+							dept {
+								name
+								location
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let emp = &body["data"]["_get_employee"];
+			assert_eq!(emp["name"], "Bob");
+			assert_eq!(emp["dept"]["name"], "Marketing");
+			assert_eq!(emp["dept"]["location"], "Building B");
+		}
+
+		// Test 3: Schema shows record-link field as the target table type
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "employee") {
+							fields {
+								name
+								type { name kind }
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let dept_field = fields.iter().find(|f| f["name"] == "dept").unwrap();
+			// The type should be the department table type (NON_NULL wrapper)
+			let type_info = &dept_field["type"];
+			// non-null wraps the named type
+			assert_eq!(type_info["kind"], "NON_NULL");
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn self_referential_relations() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema: user -[follows]-> user (self-referential)
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE user SCHEMAFUL;
+					DEFINE FIELD name ON user TYPE string;
+
+					DEFINE TABLE follows TYPE RELATION FROM user TO user SCHEMAFUL;
+					DEFINE FIELD in ON follows TYPE record<user>;
+					DEFINE FIELD out ON follows TYPE record<user>;
+
+					CREATE user:alice SET name = "Alice";
+					CREATE user:bob SET name = "Bob";
+					CREATE user:charlie SET name = "Charlie";
+
+					RELATE user:alice->follows->user:bob;
+					RELATE user:alice->follows->user:charlie;
+					RELATE user:bob->follows->user:alice;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Test 1: user type has both outgoing (follows) and incoming (follows_in) fields
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						__type(name: "user") {
+							fields { name }
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(
+				field_names.contains(&"follows"),
+				"missing 'follows' outgoing field: {field_names:?}"
+			);
+			assert!(
+				field_names.contains(&"follows_in"),
+				"missing 'follows_in' incoming field: {field_names:?}"
+			);
+		}
+
+		// Test 2: Query outgoing follows (who does Alice follow?)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_user(id: "alice") {
+							name
+							follows {
+								id
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let user = &body["data"]["_get_user"];
+			assert_eq!(user["name"], "Alice");
+			let follows = user["follows"].as_array().unwrap();
+			assert_eq!(follows.len(), 2, "Alice follows 2 users");
+		}
+
+		// Test 3: Query incoming follows (who follows Alice?)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_user(id: "alice") {
+							name
+							follows_in {
+								id
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let user = &body["data"]["_get_user"];
+			assert_eq!(user["name"], "Alice");
+			let followers = user["follows_in"].as_array().unwrap();
+			assert_eq!(followers.len(), 1, "Only Bob follows Alice");
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn relation_with_record_link_traversal() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up: author -[wrote]-> article, with traversal through in/out fields
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE author SCHEMAFUL;
+					DEFINE FIELD name ON author TYPE string;
+
+					DEFINE TABLE article SCHEMAFUL;
+					DEFINE FIELD title ON article TYPE string;
+
+					DEFINE TABLE wrote TYPE RELATION FROM author TO article SCHEMAFUL;
+					DEFINE FIELD in ON wrote TYPE record<author>;
+					DEFINE FIELD out ON wrote TYPE record<article>;
+					DEFINE FIELD year ON wrote TYPE int;
+
+					CREATE author:a1 SET name = "Jane Doe";
+					CREATE article:art1 SET title = "GraphQL in Practice";
+					CREATE article:art2 SET title = "SurrealDB Deep Dive";
+
+					RELATE author:a1->wrote->article:art1 SET year = 2024;
+					RELATE author:a1->wrote->article:art2 SET year = 2025;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Test: Traverse from author through relation to article via record-link
+		// author -> wrote (outgoing relation) -> out (record<article>) -> title
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_author(id: "a1") {
+							name
+							wrote(order: {asc: year}) {
+								year
+								out {
+									title
+								}
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let author = &body["data"]["_get_author"];
+			assert_eq!(author["name"], "Jane Doe");
+			let wrote = author["wrote"].as_array().unwrap();
+			assert_eq!(wrote.len(), 2);
+
+			// Ordered by year asc
+			assert_eq!(wrote[0]["year"], 2024);
+			assert_eq!(wrote[0]["out"]["title"], "GraphQL in Practice");
+			assert_eq!(wrote[1]["year"], 2025);
+			assert_eq!(wrote[1]["out"]["title"], "SurrealDB Deep Dive");
+		}
+
+		// Test: Traverse from article through incoming relation to author
+		// article -> wrote_in (incoming relation) -> in (record<author>) -> name
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						_get_article(id: "art1") {
+							title
+							wrote_in {
+								year
+								in {
+									name
+								}
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let article = &body["data"]["_get_article"];
+			assert_eq!(article["title"], "GraphQL in Practice");
+			let wrote_in = article["wrote_in"].as_array().unwrap();
+			assert_eq!(wrote_in.len(), 1);
+			assert_eq!(wrote_in[0]["year"], 2024);
+			assert_eq!(wrote_in[0]["in"]["name"], "Jane Doe");
+		}
+
+		Ok(())
+	}
 }
