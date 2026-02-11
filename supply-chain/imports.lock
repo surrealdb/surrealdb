@@ -1,6 +1,14 @@
 
 # cargo-vet imports lock
 
+[[unpublished.surrealdb]]
+version = "2.6.1"
+audited_as = "2.6.0"
+
+[[unpublished.surrealdb-core]]
+version = "2.6.1"
+audited_as = "2.6.0"
+
 [[publisher.addr]]
 version = "0.15.6"
 when = "2022-08-31"
@@ -471,15 +479,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "2.3.10"
-when = "2025-09-19"
+version = "2.6.0"
+when = "2026-01-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "2.3.10"
-when = "2025-09-19"
+version = "2.6.0"
+when = "2026-01-27"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1749,7 +1757,7 @@ aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_p
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 delta = "1.14.0 -> 1.15.0"
-notes = "The delta in `lib.rs` only tweaks doc comments and `#[cfg(feature = \"std\")]`."
+notes = 'The delta in `lib.rs` only tweaks doc comments and `#[cfg(feature = "std")]`.'
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.equivalent]]
@@ -2012,8 +2020,8 @@ who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 version = "1.0.78"
 notes = """
-Grepped for \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits
-(except for a benign \"fs\" hit in a doc comment)
+Grepped for "crypt", "cipher", "fs", "net" - there were no hits
+(except for a benign "fs" hit in a doc comment)
 
 Notes from the `unsafe` review can be found in https://crrev.com/c/5385745.
 """
@@ -2125,8 +2133,8 @@ who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
 version = "1.0.35"
 notes = """
-Grepped for \"unsafe\", \"crypt\", \"cipher\", \"fs\", \"net\" - there were no hits
-(except for benign \"net\" hit in tests and \"fs\" hit in README.md)
+Grepped for "unsafe", "crypt", "cipher", "fs", "net" - there were no hits
+(except for benign "net" hit in tests and "fs" hit in README.md)
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
@@ -2249,7 +2257,7 @@ and there were no hits except for:
 * Using `unsafe` in a string:
 
     ```
-    src/constfn.rs:            \"unsafe\" => Qualifiers::Unsafe,
+    src/constfn.rs:            "unsafe" => Qualifiers::Unsafe,
     ```
 
 * Using `std::fs` in `build/build.rs` to write `${OUT_DIR}/version.expr`
@@ -3099,6 +3107,12 @@ who = "Bobby Holley <bobbyholley@gmail.com>"
 criteria = "safe-to-deploy"
 version = "1.0.7"
 notes = "Simple hasher implementation with no unsafe code."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.foldhash]]
+who = "Erich Gubler <erichdongubler@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.5 -> 0.2.0"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.form_urlencoded]]
@@ -4144,13 +4158,13 @@ delta = "0.21.8 -> 0.21.12"
 notes = """
 A comment in get_sni_extension asks whether the behaviour of parsing an IPv4 or IPv6 address
 in a host_name field of a server_name extension, but then ignoring the extension (because
-'Literal IPv4 and IPv6 addresses are not permitted in \"HostName\"'), as the server, is
+'Literal IPv4 and IPv6 addresses are not permitted in "HostName"'), as the server, is
 compliant with RFC 6066. As an original author of RFC 3546 which has very similar wording,
 I can speak to the intent: yes this is fine. The client is clearly nonconformant in this
 case, but the server isn't.
 
-RFC 3546 said \"If the server understood the client hello extension but does not recognize
-the server name, it SHOULD send an \"unrecognized_name\" alert (which MAY be fatal).\"
+RFC 3546 said "If the server understood the client hello extension but does not recognize
+the server name, it SHOULD send an "unrecognized_name" alert (which MAY be fatal)."
 This wording was preserved in RFC 5746, and then updated in RFC 6066 to:
 
    If the server understood the ClientHello extension but
@@ -4168,9 +4182,9 @@ This wording was preserved in RFC 5746, and then updated in RFC 6066 to:
 
 To me it's clear that it is reasonable to consider an IP address as a name that the
 server does not recognize. And so the server SHOULD *either* send a fatal unrecognized_name
-alert, *or* continue the handshake and let the client application decide when it \"performs
-the server endpoint identification\". There's no conformance requirement for the server to
-take any notice of a host_name that is \"not permitted\". (It would have been clearer to
+alert, *or* continue the handshake and let the client application decide when it "performs
+the server endpoint identification". There's no conformance requirement for the server to
+take any notice of a host_name that is "not permitted". (It would have been clearer to
 express this by specifying the allowed client and server behaviour separately, i.e. saying
 that the client MUST NOT send an IP address in host_name, and then explicitly specifying
 the server behaviour if it does so anyway. That's how I would write it now. But honestly
