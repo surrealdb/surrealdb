@@ -28,7 +28,7 @@ use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::Datastore;
-use crate::val::{Datetime, Object as SurObject, RecordId, TableName, Value};
+use crate::val::{Array as SurArray, Datetime, Object as SurObject, RecordId, TableName, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
@@ -497,7 +497,7 @@ fn make_sub_field_resolver(
 					}
 					v => {
 						let gql_val = sql_value_to_gql_value(v.clone())
-							.map_err(|e| async_graphql::Error::from(e))?;
+							.map_err(async_graphql::Error::from)?;
 						Ok(Some(FieldValue::value(gql_val)))
 					}
 				},
@@ -574,7 +574,7 @@ fn resolve_nested_object_value(
 			Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
 			Value::None | Value::Null => Ok(None),
 			_ => {
-				let out = sql_value_to_gql_value(val).map_err(|e| async_graphql::Error::from(e))?;
+				let out = sql_value_to_gql_value(val).map_err(async_graphql::Error::from)?;
 				Ok(Some(FieldValue::value(out)))
 			}
 		}
@@ -584,6 +584,449 @@ fn resolve_nested_object_value(
 fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
+
+// ---------------------------------------------------------------------------
+// Result conversion helpers
+// ---------------------------------------------------------------------------
+
+/// Convert an array of record objects to a list of [`CachedRecord`] field values.
+///
+/// Each `Value::Object` in the array is wrapped in a `CachedRecord` so that
+/// field resolvers can extract values directly from memory. Used by table list
+/// queries, relation field resolvers, and bulk mutation results.
+fn objects_to_cached_records(
+	arr: SurArray,
+	version: Option<Datetime>,
+) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
+	let out: Result<Vec<FieldValue>, GqlError> = arr
+		.0
+		.into_iter()
+		.map(|v| match v {
+			Value::Object(obj) => {
+				let rid = match obj.get("id") {
+					Some(Value::RecordId(rid)) => rid.clone(),
+					_ => {
+						error!("Object missing 'id' field or id is not a RecordId: {obj:?}");
+						return Err(internal_error("Record missing 'id' field"));
+					}
+				};
+				Ok(FieldValue::owned_any(CachedRecord {
+					rid,
+					version: version.clone(),
+					data: obj,
+				}))
+			}
+			_ => {
+				error!("Expected object in result, found: {v:?}");
+				Err(internal_error("Expected object in result"))
+			}
+		})
+		.collect();
+	match out {
+		Ok(l) => Ok(Some(FieldValue::list(l))),
+		Err(e) => Err(e.into()),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Query root field builders
+// ---------------------------------------------------------------------------
+
+/// Build the query field for listing records of a table.
+///
+/// Creates a field like `person(limit: Int, start: Int, order: ..., filter: ...,
+/// version: String): [person!]!` that returns all matching records as
+/// [`CachedRecord`] instances for efficient field resolution.
+fn make_table_list_field(
+	tb: &TableDefinition,
+	fds: Arc<[FieldDefinition]>,
+	kvs: Arc<Datastore>,
+) -> Field {
+	let tb_name = tb.name.clone();
+	let tb_name_str = tb_name.clone().into_string();
+	let table_order_name = format!("_order_{tb_name}");
+	let table_filter_name = filter_name_from_table(&tb_name);
+
+	Field::new(tb_name_str.clone(), TypeRef::named_nn_list_nn(&tb_name_str), move |ctx| {
+		let tb_name = tb_name.clone();
+		let fds = fds.clone();
+		let kvs = kvs.clone();
+		FieldFuture::new(async move {
+			let sess = ctx.data::<Arc<Session>>()?;
+			let args = ctx.args.as_index_map();
+			trace!("received request with args: {args:?}");
+
+			let start = parse_start_arg(args);
+			let limit = parse_limit_arg(args);
+			let version = parse_version_arg(args)?;
+			let order = parse_order_arg(args)?;
+			let cond = parse_filter_arg(args, &fds)?;
+
+			trace!("parsed order: {order:?}");
+			trace!("parsed filter: {cond:?}");
+
+			let stmt =
+				select_all_from_table(Expr::Table(tb_name), cond, order, limit, start, &version);
+			let res = execute_select(&kvs, sess, stmt).await?;
+
+			match res {
+				Value::Array(a) => objects_to_cached_records(a, version),
+				v => {
+					error!("Found top level value, in result which should be array: {v:?}");
+					Err(internal_error("Unexpected result type from table query").into())
+				}
+			}
+		})
+	})
+	.description(if let Some(c) = &tb.comment {
+		c.clone()
+	} else {
+		format!("Generated from table `{}`\nallows querying a table with filters", tb.name)
+	})
+	.argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+	.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
+	.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+	.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
+	.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
+	.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING)))
+}
+
+/// Build the `_get_<table>` query field for fetching a single record by ID.
+///
+/// Returns the record as a [`CachedRecord`] for efficient field resolution,
+/// or `null` if the record does not exist.
+fn make_table_get_field(tb: &TableDefinition, kvs: Arc<Datastore>) -> Field {
+	let tb_name = tb.name.clone();
+	let tb_name_str = tb_name.clone().into_string();
+
+	Field::new(format!("_get_{}", tb.name), TypeRef::named(&tb_name_str), move |ctx| {
+		let tb_name = tb_name.clone();
+		let kvs = kvs.clone();
+		FieldFuture::new(async move {
+			let sess = ctx.data::<Arc<Session>>()?;
+			let args = ctx.args.as_index_map();
+			let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+				Some(i) => i,
+				None => {
+					return Err(
+						internal_error("Schema validation failed: No id found in _get_").into()
+					);
+				}
+			};
+			let version = parse_version_arg(args)?;
+
+			let rid_str = format!("{tb_name}:{id}");
+			let record_id: RecordId = match crate::syn::record_id(&rid_str) {
+				Ok(x) => x.into(),
+				Err(_) => RecordId::new(tb_name, id),
+			};
+
+			let stmt = select_all_from_record(&record_id, &version);
+			let res = execute_select(&kvs, sess, stmt).await?;
+
+			match res {
+				Value::Object(obj) => {
+					let rid = match obj.get("id") {
+						Some(Value::RecordId(rid)) => rid.clone(),
+						_ => return Ok(None),
+					};
+					Ok(Some(FieldValue::owned_any(CachedRecord {
+						rid,
+						version,
+						data: obj,
+					})))
+				}
+				_ => Ok(None),
+			}
+		})
+	})
+	.description(if let Some(c) = &tb.comment {
+		c.clone()
+	} else {
+		format!(
+			"Generated from table `{}`\nallows querying a single record in a table by ID",
+			tb.name
+		)
+	})
+	.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+	.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING)))
+}
+
+/// Build the generic `_get` query field for fetching any record by full ID.
+///
+/// Unlike `_get_<table>`, this accepts a full record ID (e.g. `"person:alice"`)
+/// and returns the `record` interface type, requiring `.with_type()` to
+/// indicate the concrete table type.
+fn make_generic_get_field(kvs: Arc<Datastore>) -> Field {
+	Field::new("_get", TypeRef::named("record"), move |ctx| {
+		let kvs = kvs.clone();
+		FieldFuture::new(async move {
+			let sess = ctx.data::<Arc<Session>>()?;
+			let args = ctx.args.as_index_map();
+			let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+				Some(i) => i,
+				None => {
+					return Err(
+						internal_error("Schema validation failed: No id found in _get").into()
+					);
+				}
+			};
+			let version = parse_version_arg(args)?;
+
+			let record_id: RecordId = match crate::syn::record_id(&id) {
+				Ok(x) => x.into(),
+				Err(_) => {
+					return Err(resolver_error("Invalid record ID format").into());
+				}
+			};
+
+			let stmt = select_all_from_record(&record_id, &version);
+			let res = execute_select(&kvs, sess, stmt).await?;
+
+			match res {
+				Value::Object(obj) => {
+					let rid = match obj.get("id") {
+						Some(Value::RecordId(rid)) => rid.clone(),
+						_ => return Ok(None),
+					};
+					let table_name = rid.table.clone();
+					Ok(Some(
+						FieldValue::owned_any(CachedRecord {
+							rid,
+							version,
+							data: obj,
+						})
+						.with_type(table_name),
+					))
+				}
+				_ => Ok(None),
+			}
+		})
+	})
+	.description("Allows fetching arbitrary records".to_string())
+	.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+	.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING)))
+}
+
+// ---------------------------------------------------------------------------
+// Table type system builders
+// ---------------------------------------------------------------------------
+
+/// The GraphQL types generated for a single table.
+///
+/// Returned by [`build_table_type`] for registration on the schema.
+struct TableGraphQLTypes {
+	/// The table's Object type (e.g., `person`).
+	ty_obj: Object,
+	/// Enum of fields that can be ordered by (e.g., `_orderable_person`).
+	orderable: Enum,
+	/// The order input object (e.g., `_order_person`).
+	order: InputObject,
+	/// The filter input object (e.g., `_filter_person`).
+	filter: InputObject,
+}
+
+/// Build all GraphQL types for a single table: the Object type, orderable enum,
+/// order input, and filter input.
+///
+/// This processes all field definitions to create typed fields, filter types,
+/// and orderable items, then attaches relation fields for any relations that
+/// connect to this table.
+fn build_table_type(
+	tb: &TableDefinition,
+	fds: &[FieldDefinition],
+	relations: &[RelationInfo],
+	exposed_table_names: &HashSet<String>,
+	relation_table_fds: &HashMap<String, Arc<[FieldDefinition]>>,
+	types: &mut Vec<Type>,
+) -> Result<TableGraphQLTypes, GqlError> {
+	let tb_name = &tb.name;
+	let tb_name_str = tb_name.clone().into_string();
+
+	// --- Create initial types ---
+
+	let table_orderable_name = format!("_orderable_{tb_name}");
+	let table_order_name = format!("_order_{tb_name}");
+	let table_filter_name = filter_name_from_table(tb_name);
+
+	let mut orderable = Enum::new(&table_orderable_name).item("id").description(format!(
+		"Generated from `{tb_name}` the fields which a query can be ordered by"
+	));
+
+	let order = InputObject::new(&table_order_name)
+		.description(format!("Generated from `{tb_name}` an object representing a query ordering"))
+		.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
+		.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
+		.field(InputValue::new("then", TypeRef::named(&table_order_name)));
+
+	let mut filter = InputObject::new(&table_filter_name)
+		.field(InputValue::new("id", TypeRef::named("_filter_id")))
+		.field(InputValue::new("and", TypeRef::named_nn_list(&table_filter_name)))
+		.field(InputValue::new("or", TypeRef::named_nn_list(&table_filter_name)))
+		.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
+
+	types.push(Type::InputObject(filter_id()));
+
+	let mut ty_obj = Object::new(&tb_name_str)
+		.field(Field::new(
+			"id",
+			TypeRef::named_nn(TypeRef::ID),
+			make_table_field_resolver("id", Some(Kind::Record(vec![tb_name.clone()]))),
+		))
+		.implement("record");
+
+	let mut existing_field_names: HashSet<String> = HashSet::new();
+	existing_field_names.insert("id".to_string());
+
+	// --- Process field definitions ---
+
+	let nested_objects = detect_nested_objects(&tb_name_str, fds);
+
+	for fd in fds.iter() {
+		let Some(ref kind) = fd.field_kind else {
+			continue;
+		};
+		if fd.name.is_id() {
+			continue;
+		}
+		if fd.name.0.len() > 1 {
+			continue;
+		}
+
+		let fd_name = Name::new(fd.name.to_sql());
+		existing_field_names.insert(fd_name.to_string());
+
+		// Handle nested object fields (TYPE object with children)
+		if let Some(nested) = nested_objects.get(fd_name.as_str()) {
+			let nested_type =
+				make_nested_object_type(&nested.gql_type_name, &nested.sub_fields, types)?;
+			types.push(Type::Object(nested_type));
+
+			let fd_type = if nested.is_array {
+				let list = TypeRef::List(Box::new(TypeRef::named_nn(&nested.gql_type_name)));
+				if nested.optional {
+					list
+				} else {
+					TypeRef::NonNull(Box::new(list))
+				}
+			} else if nested.optional {
+				TypeRef::named(&nested.gql_type_name)
+			} else {
+				TypeRef::named_nn(&nested.gql_type_name)
+			};
+
+			orderable = orderable.item(fd_name.to_string());
+			ty_obj = ty_obj
+				.field(Field::new(
+					fd_name.as_str(),
+					fd_type,
+					make_nested_object_field_resolver(
+						fd_name.as_str().to_string(),
+						nested.is_array,
+					),
+				))
+				.description(if let Some(ref c) = fd.comment {
+					c.clone()
+				} else {
+					format!("Nested object field `{}`", fd_name.as_str())
+				});
+			continue;
+		}
+
+		// Handle regular fields
+		let fd_type = kind_to_type(kind.clone(), types, false)?;
+		orderable = orderable.item(fd_name.to_string());
+
+		let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
+		let filter_already_exists = types.iter().any(|t| match t {
+			Type::InputObject(io) => io.type_name() == type_filter_name,
+			_ => false,
+		});
+		if !filter_already_exists {
+			let type_filter =
+				Type::InputObject(filter_from_type(kind.clone(), type_filter_name.clone(), types)?);
+			trace!("\n{type_filter:?}\n");
+			types.push(type_filter);
+		}
+
+		filter = filter.field(InputValue::new(fd.name.to_sql(), TypeRef::named(type_filter_name)));
+		ty_obj = ty_obj
+			.field(Field::new(
+				fd.name.to_sql(),
+				fd_type,
+				make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
+			))
+			.description(if let Some(ref c) = fd.comment {
+				c.clone()
+			} else {
+				"".to_string()
+			});
+	}
+
+	// --- Add relation fields ---
+
+	for rel in relations.iter() {
+		let rel_table_str = rel.table_name.clone().into_string();
+		if !exposed_table_names.contains(&rel_table_str) {
+			continue;
+		}
+
+		let rel_fds = relation_table_fds.get(&rel_table_str).cloned();
+
+		// Outgoing: this table is in the FROM list
+		if rel.from_tables.contains(&tb_name_str) {
+			let field_name = rel_table_str.clone();
+			if !existing_field_names.contains(&field_name) {
+				existing_field_names.insert(field_name.clone());
+				ty_obj = ty_obj.field(make_relation_field(
+					&field_name,
+					&rel_table_str,
+					rel.table_name.clone(),
+					RelationDirection::Outgoing,
+					rel_fds.clone(),
+				));
+			} else {
+				trace!(
+					"Skipping outgoing relation field '{}' on table '{}': \
+					 conflicts with existing field",
+					field_name, tb_name_str
+				);
+			}
+		}
+
+		// Incoming: this table is in the TO list
+		if rel.to_tables.contains(&tb_name_str) {
+			let field_name = format!("{}_in", rel_table_str);
+			if !existing_field_names.contains(&field_name) {
+				existing_field_names.insert(field_name.clone());
+				ty_obj = ty_obj.field(make_relation_field(
+					&field_name,
+					&rel_table_str,
+					rel.table_name.clone(),
+					RelationDirection::Incoming,
+					rel_fds.clone(),
+				));
+			} else {
+				trace!(
+					"Skipping incoming relation field '{}' on table '{}': \
+					 conflicts with existing field",
+					field_name, tb_name_str
+				);
+			}
+		}
+	}
+
+	Ok(TableGraphQLTypes {
+		ty_obj,
+		orderable,
+		order,
+		filter,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Top-level table processing
+// ---------------------------------------------------------------------------
 
 pub async fn process_tbs(
 	tbs: Arc<[TableDefinition]>,
@@ -609,454 +1052,29 @@ pub async fn process_tbs(
 
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
-		let tb_name = tb.name.clone();
-		let first_tb_name = tb_name.clone();
-		let second_tb_name = tb_name.clone();
-
-		let table_orderable_name = format!("_orderable_{tb_name}");
-		let mut table_orderable = Enum::new(&table_orderable_name).item("id");
-		table_orderable = table_orderable.description(format!(
-			"Generated from `{}` the fields which a query can be ordered by",
-			tb.name
-		));
-		let table_order_name = format!("_order_{tb_name}");
-		let table_order = InputObject::new(&table_order_name)
-			.description(format!(
-				"Generated from `{}` an object representing a query ordering",
-				tb.name
-			))
-			.field(InputValue::new("asc", TypeRef::named(&table_orderable_name)))
-			.field(InputValue::new("desc", TypeRef::named(&table_orderable_name)))
-			.field(InputValue::new("then", TypeRef::named(&table_order_name)));
-
-		let table_filter_name = filter_name_from_table(tb_name);
-		let mut table_filter = InputObject::new(&table_filter_name);
-		table_filter = table_filter
-			.field(InputValue::new("id", TypeRef::named("_filter_id")))
-			.field(InputValue::new("and", TypeRef::named_nn_list(&table_filter_name)))
-			.field(InputValue::new("or", TypeRef::named_nn_list(&table_filter_name)))
-			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
-		types.push(Type::InputObject(filter_id()));
-
 		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb.name, None).await?;
 
-		// Detect nested object fields (TYPE object with children, TYPE array<object>
-		// with wildcard children). These will get generated GraphQL Object types
-		// instead of the opaque `object` scalar.
-		let nested_objects = detect_nested_objects(&tb.name.clone().into_string(), &fds);
+		// Add query root fields for this table
+		query = query.field(make_table_list_field(tb, fds.clone(), ctx.datastore.clone()));
+		query = query.field(make_table_get_field(tb, ctx.datastore.clone()));
 
-		let fds1 = fds.clone();
-		let kvs1 = ctx.datastore.clone();
-
-		query = query.field(
-			Field::new(
-				tb.name.clone().into_string(),
-				TypeRef::named_nn_list_nn(tb.name.clone().into_string()),
-				move |ctx| {
-					let tb_name = first_tb_name.clone();
-					let fds1 = fds1.clone();
-					let kvs1 = kvs1.clone();
-					FieldFuture::new(async move {
-						// Get session from GraphQL context (has proper user permissions)
-						let sess1 = ctx.data::<Arc<Session>>()?;
-						let args = ctx.args.as_index_map();
-						trace!("received request with args: {args:?}");
-
-						let start = parse_start_arg(args);
-						let limit = parse_limit_arg(args);
-						let version = parse_version_arg(args)?;
-						let order = parse_order_arg(args)?;
-						let cond = parse_filter_arg(args, &fds1)?;
-
-						trace!("parsed order: {order:?}");
-						trace!("parsed filter: {cond:?}");
-
-						// SELECT * FROM <table> with optional filtering, ordering,
-						// pagination and versioning. We select * (not just id) so
-						// that permissions are properly checked.
-						let stmt = select_all_from_table(
-							Expr::Table(tb_name),
-							cond,
-							order,
-							limit,
-							start,
-							&version,
-						);
-
-						let res = execute_select(&kvs1, sess1, stmt).await?;
-
-						let res_vec = match res {
-							Value::Array(a) => a,
-							v => {
-								error!(
-									"Found top level value, in result which should be array: {v:?}"
-								);
-								return Err(internal_error(
-									"Unexpected result type from table query",
-								)
-								.into());
-							}
-						};
-
-						// Wrap each result object as a CachedRecord, preserving
-						// the full record data so that field resolvers can extract
-						// values directly without additional database queries.
-						let out: Result<Vec<FieldValue>, GqlError> = res_vec
-							.0
-							.into_iter()
-							.map(|v| match v {
-								Value::Object(obj) => {
-									let rid = match obj.get("id") {
-										Some(Value::RecordId(rid)) => rid.clone(),
-										_ => {
-											error!(
-												"Object missing 'id' field or id is not a RecordId: {obj:?}"
-											);
-											return Err(internal_error(
-												"Record missing 'id' field",
-											));
-										}
-									};
-									Ok(FieldValue::owned_any(CachedRecord {
-										rid,
-										version: version.clone(),
-										data: obj,
-									}))
-								}
-								_ => {
-									error!(
-										"Found top level value, in result which should be object: {v:?}"
-									);
-									Err(internal_error("Expected object in result"))
-								}
-							})
-							.collect();
-
-						match out {
-							Ok(l) => Ok(Some(FieldValue::list(l))),
-							Err(e) => Err(e.into()),
-						}
-					})
-				},
-			)
-			.description(if let Some(c) = &tb.comment {
-				c.clone()
-			} else {
-				format!("Generated from table `{}`\nallows querying a table with filters", tb.name)
-			})
-			.argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-			.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
-			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
-			.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
-			.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
-		);
-
-		let kvs2 = ctx.datastore.to_owned();
-		query = query.field(
-			Field::new(
-				format!("_get_{}", tb.name),
-				TypeRef::named(tb.name.clone().into_string()),
-				move |ctx| {
-					let tb_name = second_tb_name.clone();
-					let kvs2 = kvs2.clone();
-					FieldFuture::new({
-						async move {
-							// Get session from GraphQL context (has proper user permissions)
-							let sess2 = ctx.data::<Arc<Session>>()?;
-							let args = ctx.args.as_index_map();
-							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-								Some(i) => i,
-								None => {
-									return Err(internal_error(
-										"Schema validation failed: No id found in _get_",
-									)
-									.into());
-								}
-							};
-							let version = parse_version_arg(args)?;
-
-							// Parse the full record id string so that numeric
-							// keys like "1" are correctly interpreted as Number(1)
-							// rather than String("1"). Fall back to a plain string
-							// key if parsing fails.
-							let rid_str = format!("{tb_name}:{id}");
-							let record_id: RecordId = match crate::syn::record_id(&rid_str) {
-								Ok(x) => x.into(),
-								Err(_) => RecordId::new(tb_name, id),
-							};
-
-							// Build SELECT * FROM ONLY <record_id> and cache
-							// the full record for field resolvers.
-							let stmt = select_all_from_record(&record_id, &version);
-							let res = execute_select(&kvs2, sess2, stmt).await?;
-
-							match res {
-								Value::Object(obj) => {
-									let rid = match obj.get("id") {
-										Some(Value::RecordId(rid)) => rid.clone(),
-										_ => return Ok(None),
-									};
-									Ok(Some(FieldValue::owned_any(CachedRecord {
-										rid,
-										version,
-										data: obj,
-									})))
-								}
-								_ => Ok(None),
-							}
-						}
-					})
-				},
-			)
-			.description(if let Some(c) = &tb.comment {
-				c.clone()
-			} else {
-				format!(
-					"Generated from table `{}`\nallows querying a single record in a table by ID",
-					tb.name
-				)
-			})
-			.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-			.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
-		);
-
-		let mut table_ty_obj = Object::new(tb.name.clone().into_string())
-			.field(Field::new(
-				"id",
-				TypeRef::named_nn(TypeRef::ID),
-				make_table_field_resolver("id", Some(Kind::Record(vec![tb.name.clone()]))),
-			))
-			.implement("record");
-
-		// Track existing field names to detect conflicts with relation fields
-		let mut existing_field_names: HashSet<String> = HashSet::new();
-		existing_field_names.insert("id".to_string());
-
-		for fd in fds.iter() {
-			let Some(ref kind) = fd.field_kind else {
-				continue;
-			};
-			if fd.name.is_id() {
-				// We have already defined "id"
-				// so we don't take any new definition for it.
-				continue;
-			};
-
-			// Skip nested child fields (multi-part idioms like `time.createdAt`
-			// or `tags.*.name`). These are handled by their parent's generated
-			// nested object type.
-			if fd.name.0.len() > 1 {
-				continue;
-			}
-
-			let fd_name = Name::new(fd.name.to_sql());
-			existing_field_names.insert(fd_name.to_string());
-
-			// Check if this field has nested children and should use a generated
-			// GraphQL Object type instead of the default scalar/type mapping.
-			if let Some(nested) = nested_objects.get(fd_name.as_str()) {
-				// Generate the nested object type and register it
-				let nested_type =
-					make_nested_object_type(&nested.gql_type_name, &nested.sub_fields, types)?;
-				types.push(Type::Object(nested_type));
-
-				// Determine the GraphQL type for this field, respecting nullability.
-				let fd_type = if nested.is_array {
-					let list = TypeRef::List(Box::new(TypeRef::named_nn(&nested.gql_type_name)));
-					if nested.optional {
-						list
-					} else {
-						TypeRef::NonNull(Box::new(list))
-					}
-				} else if nested.optional {
-					TypeRef::named(&nested.gql_type_name)
-				} else {
-					TypeRef::named_nn(&nested.gql_type_name)
-				};
-
-				// Add to orderable (parent field name only, not sub-fields)
-				table_orderable = table_orderable.item(fd_name.to_string());
-
-				// Use the nested object resolver instead of the default one
-				table_ty_obj = table_ty_obj
-					.field(Field::new(
-						fd_name.as_str(),
-						fd_type,
-						make_nested_object_field_resolver(
-							fd_name.as_str().to_string(),
-							nested.is_array,
-						),
-					))
-					.description(if let Some(ref c) = fd.comment {
-						c.clone()
-					} else {
-						format!("Nested object field `{}`", fd_name.as_str())
-					});
-
-				continue;
-			}
-
-			let fd_type = kind_to_type(kind.clone(), types, false)?;
-			table_orderable = table_orderable.item(fd_name.to_string());
-			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
-
-			// Only create a new filter type if one with this name hasn't been registered yet.
-			// This prevents record-link fields (e.g. `TYPE record<department>`) from
-			// overwriting the target table's own, richer filter type.
-			let filter_already_exists = types.iter().any(|t| match t {
-				Type::InputObject(io) => io.type_name() == type_filter_name,
-				_ => false,
-			});
-			if !filter_already_exists {
-				let type_filter = Type::InputObject(filter_from_type(
-					kind.clone(),
-					type_filter_name.clone(),
-					types,
-				)?);
-				trace!("\n{type_filter:?}\n");
-				types.push(type_filter);
-			}
-
-			table_filter = table_filter
-				.field(InputValue::new(fd.name.to_sql(), TypeRef::named(type_filter_name)));
-
-			table_ty_obj = table_ty_obj
-				.field(Field::new(
-					fd.name.to_sql(),
-					fd_type,
-					make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
-				))
-				.description(if let Some(ref c) = fd.comment {
-					c.clone()
-				} else {
-					"".to_string()
-				});
-		}
-
-		// Add relation fields to this table's type.
-		// For each relation table where this table is in the FROM list, add an
-		// outgoing relation field. For each where this table is in the TO list,
-		// add an incoming relation field.
-		let tb_name_str = tb.name.clone().into_string();
-		for rel in relations.iter() {
-			let rel_table_str = rel.table_name.clone().into_string();
-
-			// Only add relation fields if the relation table is also exposed
-			if !exposed_table_names.contains(&rel_table_str) {
-				continue;
-			}
-
-			let rel_fds = relation_table_fds.get(&rel_table_str).cloned();
-
-			// Outgoing: this table is in the FROM list
-			if rel.from_tables.contains(&tb_name_str) {
-				let field_name = rel_table_str.clone();
-				if !existing_field_names.contains(&field_name) {
-					existing_field_names.insert(field_name.clone());
-					table_ty_obj = table_ty_obj.field(make_relation_field(
-						&field_name,
-						&rel_table_str,
-						rel.table_name.clone(),
-						RelationDirection::Outgoing,
-						rel_fds.clone(),
-					));
-				} else {
-					trace!(
-						"Skipping outgoing relation field '{}' on table '{}': \
-						 conflicts with existing field",
-						field_name, tb_name_str
-					);
-				}
-			}
-
-			// Incoming: this table is in the TO list
-			if rel.to_tables.contains(&tb_name_str) {
-				let field_name = format!("{}_in", rel_table_str);
-				if !existing_field_names.contains(&field_name) {
-					existing_field_names.insert(field_name.clone());
-					table_ty_obj = table_ty_obj.field(make_relation_field(
-						&field_name,
-						&rel_table_str,
-						rel.table_name.clone(),
-						RelationDirection::Incoming,
-						rel_fds.clone(),
-					));
-				} else {
-					trace!(
-						"Skipping incoming relation field '{}' on table '{}': \
-						 conflicts with existing field",
-						field_name, tb_name_str
-					);
-				}
-			}
-		}
-
-		types.push(Type::Object(table_ty_obj));
-		types.push(table_order.into());
-		types.push(Type::Enum(table_orderable));
-		types.push(Type::InputObject(table_filter));
+		// Build and register the table's type system
+		let tt = build_table_type(
+			tb,
+			&fds,
+			relations,
+			&exposed_table_names,
+			&relation_table_fds,
+			types,
+		)?;
+		types.push(Type::Object(tt.ty_obj));
+		types.push(tt.order.into());
+		types.push(Type::Enum(tt.orderable));
+		types.push(Type::InputObject(tt.filter));
 	}
 
-	let kvs3 = ctx.datastore.to_owned();
-	query = query.field(
-		Field::new("_get", TypeRef::named("record"), move |ctx| {
-			FieldFuture::new({
-				let kvs3 = kvs3.clone();
-				async move {
-					// Get session from GraphQL context (has proper user permissions)
-					let sess3 = ctx.data::<Arc<Session>>()?;
-					let args = ctx.args.as_index_map();
-					let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-						Some(i) => i,
-						None => {
-							return Err(internal_error(
-								"Schema validation failed: No id found in _get",
-							)
-							.into());
-						}
-					};
-					let version = parse_version_arg(args)?;
-
-					// Parse ID as a record id.
-					let record_id: crate::val::RecordId = match crate::syn::record_id(&id) {
-						Ok(x) => x.into(),
-						Err(_) => {
-							return Err(resolver_error("Invalid record ID format").into());
-						}
-					};
-
-					// Build SELECT * FROM ONLY <record_id> and cache
-					// the full record for field resolvers.
-					let stmt = select_all_from_record(&record_id, &version);
-					let res = execute_select(&kvs3, sess3, stmt).await?;
-
-					match res {
-						Value::Object(obj) => {
-							let rid = match obj.get("id") {
-								Some(Value::RecordId(rid)) => rid.clone(),
-								_ => return Ok(None),
-							};
-							let table_name = rid.table.clone();
-							// Generic _get returns interface type "record", needs .with_type()
-							Ok(Some(
-								FieldValue::owned_any(CachedRecord {
-									rid,
-									version,
-									data: obj,
-								})
-								.with_type(table_name),
-							))
-						}
-						_ => Ok(None),
-					}
-				}
-			})
-		})
-		.description("Allows fetching arbitrary records".to_string())
-		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-		.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
-	);
+	// Add generic _get query field for fetching any record by full ID
+	query = query.field(make_generic_get_field(ctx.datastore.clone()));
 
 	Ok(query)
 }
@@ -1161,7 +1179,7 @@ async fn resolve_field_value(
 		}
 		Value::None | Value::Null => Ok(None),
 		v => {
-			let out = sql_value_to_gql_value(v).map_err(|_| "SQL to GQL translation failed")?;
+			let out = sql_value_to_gql_value(v).map_err(async_graphql::Error::from)?;
 			Ok(Some(FieldValue::value(out)))
 		}
 	}
@@ -1267,14 +1285,14 @@ fn make_relation_field_resolver(
 			};
 
 			// Parse and combine user-supplied filter
-			if let Some(ref fds) = fds {
-				if let Some(user_cond) = parse_filter_arg(args, fds)? {
-					base_cond = Expr::Binary {
-						left: Box::new(base_cond),
-						op: BinaryOperator::And,
-						right: Box::new(user_cond.0),
-					};
-				}
+			if let Some(ref fds) = fds
+				&& let Some(user_cond) = parse_filter_arg(args, fds)?
+			{
+				base_cond = Expr::Binary {
+					left: Box::new(base_cond),
+					op: BinaryOperator::And,
+					right: Box::new(user_cond.0),
+				};
 			}
 
 			let cond = Some(Cond(base_cond));
@@ -1292,44 +1310,13 @@ fn make_relation_field_resolver(
 
 			let res = execute_select(ds, sess, stmt).await?;
 
-			let res_vec = match res {
-				Value::Array(a) => a,
+			match res {
+				Value::Array(a) => objects_to_cached_records(a, version),
 				v => {
 					error!("Expected array result for relation query, found: {v:?}");
-					return Err(internal_error("Unexpected result type for relation query").into());
+					Err(internal_error("Unexpected result type for relation query").into())
 				}
-			};
-
-			// Wrap each relation result as CachedRecord so that the
-			// relation table's field resolvers can use the cache path.
-			let out: Result<Vec<FieldValue>, GqlError> = res_vec
-				.0
-				.into_iter()
-				.map(|v| match v {
-					Value::Object(obj) => {
-						let rid = match obj.get("id") {
-							Some(Value::RecordId(rid)) => rid.clone(),
-							_ => {
-								error!(
-									"Relation object missing 'id' field or id is not a RecordId"
-								);
-								return Err(internal_error("Unexpected relation result format"));
-							}
-						};
-						Ok(FieldValue::owned_any(CachedRecord {
-							rid,
-							version: version.clone(),
-							data: obj,
-						}))
-					}
-					_ => {
-						error!("Expected object in relation result, found: {v:?}");
-						Err(internal_error("Unexpected value type in relation result"))
-					}
-				})
-				.collect();
-
-			Ok(Some(FieldValue::list(out?)))
+			}
 		})
 	}
 }
