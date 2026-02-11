@@ -571,8 +571,6 @@ jobs:
     name: SDK - JavaScript (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -619,21 +617,10 @@ jobs:
           SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
-
   sdk-golang:
     name: SDK - Golang (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -684,7 +671,6 @@ jobs:
           fi
 
       - name: Run Golang tests (HTTP)
-        id: test-http
         timeout-minutes: 5
         continue-on-error: true
         run: go test -v -cover ./...
@@ -692,28 +678,16 @@ jobs:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
-        id: test-ws
         timeout-minutes: 5
         continue-on-error: true
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
-
   sdk-python:
     name: SDK - Python (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -771,7 +745,6 @@ jobs:
         run: uv sync --group dev
 
       - name: Run Python tests (HTTP)
-        id: test-http
         timeout-minutes: 5
         continue-on-error: true
         run: uv run pytest
@@ -782,7 +755,6 @@ jobs:
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
       - name: Run Python tests (WebSocket)
-        id: test-ws
         timeout-minutes: 5
         continue-on-error: true
         run: uv run pytest
@@ -792,21 +764,10 @@ jobs:
           SURREALDB_VERSION: ${{ matrix.version }}
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
-
   sdk-php:
     name: SDK - PHP (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -860,26 +821,14 @@ jobs:
           fi
 
       - name: Run PHP tests
-        id: test-php
         timeout-minutes: 5
         continue-on-error: true
         run: composer test-coverage-v2
-
-      - name: ${{ (steps.test-php.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-php.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
 
   sdk-dotnet:
     name: SDK - .NET (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -937,7 +886,6 @@ jobs:
           fi
 
       - name: Run .NET tests
-        id: test-main
         timeout-minutes: 5
         continue-on-error: true
         run: >
@@ -947,7 +895,6 @@ jobs:
           --no-build
 
       - name: Run .NET tests (Live Query)
-        id: test-live
         timeout-minutes: 5
         continue-on-error: true
         run: >
@@ -956,23 +903,14 @@ jobs:
           --no-restore
           --no-build
 
-      - name: ${{ (steps.test-main.outcome != 'success' || steps.test-live.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-main.outcome }}" != "success" ] || [ "${{ steps.test-live.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
-
   # ----------------------------------------
-  # SDK output
+  # SDK summary (fails if any SDK test job failed; not in required-checks yet)
   # ----------------------------------------
 
   sdk-output:
-    name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '❌ SDK tests failed' || '✅ SDK tests passed' }}
+    name: SDK test summary
     runs-on: ubuntu-latest
-    if: success() || failure()
+    if: always()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -980,21 +918,25 @@ jobs:
       - sdk-php
       - sdk-dotnet
     steps:
-      - name: Output SDK test results
+      - name: SDK test results
         run: |
-          echo "JavaScript: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Golang: ${{ needs.sdk-golang.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Python: ${{ needs.sdk-python.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "PHP: ${{ needs.sdk-php.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo ".NET: ${{ needs.sdk-dotnet.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "JavaScript: ${{ needs.sdk-javascript.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Golang: ${{ needs.sdk-golang.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Python: ${{ needs.sdk-python.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "PHP: ${{ needs.sdk-php.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo ".NET: ${{ needs.sdk-dotnet.result == 'success' && '✅ Passed' || '❌ Failed' }}"
 
-      - name: Output SDK test summary
+      - name: Fail if any SDK tests failed
         run: |
-          if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
-            echo "❌ Some SDK tests failed"
-          else
-            echo "✅ All SDK tests passed successfully"
+          if [[ "${{ needs.sdk-javascript.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-golang.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-python.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-php.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-dotnet.result }}" == "failure" ]]; then
+            echo "❌ One or more SDK test jobs failed"
+            exit 1
           fi
+          echo "✅ All SDK tests passed"
 
   # ----------------------------------------
   # Required checks
