@@ -27,7 +27,7 @@ use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::{Datastore, Transaction};
-use crate::val::{RecordId, TableName, Value};
+use crate::val::{Datetime, RecordId, TableName, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
@@ -41,6 +41,38 @@ fn order_desc(field_name: String) -> expr::Order {
 	expr::Order {
 		value: Idiom::field(field_name),
 		..expr::Order::default()
+	}
+}
+
+/// A record ID with an optional version for temporal queries.
+/// Propagates the version from top-level queries down to field and relation resolvers,
+/// ensuring consistent versioned reads across the entire query tree.
+#[derive(Clone, Debug)]
+pub(crate) struct VersionedRecord {
+	pub rid: RecordId,
+	pub version: Option<Datetime>,
+}
+
+/// Convert an optional `Datetime` version to the `Expr` representation
+/// used in `SelectStatement.version`.
+fn version_to_expr(version: &Option<Datetime>) -> Expr {
+	match version {
+		Some(dt) => Expr::Literal(Literal::Datetime(dt.clone())),
+		None => Expr::Literal(Literal::None),
+	}
+}
+
+/// Parse the optional `version` argument from GraphQL query arguments.
+/// Expects an ISO 8601 / RFC 3339 datetime string (e.g. `"2024-06-01T00:00:00Z"`).
+fn parse_version_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Datetime>, GqlError> {
+	match args.get("version") {
+		Some(GqlValue::String(s)) => {
+			let dt = crate::syn::datetime(s)
+				.map_err(|_| resolver_error(format!("Invalid version datetime: {s}")))?;
+			Ok(Some(dt.into()))
+		}
+		Some(GqlValue::Null) | None => Ok(None),
+		Some(_) => Err(resolver_error("version must be a datetime string")),
 	}
 }
 
@@ -121,17 +153,18 @@ pub async fn process_tbs(
 					let args = ctx.args.as_index_map();
 					trace!("received request with args: {args:?}");
 
-					let start = args
-						.get("start")
-						.and_then(|v| v.as_i64())
-						.map(|s| Start(Expr::Literal(Literal::Integer(s))));
-					let limit = args
-						.get("limit")
-						.and_then(|v| v.as_i64())
-						.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-				let order = args.get("order");
-				// Accept both `filter` and `where` (aliases of each other)
-				let filter = args.get("filter").or_else(|| args.get("where"));
+				let start = args
+					.get("start")
+					.and_then(|v| v.as_i64())
+					.map(|s| Start(Expr::Literal(Literal::Integer(s))));
+				let limit = args
+					.get("limit")
+					.and_then(|v| v.as_i64())
+					.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+				let version = parse_version_arg(args)?;
+			let order = args.get("order");
+			// Accept both `filter` and `where` (aliases of each other)
+			let filter = args.get("filter").or_else(|| args.get("where"));
 
 					let orders = match order {
 						Some(GqlValue::Object(o)) => {
@@ -203,7 +236,7 @@ pub async fn process_tbs(
 						split: None,
 						group: None,
 						fetch: None,
-						version: Expr::Literal(Literal::None),
+						version: version_to_expr(&version),
 						timeout: Expr::Literal(Literal::None),
 						explain: None,
 						tempfiles: false,
@@ -237,7 +270,10 @@ pub async fn process_tbs(
 									// Extract the 'id' field which should be a RecordId
 									match obj.get("id") {
 										Some(Value::RecordId(rid)) => {
-											Ok(FieldValue::owned_any(rid.clone()))
+											Ok(FieldValue::owned_any(VersionedRecord {
+												rid: rid.clone(),
+												version: version.clone(),
+											}))
 										}
 										_ => {
 											error!(
@@ -274,7 +310,8 @@ pub async fn process_tbs(
 			.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
-		.argument(InputValue::new("where", TypeRef::named(&table_filter_name))),
+		.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
+		.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
 		);
 
 		let kvs2 = datastore.to_owned();
@@ -299,6 +336,7 @@ pub async fn process_tbs(
 									.into());
 								}
 							};
+							let version = parse_version_arg(args)?;
 
 							let record_id = RecordId::new(tb_name, id);
 
@@ -319,7 +357,7 @@ pub async fn process_tbs(
 								limit: None,
 								start: None,
 								fetch: None,
-								version: Expr::Literal(Literal::None),
+								version: version_to_expr(&version),
 								timeout: Expr::Literal(Literal::None),
 								explain: None,
 								tempfiles: false,
@@ -335,8 +373,10 @@ pub async fn process_tbs(
 
 							match res {
 								Value::RecordId(t) => {
-									// let erased: ErasedRecord = (kvs2.clone(), sess2.clone(), t);
-									Ok(Some(FieldValue::owned_any(t)))
+									Ok(Some(FieldValue::owned_any(VersionedRecord {
+										rid: t,
+										version,
+									})))
 								}
 								_ => Ok(None),
 							}
@@ -352,7 +392,8 @@ pub async fn process_tbs(
 					tb.name
 				)
 			})
-			.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+			.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+			.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
 		);
 
 		let mut table_ty_obj = Object::new(tb.name.clone().into_string())
@@ -434,8 +475,7 @@ pub async fn process_tbs(
 					trace!(
 						"Skipping outgoing relation field '{}' on table '{}': \
 						 conflicts with existing field",
-						field_name,
-						tb_name_str
+						field_name, tb_name_str
 					);
 				}
 			}
@@ -456,8 +496,7 @@ pub async fn process_tbs(
 					trace!(
 						"Skipping incoming relation field '{}' on table '{}': \
 						 conflicts with existing field",
-						field_name,
-						tb_name_str
+						field_name, tb_name_str
 					);
 				}
 			}
@@ -487,6 +526,7 @@ pub async fn process_tbs(
 							.into());
 						}
 					};
+					let version = parse_version_arg(args)?;
 
 					// Parse ID as a record id.
 					let record_id: crate::val::RecordId = match crate::syn::record_id(&id) {
@@ -513,7 +553,7 @@ pub async fn process_tbs(
 						limit: None,
 						start: None,
 						fetch: None,
-						version: Expr::Literal(Literal::None),
+						version: version_to_expr(&version),
 						timeout: Expr::Literal(Literal::None),
 						explain: None,
 						tempfiles: false,
@@ -527,8 +567,15 @@ pub async fn process_tbs(
 
 					match res {
 						Value::RecordId(t) => {
+							let table_name = t.table.clone();
 							// Generic _get returns interface type "record", needs .with_type()
-							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table)))
+							Ok(Some(
+								FieldValue::owned_any(VersionedRecord {
+									rid: t,
+									version,
+								})
+								.with_type(table_name),
+							))
 						}
 						_ => Ok(None),
 					}
@@ -536,7 +583,8 @@ pub async fn process_tbs(
 			})
 		})
 		.description("Allows fetching arbitrary records".to_string())
-		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
+		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+		.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
 	);
 
 	Ok(query)
@@ -554,7 +602,17 @@ fn make_table_field_resolver(
 			async move {
 				let ds = ctx.data::<Arc<Datastore>>()?;
 				let sess = ctx.data::<Arc<Session>>()?;
-				let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+
+				// Extract record ID and optional version.
+				// Try VersionedRecord first (from versioned queries), then
+				// fall back to plain RecordId (from functions, etc.).
+				let (rid, version) = match ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
+					Ok(vr) => (vr.rid.clone(), vr.version.clone()),
+					Err(_) => {
+						let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+						(rid.clone(), None)
+					}
+				};
 
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let select_stmt = SelectStatement {
@@ -573,7 +631,7 @@ fn make_table_field_resolver(
 					limit: None,
 					start: None,
 					fetch: None,
-					version: Expr::Literal(Literal::None),
+					version: version_to_expr(&version),
 					timeout: Expr::Literal(Literal::None),
 					explain: None,
 					tempfiles: false,
@@ -586,13 +644,16 @@ fn make_table_field_resolver(
 				let val = execute_plan(ds, sess, plan).await?;
 
 				match val {
-					Value::RecordId(rid) if fd_name != "id" => {
-						// Check if this is an interface/union type that needs .with_type()
-						let field_val = FieldValue::owned_any(rid.clone());
+					Value::RecordId(new_rid) if fd_name != "id" => {
+						// Record-link dereferencing: propagate version to child
+						let field_val = FieldValue::owned_any(VersionedRecord {
+							rid: new_rid.clone(),
+							version,
+						});
 						let field_val = match field_kind {
 							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
 								// Interface or union type, needs .with_type()
-								field_val.with_type(rid.table)
+								field_val.with_type(new_rid.table)
 							}
 							_ => {
 								// Concrete type, no .with_type() needed
@@ -647,10 +708,9 @@ fn make_relation_field(
 	let table_order_name = format!("_order_{}", rel_table_type_name);
 
 	let desc = match direction {
-		RelationDirection::Outgoing => format!(
-			"Outgoing `{}` relations from this record",
-			rel_table_type_name
-		),
+		RelationDirection::Outgoing => {
+			format!("Outgoing `{}` relations from this record", rel_table_type_name)
+		}
 		RelationDirection::Incoming => {
 			format!("Incoming `{}` relations to this record", rel_table_type_name)
 		}
@@ -687,7 +747,16 @@ fn make_relation_field_resolver(
 		FieldFuture::new(async move {
 			let ds = ctx.data::<Arc<Datastore>>()?;
 			let sess = ctx.data::<Arc<Session>>()?;
-			let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+
+			// Extract record ID and optional version from parent.
+			// Try VersionedRecord first, then fall back to plain RecordId.
+			let (rid, version) = match ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
+				Ok(vr) => (vr.rid.clone(), vr.version.clone()),
+				Err(_) => {
+					let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+					(rid.clone(), None)
+				}
+			};
 			let args = ctx.args.as_index_map();
 
 			// Parse limit/start arguments
@@ -769,6 +838,7 @@ fn make_relation_field_resolver(
 			let cond = Some(Cond(base_cond));
 
 			// Build SELECT * FROM <relation_table> WHERE ...
+			// Propagate version from parent for consistent temporal queries
 			let select_stmt = SelectStatement {
 				what: vec![Expr::Table(relation_table)],
 				fields: Fields::all(),
@@ -782,7 +852,7 @@ fn make_relation_field_resolver(
 				split: None,
 				group: None,
 				fetch: None,
-				version: Expr::Literal(Literal::None),
+				version: version_to_expr(&version),
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
@@ -809,7 +879,10 @@ fn make_relation_field_resolver(
 				.into_iter()
 				.map(|v| match v {
 					Value::Object(obj) => match obj.get("id") {
-						Some(Value::RecordId(rid)) => Ok(FieldValue::owned_any(rid.clone())),
+						Some(Value::RecordId(rid)) => Ok(FieldValue::owned_any(VersionedRecord {
+							rid: rid.clone(),
+							version: version.clone(),
+						})),
 						_ => Err(internal_error(format!(
 							"Relation object missing 'id' field or id is not a \
 							 RecordId: {obj:?}"

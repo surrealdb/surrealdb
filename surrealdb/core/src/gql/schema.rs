@@ -943,9 +943,8 @@ fn make_geometry_collection_type() -> Object {
 /// that must be registered directly on the Schema builder (enum, union).
 ///
 /// Types registered into `types` vec:
-/// - Object types: `GeometryPoint`, `GeometryLineString`, `GeometryPolygon`,
-///   `GeometryMultiPoint`, `GeometryMultiLineString`, `GeometryMultiPolygon`,
-///   `GeometryCollection`
+/// - Object types: `GeometryPoint`, `GeometryLineString`, `GeometryPolygon`, `GeometryMultiPoint`,
+///   `GeometryMultiLineString`, `GeometryMultiPolygon`, `GeometryCollection`
 ///
 /// Types that need `schema.register()`:
 /// - Enum: `GeometryType`

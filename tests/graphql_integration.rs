@@ -1403,6 +1403,225 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	#[cfg(feature = "storage-surrealkv")]
+	async fn version() -> Result<(), Box<dyn std::error::Error>> {
+		let (_dir, addr, _server) = common::start_server_gql_with_versioning().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema and initial data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE item SCHEMAFUL;
+					DEFINE FIELD name ON item TYPE string;
+					DEFINE FIELD price ON item TYPE float;
+
+					CREATE item:1 SET name = "Alpha", price = 10.0;
+					CREATE item:2 SET name = "Beta", price = 20.0;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Sleep to create a time gap, then capture the timestamp
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					SLEEP 100ms;
+					RETURN time::now();
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			// Extract the timestamp from the second result
+			let ts = body[1]["result"].as_str().unwrap().to_string();
+
+			// Sleep again, then add more data and update existing records
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					SLEEP 100ms;
+					CREATE item:3 SET name = "Gamma", price = 30.0;
+					UPDATE item:1 SET name = "Alpha Updated", price = 15.0;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+
+			// Test 1: Query without version — should return current data (3 items)
+			{
+				let res = client
+					.post(gql_url)
+					.body(
+						json!({"query": r#"query { item(order: {asc: id}) { id name price } }"#})
+							.to_string(),
+					)
+					.send()
+					.await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let items = body["data"]["item"].as_array().unwrap();
+				assert_eq!(items.len(), 3, "Current data should have 3 items: {body}");
+				// item:1 should be updated
+				assert_eq!(items[0]["name"], "Alpha Updated");
+				assert_eq!(items[0]["price"], 15.0);
+			}
+
+			// Test 2: Query with version — should return data as it was at
+			// the captured timestamp (2 items, with original values)
+			{
+				let query = format!(
+					r#"query {{ item(version: "{ts}", order: {{asc: id}}) {{ id name price }} }}"#
+				);
+				let res =
+					client.post(gql_url).body(json!({"query": query}).to_string()).send().await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let items = body["data"]["item"].as_array().unwrap();
+				assert_eq!(items.len(), 2, "Versioned query should have 2 items: {body}");
+				// item:1 should still have original values
+				assert_eq!(items[0]["name"], "Alpha");
+				assert_eq!(items[0]["price"], 10.0);
+				assert_eq!(items[1]["name"], "Beta");
+			}
+
+			// Test 3: _get_ with version — single record fetch at historical time
+			{
+				let query = format!(
+					r#"query {{ _get_item(id: "1", version: "{ts}") {{ id name price }} }}"#
+				);
+				let res =
+					client.post(gql_url).body(json!({"query": query}).to_string()).send().await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let item = &body["data"]["_get_item"];
+				assert_eq!(
+					item["name"], "Alpha",
+					"Versioned _get_ should see original name: {body}"
+				);
+				assert_eq!(item["price"], 10.0);
+			}
+
+			// Test 4: _get_ without version — should see the updated value
+			{
+				let res = client
+					.post(gql_url)
+					.body(
+						json!({"query": r#"query { _get_item(id: "1") { id name price } }"#})
+							.to_string(),
+					)
+					.send()
+					.await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let item = &body["data"]["_get_item"];
+				assert_eq!(item["name"], "Alpha Updated");
+				assert_eq!(item["price"], 15.0);
+			}
+
+			// Test 5: version argument with invalid datetime — should return error
+			{
+				let res = client
+					.post(gql_url)
+					.body(
+						json!({"query": r#"query { item(version: "not-a-date") { id } }"#})
+							.to_string(),
+					)
+					.send()
+					.await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				assert!(
+					body["errors"].as_array().is_some_and(|e| !e.is_empty()),
+					"Invalid version should produce an error: {body}"
+				);
+			}
+
+			// Test 6: Schema introspection — verify version argument exists on list query
+			{
+				let res = client
+					.post(gql_url)
+					.body(
+						json!({"query": r#"{
+							__type(name: "Query") {
+								fields {
+									name
+									args { name type { name } }
+								}
+							}
+						}"#})
+						.to_string(),
+					)
+					.send()
+					.await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+
+				// Check the 'item' list query has a 'version' argument
+				let item_field = fields.iter().find(|f| f["name"] == "item").unwrap();
+				let version_arg =
+					item_field["args"].as_array().unwrap().iter().find(|a| a["name"] == "version");
+				assert!(
+					version_arg.is_some(),
+					"List query should have a 'version' argument: {body}"
+				);
+				assert_eq!(
+					version_arg.unwrap()["type"]["name"],
+					"String",
+					"version argument should be of type String"
+				);
+
+				// Check the '_get_item' query has a 'version' argument
+				let get_item_field = fields.iter().find(|f| f["name"] == "_get_item").unwrap();
+				let version_arg = get_item_field["args"]
+					.as_array()
+					.unwrap()
+					.iter()
+					.find(|a| a["name"] == "version");
+				assert!(
+					version_arg.is_some(),
+					"_get_ query should have a 'version' argument: {body}"
+				);
+
+				// Check the generic '_get' query has a 'version' argument
+				let get_field = fields.iter().find(|f| f["name"] == "_get").unwrap();
+				let version_arg =
+					get_field["args"].as_array().unwrap().iter().find(|a| a["name"] == "version");
+				assert!(
+					version_arg.is_some(),
+					"Generic _get query should have a 'version' argument: {body}"
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn filters() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
@@ -1712,6 +1931,391 @@ mod graphql_integration {
 			let products = body["data"]["product"].as_array().unwrap();
 			// after 2024-06-01: product:4, product:5
 			assert_eq!(products.len(), 2);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn nested_objects() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with nested objects and array-of-objects
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE item SCHEMAFULL;
+					DEFINE FIELD name ON item TYPE string;
+					DEFINE FIELD time ON item TYPE object;
+					DEFINE FIELD time.createdAt ON item TYPE datetime;
+					DEFINE FIELD time.updatedAt ON item TYPE datetime;
+					DEFINE FIELD tags ON item TYPE array<object>;
+					DEFINE FIELD tags.* ON item TYPE object;
+					DEFINE FIELD tags.*.label ON item TYPE string;
+					DEFINE FIELD tags.*.priority ON item TYPE int;
+
+					DEFINE TABLE article SCHEMAFULL;
+					DEFINE FIELD title ON article TYPE string;
+					DEFINE FIELD meta ON article TYPE option<object>;
+					DEFINE FIELD meta.author ON article TYPE string;
+					DEFINE FIELD meta.source ON article TYPE string;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Insert test data
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE item:alpha SET
+						name = "Alpha",
+						time = { createdAt: d"2024-01-15T10:00:00Z", updatedAt: d"2024-06-01T12:00:00Z" },
+						tags = [
+							{ label: "urgent", priority: 1 },
+							{ label: "review", priority: 3 }
+						];
+					CREATE item:beta SET
+						name = "Beta",
+						time = { createdAt: d"2024-03-20T08:00:00Z", updatedAt: d"2024-07-10T16:00:00Z" },
+						tags = [
+							{ label: "feature", priority: 2 }
+						];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// --- Test 1: Query nested object sub-fields (time { createdAt, updatedAt }) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							item(order: { asc: id }) {
+								id
+								name
+								time {
+									createdAt
+									updatedAt
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let items = body["data"]["item"].as_array().unwrap();
+			assert_eq!(items.len(), 2);
+
+			// First item
+			assert_eq!(items[0]["id"], "item:alpha");
+			assert_eq!(items[0]["name"], "Alpha");
+			assert!(
+				items[0]["time"]["createdAt"].as_str().unwrap().contains("2024-01-15"),
+				"Expected createdAt to contain 2024-01-15, got: {}",
+				items[0]["time"]["createdAt"]
+			);
+			assert!(
+				items[0]["time"]["updatedAt"].as_str().unwrap().contains("2024-06-01"),
+				"Expected updatedAt to contain 2024-06-01, got: {}",
+				items[0]["time"]["updatedAt"]
+			);
+
+			// Second item
+			assert_eq!(items[1]["id"], "item:beta");
+			assert_eq!(items[1]["name"], "Beta");
+			assert!(items[1]["time"]["createdAt"].as_str().unwrap().contains("2024-03-20"),);
+		}
+
+		// --- Test 2: Query array-of-object sub-fields (tags { label, priority }) ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							item(order: { asc: id }) {
+								id
+								tags {
+									label
+									priority
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let items = body["data"]["item"].as_array().unwrap();
+			assert_eq!(items.len(), 2);
+
+			// First item has two tags
+			let tags0 = items[0]["tags"].as_array().unwrap();
+			assert_eq!(tags0.len(), 2);
+			assert_eq!(tags0[0]["label"], "urgent");
+			assert_eq!(tags0[0]["priority"], 1);
+			assert_eq!(tags0[1]["label"], "review");
+			assert_eq!(tags0[1]["priority"], 3);
+
+			// Second item has one tag
+			let tags1 = items[1]["tags"].as_array().unwrap();
+			assert_eq!(tags1.len(), 1);
+			assert_eq!(tags1[0]["label"], "feature");
+			assert_eq!(tags1[0]["priority"], 2);
+		}
+
+		// --- Test 3: Select only specific sub-fields ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							item(order: { asc: id }) {
+								name
+								time {
+									createdAt
+								}
+								tags {
+									label
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let items = body["data"]["item"].as_array().unwrap();
+			assert_eq!(items.len(), 2);
+
+			// time should only have createdAt (not updatedAt)
+			assert!(items[0]["time"]["createdAt"].is_string());
+			assert!(items[0]["time"].get("updatedAt").is_none());
+
+			// tags should only have label (not priority)
+			let tags = items[0]["tags"].as_array().unwrap();
+			assert!(tags[0]["label"].is_string());
+			assert!(tags[0].get("priority").is_none());
+		}
+
+		// --- Test 4: Single record fetch with nested objects ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							_get_item(id: "alpha") {
+								id
+								name
+								time {
+									createdAt
+									updatedAt
+								}
+								tags {
+									label
+									priority
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let item = &body["data"]["_get_item"];
+			assert_eq!(item["id"], "item:alpha");
+			assert_eq!(item["name"], "Alpha");
+			assert!(item["time"]["createdAt"].as_str().unwrap().contains("2024-01-15"));
+			let tags = item["tags"].as_array().unwrap();
+			assert_eq!(tags.len(), 2);
+			assert_eq!(tags[0]["label"], "urgent");
+		}
+
+		// --- Test 5: Schema introspection shows generated nested types ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							__type(name: "item_time") {
+								name
+								fields {
+									name
+									type {
+										name
+										kind
+									}
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let ty = &body["data"]["__type"];
+			assert_eq!(ty["name"], "item_time");
+			let fields = ty["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(field_names.contains(&"createdAt"), "Expected createdAt field");
+			assert!(field_names.contains(&"updatedAt"), "Expected updatedAt field");
+		}
+
+		// --- Test 6: Schema introspection for array element type ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							__type(name: "item_tags") {
+								name
+								fields {
+									name
+									type {
+										name
+										kind
+									}
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let ty = &body["data"]["__type"];
+			assert_eq!(ty["name"], "item_tags");
+			let fields = ty["fields"].as_array().unwrap();
+			let field_names: Vec<&str> =
+				fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+			assert!(field_names.contains(&"label"), "Expected label field");
+			assert!(field_names.contains(&"priority"), "Expected priority field");
+		}
+
+		// --- Test 7: Optional nested object fields handled gracefully ---
+		{
+			// Insert article data (table defined in setup)
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE article:with_meta SET
+						title = "Article One",
+						meta = { author: "Alice", source: "Blog" };
+					CREATE article:no_meta SET
+						title = "Article Two";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+
+			// Query the article with meta
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							_get_article(id: "with_meta") {
+								title
+								meta {
+									author
+									source
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let article = &body["data"]["_get_article"];
+			assert_eq!(article["title"], "Article One");
+			assert_eq!(article["meta"]["author"], "Alice");
+			assert_eq!(article["meta"]["source"], "Blog");
+
+			// Query the article without meta — should return null for meta
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({
+						"query": r#"query {
+							_get_article(id: "no_meta") {
+								title
+								meta {
+									author
+									source
+								}
+							}
+						}"#
+					})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
+			let article = &body["data"]["_get_article"];
+			assert_eq!(article["title"], "Article Two");
+			assert!(
+				article["meta"].is_null(),
+				"Expected meta to be null, got: {:?}",
+				article["meta"]
+			);
 		}
 
 		Ok(())
