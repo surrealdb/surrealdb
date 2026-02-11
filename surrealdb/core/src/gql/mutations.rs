@@ -20,7 +20,7 @@ use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 use super::schema::{gql_to_sql_kind, kind_to_type, unwrap_type};
-use super::tables::{VersionedRecord, cond_from_filter};
+use super::tables::{CachedRecord, cond_from_filter};
 use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition, TableType};
@@ -867,21 +867,34 @@ async fn execute_relate_create(
 }
 
 /// Extract a single record from a mutation result and return it as a FieldValue.
+///
+/// The full result object is cached in a [`CachedRecord`] so that field
+/// resolvers can extract values directly without additional database queries.
 fn extract_single_record(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	match val {
-		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => Ok(Some(FieldValue::owned_any(VersionedRecord {
-				rid: rid.clone(),
+		Value::Object(obj) => {
+			let rid = match obj.get("id") {
+				Some(Value::RecordId(rid)) => rid.clone(),
+				_ => return Err(resolver_error("Mutation result missing 'id' field").into()),
+			};
+			Ok(Some(FieldValue::owned_any(CachedRecord {
+				rid,
 				version: None,
-			}))),
-			_ => Err(resolver_error("Mutation result missing 'id' field").into()),
-		},
+				data: obj,
+			})))
+		}
 		Value::None | Value::Null => Ok(None),
-		_ => Err(resolver_error(format!("Unexpected mutation result: {val:?}")).into()),
+		_ => {
+			error!("Unexpected mutation result type: {val:?}");
+			Err(resolver_error("Unexpected mutation result").into())
+		}
 	}
 }
 
 /// Extract a list of records from a bulk mutation result.
+///
+/// Each result object is cached in a [`CachedRecord`] for efficient field
+/// resolution.
 fn extract_record_list(val: Value) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	match val {
 		Value::Array(arr) => {
@@ -889,23 +902,28 @@ fn extract_record_list(val: Value) -> Result<Option<FieldValue<'static>>, async_
 				.0
 				.into_iter()
 				.map(|v| match v {
-					Value::Object(obj) => match obj.get("id") {
-						Some(Value::RecordId(rid)) => Ok(FieldValue::owned_any(VersionedRecord {
-							rid: rid.clone(),
+					Value::Object(obj) => {
+						let rid = match obj.get("id") {
+							Some(Value::RecordId(rid)) => rid.clone(),
+							_ => return Err(resolver_error("Mutation result missing 'id' field")),
+						};
+						Ok(FieldValue::owned_any(CachedRecord {
+							rid,
 							version: None,
-						})),
-						_ => Err(resolver_error("Mutation result missing 'id' field")),
-					},
-					_ => Err(resolver_error(format!(
-						"Expected object in mutation result, found: {v:?}"
-					))),
+							data: obj,
+						}))
+					}
+					_ => {
+						error!("Expected object in mutation result, found: {v:?}");
+						Err(resolver_error("Unexpected mutation result format"))
+					}
 				})
 				.collect();
 			Ok(Some(FieldValue::list(items?)))
 		}
 		_ => {
-			Err(resolver_error(format!("Expected array result for bulk mutation, found: {val:?}"))
-				.into())
+			error!("Expected array result for bulk mutation, found: {val:?}");
+			Err(resolver_error("Unexpected bulk mutation result format").into())
 		}
 	}
 }

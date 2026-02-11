@@ -3631,4 +3631,454 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	/// Tests that the N+1 query optimization (CachedRecord) correctly resolves
+	/// fields from cached record data without individual per-field database queries.
+	///
+	/// Validates:
+	/// - Multi-field list queries return all fields correctly
+	/// - Single-record _get_ queries return all fields from cache
+	/// - Record-link dereferencing fetches and caches the target record
+	/// - Mutation results are cached for field resolution
+	/// - Relation record fields are resolved from cache
+	/// - Nested object fields are resolved from cache
+	#[test(tokio::test)]
+	async fn cached_record_resolution() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with multiple field types, record links, relations,
+		// and nested objects to exercise all CachedRecord code paths.
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE department SCHEMAFULL;
+					DEFINE FIELD name ON department TYPE string;
+					DEFINE FIELD budget ON department TYPE int;
+
+					DEFINE TABLE employee SCHEMAFULL;
+					DEFINE FIELD name ON employee TYPE string;
+					DEFINE FIELD age ON employee TYPE int;
+					DEFINE FIELD active ON employee TYPE bool;
+					DEFINE FIELD dept ON employee TYPE record<department>;
+
+					DEFINE TABLE project SCHEMAFULL;
+					DEFINE FIELD title ON project TYPE string;
+
+					DEFINE TABLE works_on TYPE RELATION FROM employee TO project SCHEMAFULL;
+					DEFINE FIELD role ON works_on TYPE string;
+
+					DEFINE TABLE widget SCHEMAFULL;
+					DEFINE FIELD name ON widget TYPE string;
+					DEFINE FIELD price ON widget TYPE float;
+					DEFINE FIELD meta ON widget TYPE object;
+					DEFINE FIELD meta.color ON widget TYPE string;
+					DEFINE FIELD meta.weight ON widget TYPE float;
+					DEFINE FIELD tags ON widget TYPE array<object>;
+					DEFINE FIELD tags.*.label ON widget TYPE string;
+
+					-- Seed data
+					CREATE department:eng SET name = 'Engineering', budget = 500000;
+					CREATE department:sales SET name = 'Sales', budget = 200000;
+
+					CREATE employee:alice SET name = 'Alice', age = 30, active = true, dept = department:eng;
+					CREATE employee:bob SET name = 'Bob', age = 25, active = false, dept = department:sales;
+					CREATE employee:carol SET name = 'Carol', age = 35, active = true, dept = department:eng;
+
+					CREATE project:alpha SET title = 'Project Alpha';
+					CREATE project:beta SET title = 'Project Beta';
+
+					RELATE employee:alice->works_on:wa->project:alpha SET role = 'lead';
+					RELATE employee:bob->works_on:wb->project:beta SET role = 'contributor';
+					RELATE employee:carol->works_on:wc->project:alpha SET role = 'engineer';
+
+					CREATE widget:w1 SET
+						name = 'Gadget',
+						price = 19.99,
+						meta = { color: 'red', weight: 1.5 },
+						tags = [{ label: 'new' }, { label: 'sale' }];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// --- Test 1: Multi-field list query ---
+		// All fields should be correctly resolved from the cached record data.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						employee(order: { asc: name }) {
+							id
+							name
+							age
+							active
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let employees = &body["data"]["employee"];
+			assert_eq!(employees.as_array().unwrap().len(), 3);
+
+			assert_eq!(employees[0]["id"], "employee:alice");
+			assert_eq!(employees[0]["name"], "Alice");
+			assert_eq!(employees[0]["age"], 30);
+			assert_eq!(employees[0]["active"], true);
+
+			assert_eq!(employees[1]["id"], "employee:bob");
+			assert_eq!(employees[1]["name"], "Bob");
+			assert_eq!(employees[1]["age"], 25);
+			assert_eq!(employees[1]["active"], false);
+
+			assert_eq!(employees[2]["id"], "employee:carol");
+			assert_eq!(employees[2]["name"], "Carol");
+			assert_eq!(employees[2]["age"], 35);
+			assert_eq!(employees[2]["active"], true);
+		}
+
+		// --- Test 2: Single-record _get_ query ---
+		// The _get_ resolver now uses SELECT * and caches the full record.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						_get_employee(id: "alice") {
+							id
+							name
+							age
+							active
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let emp = &body["data"]["_get_employee"];
+			assert_eq!(emp["id"], "employee:alice");
+			assert_eq!(emp["name"], "Alice");
+			assert_eq!(emp["age"], 30);
+			assert_eq!(emp["active"], true);
+		}
+
+		// --- Test 3: Record-link dereferencing ---
+		// When a field is TYPE record<department>, the resolver fetches and
+		// caches the target record's full data. All dept sub-fields should
+		// be resolved from that single cached fetch.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						employee(order: { asc: name }) {
+							name
+							dept {
+								id
+								name
+								budget
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let employees = &body["data"]["employee"];
+
+			// Alice -> Engineering
+			assert_eq!(employees[0]["name"], "Alice");
+			assert_eq!(employees[0]["dept"]["id"], "department:eng");
+			assert_eq!(employees[0]["dept"]["name"], "Engineering");
+			assert_eq!(employees[0]["dept"]["budget"], 500000);
+
+			// Bob -> Sales
+			assert_eq!(employees[1]["name"], "Bob");
+			assert_eq!(employees[1]["dept"]["id"], "department:sales");
+			assert_eq!(employees[1]["dept"]["name"], "Sales");
+			assert_eq!(employees[1]["dept"]["budget"], 200000);
+
+			// Carol -> Engineering
+			assert_eq!(employees[2]["name"], "Carol");
+			assert_eq!(employees[2]["dept"]["id"], "department:eng");
+			assert_eq!(employees[2]["dept"]["name"], "Engineering");
+			assert_eq!(employees[2]["dept"]["budget"], 500000);
+		}
+
+		// --- Test 4: Mutation result caching ---
+		// After a CREATE mutation, the returned fields should be resolved
+		// from the cached mutation result.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createEmployee(data: {
+							id: "dave",
+							name: "Dave",
+							age: 28,
+							active: true,
+							dept: "department:eng"
+						}) {
+							id
+							name
+							age
+							active
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let emp = &body["data"]["createEmployee"];
+			assert_eq!(emp["id"], "employee:dave");
+			assert_eq!(emp["name"], "Dave");
+			assert_eq!(emp["age"], 28);
+			assert_eq!(emp["active"], true);
+		}
+
+		// --- Test 5: Update mutation result caching ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						updateEmployee(id: "alice", data: { age: 31 }) {
+							id
+							name
+							age
+							active
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let emp = &body["data"]["updateEmployee"];
+			assert_eq!(emp["id"], "employee:alice");
+			assert_eq!(emp["name"], "Alice");
+			assert_eq!(emp["age"], 31);
+			assert_eq!(emp["active"], true);
+		}
+
+		// --- Test 6: Bulk mutation result caching ---
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createManyDepartment(data: [
+							{ id: "hr", name: "HR", budget: 100000 },
+							{ id: "legal", name: "Legal", budget: 150000 }
+						]) {
+							id
+							name
+							budget
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let depts = &body["data"]["createManyDepartment"];
+			assert_eq!(depts.as_array().unwrap().len(), 2);
+			// The results should have all fields from cache
+			assert_eq!(depts[0]["id"], "department:hr");
+			assert_eq!(depts[0]["name"], "HR");
+			assert_eq!(depts[0]["budget"], 100000);
+			assert_eq!(depts[1]["id"], "department:legal");
+			assert_eq!(depts[1]["name"], "Legal");
+			assert_eq!(depts[1]["budget"], 150000);
+		}
+
+		// --- Test 7: Relation field resolution ---
+		// Relation records returned by SELECT * should be cached, so all
+		// relation fields should resolve from the cache.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						_get_employee(id: "alice") {
+							name
+							works_on(order: { asc: id }) {
+								id
+								role
+								out {
+									... on project {
+										title
+									}
+								}
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let emp = &body["data"]["_get_employee"];
+			assert_eq!(emp["name"], "Alice");
+			let relations = &emp["works_on"];
+			assert_eq!(relations.as_array().unwrap().len(), 1);
+			assert_eq!(relations[0]["role"], "lead");
+			assert_eq!(relations[0]["out"]["title"], "Project Alpha");
+		}
+
+		// --- Test 8: Nested object field resolution from cache ---
+		// The nested object field resolver extracts object/array values
+		// directly from the parent CachedRecord.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						_get_widget(id: "w1") {
+							id
+							name
+							price
+							meta {
+								color
+								weight
+							}
+							tags {
+								label
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let widget = &body["data"]["_get_widget"];
+			assert_eq!(widget["id"], "widget:w1");
+			assert_eq!(widget["name"], "Gadget");
+			// Float comparison
+			assert!((widget["price"].as_f64().unwrap() - 19.99).abs() < 0.001);
+			assert_eq!(widget["meta"]["color"], "red");
+			assert!((widget["meta"]["weight"].as_f64().unwrap() - 1.5).abs() < 0.001);
+			let tags = widget["tags"].as_array().unwrap();
+			assert_eq!(tags.len(), 2);
+			assert_eq!(tags[0]["label"], "new");
+			assert_eq!(tags[1]["label"], "sale");
+		}
+
+		// --- Test 9: Generic _get query ---
+		// The generic _get resolver should also cache the full record.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						_get(id: "department:eng") {
+							id
+							... on department {
+								name
+								budget
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let dept = &body["data"]["_get"];
+			assert_eq!(dept["id"], "department:eng");
+			assert_eq!(dept["name"], "Engineering");
+			assert_eq!(dept["budget"], 500000);
+		}
+
+		// --- Test 10: Multiple record links in a single query ---
+		// Ensures that when multiple employees reference the same department,
+		// each record-link dereference produces the correct data.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						employee(filter: { active: { eq: true } }, order: { asc: name }) {
+							name
+							dept {
+								name
+							}
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+			let employees = &body["data"]["employee"];
+			// Alice, Carol, Dave are active
+			assert!(employees.as_array().unwrap().len() >= 2);
+			// All active employees with dept should have correct dept name
+			for emp in employees.as_array().unwrap() {
+				let dept_name = emp["dept"]["name"].as_str().unwrap();
+				assert!(
+					dept_name == "Engineering" || dept_name == "Sales",
+					"Unexpected department: {dept_name}"
+				);
+			}
+		}
+
+		Ok(())
+	}
 }

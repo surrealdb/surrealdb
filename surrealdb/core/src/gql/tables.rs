@@ -48,10 +48,35 @@ fn order_desc(field_name: String) -> expr::Order {
 /// A record ID with an optional version for temporal queries.
 /// Propagates the version from top-level queries down to field and relation resolvers,
 /// ensuring consistent versioned reads across the entire query tree.
+///
+/// Used as a fallback when full record data is not available (e.g., from custom
+/// function return values). Prefer [`CachedRecord`] when the full record data
+/// has already been fetched.
 #[derive(Clone, Debug)]
 pub(crate) struct VersionedRecord {
 	pub rid: RecordId,
 	pub version: Option<Datetime>,
+}
+
+/// A record with its full field data cached from a parent query.
+///
+/// Field resolvers extract values directly from the cached data without issuing
+/// additional database queries, eliminating the N+1 query problem. When a list
+/// query fetches `SELECT * FROM table`, the full objects are preserved in
+/// `CachedRecord` instances and passed to field resolvers, which simply read
+/// from the in-memory data instead of issuing per-field `SELECT VALUE` queries.
+///
+/// For record-link fields (`TYPE record<target>`), the resolver performs a
+/// single `SELECT * FROM ONLY <target>` to fetch the linked record's full data
+/// and wraps it in a new `CachedRecord`, so the target's field resolvers also
+/// benefit from caching.
+#[derive(Clone, Debug)]
+pub(crate) struct CachedRecord {
+	pub rid: RecordId,
+	pub version: Option<Datetime>,
+	/// The full record data. Field resolvers extract values from here
+	/// instead of firing individual `SELECT VALUE` queries.
+	pub data: SurObject,
 }
 
 /// Convert an optional `Datetime` version to the `Expr` representation
@@ -309,6 +334,13 @@ fn make_nested_object_field_resolver(
 	move |ctx: ResolverContext| {
 		let fd_name = fd_name.clone();
 		FieldFuture::new(async move {
+			// ── Fast path: extract nested object from CachedRecord ──
+			if let Ok(cached) = ctx.parent_value.try_downcast_ref::<CachedRecord>() {
+				let val = cached.data.get(&fd_name).cloned().unwrap_or(Value::None);
+				return resolve_nested_object_value(val, is_array);
+			}
+
+			// ── Slow path: fetch via database query ──
 			let ds = ctx.data::<Arc<Datastore>>()?;
 			let sess = ctx.data::<Arc<Session>>()?;
 
@@ -349,38 +381,45 @@ fn make_nested_object_field_resolver(
 			};
 
 			let val = execute_plan(ds, sess, plan).await?;
-
-			if is_array {
-				// Array<object>: return a list of SurObjects
-				match val {
-					Value::Array(arr) => {
-						let items: Vec<FieldValue> = arr
-							.0
-							.into_iter()
-							.filter_map(|v| match v {
-								Value::Object(obj) => Some(FieldValue::owned_any(obj)),
-								_ => None,
-							})
-							.collect();
-						Ok(Some(FieldValue::list(items)))
-					}
-					Value::None | Value::Null => Ok(None),
-					_ => Ok(None),
-				}
-			} else {
-				// Plain object: return a single SurObject
-				match val {
-					Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
-					Value::None | Value::Null => Ok(None),
-					_ => {
-						// Fallback: convert to GQL value
-						let out = sql_value_to_gql_value(val)
-							.map_err(|_| "SQL to GQL translation failed")?;
-						Ok(Some(FieldValue::value(out)))
-					}
-				}
-			}
+			resolve_nested_object_value(val, is_array)
 		})
+	}
+}
+
+/// Convert a nested object/array-of-object value to a GraphQL `FieldValue`.
+///
+/// For arrays, each `Value::Object` element becomes a `FieldValue::owned_any(SurObject(..))`.
+/// For plain objects, the `SurObject` is returned directly.
+fn resolve_nested_object_value(
+	val: Value,
+	is_array: bool,
+) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
+	if is_array {
+		match val {
+			Value::Array(arr) => {
+				let items: Vec<FieldValue> = arr
+					.0
+					.into_iter()
+					.filter_map(|v| match v {
+						Value::Object(obj) => Some(FieldValue::owned_any(obj)),
+						_ => None,
+					})
+					.collect();
+				Ok(Some(FieldValue::list(items)))
+			}
+			Value::None | Value::Null => Ok(None),
+			_ => Ok(None),
+		}
+	} else {
+		match val {
+			Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
+			Value::None | Value::Null => Ok(None),
+			_ => {
+				let out =
+					sql_value_to_gql_value(val).map_err(|_| "SQL to GQL translation failed")?;
+				Ok(Some(FieldValue::value(out)))
+			}
+		}
 	}
 }
 
@@ -457,164 +496,165 @@ pub async fn process_tbs(
 		let kvs1 = datastore.clone();
 
 		query = query.field(
-			Field::new(tb.name.clone().into_string(), TypeRef::named_nn_list_nn(tb.name.clone().into_string()), move |ctx| {
-				let tb_name = first_tb_name.clone();
-				let fds1 = fds1.clone();
-				let kvs1 = kvs1.clone();
-				FieldFuture::new(async move {
-					// Get session from GraphQL context (has proper user permissions)
-					let sess1 = ctx.data::<Arc<Session>>()?;
-					let args = ctx.args.as_index_map();
-					trace!("received request with args: {args:?}");
+			Field::new(
+				tb.name.clone().into_string(),
+				TypeRef::named_nn_list_nn(tb.name.clone().into_string()),
+				move |ctx| {
+					let tb_name = first_tb_name.clone();
+					let fds1 = fds1.clone();
+					let kvs1 = kvs1.clone();
+					FieldFuture::new(async move {
+						// Get session from GraphQL context (has proper user permissions)
+						let sess1 = ctx.data::<Arc<Session>>()?;
+						let args = ctx.args.as_index_map();
+						trace!("received request with args: {args:?}");
 
-				let start = args
-					.get("start")
-					.and_then(|v| v.as_i64())
-					.map(|s| Start(Expr::Literal(Literal::Integer(s))));
-				let limit = args
-					.get("limit")
-					.and_then(|v| v.as_i64())
-					.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-				let version = parse_version_arg(args)?;
-			let order = args.get("order");
-			// Accept both `filter` and `where` (aliases of each other)
-			let filter = args.get("filter").or_else(|| args.get("where"));
+						let start = args
+							.get("start")
+							.and_then(|v| v.as_i64())
+							.map(|s| Start(Expr::Literal(Literal::Integer(s))));
+						let limit = args
+							.get("limit")
+							.and_then(|v| v.as_i64())
+							.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+						let version = parse_version_arg(args)?;
+						let order = args.get("order");
+						// Accept both `filter` and `where` (aliases of each other)
+						let filter = args.get("filter").or_else(|| args.get("where"));
 
-					let orders = match order {
-						Some(GqlValue::Object(o)) => {
-							let mut orders = vec![];
-							let mut current = o;
-							loop {
-								let asc = current.get("asc");
-								let desc = current.get("desc");
-								match (asc, desc) {
-									(Some(_), Some(_)) => {
-										return Err("Found both ASC and DESC in order".into());
+						let orders = match order {
+							Some(GqlValue::Object(o)) => {
+								let mut orders = vec![];
+								let mut current = o;
+								loop {
+									let asc = current.get("asc");
+									let desc = current.get("desc");
+									match (asc, desc) {
+										(Some(_), Some(_)) => {
+											return Err("Found both ASC and DESC in order".into());
+										}
+										(Some(GqlValue::Enum(a)), None) => {
+											orders.push(order_asc(a.as_str().to_string()))
+										}
+										(None, Some(GqlValue::Enum(d))) => {
+											orders.push(order_desc(d.as_str().to_string()))
+										}
+										(_, _) => {
+											break;
+										}
 									}
-									(Some(GqlValue::Enum(a)), None) => {
-										orders.push(order_asc(a.as_str().to_string()))
-									}
-									(None, Some(GqlValue::Enum(d))) => {
-										orders.push(order_desc(d.as_str().to_string()))
-									}
-									(_, _) => {
+									if let Some(GqlValue::Object(next)) = current.get("then") {
+										current = next;
+									} else {
 										break;
 									}
 								}
-								if let Some(GqlValue::Object(next)) = current.get("then") {
-									current = next;
-								} else {
-									break;
-								}
+								Some(orders)
 							}
-							Some(orders)
-						}
-						_ => None,
-					};
+							_ => None,
+						};
 
-					trace!("parsed orders: {orders:?}");
+						trace!("parsed orders: {orders:?}");
 
-					let cond = match filter {
-						Some(f) => {
-							let o = match f {
-								GqlValue::Object(o) => o,
-								f => {
-									error!(
+						let cond = match filter {
+							Some(f) => {
+								let o = match f {
+									GqlValue::Object(o) => o,
+									f => {
+										error!(
 										"Found filter {f}, which should be object and should have been rejected by async graphql."
 									);
-									return Err("Value in cond doesn't fit schema".into());
+										return Err("Value in cond doesn't fit schema".into());
+									}
+								};
+
+								let cond = cond_from_filter(o, &fds1)?;
+
+								Some(cond)
+							}
+							None => None,
+						};
+
+						trace!("parsed filter: {cond:?}");
+
+						// SELECT * FROM ...
+						// Note: We select * (not just id) so that permissions are properly checked
+						let expr = expr::Expr::Select(Box::new(SelectStatement {
+							what: vec![Expr::Table(tb_name)],
+							fields: Fields::all(),
+							order: orders.map(|x| Ordering::Order(OrderList(x))),
+							cond,
+							limit,
+							start,
+							omit: vec![],
+							only: false,
+							with: None,
+							split: None,
+							group: None,
+							fetch: None,
+							version: version_to_expr(&version),
+							timeout: Expr::Literal(Literal::None),
+							explain: None,
+							tempfiles: false,
+						}));
+
+						// Convert to LogicalPlan and execute
+						let plan = LogicalPlan {
+							expressions: vec![TopLevelExpr::Expr(expr)],
+						};
+
+						let res = execute_plan(&kvs1, sess1, plan).await?;
+
+						let res_vec =
+							match res {
+								Value::Array(a) => a,
+								v => {
+									error!("Found top level value, in result which should be array: {v:?}");
+									return Err("Internal Error".into());
 								}
 							};
 
-							let cond = cond_from_filter(o, &fds1)?;
-
-							Some(cond)
-						}
-						None => None,
-					};
-
-					trace!("parsed filter: {cond:?}");
-
-					// SELECT * FROM ...
-					// Note: We select * (not just id) so that permissions are properly checked
-					let expr = expr::Expr::Select(Box::new(SelectStatement {
-						what: vec![Expr::Table(tb_name)],
-						fields: Fields::all(),
-						order: orders.map(|x| Ordering::Order(OrderList(x))),
-						cond,
-						limit,
-						start,
-						omit: vec![],
-						only: false,
-						with: None,
-						split: None,
-						group: None,
-						fetch: None,
-						version: version_to_expr(&version),
-						timeout: Expr::Literal(Literal::None),
-						explain: None,
-						tempfiles: false,
-					}));
-
-					// Convert to LogicalPlan and execute
-					let plan = LogicalPlan {
-						expressions: vec![TopLevelExpr::Expr(expr)],
-					};
-
-					tracing::warn!("generated logical plan: {plan:?}");
-
-					let res = execute_plan(&kvs1, sess1, plan).await?;
-
-					tracing::warn!("result: {res:?}");
-
-					let res_vec = match res {
-						Value::Array(a) => a,
-						v => {
-							error!("Found top level value, in result which should be array: {v:?}");
-							return Err("Internal Error".into());
-						}
-					};
-
-					let out: Result<Vec<FieldValue>, Value> = res_vec
-						.0
-						.into_iter()
-						.map(|v| {
-							match v {
+						// Wrap each result object as a CachedRecord, preserving
+						// the full record data so that field resolvers can extract
+						// values directly without additional database queries.
+						let out: Result<Vec<FieldValue>, GqlError> = res_vec
+							.0
+							.into_iter()
+							.map(|v| match v {
 								Value::Object(obj) => {
-									// Extract the 'id' field which should be a RecordId
-									match obj.get("id") {
-										Some(Value::RecordId(rid)) => {
-											Ok(FieldValue::owned_any(VersionedRecord {
-												rid: rid.clone(),
-												version: version.clone(),
-											}))
-										}
+									let rid = match obj.get("id") {
+										Some(Value::RecordId(rid)) => rid.clone(),
 										_ => {
 											error!(
 												"Object missing 'id' field or id is not a RecordId: {obj:?}"
 											);
-											Err("Internal Error".into())
+											return Err(internal_error(
+												"Record missing 'id' field",
+											));
 										}
-									}
+									};
+									Ok(FieldValue::owned_any(CachedRecord {
+										rid,
+										version: version.clone(),
+										data: obj,
+									}))
 								}
 								_ => {
 									error!(
 										"Found top level value, in result which should be object: {v:?}"
 									);
-									Err("Internal Error".into())
+									Err(internal_error("Expected object in result"))
 								}
-							}
-						})
-						.collect();
+							})
+							.collect();
 
-					match out {
-						Ok(l) => Ok(Some(FieldValue::list(l))),
-						Err(v) => {
-							Err(internal_error(format!("expected thing, found: {v:?}")).into())
+						match out {
+							Ok(l) => Ok(Some(FieldValue::list(l))),
+							Err(e) => Err(e.into()),
 						}
-					}
-				})
-			})
+					})
+				},
+			)
 			.description(if let Some(c) = &tb.comment {
 				c.clone()
 			} else {
@@ -624,8 +664,8 @@ pub async fn process_tbs(
 			.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
 			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
 			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name)))
-		.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
-		.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
+			.argument(InputValue::new("where", TypeRef::named(&table_filter_name)))
+			.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
 		);
 
 		let kvs2 = datastore.to_owned();
@@ -662,13 +702,11 @@ pub async fn process_tbs(
 								Err(_) => RecordId::new(tb_name, id),
 							};
 
-							// Build SELECT VALUE id FROM ONLY <record_id>
+							// Build SELECT * FROM ONLY <record_id> and cache
+							// the full record for field resolvers.
 							let select_stmt = SelectStatement {
 								what: vec![Value::RecordId(record_id.clone()).into_literal()],
-								fields: Fields::Value(Box::new(Selector {
-									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-									alias: None,
-								})),
+								fields: Fields::all(),
 								only: true,
 								omit: vec![],
 								with: None,
@@ -694,10 +732,15 @@ pub async fn process_tbs(
 							let res = execute_plan(&kvs2, sess2, plan).await?;
 
 							match res {
-								Value::RecordId(t) => {
-									Ok(Some(FieldValue::owned_any(VersionedRecord {
-										rid: t,
+								Value::Object(obj) => {
+									let rid = match obj.get("id") {
+										Some(Value::RecordId(rid)) => rid.clone(),
+										_ => return Ok(None),
+									};
+									Ok(Some(FieldValue::owned_any(CachedRecord {
+										rid,
 										version,
+										data: obj,
 									})))
 								}
 								_ => Ok(None),
@@ -918,18 +961,16 @@ pub async fn process_tbs(
 					// Parse ID as a record id.
 					let record_id: crate::val::RecordId = match crate::syn::record_id(&id) {
 						Ok(x) => x.into(),
-						Err(e) => {
-							return Err(internal_error(format!("Invalid record id: {e}")).into());
+						Err(_) => {
+							return Err(resolver_error("Invalid record ID format").into());
 						}
 					};
 
-					// Build SELECT VALUE id FROM ONLY <record_id>
+					// Build SELECT * FROM ONLY <record_id> and cache
+					// the full record for field resolvers.
 					let select_stmt = SelectStatement {
 						what: vec![Value::RecordId(record_id.clone()).into_literal()],
-						fields: Fields::Value(Box::new(Selector {
-							expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-							alias: None,
-						})),
+						fields: Fields::all(),
 						only: true,
 						omit: vec![],
 						with: None,
@@ -953,13 +994,18 @@ pub async fn process_tbs(
 					let res = execute_plan(&kvs3, sess3, plan).await?;
 
 					match res {
-						Value::RecordId(t) => {
-							let table_name = t.table.clone();
+						Value::Object(obj) => {
+							let rid = match obj.get("id") {
+								Some(Value::RecordId(rid)) => rid.clone(),
+								_ => return Ok(None),
+							};
+							let table_name = rid.table.clone();
 							// Generic _get returns interface type "record", needs .with_type()
 							Ok(Some(
-								FieldValue::owned_any(VersionedRecord {
-									rid: t,
+								FieldValue::owned_any(CachedRecord {
+									rid,
 									version,
+									data: obj,
 								})
 								.with_type(table_name),
 							))
@@ -987,12 +1033,24 @@ fn make_table_field_resolver(
 		let field_kind = kind.clone();
 		FieldFuture::new({
 			async move {
+				// ── Fast path: extract field from CachedRecord ──
+				//
+				// When the parent is a CachedRecord (from a list query, _get_,
+				// relation, or mutation), the full record data is already in
+				// memory. Extract the requested field directly instead of
+				// issuing a separate database query.
+				if let Ok(cached) = ctx.parent_value.try_downcast_ref::<CachedRecord>() {
+					return resolve_field_from_cached_record(&ctx, cached, &fd_name, &field_kind)
+						.await;
+				}
+
+				// ── Slow path: fetch field via database query ──
+				//
+				// Fallback for VersionedRecord (no cached data) or plain
+				// RecordId (from custom functions, etc.).
 				let ds = ctx.data::<Arc<Datastore>>()?;
 				let sess = ctx.data::<Arc<Session>>()?;
 
-				// Extract record ID and optional version.
-				// Try VersionedRecord first (from versioned queries), then
-				// fall back to plain RecordId (from functions, etc.).
 				let (rid, version) = match ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
 					Ok(vr) => (vr.rid.clone(), vr.version.clone()),
 					Err(_) => {
@@ -1029,54 +1087,108 @@ fn make_table_field_resolver(
 				};
 
 				let val = execute_plan(ds, sess, plan).await?;
-
-				match val {
-					Value::RecordId(new_rid) if fd_name != "id" => {
-						// Record-link dereferencing: propagate version to child
-						let field_val = FieldValue::owned_any(VersionedRecord {
-							rid: new_rid.clone(),
-							version,
-						});
-						let field_val = match field_kind {
-							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
-								// Interface or union type, needs .with_type()
-								field_val.with_type(new_rid.table)
-							}
-							_ => {
-								// Concrete type, no .with_type() needed
-								field_val
-							}
-						};
-						Ok(Some(field_val))
-					}
-					Value::Geometry(g) => {
-						// Store the Geometry as owned_any so the geometry Object
-						// type resolvers can downcast it via try_downcast_ref.
-						let type_name = geometry_gql_type_name(&g);
-						let field_val = FieldValue::owned_any(g);
-						let field_val = match &field_kind {
-							// Union type or unrestricted geometry – needs .with_type()
-							Some(Kind::Geometry(ks)) if ks.is_empty() || ks.len() > 1 => {
-								field_val.with_type(type_name)
-							}
-							_ => field_val,
-						};
-						Ok(Some(field_val))
-					}
-					Value::None | Value::Null => Ok(None),
-					v => {
-						match field_kind {
-							Some(Kind::Either(ks)) if ks.len() != 1 => {}
-							_ => {}
-						}
-						let out = sql_value_to_gql_value(v)
-							.map_err(|_| "SQL to GQL translation failed")?;
-						Ok(Some(FieldValue::value(out)))
-					}
-				}
+				resolve_field_value(&ctx, val, &fd_name, &field_kind, &version).await
 			}
 		})
 	}
+}
+
+/// Convert a resolved field value to a GraphQL `FieldValue`.
+///
+/// Handles record-link dereferencing (fetching the target record's full data
+/// for caching), geometry values, and scalar conversions. Used by both the
+/// cached and uncached paths in `make_table_field_resolver`.
+async fn resolve_field_value(
+	ctx: &ResolverContext<'_>,
+	val: Value,
+	fd_name: &str,
+	field_kind: &Option<Kind>,
+	version: &Option<Datetime>,
+) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
+	match val {
+		Value::RecordId(target_rid) if fd_name != "id" => {
+			// Record-link dereferencing: fetch the full target record and
+			// wrap it as CachedRecord so the target's field resolvers can
+			// also benefit from caching.
+			let ds = ctx.data::<Arc<Datastore>>()?;
+			let sess = ctx.data::<Arc<Session>>()?;
+
+			let select_stmt = SelectStatement {
+				what: vec![Value::RecordId(target_rid.clone()).into_literal()],
+				fields: Fields::all(),
+				only: true,
+				omit: vec![],
+				with: None,
+				cond: None,
+				split: None,
+				group: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: version_to_expr(version),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
+			};
+
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
+			};
+
+			let target_val = execute_plan(ds, sess, plan).await?;
+
+			match target_val {
+				Value::Object(obj) => {
+					let field_val = FieldValue::owned_any(CachedRecord {
+						rid: target_rid.clone(),
+						version: version.clone(),
+						data: obj,
+					});
+					let field_val = match field_kind {
+						Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
+							field_val.with_type(target_rid.table)
+						}
+						_ => field_val,
+					};
+					Ok(Some(field_val))
+				}
+				Value::None | Value::Null => Ok(None),
+				_ => Ok(None),
+			}
+		}
+		Value::Geometry(g) => {
+			let type_name = geometry_gql_type_name(&g);
+			let field_val = FieldValue::owned_any(g);
+			let field_val = match field_kind {
+				Some(Kind::Geometry(ks)) if ks.is_empty() || ks.len() > 1 => {
+					field_val.with_type(type_name)
+				}
+				_ => field_val,
+			};
+			Ok(Some(field_val))
+		}
+		Value::None | Value::Null => Ok(None),
+		v => {
+			let out = sql_value_to_gql_value(v).map_err(|_| "SQL to GQL translation failed")?;
+			Ok(Some(FieldValue::value(out)))
+		}
+	}
+}
+
+/// Fast-path field resolution from a [`CachedRecord`].
+///
+/// Extracts the field value directly from the cached record data. For
+/// record-link fields, fetches the linked record's full data in a single
+/// `SELECT *` query (instead of N per-field queries).
+async fn resolve_field_from_cached_record(
+	ctx: &ResolverContext<'_>,
+	cached: &CachedRecord,
+	fd_name: &str,
+	field_kind: &Option<Kind>,
+) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
+	let val = cached.data.get(fd_name).cloned().unwrap_or(Value::None);
+	resolve_field_value(ctx, val, fd_name, field_kind, &cached.version).await
 }
 
 /// Build a GraphQL field for a relation on a table type.
@@ -1136,14 +1248,16 @@ fn make_relation_field_resolver(
 			let sess = ctx.data::<Arc<Session>>()?;
 
 			// Extract record ID and optional version from parent.
-			// Try VersionedRecord first, then fall back to plain RecordId.
-			let (rid, version) = match ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
-				Ok(vr) => (vr.rid.clone(), vr.version.clone()),
-				Err(_) => {
+			// Try CachedRecord first, then VersionedRecord, then plain RecordId.
+			let (rid, version) =
+				if let Ok(cached) = ctx.parent_value.try_downcast_ref::<CachedRecord>() {
+					(cached.rid.clone(), cached.version.clone())
+				} else if let Ok(vr) = ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
+					(vr.rid.clone(), vr.version.clone())
+				} else {
 					let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
 					(rid.clone(), None)
-				}
-			};
+				};
 			let args = ctx.args.as_index_map();
 
 			// Parse limit/start arguments
@@ -1254,30 +1368,37 @@ fn make_relation_field_resolver(
 			let res_vec = match res {
 				Value::Array(a) => a,
 				v => {
-					return Err(internal_error(format!(
-						"Expected array result for relation query, found: {v:?}"
-					))
-					.into());
+					error!("Expected array result for relation query, found: {v:?}");
+					return Err(internal_error("Unexpected result type for relation query").into());
 				}
 			};
 
+			// Wrap each relation result as CachedRecord so that the
+			// relation table's field resolvers can use the cache path.
 			let out: Result<Vec<FieldValue>, GqlError> = res_vec
 				.0
 				.into_iter()
 				.map(|v| match v {
-					Value::Object(obj) => match obj.get("id") {
-						Some(Value::RecordId(rid)) => Ok(FieldValue::owned_any(VersionedRecord {
-							rid: rid.clone(),
+					Value::Object(obj) => {
+						let rid = match obj.get("id") {
+							Some(Value::RecordId(rid)) => rid.clone(),
+							_ => {
+								error!(
+									"Relation object missing 'id' field or id is not a RecordId"
+								);
+								return Err(internal_error("Unexpected relation result format"));
+							}
+						};
+						Ok(FieldValue::owned_any(CachedRecord {
+							rid,
 							version: version.clone(),
-						})),
-						_ => Err(internal_error(format!(
-							"Relation object missing 'id' field or id is not a \
-							 RecordId: {obj:?}"
-						))),
-					},
-					_ => Err(internal_error(format!(
-						"Expected object in relation result, found: {v:?}"
-					))),
+							data: obj,
+						}))
+					}
+					_ => {
+						error!("Expected object in relation result, found: {v:?}");
+						Err(internal_error("Unexpected value type in relation result"))
+					}
 				})
 				.collect();
 
