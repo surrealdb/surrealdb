@@ -76,11 +76,17 @@ impl InfoStructure for ConfigDefinition {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct GraphQLConfig {
 	pub tables: GraphQLTablesConfig,
 	pub functions: GraphQLFunctionsConfig,
+	/// Maximum query nesting depth. `None` means no limit.
+	#[revision(start = 2)]
+	pub depth_limit: Option<u32>,
+	/// Maximum query complexity (total number of fields). `None` means no limit.
+	#[revision(start = 2)]
+	pub complexity_limit: Option<u32>,
 }
 
 impl InfoStructure for GraphQLConfig {
@@ -88,6 +94,8 @@ impl InfoStructure for GraphQLConfig {
 		Value::from(map!(
 			"tables" => self.tables.structure(),
 			"functions" => self.functions.structure(),
+			"depth_limit", if let Some(d) = self.depth_limit => Value::from(d as i64),
+			"complexity_limit", if let Some(c) = self.complexity_limit => Value::from(c as i64),
 		))
 	}
 }

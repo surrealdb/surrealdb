@@ -7,6 +7,8 @@ use crate::fmt::EscapeKwFreeIdent;
 pub struct GraphQLConfig {
 	pub tables: TablesConfig,
 	pub functions: FunctionsConfig,
+	pub depth_limit: Option<u32>,
+	pub complexity_limit: Option<u32>,
 }
 
 impl From<GraphQLConfig> for crate::catalog::GraphQLConfig {
@@ -14,6 +16,8 @@ impl From<GraphQLConfig> for crate::catalog::GraphQLConfig {
 		crate::catalog::GraphQLConfig {
 			tables: v.tables.into(),
 			functions: v.functions.into(),
+			depth_limit: v.depth_limit,
+			complexity_limit: v.complexity_limit,
 		}
 	}
 }
@@ -23,6 +27,8 @@ impl From<crate::catalog::GraphQLConfig> for GraphQLConfig {
 		GraphQLConfig {
 			tables: v.tables.into(),
 			functions: v.functions.into(),
+			depth_limit: v.depth_limit,
+			complexity_limit: v.complexity_limit,
 		}
 	}
 }
@@ -107,6 +113,12 @@ impl ToSql for GraphQLConfig {
 		self.tables.fmt_sql(f, fmt);
 		f.push_str(" FUNCTIONS ");
 		self.functions.fmt_sql(f, fmt);
+		if let Some(depth) = self.depth_limit {
+			f.push_str(&format!(" DEPTH {depth}"));
+		}
+		if let Some(complexity) = self.complexity_limit {
+			f.push_str(&format!(" COMPLEXITY {complexity}"));
+		}
 	}
 }
 

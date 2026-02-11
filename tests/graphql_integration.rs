@@ -3057,4 +3057,226 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn depth_and_complexity_limits() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Set up schema with depth and complexity limits
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO DEPTH 3 COMPLEXITY 10;
+					DEFINE TABLE person SCHEMAFUL;
+					DEFINE FIELD name ON person TYPE string;
+					DEFINE FIELD age ON person TYPE int;
+					DEFINE TABLE post SCHEMAFUL;
+					DEFINE FIELD title ON post TYPE string;
+					DEFINE FIELD author ON post TYPE record<person>;
+					DEFINE TABLE comment SCHEMAFUL;
+					DEFINE FIELD text ON comment TYPE string;
+					DEFINE FIELD post ON comment TYPE record<post>;
+					CREATE person:1 SET name = 'Alice', age = 30;
+					CREATE post:1 SET title = 'Hello', author = person:1;
+					CREATE comment:1 SET text = 'Nice', post = post:1;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// A simple shallow query should succeed (depth 2, within limit of 3)
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"{ person { id, name } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(body["errors"].is_null(), "Unexpected errors for shallow query: {:?}", body);
+			assert!(body["data"]["person"].is_array(), "Expected person data");
+		}
+
+		// A deeply nested query should fail with depth limit error (depth > 3)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ comment { text, post { title, author { name, age } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let errors = &body["errors"];
+			assert!(errors.is_array(), "Expected errors for deep query, got: {:?}", body);
+			let error_msg = errors[0]["message"].as_str().unwrap_or("");
+			assert!(
+				error_msg.contains("nested too deep") || error_msg.contains("too deep"),
+				"Expected depth limit error, got: {error_msg}"
+			);
+		}
+
+		// A query with too many fields should fail with complexity limit error (>10 fields)
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						person { id, name, age }
+						post { id, title }
+						comment { id, text }
+						p2: person { id, name, age }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let errors = &body["errors"];
+			assert!(errors.is_array(), "Expected errors for complex query, got: {:?}", body);
+			let error_msg = errors[0]["message"].as_str().unwrap_or("");
+			assert!(
+				error_msg.contains("too complex") || error_msg.contains("complexity"),
+				"Expected complexity limit error, got: {error_msg}"
+			);
+		}
+
+		// Reconfigure with higher limits and verify previously failing query works
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO DEPTH 10 COMPLEXITY 100;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// The deeply nested query should now succeed
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ comment { text, post { title, author { name } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected no errors with raised limits, got: {:?}",
+				body["errors"]
+			);
+		}
+
+		// The high-field-count query should also succeed with higher complexity limit
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{
+						person { id, name, age }
+						post { id, title }
+						comment { id, text }
+						p2: person { id, name, age }
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected no errors with raised limits, got: {:?}",
+				body["errors"]
+			);
+		}
+
+		// Reconfigure without limits and verify everything works
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// All queries should succeed without any limits
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"{ comment { text, post { title, author { name, age } } } }"#})
+						.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected no errors without limits, got: {:?}",
+				body["errors"]
+			);
+		}
+
+		// Verify DEFINE CONFIG GRAPHQL round-trip preserves DEPTH and COMPLEXITY
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG OVERWRITE GRAPHQL AUTO DEPTH 5 COMPLEXITY 50;
+					INFO FOR DB;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			let info_result = &body[1]["result"];
+			let config_str = info_result["configs"]["GraphQL"].as_str().unwrap_or("");
+			assert!(
+				config_str.contains("DEPTH 5"),
+				"Expected 'DEPTH 5' in config, got: {config_str}"
+			);
+			assert!(
+				config_str.contains("COMPLEXITY 50"),
+				"Expected 'COMPLEXITY 50' in config, got: {config_str}"
+			);
+		}
+
+		Ok(())
+	}
 }

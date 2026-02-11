@@ -1528,6 +1528,8 @@ impl Parser<'_> {
 		use graphql::{FunctionsConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
+		let mut tmp_depth = Option::<u32>::None;
+		let mut tmp_complexity = Option::<u32>::None;
 		loop {
 			match self.peek_kind() {
 				t!("NONE") => {
@@ -1577,6 +1579,19 @@ impl Parser<'_> {
 						_ => unexpected!(self, next, "`NONE`, `AUTO`"),
 					}
 				}
+				TokenKind::Identifier => {
+					let token = self.peek();
+					let ident = self.span_str(token.span);
+					if ident.eq_ignore_ascii_case("DEPTH") {
+						self.pop_peek();
+						tmp_depth = Some(self.next_token_value::<u32>()?);
+					} else if ident.eq_ignore_ascii_case("COMPLEXITY") {
+						self.pop_peek();
+						tmp_complexity = Some(self.next_token_value::<u32>()?);
+					} else {
+						break;
+					}
+				}
 				_ => break,
 			}
 		}
@@ -1584,6 +1599,8 @@ impl Parser<'_> {
 		Ok(GraphQLConfig {
 			tables: tmp_tables.unwrap_or_default(),
 			functions: tmp_fncs.unwrap_or_default(),
+			depth_limit: tmp_depth,
+			complexity_limit: tmp_complexity,
 		})
 	}
 
