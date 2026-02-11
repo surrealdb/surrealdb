@@ -1,12 +1,15 @@
 use ahash::HashSet;
 use anyhow::Result;
+use async_graphql::futures_util::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::DatabaseDefinition;
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::idx::planner::ScanDirection;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
@@ -403,24 +406,30 @@ where
 
 	/// Loads the graph for this layer from the KV store.
 	///
-	/// First attempts to load from per-node `Hn` keys (new format).
-	/// If no `Hn` keys are found, falls back to chunk-based `Hl` keys (legacy format).
-	/// When loaded from legacy keys on a writable transaction, migrates all nodes
-	/// to `Hn` keys and deletes the old `Hl` chunk keys. On a read-only transaction,
-	/// the legacy data is loaded into memory without migration.
-	pub(super) async fn load(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<()> {
-		// First, try to load from new per-node Hn keys
+	/// Handles three storage states:
+	/// 1. **Fully migrated** (`st.chunks == 0`): loads only from per-node `Hn` keys.
+	/// 2. **Legacy only** (`st.chunks > 0`, no `Hn` keys): loads from chunk-based `Hl` keys.
+	/// 3. **Mixed** (`st.chunks > 0` *and* `Hn` keys exist): loads `Hl` chunks first for the
+	///    complete baseline graph, then overlays `Hn` keys which carry the most recent state for
+	///    their respective nodes.
+	///
+	/// In cases 2 and 3, if the transaction is writable the method completes the
+	/// migration: all nodes are persisted as `Hn` keys, the old `Hl` chunk keys
+	/// are deleted, and `st.chunks` is reset to 0. On a read-only transaction the
+	/// legacy data is loaded into memory without migration.
+	///
+	/// Returns `true` if a migration was performed, so the caller can persist
+	/// the updated layer state.
+	pub(super) async fn load(
+		&mut self,
+		ctx: &Context,
+		tx: &Transaction,
+		st: &mut LayerState,
+	) -> Result<bool> {
 		self.graph.clear();
-		let range = self.ikb.new_hn_layer_range(self.level)?;
-		let entries = tx.scan(range, u32::MAX, None).await?;
-		if !entries.is_empty() {
-			for (key, val) in entries {
-				let key = HnswNode::decode_key(&key)?;
-				self.graph.load_node(key.node, &val);
-			}
-			return Ok(());
-		}
-		// Fallback: load from old chunk-based Hl keys
+
+		// Load legacy Hl chunks (if any) so we start with the complete graph and possibly migrate
+		// datas
 		if st.chunks > 0 {
 			let mut val = Vec::new();
 			for i in 0..st.chunks {
@@ -429,27 +438,45 @@ where
 					tx.get(&key, None).await?.ok_or_else(|| Error::unreachable("Missing chunk"))?;
 				val.extend(chunk);
 			}
-			self.graph.reload(&val)?;
-			// Migrate to Hn keys only if the transaction is writable
+			self.graph.lecacy_reload(&val)?;
+
+			// If we can write, complete the migration:
+			// persist every node as an Hn key and remove the old Hl chunk keys.
 			if tx.writeable() {
-				let node_ids: Vec<ElementId> = self.graph.node_ids();
-				for &node_id in &node_ids {
+				// Write Hn keys for nodes that were only in Hl (not yet in Hn).
+				for &node_id in &self.graph.node_ids() {
 					if let Some(node_val) = self.graph.node_to_val(&node_id) {
 						let key = self.ikb.new_hn_key(self.level, node_id);
 						tx.set(&key, &node_val, None).await?;
 					}
 				}
-				// Delete old Hl chunk keys
-				for i in 0..st.chunks {
-					let key = self.ikb.new_hl_key(self.level, i);
-					tx.del(&key).await?;
-				}
+				// Delete old Hl chunk keys in a single range deletion
+				let hl_range = self.ikb.new_hl_layer_range(self.level)?;
+				tx.delr(hl_range).await?;
 				// Reset the chunk count so subsequent reloads don't
 				// attempt to fetch the now-deleted Hl keys.
 				st.chunks = 0;
+				return Ok(true);
 			}
 		}
-		Ok(())
+		// These represent the most recent state
+		// for each node and take precedence over the Hl data loaded above.
+		let range = self.ikb.new_hn_layer_range(self.level)?;
+		let mut stream = tx.stream_keys_vals(range, None, None, ScanDirection::Forward);
+		let mut count = 0;
+		while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					return Ok(false);
+				}
+				let key = HnswNode::decode_key(&k)?;
+				self.graph.load_node(key.node, &v);
+				count += 1;
+			}
+		}
+		Ok(false)
 	}
 }
 

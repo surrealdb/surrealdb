@@ -1,11 +1,12 @@
 //! Store chunk data for layers of an HNSW index
 use std::borrow::Cow;
 use std::fmt::Debug;
+use std::ops::Range;
 
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::kvs::impl_kv_key_storekey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::TableName;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
@@ -54,6 +55,20 @@ impl<'a> Hl<'a> {
 			layer,
 			chunk,
 		}
+	}
+
+	/// Returns a key range covering all chunks for the given layer.
+	/// Used to delete all legacy Hl chunk keys during migration.
+	pub(crate) fn new_layer_range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		layer: u16,
+	) -> anyhow::Result<Range<Vec<u8>>> {
+		let beg = Self::new(ns, db, tb, ix, layer, 0).encode_key()?;
+		let end = Self::new(ns, db, tb, ix, layer, u32::MAX).encode_key()?;
+		Ok(beg..end)
 	}
 }
 

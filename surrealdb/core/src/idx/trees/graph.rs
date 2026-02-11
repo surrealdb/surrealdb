@@ -80,7 +80,7 @@ where
 		}
 	}
 
-	pub(super) fn reload(&mut self, val: &[u8]) -> Result<()> {
+	pub(super) fn lecacy_reload(&mut self, val: &[u8]) -> Result<()> {
 		self.nodes.clear();
 		if val.is_empty() {
 			return Ok(());
@@ -117,7 +117,7 @@ where
 	pub(super) fn load_node(&mut self, node: ElementId, val: &[u8]) {
 		let mut buf = val;
 		let s_len = (&mut buf).get_u16() as usize;
-		let mut s = S::with_capacity(s_len.max(self.capacity));
+		let mut s = S::with_capacity(s_len);
 		for _ in 0..s_len {
 			s.insert((&mut buf).get_u64() as ElementId);
 		}
@@ -254,7 +254,7 @@ mod tests {
 		assert_eq!(g.len(), 2);
 
 		// Reload with empty buffer should clear the graph, not panic
-		g.reload(&[]).unwrap();
+		g.lecacy_reload(&[]).unwrap();
 		assert_eq!(g.len(), 0);
 	}
 

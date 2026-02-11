@@ -14,6 +14,7 @@ use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
+use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -111,24 +112,26 @@ where
 		})
 	}
 
-	async fn check_state(&mut self, tx: &Transaction) -> Result<()> {
+	async fn check_state(&mut self, ctx: &Context) -> Result<()> {
+		let tx = ctx.tx();
 		// Read the state
 		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Compare versions
+		let mut migrated = false;
 		if st.layer0.version != self.state.layer0.version {
-			self.layer0.load(tx, &mut st.layer0).await?;
+			migrated |= self.layer0.load(ctx, &tx, &mut st.layer0).await?;
 		}
 		for ((new_stl, stl), layer) in
 			st.layers.iter_mut().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
 		{
 			if new_stl.version != stl.version {
-				layer.load(tx, new_stl).await?;
+				migrated |= layer.load(ctx, &tx, new_stl).await?;
 			}
 		}
 		// Retrieve missing layers
 		for i in self.layers.len()..st.layers.len() {
 			let mut l = HnswLayer::new(self.ikb.clone(), i + 1, self.m);
-			l.load(tx, &mut st.layers[i]).await?;
+			migrated |= l.load(ctx, &tx, &mut st.layers[i]).await?;
 			self.layers.push(l);
 		}
 		// Remove non-existing layers
@@ -138,6 +141,11 @@ where
 		// Set the enter_point
 		self.elements.set_next_element_id(st.next_element_id);
 		self.state = st;
+		// If any layer was migrated from Hl to Hn, persist the updated state
+		// so that subsequent loads don't attempt to fetch the now-deleted Hl keys.
+		if migrated {
+			self.save_state(&tx).await?;
+		}
 		Ok(())
 	}
 
@@ -654,14 +662,14 @@ mod tests {
 	}
 
 	async fn insert_collection_hnsw_index(
-		tx: &Transaction,
+		ctx: &Context,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) -> Result<HashMap<SharedVector, HashSet<DocId>>> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(tx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
+			h.index_document(ctx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -716,14 +724,14 @@ mod tests {
 	}
 
 	async fn delete_hnsw_index_collection(
-		tx: &Transaction,
+		ctx: &Context,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(tx, RecordIdKey::Number(*doc_id as i64), &content).await?;
+			h.remove_document(ctx, RecordIdKey::Number(*doc_id as i64), &content).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -775,7 +783,7 @@ mod tests {
 			.await
 			.unwrap();
 			// Fill index
-			let map = insert_collection_hnsw_index(&tx, &mut h, &collection).await.unwrap();
+			let map = insert_collection_hnsw_index(&ctx, &mut h, &collection).await.unwrap();
 			tx.commit().await.unwrap();
 			(h, map)
 		};
@@ -801,7 +809,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			delete_hnsw_index_collection(&tx, &mut h, &collection, map).await.unwrap();
+			delete_hnsw_index_collection(&ctx, &mut h, &collection, map).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 	}
@@ -928,7 +936,7 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&tx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
+			h.index_document(&ctx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
 		}
 		tx.commit().await?;
 

@@ -80,6 +80,11 @@ impl IndexKeyBase {
 		Hl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, chunk)
 	}
 
+	/// Returns a key range covering all legacy `Hl` chunk entries for the given HNSW layer.
+	fn new_hl_layer_range(&self, layer: u16) -> Result<Range<Key>> {
+		Hl::new_layer_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer)
+	}
+
 	/// Creates a per-node `Hn` key for storing a single node's edge list in an HNSW layer.
 	fn new_hn_key(&self, layer: u16, node: ElementId) -> HnswNode<'_> {
 		HnswNode::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, layer, node)
