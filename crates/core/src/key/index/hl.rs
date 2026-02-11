@@ -1,7 +1,9 @@
 //! Store and chunked layers of an HNSW index
-use crate::kvs::impl_key;
+use crate::err::Error;
+use crate::kvs::{impl_key, KeyEncode};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -42,15 +44,27 @@ impl<'a> Hl<'a> {
 			chunk,
 		}
 	}
+
+	pub(crate) fn new_layer_range(
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		ix: &'a str,
+		layer: u16,
+	) -> Result<Range<Vec<u8>>, Error> {
+		let beg = Self::new(ns, db, tb, ix, layer, 0).encode()?;
+		let end = Self::new(ns, db, tb, ix, layer, u32::MAX).encode()?;
+		Ok(beg..end)
+	}
 }
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::kvs::{KeyDecode, KeyEncode};
 
 	#[test]
 	fn key() {
-		use super::*;
 		let val = Hl::new("testns", "testdb", "testtb", "testix", 7, 8);
 		let enc = Hl::encode(&val).unwrap();
 		assert_eq!(
