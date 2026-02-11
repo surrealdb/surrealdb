@@ -84,9 +84,11 @@ pub fn add_auth_mutations(
 					let vars = build_public_variables(&ns_name, &db_name, &access, variables)?;
 
 					// Create a fresh session for the signin operation
-					let mut auth_sess = Session::default();
-					auth_sess.ns = Some(ns_name.clone());
-					auth_sess.db = Some(db_name.clone());
+					let mut auth_sess = Session {
+						ns: Some(ns_name.clone()),
+						db: Some(db_name.clone()),
+						..Default::default()
+					};
 					auth_sess.ip.clone_from(&sess.ip);
 					auth_sess.or.clone_from(&sess.or);
 
@@ -142,9 +144,11 @@ pub fn add_auth_mutations(
 					let vars = build_public_variables(&ns_name, &db_name, &access, variables)?;
 
 					// Create a fresh session for the signup operation
-					let mut auth_sess = Session::default();
-					auth_sess.ns = Some(ns_name.clone());
-					auth_sess.db = Some(db_name.clone());
+					let mut auth_sess = Session {
+						ns: Some(ns_name.clone()),
+						db: Some(db_name.clone()),
+						..Default::default()
+					};
 					auth_sess.ip.clone_from(&sess.ip);
 					auth_sess.or.clone_from(&sess.or);
 

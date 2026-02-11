@@ -444,9 +444,9 @@ pub async fn process_tbs(
 	let mut relation_table_fds: HashMap<String, Arc<[FieldDefinition]>> = HashMap::new();
 	for rel in relations.iter() {
 		let rel_name = rel.table_name.clone().into_string();
-		if !relation_table_fds.contains_key(&rel_name) {
+		if let std::collections::hash_map::Entry::Vacant(e) = relation_table_fds.entry(rel_name) {
 			let fds = tx.all_tb_fields(ns, db, &rel.table_name, None).await?;
-			relation_table_fds.insert(rel_name, fds);
+			e.insert(fds);
 		}
 	}
 
@@ -1315,25 +1315,25 @@ fn make_relation_field_resolver(
 
 			// Parse and combine user-supplied filter (accept both `filter` and `where`)
 			let filter = args.get("filter").or_else(|| args.get("where"));
-			if let Some(f) = filter {
-				if let Some(ref fds) = fds {
-					let o = match f {
-						GqlValue::Object(o) => o,
-						f => {
-							error!(
-								"Found filter {f}, which should be object and should have \
-								 been rejected by async graphql."
-							);
-							return Err("Value in cond doesn't fit schema".into());
-						}
-					};
-					let user_cond = cond_from_filter(o, fds)?;
-					base_cond = Expr::Binary {
-						left: Box::new(base_cond),
-						op: BinaryOperator::And,
-						right: Box::new(user_cond.0),
-					};
-				}
+			if let Some(f) = filter
+				&& let Some(ref fds) = fds
+			{
+				let o = match f {
+					GqlValue::Object(o) => o,
+					f => {
+						error!(
+							"Found filter {f}, which should be object and should have \
+							 been rejected by async graphql."
+						);
+						return Err("Value in cond doesn't fit schema".into());
+					}
+				};
+				let user_cond = cond_from_filter(o, fds)?;
+				base_cond = Expr::Binary {
+					left: Box::new(base_cond),
+					op: BinaryOperator::And,
+					right: Box::new(user_cond.0),
+				};
 			}
 
 			let cond = Some(Cond(base_cond));

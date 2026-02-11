@@ -118,11 +118,11 @@ fn kind_to_input_type_ref(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, 
 			// Strip None/Null variants to see what's underneath
 			let non_none: Vec<&Kind> =
 				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1 {
-				if let Kind::Record(_) = non_none[0] {
-					// option<record<T>> -> nullable ID
-					return Ok(TypeRef::named(TypeRef::ID));
-				}
+			if non_none.len() == 1
+				&& let Kind::Record(_) = non_none[0]
+			{
+				// option<record<T>> -> nullable ID
+				return Ok(TypeRef::named(TypeRef::ID));
 			}
 		}
 		_ => {}
@@ -687,7 +687,6 @@ fn add_upsert_many_field(
 	)
 }
 
-#[expect(clippy::too_many_arguments)]
 fn add_delete_many_field(
 	mutation: Object,
 	cap_name: &str,
@@ -743,9 +742,7 @@ fn add_delete_many_field(
 // ---------------------------------------------------------------------------
 
 /// Extract the required `data` argument as an object from the args map.
-fn get_data_object<'a>(
-	args: &'a IndexMap<Name, GqlValue>,
-) -> Result<&'a IndexMap<Name, GqlValue>, GqlError> {
+fn get_data_object(args: &IndexMap<Name, GqlValue>) -> Result<&IndexMap<Name, GqlValue>, GqlError> {
 	args.get("data")
 		.ok_or_else(|| resolver_error("Missing required 'data' argument"))
 		.and_then(|v| v.as_object().ok_or_else(|| resolver_error("'data' must be an object")))
