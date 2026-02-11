@@ -80,11 +80,11 @@ where
 
 	pub(super) fn lecacy_reload(&mut self, val: &[u8]) -> Result<(), Error> {
 		self.nodes.clear();
-        if val.is_empty() {
-            return Ok(());
-        }
-        let mut buf = BytesMut::from(val);
-        let len = buf.get_u32() as usize;
+		if val.is_empty() {
+			return Ok(());
+		}
+		let mut buf = BytesMut::from(val);
+		let len = buf.get_u32() as usize;
 		for _ in 0..len {
 			let e = buf.get_u64();
 			let s_len = buf.get_u16() as usize;

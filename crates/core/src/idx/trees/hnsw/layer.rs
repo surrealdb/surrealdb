@@ -17,7 +17,6 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use std::mem;
 
 #[revisioned(revision = 1)]
 #[derive(Default, Debug, Serialize, Deserialize)]
