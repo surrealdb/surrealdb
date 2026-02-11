@@ -4,7 +4,7 @@ use crate::idx::trees::hnsw::ElementId;
 use ahash::HashMap;
 #[cfg(test)]
 use ahash::HashSet;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BytesMut};
 use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 
@@ -78,23 +78,13 @@ where
 		}
 	}
 
-	pub(super) fn to_val(&self) -> Result<BytesMut, Error> {
-		let mut buf = BytesMut::new();
-		buf.put_u32(self.nodes.len() as u32);
-		for (&e, s) in &self.nodes {
-			buf.put_u64(e);
-			buf.put_u16(s.len() as u16);
-			for &i in s.iter() {
-				buf.put_u64(i);
-			}
-		}
-		Ok(buf)
-	}
-
-	pub(super) fn reload(&mut self, val: &[u8]) -> Result<(), Error> {
-		let mut buf = BytesMut::from(val);
+	pub(super) fn lecacy_reload(&mut self, val: &[u8]) -> Result<(), Error> {
 		self.nodes.clear();
-		let len = buf.get_u32() as usize;
+        if val.is_empty() {
+            return Ok(());
+        }
+        let mut buf = BytesMut::from(val);
+        let len = buf.get_u32() as usize;
 		for _ in 0..len {
 			let e = buf.get_u64();
 			let s_len = buf.get_u16() as usize;
@@ -105,6 +95,41 @@ where
 			self.nodes.insert(e, s);
 		}
 		Ok(())
+	}
+
+	/// Serializes a single node's edge list into a byte buffer.
+	/// Returns `None` if the node does not exist in the graph.
+	pub(super) fn node_to_val(&self, node: &ElementId) -> Option<Vec<u8>> {
+		self.nodes.get(node).map(|edges| {
+			let mut buf = Vec::with_capacity(2 + edges.len() * 8);
+			buf.extend_from_slice(&(edges.len() as u16).to_be_bytes());
+			for &e in edges.iter() {
+				buf.extend_from_slice(&e.to_be_bytes());
+			}
+			buf
+		})
+	}
+
+	/// Deserializes a single node's edge list from a byte buffer
+	/// and inserts it into the graph, as produced by [`Self::node_to_val`].
+	pub(super) fn load_node(&mut self, node: ElementId, val: &[u8]) {
+		let mut buf = val;
+		let s_len = (&mut buf).get_u16() as usize;
+		let mut s = S::with_capacity(s_len);
+		for _ in 0..s_len {
+			s.insert((&mut buf).get_u64() as ElementId);
+		}
+		self.nodes.insert(node, s);
+	}
+
+	/// Returns all node IDs currently present in the graph.
+	pub(super) fn node_ids(&self) -> Vec<ElementId> {
+		self.nodes.keys().copied().collect()
+	}
+
+	/// Removes all nodes and edges from the graph.
+	pub(super) fn clear(&mut self) {
+		self.nodes.clear();
 	}
 }
 
@@ -213,5 +238,62 @@ mod tests {
 	#[test]
 	fn test_undirected_graph_hash() {
 		test_undirected_graph::<AHashSet>(10);
+	}
+
+	/// Test that reload handles empty buffer gracefully.
+	/// This can happen when a layer has no stored chunks yet (chunks == 0).
+	#[test]
+	fn test_reload_empty_buffer() {
+		let mut g = UndirectedGraph::<ArraySet<10>>::new(10);
+
+		// Add some data first
+		g.add_empty_node(1);
+		g.add_empty_node(2);
+		assert_eq!(g.len(), 2);
+
+		// Reload with empty buffer should clear the graph, not panic
+		g.lecacy_reload(&[]).unwrap();
+		assert_eq!(g.len(), 0);
+	}
+
+	/// Test that clear handles graph reset gracefully.
+	#[test]
+	fn test_clear() {
+		let mut g = UndirectedGraph::<ArraySet<10>>::new(10);
+
+		// Add some data first
+		g.add_empty_node(1);
+		g.add_empty_node(2);
+		assert_eq!(g.len(), 2);
+
+		// Clear should reset the graph
+		g.clear();
+		assert_eq!(g.len(), 0);
+	}
+
+	/// Test per-node serialization round-trip.
+	#[test]
+	fn test_node_to_val_and_load_node() {
+		let mut g = UndirectedGraph::<ArraySet<10>>::new(10);
+
+		let mut e = ArraySet::<10>::with_capacity(10);
+		e.insert(2);
+		e.insert(3);
+		g.add_node_and_bidirectional_edges(1, e);
+
+		// Serialize node 1
+		let val = g.node_to_val(&1).unwrap();
+
+		// Load into a new graph
+		let mut g2 = UndirectedGraph::<ArraySet<10>>::new(10);
+		g2.load_node(1, &val);
+
+		// Check the loaded node has the same edges
+		let edges: Vec<ElementId> = {
+			let mut v: Vec<ElementId> = g2.get_edges(&1).unwrap().iter().copied().collect();
+			v.sort();
+			v
+		};
+		assert_eq!(edges, vec![2, 3]);
 	}
 }
