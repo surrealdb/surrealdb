@@ -22,7 +22,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn basic() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -204,7 +204,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn basic_auth() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 		let signup_url = &format!("http://{addr}/signup");
@@ -307,7 +307,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn config() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -422,7 +422,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn geometry() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -682,7 +682,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn functions() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -767,7 +767,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn relations() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1017,7 +1017,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn record_links() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1158,7 +1158,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn self_referential_relations() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1286,7 +1286,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn relation_with_record_link_traversal() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1405,7 +1405,7 @@ mod graphql_integration {
 	#[test(tokio::test)]
 	#[cfg(feature = "storage-surrealkv")]
 	async fn version() -> Result<(), Box<dyn std::error::Error>> {
-		let (_dir, addr, _server) = common::start_server_gql_with_versioning().await.unwrap();
+		let (_dir, addr, _server) = common::start_server_with_versioning().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1623,7 +1623,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn filters() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -1938,7 +1938,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn nested_objects() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -2323,7 +2323,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn serialization() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -2652,7 +2652,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn mutations() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -3060,7 +3060,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn depth_and_complexity_limits() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -3282,7 +3282,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn introspection_control() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -3503,7 +3503,7 @@ mod graphql_integration {
 
 	#[test(tokio::test)]
 	async fn auth_mutations() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -3871,7 +3871,7 @@ mod graphql_integration {
 	/// - Nested object fields are resolved from cache
 	#[test(tokio::test)]
 	async fn cached_record_resolution() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql_without_auth().await.unwrap();
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -4319,7 +4319,7 @@ mod graphql_integration {
 	/// - Root users bypass permissions and can mutate everything
 	#[test(tokio::test)]
 	async fn mutation_permissions() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 		let signup_url = &format!("http://{addr}/signup");
@@ -4768,7 +4768,7 @@ mod graphql_integration {
 	/// permission to read.
 	#[test(tokio::test)]
 	async fn relation_permissions() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 		let signup_url = &format!("http://{addr}/signup");
@@ -4954,7 +4954,7 @@ mod graphql_integration {
 	/// details, table structures, or database internals.
 	#[test(tokio::test)]
 	async fn error_message_safety() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 
@@ -5084,7 +5084,7 @@ mod graphql_integration {
 	/// Tests that upsert mutations respect table PERMISSIONS.
 	#[test(tokio::test)]
 	async fn upsert_permissions() -> Result<(), Box<dyn std::error::Error>> {
-		let (addr, _server) = common::start_server_gql().await.unwrap();
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 		let signup_url = &format!("http://{addr}/signup");

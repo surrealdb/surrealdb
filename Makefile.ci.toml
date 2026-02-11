@@ -298,7 +298,7 @@ description = "Run GraphQL integration tests"
 command = "cargo"
 env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
     "RUST_LOG",
-] } }, SURREAL_CAPS_ALLOW_EXPERIMENTAL = "graphql" }
+] } } }
 args = [
     "test",
     "--locked",

@@ -228,39 +228,11 @@ pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child)
 	.await
 }
 
-pub async fn start_server_gql() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		vars: Some(HashMap::from([(
-			"SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(),
-			"graphql".to_string(),
-		)])),
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_gql_without_auth() -> Result<(String, Child), Box<dyn Error>> {
-	start_server(StartServerArguments {
-		auth: false,
-		vars: Some(HashMap::from([(
-			"SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(),
-			"graphql".to_string(),
-		)])),
-		..Default::default()
-	})
-	.await
-}
-
-pub async fn start_server_gql_with_versioning() -> Result<(TempDir, String, Child), Box<dyn Error>>
-{
+pub async fn start_server_with_versioning() -> Result<(TempDir, String, Child), Box<dyn Error>> {
 	let dir = tempfile::tempdir().unwrap();
 	let (addr, server) = start_server(StartServerArguments {
 		path: Some(format!("surrealkv+versioned:{}", dir.path().display())),
 		auth: false,
-		vars: Some(HashMap::from([(
-			"SURREAL_CAPS_ALLOW_EXPERIMENTAL".to_string(),
-			"graphql".to_string(),
-		)])),
 		..Default::default()
 	})
 	.await?;

@@ -120,7 +120,6 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
-	GraphQL,
 	DefineApi,
 	Files,
 	Surrealism,
@@ -129,7 +128,6 @@ pub enum ExperimentalTarget {
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::GraphQL => write!(f, "graphql"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
@@ -146,7 +144,6 @@ impl Target for ExperimentalTarget {
 impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
-			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
@@ -175,7 +172,6 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim().to_ascii_lowercase().as_str() {
-			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),

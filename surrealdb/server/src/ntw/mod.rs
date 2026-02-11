@@ -36,7 +36,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
@@ -206,12 +205,6 @@ pub async fn init<F: RouterFactory>(
 		);
 
 	let axum_app = F::configure_router();
-
-	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
-		warn!(
-			"❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌"
-		);
-	}
 
 	let axum_app = axum_app.layer(service);
 
