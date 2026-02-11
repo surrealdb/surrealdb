@@ -428,9 +428,7 @@ where
 	) -> Result<bool> {
 		self.graph.clear();
 
-		let mut migrated = false;
-		// Load legacy Hl chunks (if any) so we start with the complete graph and possibly migrate
-		// datas
+		// Load legacy Hl chunks (if any) as the baseline graph.
 		if st.chunks > 0 {
 			let mut val = Vec::new();
 			for i in 0..st.chunks {
@@ -440,31 +438,13 @@ where
 				val.extend(chunk);
 			}
 			self.graph.lecacy_reload(&val)?;
-
-			// If we can write, complete the migration:
-			// persist every node as an Hn key and remove the old Hl chunk keys.
-			if tx.writeable() {
-				// Write Hn keys for nodes that were only in Hl (not yet in Hn).
-				for &node_id in &self.graph.node_ids() {
-					if let Some(node_val) = self.graph.node_to_val(&node_id) {
-						let key = self.ikb.new_hn_key(self.level, node_id);
-						tx.set(&key, &node_val, None).await?;
-					}
-				}
-				// Delete old Hl chunk keys in a single range deletion
-				let hl_range = self.ikb.new_hl_layer_range(self.level)?;
-				tx.delr(hl_range).await?;
-				// Reset the chunk count so subsequent reloads don't
-				// attempt to fetch the now-deleted Hl keys.
-				st.chunks = 0;
-				migrated = true;
-			}
 		}
+
 		// These represent the most recent state
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
-		let mut stream = tx.stream_keys_vals(range, None, None, ScanDirection::Forward);
 		let mut count = 0;
+		let mut stream = tx.stream_keys_vals(range, None, None, ScanDirection::Forward);
 		while let Some(res) = stream.next().await {
 			let batch = res?;
 			for (k, v) in batch {
@@ -477,7 +457,28 @@ where
 				count += 1;
 			}
 		}
-		Ok(migrated)
+
+		// If we can write, complete the migration:
+		// persist every node as an Hn key and remove the old Hl chunk keys.
+		if st.chunks > 0 && tx.writeable() {
+			// Write every node as an Hn key. Nodes that already had Hn entries
+			// are rewritten with the same data (their state was overlaid onto
+			// the graph in the streaming step above).
+			for &node_id in &self.graph.node_ids() {
+				if let Some(node_val) = self.graph.node_to_val(&node_id) {
+					let key = self.ikb.new_hn_key(self.level, node_id);
+					tx.set(&key, &node_val, None).await?;
+				}
+			}
+			// Delete old Hl chunk keys in a single range deletion
+			let hl_range = self.ikb.new_hl_layer_range(self.level)?;
+			tx.delr(hl_range).await?;
+			// Reset the chunk count so subsequent reloads don't
+			// attempt to fetch the now-deleted Hl keys.
+			st.chunks = 0;
+			return Ok(true);
+		}
+		Ok(false)
 	}
 }
 
