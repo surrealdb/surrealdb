@@ -1,6 +1,146 @@
 use std::fmt;
 
-use crate::{Kind, ToSql, Value};
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
+
+use crate::{Kind, Object, SurrealValue, ToSql, Value};
+
+// -----------------------------------------------------------------------------
+// Public API error type (wire-friendly, non-lossy, supports chaining)
+// -----------------------------------------------------------------------------
+
+/// Public error type for SurrealDB APIs.
+///
+/// Designed to be returned from public APIs (including over the wire). It is
+/// wire-friendly and non-lossy: serialization preserves `kind`, `message`,
+/// `details`, and the cause chain. Use this type whenever an error crosses
+/// an API boundary (e.g. server response, SDK method return).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Error {
+	/// Machine-readable error kind (e.g. `"tb_not_found"`, `"query_timed_out"`).
+	pub kind: String,
+	/// Human-readable error message.
+	pub message: String,
+	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub details: Option<Object>,
+	/// The underlying cause of this error, if any. Semantically: "this error was caused by that one".
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub cause: Option<Box<Error>>,
+}
+
+impl Error {
+	/// Creates a new error with the given `kind` and `message`.
+	pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
+		Self {
+			kind: kind.into(),
+			message: message.into(),
+			details: None,
+			cause: None,
+		}
+	}
+
+	/// Adds optional structured details to this error.
+	#[must_use]
+	pub fn with_details(mut self, details: Object) -> Self {
+		self.details = Some(details);
+		self
+	}
+
+	/// Sets the cause of this error (the error that led to this one).
+	#[must_use]
+	pub fn with_cause(mut self, cause: Error) -> Self {
+		self.cause = Some(Box::new(cause));
+		self
+	}
+
+	/// Returns the underlying cause of this error, if any.
+	pub fn cause(&self) -> Option<&Error> {
+		self.cause.as_deref()
+	}
+
+	/// Returns an iterator over the full cause chain (this error, then its cause, then the cause's cause, etc.).
+	pub fn chain(&self) -> Chain<'_> {
+		Chain {
+			current: Some(self),
+		}
+	}
+}
+
+/// Iterator over an error and its cause chain.
+#[derive(Debug)]
+pub struct Chain<'a> {
+	current: Option<&'a Error>,
+}
+
+impl<'a> Iterator for Chain<'a> {
+	type Item = &'a Error;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let err = self.current?;
+		self.current = err.cause.as_deref();
+		Some(err)
+	}
+}
+
+impl fmt::Display for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.message)?;
+		if let Some(cause) = &self.cause {
+			write!(f, ": {}", cause)?;
+		}
+		Ok(())
+	}
+}
+
+impl std::error::Error for Error {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		self.cause.as_deref().map(|e| e as &(dyn std::error::Error + 'static))
+	}
+}
+
+impl SurrealValue for Error {
+	fn kind_of() -> Kind {
+		Kind::Object
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Object(obj) if obj.contains_key("kind") && obj.contains_key("message"))
+	}
+
+	fn into_value(self) -> Value {
+		let mut obj = Object::new();
+		obj.insert("kind", self.kind);
+		obj.insert("message", self.message);
+		if let Some(details) = self.details {
+			obj.insert("details", details);
+		}
+		if let Some(cause) = self.cause {
+			obj.insert("cause", cause.into_value());
+		}
+		Value::Object(obj)
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		let Value::Object(mut obj) = value else {
+			anyhow::bail!("expected object for Error");
+		};
+		let kind = obj.remove("kind").context("missing 'kind'")?.into_string()?;
+		let message = obj.remove("message").context("missing 'message'")?.into_string()?;
+		let details = obj.remove("details").map(Object::from_value).transpose()?;
+		let cause = obj.remove("cause").map(Error::from_value).transpose()?.map(Box::new);
+		Ok(Self {
+			kind,
+			message,
+			details,
+			cause,
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Type conversion errors (internal to the types layer)
+// -----------------------------------------------------------------------------
 
 /// Errors that can occur when working with SurrealDB types
 #[derive(Debug, Clone)]

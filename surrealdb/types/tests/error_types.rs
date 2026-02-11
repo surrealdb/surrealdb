@@ -1,5 +1,6 @@
 use surrealdb_types::{
-	ConversionError, Kind, LengthMismatchError, Number, OutOfRangeError, TypeError, Value,
+	ConversionError, Error, Kind, LengthMismatchError, Number, Object, OutOfRangeError,
+	SurrealValue, TypeError, Value,
 };
 
 #[test]
@@ -281,4 +282,98 @@ fn test_error_message_quality() {
 	assert!(err_msg.contains("String") || err_msg.contains("string"));
 
 	println!("Error message: {}", err_msg);
+}
+
+// -----------------------------------------------------------------------------
+// Public API Error type (wire-friendly, chaining)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_public_error_new() {
+	let err = Error::new("tb_not_found", "The table 'users' does not exist");
+
+	assert_eq!(err.kind, "tb_not_found");
+	assert_eq!(err.message, "The table 'users' does not exist");
+	assert!(err.details.is_none());
+	assert!(err.cause.is_none());
+	assert!(err.cause().is_none());
+}
+
+#[test]
+fn test_public_error_with_details() {
+	let mut details = Object::new();
+	details.insert("name", "users");
+	let err = Error::new("tb_not_found", "The table 'users' does not exist").with_details(details);
+
+	assert_eq!(err.kind, "tb_not_found");
+	assert!(err.details.is_some());
+	let d = err.details.as_ref().unwrap();
+	assert!(d.contains_key("name"));
+	assert_eq!(d.get("name").and_then(|v| v.as_string()).unwrap(), "users");
+}
+
+#[test]
+fn test_public_error_with_cause() {
+	let root = Error::new("internal", "connection refused");
+	let top = Error::new("query_failed", "Failed to execute query").with_cause(root);
+
+	assert_eq!(top.kind, "query_failed");
+	assert!(top.cause().is_some());
+	let cause = top.cause().unwrap();
+	assert_eq!(cause.kind, "internal");
+	assert_eq!(cause.message, "connection refused");
+	assert!(cause.cause().is_none());
+}
+
+#[test]
+fn test_public_error_chain() {
+	let root = Error::new("internal", "root");
+	let mid = Error::new("mid", "mid").with_cause(root);
+	let top = Error::new("top", "top").with_cause(mid);
+
+	let chain: Vec<_> = top.chain().collect();
+	assert_eq!(chain.len(), 3);
+	assert_eq!(chain[0].kind, "top");
+	assert_eq!(chain[1].kind, "mid");
+	assert_eq!(chain[2].kind, "internal");
+}
+
+#[test]
+fn test_public_error_display() {
+	let err = Error::new("thrown", "Something went wrong");
+	assert!(err.to_string().contains("Something went wrong"));
+
+	let with_cause = Error::new("outer", "outer").with_cause(Error::new("inner", "inner"));
+	let display = with_cause.to_string();
+	assert!(display.contains("outer"));
+	assert!(display.contains("inner"));
+}
+
+#[test]
+fn test_public_error_std_error_source() {
+	let inner = Error::new("inner", "inner");
+	let outer = Error::new("outer", "outer").with_cause(inner);
+
+	let source = std::error::Error::source(&outer).unwrap();
+	assert_eq!(source.to_string(), "inner");
+}
+
+#[test]
+fn test_public_error_surreal_value_roundtrip() {
+	let err = Error::new("tb_not_found", "Table 'users' does not exist")
+		.with_details({
+			let mut o = Object::new();
+			o.insert("name", "users");
+			o
+		})
+		.with_cause(Error::new("internal", "io error"));
+
+	let value = err.clone().into_value();
+	let restored = Error::from_value(value).unwrap();
+
+	assert_eq!(restored.kind, err.kind);
+	assert_eq!(restored.message, err.message);
+	assert!(restored.details.is_some());
+	assert!(restored.cause.is_some());
+	assert_eq!(restored.cause.as_ref().unwrap().kind, "internal");
 }
