@@ -19,18 +19,18 @@ use async_graphql::{Name, Value as GqlValue};
 use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
-use super::schema::{gql_to_sql_kind, kind_to_type, unwrap_type};
+use super::schema::{SchemaContext, gql_to_sql_kind, kind_to_type, unwrap_type};
 use super::tables::{CachedRecord, cond_from_filter};
 use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition, TableType};
+use crate::catalog::{FieldDefinition, TableDefinition, TableType};
 use crate::dbs::Session;
 use crate::expr::part::Part;
 use crate::expr::statements::{
 	CreateStatement, DeleteStatement, RelateStatement, UpdateStatement, UpsertStatement,
 };
 use crate::expr::{Cond, Data, Expr, Kind, Literal, LogicalPlan, Output, TopLevelExpr};
-use crate::kvs::{Datastore, Transaction};
+use crate::kvs::Datastore;
 use crate::val::{Object as SurObject, RecordId, TableName, Value};
 
 /// Capitalize the first character of a string.
@@ -200,14 +200,32 @@ fn generate_input_types(
 	Ok((create_name, update_name, upsert_name))
 }
 
+/// Shared context for generating mutation fields for a single table.
+///
+/// Groups the per-table parameters that are passed to every mutation field
+/// builder, replacing scattered arguments with a single reference.
+struct MutationTableContext {
+	/// The capitalized table name (e.g., "Person").
+	cap_name: String,
+	/// The table name as a string (e.g., "person").
+	tb_name_str: String,
+	/// The table name.
+	tb_name: TableName,
+	/// Whether the table is a relation table.
+	is_relation: bool,
+	/// Field definitions for this table.
+	fds: Arc<[FieldDefinition]>,
+	/// The datastore.
+	kvs: Arc<Datastore>,
+	/// The filter type name for this table (e.g., "_filter_person").
+	table_filter_name: String,
+}
+
 /// Process all tables and generate the Mutation root object with mutation fields.
 pub async fn process_mutations(
 	tbs: Arc<[TableDefinition]>,
 	types: &mut Vec<Type>,
-	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	datastore: &Arc<Datastore>,
+	schema_ctx: &SchemaContext<'_>,
 ) -> Result<Object, GqlError> {
 	let mut mutation = Object::new("Mutation");
 
@@ -216,103 +234,33 @@ pub async fn process_mutations(
 		let tb_name_str = tb_name.clone().into_string();
 		let is_relation = matches!(tb.table_type, TableType::Relation(_));
 
-		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
+		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb.name, None).await?;
 
 		// Generate input types
 		let (create_input_name, update_input_name, upsert_input_name) =
 			generate_input_types(&tb_name_str, &fds, is_relation, types)?;
 
-		let cap_name = capitalize_first(&tb_name_str);
-		let table_filter_name = format!("_filter_{tb_name_str}");
+		let ctx = MutationTableContext {
+			cap_name: capitalize_first(&tb_name_str),
+			table_filter_name: format!("_filter_{tb_name_str}"),
+			tb_name_str,
+			tb_name,
+			is_relation,
+			fds,
+			kvs: schema_ctx.datastore.clone(),
+		};
 
 		// --- Single-record mutations ---
-
-		// create{TableName}
-		mutation = add_create_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			is_relation,
-			fds.clone(),
-			datastore.clone(),
-			&create_input_name,
-		);
-
-		// update{TableName}
-		mutation = add_update_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			fds.clone(),
-			datastore.clone(),
-			&update_input_name,
-		);
-
-		// upsert{TableName}
-		mutation = add_upsert_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			fds.clone(),
-			datastore.clone(),
-			&upsert_input_name,
-		);
-
-		// delete{TableName}
-		mutation =
-			add_delete_field(mutation, &cap_name, &tb_name_str, tb_name.clone(), datastore.clone());
+		mutation = add_create_field(mutation, &ctx, &create_input_name);
+		mutation = add_update_field(mutation, &ctx, &update_input_name);
+		mutation = add_upsert_field(mutation, &ctx, &upsert_input_name);
+		mutation = add_delete_field(mutation, &ctx);
 
 		// --- Bulk mutations ---
-
-		// createMany{TableName}
-		mutation = add_create_many_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			is_relation,
-			fds.clone(),
-			datastore.clone(),
-			&create_input_name,
-		);
-
-		// updateMany{TableName}
-		mutation = add_update_many_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			fds.clone(),
-			datastore.clone(),
-			&update_input_name,
-			&table_filter_name,
-		);
-
-		// upsertMany{TableName}
-		mutation = add_upsert_many_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			fds.clone(),
-			datastore.clone(),
-			&upsert_input_name,
-			&table_filter_name,
-		);
-
-		// deleteMany{TableName}
-		mutation = add_delete_many_field(
-			mutation,
-			&cap_name,
-			&tb_name_str,
-			tb_name.clone(),
-			fds.clone(),
-			datastore.clone(),
-			&table_filter_name,
-		);
+		mutation = add_create_many_field(mutation, &ctx, &create_input_name);
+		mutation = add_update_many_field(mutation, &ctx, &update_input_name);
+		mutation = add_upsert_many_field(mutation, &ctx, &upsert_input_name);
+		mutation = add_delete_many_field(mutation, &ctx);
 	}
 
 	Ok(mutation)
@@ -322,182 +270,178 @@ pub async fn process_mutations(
 // Single-record mutation field builders
 // ---------------------------------------------------------------------------
 
-#[expect(clippy::too_many_arguments)]
-fn add_create_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	is_relation: bool,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	create_input_name: &str,
-) -> Object {
+fn add_create_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
+	let is_relation = tc.is_relation;
 	mutation.field(
-		Field::new(format!("create{cap_name}"), TypeRef::named(tb_name_str), move |ctx| {
-			let fds = fds.clone();
-			let kvs = kvs.clone();
-			let tb_name = tb_name.clone();
-			FieldFuture::new(async move {
-				let sess = ctx.data::<Arc<Session>>()?;
-				let args = ctx.args.as_index_map();
-				let data_obj = get_data_object(args)?;
-				let id_opt = data_obj.get("id").and_then(GqlValueUtils::as_string);
+		Field::new(
+			format!("create{}", tc.cap_name),
+			TypeRef::named(tc.tb_name_str.as_str()),
+			move |ctx| {
+				let fds = fds.clone();
+				let kvs = kvs.clone();
+				let tb_name = tb_name.clone();
+				FieldFuture::new(async move {
+					let sess = ctx.data::<Arc<Session>>()?;
+					let args = ctx.args.as_index_map();
+					let data_obj = get_data_object(args)?;
+					let id_opt = data_obj.get("id").and_then(GqlValueUtils::as_string);
 
-				if is_relation {
-					execute_relate_create(&kvs, sess, &tb_name, data_obj, &fds, id_opt).await
-				} else {
-					execute_normal_create(&kvs, sess, &tb_name, data_obj, &fds, id_opt).await
-				}
-			})
-		})
-		.description(format!("Create a new `{tb_name_str}` record"))
-		.argument(InputValue::new("data", TypeRef::named_nn(create_input_name))),
+					if is_relation {
+						execute_relate_create(&kvs, sess, &tb_name, data_obj, &fds, id_opt).await
+					} else {
+						execute_normal_create(&kvs, sess, &tb_name, data_obj, &fds, id_opt).await
+					}
+				})
+			},
+		)
+		.description(format!("Create a new `{}` record", tc.tb_name_str))
+		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
-fn add_update_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	update_input_name: &str,
-) -> Object {
+fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
-		Field::new(format!("update{cap_name}"), TypeRef::named(tb_name_str), move |ctx| {
-			let fds = fds.clone();
-			let kvs = kvs.clone();
-			let tb_name = tb_name.clone();
-			FieldFuture::new(async move {
-				let sess = ctx.data::<Arc<Session>>()?;
-				let args = ctx.args.as_index_map();
-				let id_str = get_required_id(args)?;
-				let data_obj = get_data_object(args)?;
+		Field::new(
+			format!("update{}", tc.cap_name),
+			TypeRef::named(tc.tb_name_str.as_str()),
+			move |ctx| {
+				let fds = fds.clone();
+				let kvs = kvs.clone();
+				let tb_name = tb_name.clone();
+				FieldFuture::new(async move {
+					let sess = ctx.data::<Arc<Session>>()?;
+					let args = ctx.args.as_index_map();
+					let id_str = get_required_id(args)?;
+					let data_obj = get_data_object(args)?;
 
-				let rid = parse_record_id(&tb_name, &id_str)?;
-				let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let rid = parse_record_id(&tb_name, &id_str)?;
+					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
 
-				let data = if content.0.is_empty() {
-					None
-				} else {
-					Some(Data::MergeExpression(Value::Object(content).into_literal()))
-				};
+					let data = if content.0.is_empty() {
+						None
+					} else {
+						Some(Data::MergeExpression(Value::Object(content).into_literal()))
+					};
 
-				let stmt = UpdateStatement {
-					only: true,
-					what: vec![Value::RecordId(rid).into_literal()],
-					data,
-					cond: None,
-					output: None,
-					timeout: Expr::Literal(Literal::None),
-					..Default::default()
-				};
+					let stmt = UpdateStatement {
+						only: true,
+						what: vec![Value::RecordId(rid).into_literal()],
+						data,
+						cond: None,
+						output: None,
+						timeout: Expr::Literal(Literal::None),
+						..Default::default()
+					};
 
-				let plan = LogicalPlan {
-					expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(stmt)))],
-				};
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(Expr::Update(Box::new(stmt)))],
+					};
 
-				let res = execute_plan(&kvs, sess, plan).await?;
-				extract_single_record(res)
-			})
-		})
-		.description(format!("Update an existing `{tb_name_str}` record"))
+					let res = execute_plan(&kvs, sess, plan).await?;
+					extract_single_record(res)
+				})
+			},
+		)
+		.description(format!("Update an existing `{}` record", tc.tb_name_str))
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-		.argument(InputValue::new("data", TypeRef::named_nn(update_input_name))),
+		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
-fn add_upsert_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	upsert_input_name: &str,
-) -> Object {
+fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
-		Field::new(format!("upsert{cap_name}"), TypeRef::named(tb_name_str), move |ctx| {
-			let fds = fds.clone();
-			let kvs = kvs.clone();
-			let tb_name = tb_name.clone();
-			FieldFuture::new(async move {
-				let sess = ctx.data::<Arc<Session>>()?;
-				let args = ctx.args.as_index_map();
-				let id_str = get_required_id(args)?;
-				let data_obj = get_data_object(args)?;
+		Field::new(
+			format!("upsert{}", tc.cap_name),
+			TypeRef::named(tc.tb_name_str.as_str()),
+			move |ctx| {
+				let fds = fds.clone();
+				let kvs = kvs.clone();
+				let tb_name = tb_name.clone();
+				FieldFuture::new(async move {
+					let sess = ctx.data::<Arc<Session>>()?;
+					let args = ctx.args.as_index_map();
+					let id_str = get_required_id(args)?;
+					let data_obj = get_data_object(args)?;
 
-				let rid = parse_record_id(&tb_name, &id_str)?;
-				let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let rid = parse_record_id(&tb_name, &id_str)?;
+					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
 
-				let data = if content.0.is_empty() {
-					None
-				} else {
-					Some(Data::ContentExpression(Value::Object(content).into_literal()))
-				};
+					let data = if content.0.is_empty() {
+						None
+					} else {
+						Some(Data::ContentExpression(Value::Object(content).into_literal()))
+					};
 
-				let stmt = UpsertStatement {
-					only: true,
-					what: vec![Value::RecordId(rid).into_literal()],
-					data,
-					cond: None,
-					output: None,
-					timeout: Expr::Literal(Literal::None),
-					..Default::default()
-				};
+					let stmt = UpsertStatement {
+						only: true,
+						what: vec![Value::RecordId(rid).into_literal()],
+						data,
+						cond: None,
+						output: None,
+						timeout: Expr::Literal(Literal::None),
+						..Default::default()
+					};
 
-				let plan = LogicalPlan {
-					expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt)))],
-				};
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(Expr::Upsert(Box::new(stmt)))],
+					};
 
-				let res = execute_plan(&kvs, sess, plan).await?;
-				extract_single_record(res)
-			})
-		})
-		.description(format!("Upsert a `{tb_name_str}` record (create or update)"))
+					let res = execute_plan(&kvs, sess, plan).await?;
+					extract_single_record(res)
+				})
+			},
+		)
+		.description(format!("Upsert a `{}` record (create or update)", tc.tb_name_str))
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
-		.argument(InputValue::new("data", TypeRef::named_nn(upsert_input_name))),
+		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
-fn add_delete_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	kvs: Arc<Datastore>,
-) -> Object {
+fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
-		Field::new(format!("delete{cap_name}"), TypeRef::named_nn(TypeRef::BOOLEAN), move |ctx| {
-			let kvs = kvs.clone();
-			let tb_name = tb_name.clone();
-			FieldFuture::new(async move {
-				let sess = ctx.data::<Arc<Session>>()?;
-				let args = ctx.args.as_index_map();
-				let id_str = get_required_id(args)?;
+		Field::new(
+			format!("delete{}", tc.cap_name),
+			TypeRef::named_nn(TypeRef::BOOLEAN),
+			move |ctx| {
+				let kvs = kvs.clone();
+				let tb_name = tb_name.clone();
+				FieldFuture::new(async move {
+					let sess = ctx.data::<Arc<Session>>()?;
+					let args = ctx.args.as_index_map();
+					let id_str = get_required_id(args)?;
 
-				let rid = parse_record_id(&tb_name, &id_str)?;
+					let rid = parse_record_id(&tb_name, &id_str)?;
 
-				let stmt = DeleteStatement {
-					only: false,
-					what: vec![Value::RecordId(rid).into_literal()],
-					cond: None,
-					output: None,
-					timeout: Expr::Literal(Literal::None),
-					..Default::default()
-				};
+					let stmt = DeleteStatement {
+						only: false,
+						what: vec![Value::RecordId(rid).into_literal()],
+						cond: None,
+						output: None,
+						timeout: Expr::Literal(Literal::None),
+						..Default::default()
+					};
 
-				let plan = LogicalPlan {
-					expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
-				};
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
+					};
 
-				let _res = execute_plan(&kvs, sess, plan).await?;
-				Ok(Some(FieldValue::value(GqlValue::Boolean(true))))
-			})
-		})
-		.description(format!("Delete a `{tb_name_str}` record by ID"))
+					let _res = execute_plan(&kvs, sess, plan).await?;
+					Ok(Some(FieldValue::value(GqlValue::Boolean(true))))
+				})
+			},
+		)
+		.description(format!("Delete a `{}` record by ID", tc.tb_name_str))
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
 	)
 }
@@ -506,21 +450,15 @@ fn add_delete_field(
 // Bulk mutation field builders
 // ---------------------------------------------------------------------------
 
-#[expect(clippy::too_many_arguments)]
-fn add_create_many_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	is_relation: bool,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	create_input_name: &str,
-) -> Object {
+fn add_create_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
+	let is_relation = tc.is_relation;
 	mutation.field(
 		Field::new(
-			format!("createMany{cap_name}"),
-			TypeRef::named_nn_list_nn(tb_name_str),
+			format!("createMany{}", tc.cap_name),
+			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
 				let fds = fds.clone();
 				let kvs = kvs.clone();
@@ -564,26 +502,19 @@ fn add_create_many_field(
 				})
 			},
 		)
-		.description(format!("Create multiple `{tb_name_str}` records"))
-		.argument(InputValue::new("data", TypeRef::named_nn_list_nn(create_input_name))),
+		.description(format!("Create multiple `{}` records", tc.tb_name_str))
+		.argument(InputValue::new("data", TypeRef::named_nn_list_nn(input_name))),
 	)
 }
 
-#[expect(clippy::too_many_arguments)]
-fn add_update_many_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	update_input_name: &str,
-	table_filter_name: &str,
-) -> Object {
+fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
-			format!("updateMany{cap_name}"),
-			TypeRef::named_nn_list_nn(tb_name_str),
+			format!("updateMany{}", tc.cap_name),
+			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
 				let fds = fds.clone();
 				let kvs = kvs.clone();
@@ -622,27 +553,20 @@ fn add_update_many_field(
 				})
 			},
 		)
-		.description(format!("Update multiple `{tb_name_str}` records matching a filter"))
-		.argument(InputValue::new("where", TypeRef::named(table_filter_name)))
-		.argument(InputValue::new("data", TypeRef::named_nn(update_input_name))),
+		.description(format!("Update multiple `{}` records matching a filter", tc.tb_name_str))
+		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str())))
+		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
-#[expect(clippy::too_many_arguments)]
-fn add_upsert_many_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	upsert_input_name: &str,
-	table_filter_name: &str,
-) -> Object {
+fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
-			format!("upsertMany{cap_name}"),
-			TypeRef::named_nn_list_nn(tb_name_str),
+			format!("upsertMany{}", tc.cap_name),
+			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
 				let fds = fds.clone();
 				let kvs = kvs.clone();
@@ -681,59 +605,59 @@ fn add_upsert_many_field(
 				})
 			},
 		)
-		.description(format!("Upsert multiple `{tb_name_str}` records matching a filter"))
-		.argument(InputValue::new("where", TypeRef::named(table_filter_name)))
-		.argument(InputValue::new("data", TypeRef::named_nn(upsert_input_name))),
+		.description(format!("Upsert multiple `{}` records matching a filter", tc.tb_name_str))
+		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str())))
+		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
-fn add_delete_many_field(
-	mutation: Object,
-	cap_name: &str,
-	tb_name_str: &str,
-	tb_name: TableName,
-	fds: Arc<[FieldDefinition]>,
-	kvs: Arc<Datastore>,
-	table_filter_name: &str,
-) -> Object {
+fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object {
+	let fds = tc.fds.clone();
+	let kvs = tc.kvs.clone();
+	let tb_name = tc.tb_name.clone();
 	mutation.field(
-		Field::new(format!("deleteMany{cap_name}"), TypeRef::named_nn(TypeRef::INT), move |ctx| {
-			let fds = fds.clone();
-			let kvs = kvs.clone();
-			let tb_name = tb_name.clone();
-			FieldFuture::new(async move {
-				let sess = ctx.data::<Arc<Session>>()?;
-				let args = ctx.args.as_index_map();
+		Field::new(
+			format!("deleteMany{}", tc.cap_name),
+			TypeRef::named_nn(TypeRef::INT),
+			move |ctx| {
+				let fds = fds.clone();
+				let kvs = kvs.clone();
+				let tb_name = tb_name.clone();
+				FieldFuture::new(async move {
+					let sess = ctx.data::<Arc<Session>>()?;
+					let args = ctx.args.as_index_map();
 
-				// Parse WHERE condition
-				let cond = parse_where_arg(args, &fds)?;
+					// Parse WHERE condition
+					let cond = parse_where_arg(args, &fds)?;
 
-				// Use RETURN BEFORE to count deleted records
-				let stmt = DeleteStatement {
-					only: false,
-					what: vec![Expr::Table(tb_name)],
-					cond,
-					output: Some(Output::Before),
-					timeout: Expr::Literal(Literal::None),
-					..Default::default()
-				};
+					// Use RETURN BEFORE to count deleted records
+					let stmt = DeleteStatement {
+						only: false,
+						what: vec![Expr::Table(tb_name)],
+						cond,
+						output: Some(Output::Before),
+						timeout: Expr::Literal(Literal::None),
+						..Default::default()
+					};
 
-				let plan = LogicalPlan {
-					expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
-				};
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(stmt)))],
+					};
 
-				let res = execute_plan(&kvs, sess, plan).await?;
-				let count = match res {
-					Value::Array(a) => a.len() as i64,
-					_ => 0,
-				};
-				Ok(Some(FieldValue::value(GqlValue::Number(count.into()))))
-			})
-		})
+					let res = execute_plan(&kvs, sess, plan).await?;
+					let count = match res {
+						Value::Array(a) => a.len() as i64,
+						_ => 0,
+					};
+					Ok(Some(FieldValue::value(GqlValue::Number(count.into()))))
+				})
+			},
+		)
 		.description(format!(
-			"Delete multiple `{tb_name_str}` records matching a filter, returns count"
+			"Delete multiple `{}` records matching a filter, returns count",
+			tc.tb_name_str
 		))
-		.argument(InputValue::new("where", TypeRef::named(table_filter_name))),
+		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str()))),
 	)
 }
 

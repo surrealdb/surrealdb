@@ -18,7 +18,8 @@ use super::error::{GqlError, resolver_error};
 use super::ext::ValidatorExt;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, TableProvider};
 use crate::catalog::{
-	GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig, GraphQLTablesConfig,
+	DatabaseId, GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig,
+	GraphQLTablesConfig, NamespaceId,
 };
 use crate::dbs::Session;
 use crate::expr::kind::{GeometryKind, KindLiteral};
@@ -28,12 +29,23 @@ use crate::gql::functions::process_fns;
 use crate::gql::mutations::process_mutations;
 use crate::gql::relations::collect_relations;
 use crate::gql::tables::process_tbs;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::val::{
 	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
 	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,
 	Value as SurValue,
 };
+
+/// Shared context for accessing table metadata during schema generation.
+///
+/// Groups the transaction, namespace/database identifiers, and datastore
+/// reference that are threaded through `process_tbs` and `process_mutations`.
+pub(crate) struct SchemaContext<'a> {
+	pub tx: &'a Transaction,
+	pub ns: NamespaceId,
+	pub db: DatabaseId,
+	pub datastore: &'a Arc<Datastore>,
+}
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
@@ -108,35 +120,21 @@ pub async fn generate_schema(
 		None => Vec::new(),
 	};
 
+	let schema_ctx = SchemaContext {
+		tx: &tx,
+		ns: db_def.namespace_id,
+		db: db_def.database_id,
+		datastore,
+	};
+
 	let mut mutation_obj: Option<Object> = None;
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
-			query = process_tbs(
-				tbs.clone(),
-				query,
-				&mut types,
-				&tx,
-				db_def.namespace_id,
-				db_def.database_id,
-				session,
-				datastore,
-				&relations,
-			)
-			.await?;
+			query = process_tbs(tbs.clone(), query, &mut types, &schema_ctx, &relations).await?;
 
 			// Generate mutations for all tables
-			mutation_obj = Some(
-				process_mutations(
-					tbs.clone(),
-					&mut types,
-					&tx,
-					db_def.namespace_id,
-					db_def.database_id,
-					datastore,
-				)
-				.await?,
-			);
+			mutation_obj = Some(process_mutations(tbs.clone(), &mut types, &schema_ctx).await?);
 		}
 		_ => {}
 	}

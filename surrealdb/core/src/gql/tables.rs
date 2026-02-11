@@ -12,9 +12,9 @@ use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 use super::relations::{RelationDirection, RelationInfo};
-use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
+use super::schema::{SchemaContext, gql_to_sql_kind, sql_value_to_gql_value};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition};
+use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::Selector;
 use crate::expr::order::{OrderList, Ordering};
@@ -27,7 +27,7 @@ use crate::expr::{
 use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
-use crate::kvs::{Datastore, Transaction};
+use crate::kvs::Datastore;
 use crate::val::{Datetime, Object as SurObject, RecordId, TableName, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
@@ -313,7 +313,7 @@ fn make_sub_field_resolver(
 					}
 					v => {
 						let gql_val = sql_value_to_gql_value(v.clone())
-							.map_err(|_| "SQL to GQL translation failed")?;
+							.map_err(|e| async_graphql::Error::from(e))?;
 						Ok(Some(FieldValue::value(gql_val)))
 					}
 				},
@@ -415,8 +415,7 @@ fn resolve_nested_object_value(
 			Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
 			Value::None | Value::Null => Ok(None),
 			_ => {
-				let out =
-					sql_value_to_gql_value(val).map_err(|_| "SQL to GQL translation failed")?;
+				let out = sql_value_to_gql_value(val).map_err(|e| async_graphql::Error::from(e))?;
 				Ok(Some(FieldValue::value(out)))
 			}
 		}
@@ -427,16 +426,11 @@ fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
-#[expect(clippy::too_many_arguments)]
 pub async fn process_tbs(
 	tbs: Arc<[TableDefinition]>,
 	mut query: Object,
 	types: &mut Vec<Type>,
-	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	_session: &Session,
-	datastore: &Arc<Datastore>,
+	ctx: &SchemaContext<'_>,
 	relations: &[RelationInfo],
 ) -> Result<Object, GqlError> {
 	// Pre-fetch field definitions for relation tables (needed for filter support
@@ -445,7 +439,7 @@ pub async fn process_tbs(
 	for rel in relations.iter() {
 		let rel_name = rel.table_name.clone().into_string();
 		if let std::collections::hash_map::Entry::Vacant(e) = relation_table_fds.entry(rel_name) {
-			let fds = tx.all_tb_fields(ns, db, &rel.table_name, None).await?;
+			let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &rel.table_name, None).await?;
 			e.insert(fds);
 		}
 	}
@@ -485,7 +479,7 @@ pub async fn process_tbs(
 			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
-		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
+		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb.name, None).await?;
 
 		// Detect nested object fields (TYPE object with children, TYPE array<object>
 		// with wildcard children). These will get generated GraphQL Object types
@@ -493,7 +487,7 @@ pub async fn process_tbs(
 		let nested_objects = detect_nested_objects(&tb.name.clone().into_string(), &fds);
 
 		let fds1 = fds.clone();
-		let kvs1 = datastore.clone();
+		let kvs1 = ctx.datastore.clone();
 
 		query = query.field(
 			Field::new(
@@ -530,89 +524,98 @@ pub async fn process_tbs(
 									let asc = current.get("asc");
 									let desc = current.get("desc");
 									match (asc, desc) {
-										(Some(_), Some(_)) => {
-											return Err("Found both ASC and DESC in order".into());
-										}
-										(Some(GqlValue::Enum(a)), None) => {
-											orders.push(order_asc(a.as_str().to_string()))
-										}
-										(None, Some(GqlValue::Enum(d))) => {
-											orders.push(order_desc(d.as_str().to_string()))
-										}
-										(_, _) => {
-											break;
-										}
+									(Some(_), Some(_)) => {
+										return Err(resolver_error(
+											"Found both ASC and DESC in order",
+										)
+										.into());
 									}
-									if let Some(GqlValue::Object(next)) = current.get("then") {
-										current = next;
-									} else {
+									(Some(GqlValue::Enum(a)), None) => {
+										orders.push(order_asc(a.as_str().to_string()))
+									}
+									(None, Some(GqlValue::Enum(d))) => {
+										orders.push(order_desc(d.as_str().to_string()))
+									}
+									(_, _) => {
 										break;
 									}
 								}
-								Some(orders)
+								if let Some(GqlValue::Object(next)) = current.get("then") {
+									current = next;
+								} else {
+									break;
+								}
 							}
-							_ => None,
-						};
+							Some(orders)
+						}
+						_ => None,
+					};
 
-						trace!("parsed orders: {orders:?}");
+					trace!("parsed orders: {orders:?}");
 
-						let cond = match filter {
-							Some(f) => {
-								let o = match f {
-									GqlValue::Object(o) => o,
-									f => {
-										error!(
-										"Found filter {f}, which should be object and should have been rejected by async graphql."
-									);
-										return Err("Value in cond doesn't fit schema".into());
-									}
-								};
-
-								let cond = cond_from_filter(o, &fds1)?;
-
-								Some(cond)
-							}
-							None => None,
-						};
-
-						trace!("parsed filter: {cond:?}");
-
-						// SELECT * FROM ...
-						// Note: We select * (not just id) so that permissions are properly checked
-						let expr = expr::Expr::Select(Box::new(SelectStatement {
-							what: vec![Expr::Table(tb_name)],
-							fields: Fields::all(),
-							order: orders.map(|x| Ordering::Order(OrderList(x))),
-							cond,
-							limit,
-							start,
-							omit: vec![],
-							only: false,
-							with: None,
-							split: None,
-							group: None,
-							fetch: None,
-							version: version_to_expr(&version),
-							timeout: Expr::Literal(Literal::None),
-							explain: None,
-							tempfiles: false,
-						}));
-
-						// Convert to LogicalPlan and execute
-						let plan = LogicalPlan {
-							expressions: vec![TopLevelExpr::Expr(expr)],
-						};
-
-						let res = execute_plan(&kvs1, sess1, plan).await?;
-
-						let res_vec =
-							match res {
-								Value::Array(a) => a,
-								v => {
-									error!("Found top level value, in result which should be array: {v:?}");
-									return Err("Internal Error".into());
+					let cond = match filter {
+						Some(f) => {
+							let o = match f {
+								GqlValue::Object(o) => o,
+								f => {
+									error!(
+									"Found filter {f}, which should be object and should have been rejected by async graphql."
+								);
+									return Err(resolver_error(
+										"Value in cond doesn't fit schema",
+									)
+									.into());
 								}
 							};
+
+							let cond = cond_from_filter(o, &fds1)?;
+
+							Some(cond)
+						}
+						None => None,
+					};
+
+					trace!("parsed filter: {cond:?}");
+
+					// SELECT * FROM ...
+					// Note: We select * (not just id) so that permissions are properly checked
+					let expr = expr::Expr::Select(Box::new(SelectStatement {
+						what: vec![Expr::Table(tb_name)],
+						fields: Fields::all(),
+						order: orders.map(|x| Ordering::Order(OrderList(x))),
+						cond,
+						limit,
+						start,
+						omit: vec![],
+						only: false,
+						with: None,
+						split: None,
+						group: None,
+						fetch: None,
+						version: version_to_expr(&version),
+						timeout: Expr::Literal(Literal::None),
+						explain: None,
+						tempfiles: false,
+					}));
+
+					// Convert to LogicalPlan and execute
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(expr)],
+					};
+
+					let res = execute_plan(&kvs1, sess1, plan).await?;
+
+					let res_vec =
+						match res {
+							Value::Array(a) => a,
+							v => {
+								error!("Found top level value, in result which should be array: {v:?}");
+								return Err(internal_error(
+									"Unexpected result type from table query",
+								)
+								.into());
+							}
+						};
 
 						// Wrap each result object as a CachedRecord, preserving
 						// the full record data so that field resolvers can extract
@@ -668,7 +671,7 @@ pub async fn process_tbs(
 			.argument(InputValue::new("version", TypeRef::named(TypeRef::STRING))),
 		);
 
-		let kvs2 = datastore.to_owned();
+		let kvs2 = ctx.datastore.to_owned();
 		query = query.field(
 			Field::new(
 				format!("_get_{}", tb.name),
@@ -938,7 +941,7 @@ pub async fn process_tbs(
 		types.push(Type::InputObject(table_filter));
 	}
 
-	let kvs3 = datastore.to_owned();
+	let kvs3 = ctx.datastore.to_owned();
 	query = query.field(
 		Field::new("_get", TypeRef::named("record"), move |ctx| {
 			FieldFuture::new({
@@ -1281,7 +1284,9 @@ fn make_relation_field_resolver(
 						let desc = current.get("desc");
 						match (asc, desc) {
 							(Some(_), Some(_)) => {
-								return Err("Found both ASC and DESC in order".into());
+								return Err(
+									resolver_error("Found both ASC and DESC in order").into()
+								);
 							}
 							(Some(GqlValue::Enum(a)), None) => {
 								orders.push(order_asc(a.as_str().to_string()))
@@ -1323,9 +1328,9 @@ fn make_relation_field_resolver(
 					f => {
 						error!(
 							"Found filter {f}, which should be object and should have \
-							 been rejected by async graphql."
+						 been rejected by async graphql."
 						);
-						return Err("Value in cond doesn't fit schema".into());
+						return Err(resolver_error("Value in cond doesn't fit schema").into());
 					}
 				};
 				let user_cond = cond_from_filter(o, fds)?;

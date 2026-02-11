@@ -57,8 +57,6 @@ pub(crate) async fn execute_plan(
 		.await
 		.map_err(|e| GqlError::InternalError(format!("Failed to execute query plan: {}", e)))?;
 
-	tracing::warn!("results: {results:?}");
-
 	// Take the first result
 	let first_result = results
 		.into_iter()
