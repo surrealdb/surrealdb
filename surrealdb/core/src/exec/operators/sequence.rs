@@ -48,6 +48,15 @@ pub struct SequencePlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl SequencePlan {
+	pub(crate) fn new(block: Block) -> Self {
+		Self {
+			block,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 /// Get the FrozenContext for planning from the ExecutionContext.
 ///
 /// Since ExecutionContext's FrozenContext is the single source of truth

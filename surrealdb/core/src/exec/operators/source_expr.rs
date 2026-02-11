@@ -33,6 +33,15 @@ pub struct SourceExpr {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl SourceExpr {
+	pub(crate) fn new(expr: Arc<dyn PhysicalExpr>) -> Self {
+		Self {
+			expr,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SourceExpr {

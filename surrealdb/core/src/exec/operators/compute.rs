@@ -165,15 +165,14 @@ async fn compute_batch(
 
 impl Compute {
 	/// Create a new Compute operator.
-	pub fn new(
+	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		fields: Vec<(String, Arc<dyn PhysicalExpr>)>,
-		metrics: Arc<OperatorMetrics>,
 	) -> Self {
 		Self {
 			input,
 			fields,
-			metrics,
+			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 }
@@ -195,14 +194,11 @@ mod tests {
 		// but we can test the operator's metadata methods
 		use crate::exec::operators::SourceExpr;
 
-		let source = Arc::new(SourceExpr {
-			expr: literal_expr(1),
-		});
+		let source = Arc::new(SourceExpr::new(literal_expr(1)));
 
 		let compute = Compute::new(
 			source,
 			vec![("a".to_string(), literal_expr(42)), ("b".to_string(), literal_expr(100))],
-			Arc::new(crate::exec::OperatorMetrics::new()),
 		);
 
 		assert_eq!(compute.name(), "Compute");
@@ -219,11 +215,9 @@ mod tests {
 	fn test_compute_empty() {
 		use crate::exec::operators::SourceExpr;
 
-		let source = Arc::new(SourceExpr {
-			expr: literal_expr(1),
-		});
+		let source = Arc::new(SourceExpr::new(literal_expr(1)));
 
-		let compute = Compute::new(source, vec![], Arc::new(crate::exec::OperatorMetrics::new()));
+		let compute = Compute::new(source, vec![]);
 
 		assert!(compute.fields.is_empty());
 		assert_eq!(compute.fields.len(), 0);

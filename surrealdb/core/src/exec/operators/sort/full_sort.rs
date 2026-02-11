@@ -42,6 +42,17 @@ pub struct Sort {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Sort {
+	/// Create a new Sort operator.
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, order_by: Vec<OrderByField>) -> Self {
+		Self {
+			input,
+			order_by,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Sort {
@@ -205,15 +216,11 @@ pub struct SortByKey {
 
 impl SortByKey {
 	/// Create a new SortByKey operator.
-	pub fn new(
-		input: Arc<dyn ExecOperator>,
-		sort_keys: Vec<SortKey>,
-		metrics: Arc<OperatorMetrics>,
-	) -> Self {
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, sort_keys: Vec<SortKey>) -> Self {
 		Self {
 			input,
 			sort_keys,
-			metrics,
+			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
 }

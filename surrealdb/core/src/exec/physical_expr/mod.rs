@@ -294,6 +294,7 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// Used by `EXPLAIN` / `EXPLAIN ANALYZE` to display expression trees
 	/// beneath each operator. Each element is `(role, expr)` where `role`
 	/// describes the relationship (e.g. "left", "right", "operand").
+	#[allow(dead_code)]
 	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		vec![]
 	}

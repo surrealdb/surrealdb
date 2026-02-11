@@ -36,6 +36,16 @@ pub struct UnwrapExactlyOne {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl UnwrapExactlyOne {
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, none_on_empty: bool) -> Self {
+		Self {
+			input,
+			none_on_empty,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for UnwrapExactlyOne {

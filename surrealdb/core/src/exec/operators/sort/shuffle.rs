@@ -36,6 +36,17 @@ pub struct RandomShuffle {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl RandomShuffle {
+	/// Create a new RandomShuffle operator.
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, limit: Option<usize>) -> Self {
+		Self {
+			input,
+			limit,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for RandomShuffle {

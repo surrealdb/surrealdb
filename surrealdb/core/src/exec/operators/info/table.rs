@@ -38,6 +38,21 @@ pub struct TableInfoPlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl TableInfoPlan {
+	pub(crate) fn new(
+		table: Arc<dyn PhysicalExpr>,
+		structured: bool,
+		version: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		Self {
+			table,
+			structured,
+			version,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for TableInfoPlan {

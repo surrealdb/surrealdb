@@ -74,6 +74,7 @@ use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
 use crate::err::Error;
+use crate::exec::ExecOperator;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::operators::{
 	AnalyzePlan, DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, ForeachPlan, IfElsePlan,
@@ -81,7 +82,6 @@ use crate::exec::operators::{
 	TableInfoPlan, UserInfoPlan,
 };
 use crate::exec::physical_expr::ControlFlowKind;
-use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::{Expr, Function, FunctionCall};
 
@@ -456,50 +456,25 @@ impl<'ctx> Planner<'ctx> {
 				use crate::expr::statements::info::InfoStatement;
 
 				let plan: Arc<dyn ExecOperator> = match *info {
-					InfoStatement::Root(structured) => Arc::new(RootInfoPlan {
-						structured,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}),
-					InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan {
-						structured,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}),
+					InfoStatement::Root(structured) => Arc::new(RootInfoPlan::new(structured)),
+					InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan::new(structured)),
 					InfoStatement::Db(structured, version) => {
 						let version = version.map(|v| self.physical_expr(v)).transpose()?;
-						Arc::new(DatabaseInfoPlan {
-							structured,
-							version,
-							metrics: Arc::new(OperatorMetrics::new()),
-						})
+						Arc::new(DatabaseInfoPlan::new(structured, version))
 					}
 					InfoStatement::Tb(table, structured, version) => {
 						let table = self.physical_expr_as_name(table)?;
 						let version = version.map(|v| self.physical_expr(v)).transpose()?;
-						Arc::new(TableInfoPlan {
-							table,
-							structured,
-							version,
-							metrics: Arc::new(OperatorMetrics::new()),
-						})
+						Arc::new(TableInfoPlan::new(table, structured, version))
 					}
 					InfoStatement::User(user, base, structured) => {
 						let user = self.physical_expr_as_name(user)?;
-						Arc::new(UserInfoPlan {
-							user,
-							base,
-							structured,
-							metrics: Arc::new(OperatorMetrics::new()),
-						})
+						Arc::new(UserInfoPlan::new(user, base, structured))
 					}
 					InfoStatement::Index(index, table, structured) => {
 						let index = self.physical_expr_as_name(index)?;
 						let table = self.physical_expr_as_name(table)?;
-						Arc::new(IndexInfoPlan {
-							index,
-							table,
-							structured,
-							metrics: Arc::new(OperatorMetrics::new()),
-						})
+						Arc::new(IndexInfoPlan::new(index, table, structured))
 					}
 				};
 				Ok(Arc::new(crate::exec::physical_expr::ScalarSubquery {
@@ -773,50 +748,30 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::expr::statements::info::InfoStatement;
 		match info {
-			InfoStatement::Root(structured) => Ok(Arc::new(RootInfoPlan {
-				structured,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>),
-			InfoStatement::Ns(structured) => Ok(Arc::new(NamespaceInfoPlan {
-				structured,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>),
+			InfoStatement::Root(structured) => {
+				Ok(Arc::new(RootInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			}
+			InfoStatement::Ns(structured) => {
+				Ok(Arc::new(NamespaceInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			}
 			InfoStatement::Db(structured, version) => {
 				let version = version.map(|v| self.physical_expr(v)).transpose()?;
-				Ok(Arc::new(DatabaseInfoPlan {
-					structured,
-					version,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(DatabaseInfoPlan::new(structured, version)) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Tb(table, structured, version) => {
 				let table = self.physical_expr_as_name(table)?;
 				let version = version.map(|v| self.physical_expr(v)).transpose()?;
-				Ok(Arc::new(TableInfoPlan {
-					table,
-					structured,
-					version,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(TableInfoPlan::new(table, structured, version))
+					as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::User(user, base, structured) => {
 				let user = self.physical_expr_as_name(user)?;
-				Ok(Arc::new(UserInfoPlan {
-					user,
-					base,
-					structured,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(UserInfoPlan::new(user, base, structured)) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Index(index, table, structured) => {
 				let index = self.physical_expr_as_name(index)?;
 				let table = self.physical_expr_as_name(table)?;
-				Ok(Arc::new(IndexInfoPlan {
-					index,
-					table,
-					structured,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(IndexInfoPlan::new(index, table, structured)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -830,12 +785,7 @@ impl<'ctx> Planner<'ctx> {
 			range,
 			block,
 		} = stmt;
-		Ok(Arc::new(ForeachPlan {
-			param,
-			range,
-			body: block,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}) as Arc<dyn ExecOperator>)
+		Ok(Arc::new(ForeachPlan::new(param, range, block)) as Arc<dyn ExecOperator>)
 	}
 
 	fn plan_if_else_statement(
@@ -846,27 +796,18 @@ impl<'ctx> Planner<'ctx> {
 			exprs,
 			close,
 		} = stmt;
-		Ok(Arc::new(IfElsePlan {
-			branches: exprs,
-			else_body: close,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}) as Arc<dyn ExecOperator>)
+		Ok(Arc::new(IfElsePlan::new(exprs, close)) as Arc<dyn ExecOperator>)
 	}
 
 	fn plan_block(&self, block: crate::expr::Block) -> Result<Arc<dyn ExecOperator>, Error> {
 		if block.0.is_empty() {
 			use crate::exec::physical_expr::Literal as PhysicalLiteral;
-			Ok(Arc::new(ExprPlan {
-				expr: Arc::new(PhysicalLiteral(crate::val::Value::None)),
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>)
+			Ok(Arc::new(ExprPlan::new(Arc::new(PhysicalLiteral(crate::val::Value::None))))
+				as Arc<dyn ExecOperator>)
 		} else if block.0.len() == 1 {
 			self.plan_expr(block.0.into_iter().next().expect("block verified non-empty"))
 		} else {
-			Ok(Arc::new(SequencePlan {
-				block,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>)
+			Ok(Arc::new(SequencePlan::new(block)) as Arc<dyn ExecOperator>)
 		}
 	}
 
@@ -885,30 +826,20 @@ impl<'ctx> Planner<'ctx> {
 			if fields.is_empty() {
 				inner
 			} else {
-				Arc::new(Fetch {
-					input: inner,
-					fields,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>
+				Arc::new(Fetch::new(inner, fields)) as Arc<dyn ExecOperator>
 			}
 		} else {
 			inner
 		};
 
-		Ok(Arc::new(ReturnPlan {
-			inner,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}))
+		Ok(Arc::new(ReturnPlan::new(inner)))
 	}
 
 	fn plan_sleep_statement(
 		&self,
 		sleep_stmt: crate::expr::statements::SleepStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		Ok(Arc::new(SleepPlan {
-			duration: sleep_stmt.duration,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}))
+		Ok(Arc::new(SleepPlan::new(sleep_stmt.duration)))
 	}
 
 	fn plan_explain_statement(
@@ -938,10 +869,7 @@ impl<'ctx> Planner<'ctx> {
 	/// (literals, params, function calls, closures, etc.).
 	fn plan_expr_as_operator(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		let phys_expr = self.physical_expr(expr)?;
-		Ok(Arc::new(ExprPlan {
-			expr: phys_expr,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}) as Arc<dyn ExecOperator>)
+		Ok(Arc::new(ExprPlan::new(phys_expr)) as Arc<dyn ExecOperator>)
 	}
 }
 

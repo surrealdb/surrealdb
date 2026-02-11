@@ -33,6 +33,16 @@ pub struct LetPlan {
 	pub value: Arc<dyn ExecOperator>,
 }
 
+impl LetPlan {
+	pub(crate) fn new(name: String, value: Arc<dyn ExecOperator>) -> Self {
+		Self {
+			name,
+			value,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for LetPlan {

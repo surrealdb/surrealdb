@@ -43,6 +43,17 @@ pub struct ForeachPlan {
 	pub body: Block,
 }
 
+impl ForeachPlan {
+	pub(crate) fn new(param: Param, range: Expr, body: Block) -> Self {
+		Self {
+			param,
+			range,
+			body,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 /// Iterator enum for foreach - handles both arrays and integer ranges.
 enum ForeachIter {
 	Array(std::vec::IntoIter<Value>),

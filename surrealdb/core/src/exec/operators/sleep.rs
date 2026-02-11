@@ -30,6 +30,15 @@ pub struct SleepPlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl SleepPlan {
+	pub(crate) fn new(duration: Duration) -> Self {
+		Self {
+			duration,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SleepPlan {
@@ -100,10 +109,7 @@ mod tests {
 	use super::*;
 
 	fn test_sleep_plan(duration: Duration) -> SleepPlan {
-		SleepPlan {
-			duration,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
+		SleepPlan::new(duration)
 	}
 
 	#[test]

@@ -103,6 +103,24 @@ pub struct Project {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Project {
+	/// Create a new Project operator with fresh metrics.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		fields: Vec<FieldSelection>,
+		omit: Vec<Idiom>,
+		include_all: bool,
+	) -> Self {
+		Self {
+			input,
+			fields,
+			omit,
+			include_all,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Project {

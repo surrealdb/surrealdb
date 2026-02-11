@@ -44,6 +44,16 @@ pub struct IfElsePlan {
 	pub else_body: Option<Expr>,
 }
 
+impl IfElsePlan {
+	pub(crate) fn new(branches: Vec<(Expr, Expr)>, else_body: Option<Expr>) -> Self {
+		Self {
+			branches,
+			else_body,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IfElsePlan {

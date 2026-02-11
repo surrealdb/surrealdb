@@ -49,6 +49,23 @@ pub struct FullTextScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl FullTextScan {
+	pub(crate) fn new(
+		index_ref: IndexRef,
+		query: String,
+		operator: MatchesOperator,
+		table_name: crate::val::TableName,
+	) -> Self {
+		Self {
+			index_ref,
+			query,
+			operator,
+			table_name,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for FullTextScan {

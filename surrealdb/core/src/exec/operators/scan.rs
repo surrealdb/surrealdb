@@ -93,6 +93,35 @@ pub struct Scan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Scan {
+	/// Create a new Scan operator with fresh metrics.
+	#[allow(clippy::too_many_arguments)]
+	pub(crate) fn new(
+		source: Arc<dyn PhysicalExpr>,
+		version: Option<u64>,
+		cond: Option<Cond>,
+		order: Option<Ordering>,
+		with: Option<With>,
+		needed_fields: Option<std::collections::HashSet<String>>,
+		predicate: Option<Arc<dyn PhysicalExpr>>,
+		limit: Option<Arc<dyn PhysicalExpr>>,
+		start: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		Self {
+			source,
+			version,
+			cond,
+			order,
+			with,
+			needed_fields,
+			predicate,
+			limit,
+			start,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Scan {
@@ -556,13 +585,7 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) if index_ref.cols.len() == 1 => {
-			let operator = IndexScan {
-				index_ref,
-				access,
-				direction,
-				table_name: cfg.table_name,
-				metrics: Arc::new(OperatorMetrics::new()),
-			};
+			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -573,13 +596,7 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			let ft_op = FullTextScan {
-				index_ref,
-				query,
-				operator,
-				table_name: cfg.table_name,
-				metrics: Arc::new(OperatorMetrics::new()),
-			};
+			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -975,22 +992,21 @@ mod tests {
 		)
 		.expect("Failed to create physical expression");
 
-		Scan {
+		Scan::new(
 			source,
-			version: None,
-			cond: None,
-			order: None,
-			with: if with_index_hints {
+			None,
+			None,
+			None,
+			if with_index_hints {
 				Some(With::NoIndex)
 			} else {
 				None
 			},
-			needed_fields: None,
-			predicate: None,
-			limit: None,
-			start: None,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
+			None,
+			None,
+			None,
+			None,
+		)
 	}
 
 	#[test]

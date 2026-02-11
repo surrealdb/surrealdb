@@ -35,6 +35,21 @@ pub struct IndexInfoPlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl IndexInfoPlan {
+	pub(crate) fn new(
+		index: Arc<dyn PhysicalExpr>,
+		table: Arc<dyn PhysicalExpr>,
+		structured: bool,
+	) -> Self {
+		Self {
+			index,
+			table,
+			structured,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IndexInfoPlan {

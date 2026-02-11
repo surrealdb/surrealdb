@@ -67,6 +67,22 @@ pub struct SortTopK {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl SortTopK {
+	/// Create a new SortTopK operator.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		order_by: Vec<OrderByField>,
+		limit: usize,
+	) -> Self {
+		Self {
+			input,
+			order_by,
+			limit,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SortTopK {

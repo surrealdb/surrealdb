@@ -23,6 +23,19 @@ pub struct Timeout {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Timeout {
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		timeout: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		Self {
+			input,
+			timeout,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Timeout {

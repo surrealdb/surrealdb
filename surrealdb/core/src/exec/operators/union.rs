@@ -26,6 +26,15 @@ pub struct Union {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Union {
+	pub(crate) fn new(inputs: Vec<Arc<dyn ExecOperator>>) -> Self {
+		Self {
+			inputs,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Union {

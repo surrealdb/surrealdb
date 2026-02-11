@@ -68,6 +68,27 @@ pub struct ReferenceScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl ReferenceScan {
+	pub(crate) fn new(
+		source: Arc<dyn PhysicalExpr>,
+		referencing_table: Option<TableName>,
+		referencing_field: Option<String>,
+		output_mode: ReferenceScanOutput,
+		range_start: Bound<Arc<dyn PhysicalExpr>>,
+		range_end: Bound<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		Self {
+			source,
+			referencing_table,
+			referencing_field,
+			output_mode,
+			range_start,
+			range_end,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ReferenceScan {
@@ -408,18 +429,17 @@ mod tests {
 	fn test_reference_scan_attrs() {
 		use crate::exec::physical_expr::Literal;
 
-		let scan = ReferenceScan {
-			source: Arc::new(Literal(Value::RecordId(RecordId {
+		let scan = ReferenceScan::new(
+			Arc::new(Literal(Value::RecordId(RecordId {
 				table: "person".into(),
 				key: RecordIdKey::String("alice".to_string()),
 			}))),
-			referencing_table: Some("post".into()),
-			referencing_field: Some("author".to_string()),
-			output_mode: ReferenceScanOutput::RecordId,
-			range_start: Bound::Unbounded,
-			range_end: Bound::Unbounded,
-			metrics: Arc::new(crate::exec::OperatorMetrics::new()),
-		};
+			Some("post".into()),
+			Some("author".to_string()),
+			ReferenceScanOutput::RecordId,
+			Bound::Unbounded,
+			Bound::Unbounded,
+		);
 
 		assert_eq!(scan.name(), "ReferenceScan");
 		let attrs = scan.attrs();

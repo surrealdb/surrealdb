@@ -43,6 +43,22 @@ pub struct ExternalSort {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl ExternalSort {
+	/// Create a new ExternalSort operator.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		order_by: Vec<OrderByField>,
+		temp_dir: PathBuf,
+	) -> Self {
+		Self {
+			input,
+			order_by,
+			temp_dir,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ExternalSort {

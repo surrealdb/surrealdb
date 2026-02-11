@@ -217,20 +217,12 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Literal(Literal::None) => fetched,
 			timeout_expr => {
 				let timeout_phys = planning_planner.physical_expr(timeout_expr)?;
-				Arc::new(Timeout {
-					input: fetched,
-					timeout: Some(timeout_phys),
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>
+				Arc::new(Timeout::new(fetched, Some(timeout_phys))) as Arc<dyn ExecOperator>
 			}
 		};
 
 		if only {
-			Ok(Arc::new(UnwrapExactlyOne {
-				input: timed,
-				none_on_empty: !is_value_source,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}))
+			Ok(Arc::new(UnwrapExactlyOne::new(timed, !is_value_source)))
 		} else {
 			Ok(timed)
 		}
@@ -258,11 +250,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let filtered = if let Some(cond) = cond {
 			let predicate = self.physical_expr(cond.0)?;
-			Arc::new(Filter {
-				input: source,
-				predicate,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>
+			Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
 		} else {
 			source
 		};
@@ -287,13 +275,8 @@ impl<'ctx> Planner<'ctx> {
 			let (aggregates, group_by_exprs) = self.plan_aggregation(&fields, &group_by)?;
 
 			(
-				Arc::new(Aggregate {
-					input: split_op,
-					group_by,
-					group_by_exprs,
-					aggregates,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>,
+				Arc::new(Aggregate::new(split_op, group_by, group_by_exprs, aggregates))
+					as Arc<dyn ExecOperator>,
 				true,
 			)
 		} else {
@@ -313,12 +296,7 @@ impl<'ctx> Planner<'ctx> {
 		let limited = if limit.is_some() || start.is_some() {
 			let limit_expr = limit.map(|l| self.physical_expr(l.0)).transpose()?;
 			let offset_expr = start.map(|s| self.physical_expr(s.0)).transpose()?;
-			Arc::new(Limit {
-				input: sorted,
-				limit: limit_expr,
-				offset: offset_expr,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}) as Arc<dyn ExecOperator>
+			Arc::new(Limit::new(sorted, limit_expr, offset_expr)) as Arc<dyn ExecOperator>
 		} else {
 			sorted
 		};
@@ -331,13 +309,7 @@ impl<'ctx> Planner<'ctx> {
 		let projected = if skip_projections {
 			if !all_omit.is_empty() {
 				let omit_fields = self.plan_omit(all_omit)?;
-				Arc::new(Project {
-					input: limited,
-					fields: vec![],
-					omit: omit_fields,
-					include_all: true,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>
+				Arc::new(Project::new(limited, vec![], omit_fields, true)) as Arc<dyn ExecOperator>
 			} else {
 				limited
 			}
@@ -387,10 +359,7 @@ impl<'ctx> Planner<'ctx> {
 		if source_plans.len() == 1 {
 			Ok(source_plans.pop().expect("source_plans verified non-empty"))
 		} else {
-			Ok(Arc::new(Union {
-				inputs: source_plans,
-				metrics: Arc::new(OperatorMetrics::new()),
-			}))
+			Ok(Arc::new(Union::new(source_plans)))
 		}
 	}
 
@@ -413,78 +382,71 @@ impl<'ctx> Planner<'ctx> {
 		match expr {
 			Expr::Table(_) => {
 				let table_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan {
-					source: table_expr,
+				Ok(Arc::new(Scan::new(
+					table_expr,
 					version,
-					cond: cond.cloned(),
-					order: order.cloned(),
-					with: with.cloned(),
+					cond.cloned(),
+					order.cloned(),
+					with.cloned(),
 					needed_fields,
-					predicate: scan_predicate,
-					limit: scan_limit,
-					start: scan_start,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+					scan_predicate,
+					scan_limit,
+					scan_start,
+				)) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
 				let table_expr = self.physical_expr(Expr::Literal(
 					crate::expr::literal::Literal::RecordId(record_id_lit),
 				))?;
-				Ok(Arc::new(Scan {
-					source: table_expr,
+				Ok(Arc::new(Scan::new(
+					table_expr,
 					version,
-					cond: None,
-					order: None,
-					with: None,
+					None,
+					None,
+					None,
 					needed_fields,
-					predicate: None,
-					limit: None,
-					start: None,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+					None,
+					None,
+					None,
+				)) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Select(inner_select) => self.plan_select_statement(*inner_select),
 
 			Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
 				let phys_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(SourceExpr {
-					expr: phys_expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Param(param) => match self.ctx.value(param.as_str()) {
 				Some(Value::Table(_)) => {
 					let table_expr = self.physical_expr(Expr::Param(param.clone()))?;
-					Ok(Arc::new(Scan {
-						source: table_expr,
+					Ok(Arc::new(Scan::new(
+						table_expr,
 						version,
-						cond: cond.cloned(),
-						order: order.cloned(),
-						with: with.cloned(),
+						cond.cloned(),
+						order.cloned(),
+						with.cloned(),
 						needed_fields,
-						predicate: scan_predicate,
-						limit: scan_limit,
-						start: scan_start,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>)
+						scan_predicate,
+						scan_limit,
+						scan_start,
+					)) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
 					let table_expr = self.physical_expr(Expr::Param(param.clone()))?;
-					Ok(Arc::new(Scan {
-						source: table_expr,
+					Ok(Arc::new(Scan::new(
+						table_expr,
 						version,
-						cond: None,
-						order: None,
-						with: None,
+						None,
+						None,
+						None,
 						needed_fields,
-						predicate: None,
-						limit: None,
-						start: None,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>)
+						None,
+						None,
+						None,
+					)) as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
 					let phys_expr = self.physical_expr(Expr::Param(param))?;
@@ -497,44 +459,39 @@ impl<'ctx> Planner<'ctx> {
 
 			Expr::FunctionCall(_) => {
 				let source_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan {
-					source: source_expr,
+				Ok(Arc::new(Scan::new(
+					source_expr,
 					version,
-					cond: cond.cloned(),
-					order: order.cloned(),
-					with: with.cloned(),
+					cond.cloned(),
+					order.cloned(),
+					with.cloned(),
 					needed_fields,
-					predicate: scan_predicate,
-					limit: scan_limit,
-					start: scan_start,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+					scan_predicate,
+					scan_limit,
+					scan_start,
+				)) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Postfix {
 				..
 			} => {
 				let source_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan {
-					source: source_expr,
+				Ok(Arc::new(Scan::new(
+					source_expr,
 					version,
-					cond: cond.cloned(),
-					order: order.cloned(),
-					with: with.cloned(),
+					cond.cloned(),
+					order.cloned(),
+					with.cloned(),
 					needed_fields,
-					predicate: scan_predicate,
-					limit: scan_limit,
-					start: scan_start,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+					scan_predicate,
+					scan_limit,
+					scan_start,
+				)) as Arc<dyn ExecOperator>)
 			}
 
 			other => {
 				let phys_expr = self.physical_expr(other)?;
-				Ok(Arc::new(SourceExpr {
-					expr: phys_expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -550,11 +507,7 @@ impl<'ctx> Planner<'ctx> {
 		match fields {
 			Fields::Value(selector) => {
 				let expr = self.physical_expr(selector.expr)?;
-				Ok(Arc::new(ProjectValue {
-					input,
-					expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(field_list) => {
@@ -567,13 +520,8 @@ impl<'ctx> Planner<'ctx> {
 					} else {
 						vec![]
 					};
-					return Ok(Arc::new(Project {
-						input,
-						fields: vec![],
-						omit: omit_fields,
-						include_all: true,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>);
+					return Ok(Arc::new(Project::new(input, vec![], omit_fields, true))
+						as Arc<dyn ExecOperator>);
 				}
 
 				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
@@ -586,11 +534,7 @@ impl<'ctx> Planner<'ctx> {
 					&& let Expr::Param(_) = &selector.expr
 				{
 					let expr = self.physical_expr(selector.expr.clone())?;
-					return Ok(Arc::new(ProjectValue {
-						input,
-						expr,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>);
+					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
 				}
 
 				let mut field_selections = Vec::with_capacity(field_list.len());
@@ -625,13 +569,8 @@ impl<'ctx> Planner<'ctx> {
 					vec![]
 				};
 
-				Ok(Arc::new(Project {
-					input,
-					fields: field_selections,
-					omit: omit_fields,
-					include_all: has_wildcard,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(Project::new(input, field_selections, omit_fields, has_wildcard))
+					as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -686,41 +625,27 @@ impl<'ctx> Planner<'ctx> {
 		match order {
 			Ordering::Random => {
 				let effective_limit = get_effective_limit_literal(start, limit);
-				Ok(Arc::new(RandomShuffle {
-					input,
-					limit: effective_limit,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(RandomShuffle::new(input, effective_limit)) as Arc<dyn ExecOperator>)
 			}
 			Ordering::Order(order_list) => {
 				let order_by = self.convert_order_list(order_list)?;
 
 				#[cfg(all(storage, not(target_family = "wasm")))]
 				if tempfiles && let Some(temp_dir) = self.ctx.temporary_directory() {
-					return Ok(Arc::new(ExternalSort {
-						input,
-						order_by,
-						temp_dir: temp_dir.to_path_buf(),
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>);
+					return Ok(
+						Arc::new(ExternalSort::new(input, order_by, temp_dir.to_path_buf()))
+							as Arc<dyn ExecOperator>,
+					);
 				}
 
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
 				{
-					return Ok(Arc::new(SortTopK {
-						input,
-						order_by,
-						limit: effective_limit,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>);
+					return Ok(Arc::new(SortTopK::new(input, order_by, effective_limit))
+						as Arc<dyn ExecOperator>);
 				}
 
-				Ok(Arc::new(Sort {
-					input,
-					order_by,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(Sort::new(input, order_by)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -742,11 +667,7 @@ impl<'ctx> Planner<'ctx> {
 			Ordering::Random => {
 				let effective_limit = get_effective_limit_literal(start, limit);
 				Ok((
-					Arc::new(RandomShuffle {
-						input,
-						limit: effective_limit,
-						metrics: Arc::new(OperatorMetrics::new()),
-					}) as Arc<dyn ExecOperator>,
+					Arc::new(RandomShuffle::new(input, effective_limit)) as Arc<dyn ExecOperator>,
 					vec![],
 				))
 			}
@@ -827,15 +748,13 @@ impl<'ctx> Planner<'ctx> {
 
 				let computed = if registry.has_expressions_for_point(ComputePoint::Sort) {
 					let compute_fields = registry.get_expressions_for_point(ComputePoint::Sort);
-					Arc::new(Compute::new(input, compute_fields, Arc::new(OperatorMetrics::new())))
-						as Arc<dyn ExecOperator>
+					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
 				} else {
 					input
 				};
 
 				Ok((
-					Arc::new(SortByKey::new(computed, sort_keys, Arc::new(OperatorMetrics::new())))
-						as Arc<dyn ExecOperator>,
+					Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
 					sort_only_fields,
 				))
 			}
@@ -859,11 +778,7 @@ impl<'ctx> Planner<'ctx> {
 					});
 				}
 				let expr = self.physical_expr(selector.expr.clone())?;
-				Ok(Arc::new(ProjectValue {
-					input,
-					expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(field_list) => {
@@ -996,18 +911,11 @@ impl<'ctx> Planner<'ctx> {
 						message: "LET expression cannot reference current row context".to_string(),
 					});
 				}
-				Arc::new(ExprPlan {
-					expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				}) as Arc<dyn ExecOperator>
+				Arc::new(ExprPlan::new(expr)) as Arc<dyn ExecOperator>
 			}
 		};
 
-		Ok(Arc::new(LetPlan {
-			name,
-			value,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}) as Arc<dyn ExecOperator>)
+		Ok(Arc::new(LetPlan::new(name, value)) as Arc<dyn ExecOperator>)
 	}
 
 	// ========================================================================

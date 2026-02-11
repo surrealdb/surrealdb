@@ -25,6 +25,16 @@ pub struct Fetch {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Fetch {
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, fields: Vec<Idiom>) -> Self {
+		Self {
+			input,
+			fields,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Fetch {
@@ -353,24 +363,19 @@ mod tests {
 		let fields = vec![Idiom(vec![Part::Field("author".into())])];
 
 		// Create a minimal scan for testing
-		let scan = Arc::new(Scan {
-			source: Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
-			version: None,
-			cond: None,
-			order: None,
-			with: None,
-			needed_fields: None,
-			predicate: None,
-			limit: None,
-			start: None,
-			metrics: std::sync::Arc::new(crate::exec::OperatorMetrics::new()),
-		});
+		let scan = Arc::new(Scan::new(
+			Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
+			None,
+			None,
+			None,
+			None,
+			None,
+			None,
+			None,
+			None,
+		));
 
-		let fetch = Fetch {
-			input: scan,
-			fields,
-			metrics: std::sync::Arc::new(crate::exec::OperatorMetrics::new()),
-		};
+		let fetch = Fetch::new(scan, fields);
 
 		assert_eq!(fetch.name(), "Fetch");
 	}

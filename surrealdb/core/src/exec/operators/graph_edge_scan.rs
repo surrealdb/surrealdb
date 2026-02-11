@@ -72,6 +72,23 @@ pub struct GraphEdgeScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl GraphEdgeScan {
+	pub(crate) fn new(
+		source: Arc<dyn PhysicalExpr>,
+		direction: LookupDirection,
+		edge_tables: Vec<EdgeTableSpec>,
+		output_mode: GraphScanOutput,
+	) -> Self {
+		Self {
+			source,
+			direction,
+			edge_tables,
+			output_mode,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for GraphEdgeScan {
@@ -410,13 +427,13 @@ mod tests {
 	fn test_graph_edge_scan_attrs() {
 		use crate::exec::physical_expr::Literal;
 
-		let scan = GraphEdgeScan {
-			source: Arc::new(Literal(Value::RecordId(RecordId {
+		let scan = GraphEdgeScan::new(
+			Arc::new(Literal(Value::RecordId(RecordId {
 				table: "person".into(),
 				key: RecordIdKey::String("alice".to_string()),
 			}))),
-			direction: LookupDirection::Out,
-			edge_tables: vec![
+			LookupDirection::Out,
+			vec![
 				EdgeTableSpec {
 					table: "knows".into(),
 					range_start: Bound::Unbounded,
@@ -428,9 +445,8 @@ mod tests {
 					range_end: Bound::Unbounded,
 				},
 			],
-			output_mode: GraphScanOutput::TargetId,
-			metrics: Arc::new(crate::exec::OperatorMetrics::new()),
-		};
+			GraphScanOutput::TargetId,
+		);
 
 		assert_eq!(scan.name(), "GraphEdgeScan");
 		let attrs = scan.attrs();

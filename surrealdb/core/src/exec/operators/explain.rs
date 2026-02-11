@@ -274,7 +274,7 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 			.iter()
 			.map(|(role, expr)| {
 				let mut expr_obj = Object::default();
-				expr_obj.insert("role".to_string(), Value::String(role.to_string()));
+				expr_obj.insert("role".to_string(), Value::String((*role).to_string()));
 				expr_obj.insert("sql".to_string(), Value::String(expr.to_sql()));
 
 				let embedded = expr.embedded_operators();
@@ -283,7 +283,7 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 						.iter()
 						.map(|(embed_role, embed_plan)| {
 							let mut e = Object::default();
-							e.insert("role".to_string(), Value::String(embed_role.to_string()));
+							e.insert("role".to_string(), Value::String((*embed_role).to_string()));
 							e.insert(
 								"plan".to_string(),
 								Value::Object(format_execution_plan_json(embed_plan.as_ref())),
@@ -439,7 +439,7 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator) -> Object {
 			.iter()
 			.map(|(role, expr)| {
 				let mut expr_obj = Object::default();
-				expr_obj.insert("role".to_string(), Value::String(role.to_string()));
+				expr_obj.insert("role".to_string(), Value::String((*role).to_string()));
 				expr_obj.insert("sql".to_string(), Value::String(expr.to_sql()));
 
 				let embedded = expr.embedded_operators();
@@ -448,7 +448,7 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator) -> Object {
 						.iter()
 						.map(|(embed_role, embed_plan)| {
 							let mut e = Object::default();
-							e.insert("role".to_string(), Value::String(embed_role.to_string()));
+							e.insert("role".to_string(), Value::String((*embed_role).to_string()));
 							e.insert(
 								"plan".to_string(),
 								Value::Object(format_analyze_plan_json(embed_plan.as_ref())),

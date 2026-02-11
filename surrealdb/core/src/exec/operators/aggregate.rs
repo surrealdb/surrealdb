@@ -37,6 +37,24 @@ pub struct Aggregate {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Aggregate {
+	/// Create a new Aggregate operator.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		group_by: Vec<Idiom>,
+		group_by_exprs: Vec<Arc<dyn PhysicalExpr>>,
+		aggregates: Vec<AggregateField>,
+	) -> Self {
+		Self {
+			input,
+			group_by,
+			group_by_exprs,
+			aggregates,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 /// Represents a field in the SELECT that may be an aggregate.
 #[derive(Debug, Clone)]
 pub struct AggregateField {

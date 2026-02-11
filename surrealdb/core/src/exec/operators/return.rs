@@ -28,6 +28,15 @@ pub struct ReturnPlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl ReturnPlan {
+	pub(crate) fn new(inner: Arc<dyn ExecOperator>) -> Self {
+		Self {
+			inner,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ReturnPlan {

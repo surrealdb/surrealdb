@@ -7,13 +7,13 @@ use std::sync::Arc;
 use super::Planner;
 use super::util::{extract_table_from_context, key_lit_to_expr};
 use crate::err::Error;
+use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
 	ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
-use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::{Expr, Literal};
 
 /// Special parameter name for passing the lookup source at execution time.
@@ -188,13 +188,12 @@ impl<'ctx> Planner<'ctx> {
 					})
 					.collect::<Result<Vec<_>, Error>>()?;
 
-				Arc::new(GraphEdgeScan {
-					source: source_expr,
-					direction: LookupDirection::from(dir),
+				Arc::new(GraphEdgeScan::new(
+					source_expr,
+					LookupDirection::from(dir),
 					edge_tables,
 					output_mode,
-					metrics: Arc::new(OperatorMetrics::new()),
-				})
+				))
 			}
 			crate::expr::lookup::LookupKind::Reference => {
 				let (referencing_table, referencing_field, range_start, range_end) =
@@ -229,15 +228,14 @@ impl<'ctx> Planner<'ctx> {
 					ReferenceScanOutput::RecordId
 				};
 
-				Arc::new(ReferenceScan {
-					source: source_expr,
+				Arc::new(ReferenceScan::new(
+					source_expr,
 					referencing_table,
 					referencing_field,
-					output_mode: ref_output_mode,
+					ref_output_mode,
 					range_start,
 					range_end,
-					metrics: Arc::new(OperatorMetrics::new()),
-				})
+				))
 			}
 		};
 
@@ -258,21 +256,16 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			let filtered: Arc<dyn ExecOperator> = if let Some(cond) = cond {
 				let predicate = self.physical_expr(cond.0)?;
-				Arc::new(Filter {
-					input: base_scan,
-					predicate,
-					metrics: Arc::new(OperatorMetrics::new()),
-				})
+				Arc::new(Filter::new(base_scan, predicate))
 			} else {
 				base_scan
 			};
 
 			let split_op: Arc<dyn ExecOperator> = if let Some(splits) = split {
-				Arc::new(crate::exec::operators::Split {
-					input: filtered,
-					idioms: splits.into_iter().map(|s| s.0).collect(),
-					metrics: Arc::new(crate::exec::OperatorMetrics::new()),
-				})
+				Arc::new(crate::exec::operators::Split::new(
+					filtered,
+					splits.into_iter().map(|s| s.0).collect(),
+				))
 			} else {
 				filtered
 			};
@@ -280,11 +273,7 @@ impl<'ctx> Planner<'ctx> {
 			let sorted: Arc<dyn ExecOperator> =
 				if let Some(crate::expr::order::Ordering::Order(order_list)) = order {
 					let order_by = self.convert_order_list(order_list)?;
-					Arc::new(crate::exec::operators::Sort {
-						input: split_op,
-						order_by,
-						metrics: Arc::new(crate::exec::OperatorMetrics::new()),
-					})
+					Arc::new(crate::exec::operators::Sort::new(split_op, order_by))
 				} else {
 					split_op
 				};
@@ -292,12 +281,7 @@ impl<'ctx> Planner<'ctx> {
 			let limited: Arc<dyn ExecOperator> = if limit.is_some() || start.is_some() {
 				let limit_expr = limit.map(|l| self.physical_expr(l.0)).transpose()?;
 				let offset_expr = start.map(|s| self.physical_expr(s.0)).transpose()?;
-				Arc::new(Limit {
-					input: sorted,
-					limit: limit_expr,
-					offset: offset_expr,
-					metrics: Arc::new(OperatorMetrics::new()),
-				})
+				Arc::new(Limit::new(sorted, limit_expr, offset_expr))
 			} else {
 				sorted
 			};

@@ -37,8 +37,7 @@ fn now_ns() -> u64 {
 
 #[cfg(target_family = "wasm")]
 fn now_ns() -> u64 {
-	// js_sys::Date::now() returns milliseconds as f64.
-	(js_sys::Date::now() * 1_000_000.0) as u64
+	wasmtimer::std::Instant::now().elapsed().as_nanos() as u64
 }
 
 // ---------------------------------------------------------------------------

@@ -36,6 +36,15 @@ pub struct UserInfoPlan {
 }
 
 impl UserInfoPlan {
+	pub(crate) fn new(user: Arc<dyn PhysicalExpr>, base: Option<Base>, structured: bool) -> Self {
+		Self {
+			user,
+			base,
+			structured,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+
 	/// Determine the required context level based on the base parameter.
 	///
 	/// When base is None, we return Root as the minimum required context since

@@ -26,6 +26,22 @@ pub struct Limit {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Limit {
+	/// Create a new Limit operator with fresh metrics.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		limit: Option<Arc<dyn PhysicalExpr>>,
+		offset: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
+		Self {
+			input,
+			limit,
+			offset,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Limit {

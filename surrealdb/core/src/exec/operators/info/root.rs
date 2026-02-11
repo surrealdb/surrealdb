@@ -39,6 +39,15 @@ pub struct RootInfoPlan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl RootInfoPlan {
+	pub(crate) fn new(structured: bool) -> Self {
+		Self {
+			structured,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for RootInfoPlan {
