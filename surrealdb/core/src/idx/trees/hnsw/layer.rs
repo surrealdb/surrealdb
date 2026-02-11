@@ -428,6 +428,7 @@ where
 	) -> Result<bool> {
 		self.graph.clear();
 
+		let mut migrated = false;
 		// Load legacy Hl chunks (if any) so we start with the complete graph and possibly migrate
 		// datas
 		if st.chunks > 0 {
@@ -456,7 +457,7 @@ where
 				// Reset the chunk count so subsequent reloads don't
 				// attempt to fetch the now-deleted Hl keys.
 				st.chunks = 0;
-				return Ok(true);
+				migrated = true;
 			}
 		}
 		// These represent the most recent state
@@ -476,7 +477,7 @@ where
 				count += 1;
 			}
 		}
-		Ok(false)
+		Ok(migrated)
 	}
 }
 
