@@ -20,7 +20,10 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]\n└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Tobie' OR securityNumber == '123456']\n"'''
+value = '''
+"Project [ctx: Db]
+└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Tobie' OR securityNumber == '123456']
+"'''
 
 [[test.results]]
 value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"

@@ -7,11 +7,11 @@
 //! # Architecture
 //!
 //! ```text
-//! ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-//! │   SurrealQL  │     │   Planner    │     │  Execution   │
-//! │     AST      │ ──► │   (this)     │ ──► │    Plan      │
-//! │    (Expr)    │     │              │     │ (ExecOperator) │
-//! └──────────────┘     └──────────────┘     └──────────────┘
+//! ┌──────────────┐     ┌──────────────┐     ┌────────────────┐
+//! │   SurrealQL  │     │   Planner    │     │   Execution    │
+//! │    (Expr)    │ ──► │   (this)     │ ──► │     Plan       │
+//! │              │     │              │     │ (ExecOperator) │
+//! └──────────────┘     └──────────────┘     └────────────────┘
 //! ```
 //!
 //! # Usage
@@ -125,8 +125,47 @@ impl<'ctx> Planner<'ctx> {
 	/// Plan an expression, converting it to an executable operator tree.
 	///
 	/// This is the main entry point for the planner.
-	pub fn plan(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
-		self.plan_expr(expr)
+	///
+	/// Note: This intentionally takes a borrowed Expr to avoid cloning if a DDL/DML statement
+	/// is encountered.
+	pub fn plan(&self, expr: &Expr) -> Result<Arc<dyn ExecOperator>, Error> {
+		match expr {
+			// DML — always fall back to old executor
+			Expr::Create(_) => Err(Error::PlannerUnsupported(
+				"CREATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Update(_) => Err(Error::PlannerUnsupported(
+				"UPDATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
+				"UPSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Delete(_) => Err(Error::PlannerUnsupported(
+				"DELETE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Insert(_) => Err(Error::PlannerUnsupported(
+				"INSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Relate(_) => Err(Error::PlannerUnsupported(
+				"RELATE statements not yet supported in execution plans".to_string(),
+			)),
+
+			// DDL — always fall back to old executor
+			Expr::Define(_) => Err(Error::PlannerUnsupported(
+				"DEFINE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Remove(_) => Err(Error::PlannerUnsupported(
+				"REMOVE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
+				"REBUILD statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Alter(_) => Err(Error::PlannerUnsupported(
+				"ALTER statements not yet supported in execution plans".to_string(),
+			)),
+
+			other => self.require_planned(self.plan_expr(other.clone())),
+		}
 	}
 
 	// ========================================================================
@@ -652,46 +691,6 @@ impl<'ctx> Planner<'ctx> {
 
 	fn plan_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			// DML — always fall back to old executor
-			Expr::Create(_) => Err(Error::PlannerUnsupported(
-				"CREATE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Update(_) => Err(Error::PlannerUnsupported(
-				"UPDATE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
-				"UPSERT statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Delete(_) => Err(Error::PlannerUnsupported(
-				"DELETE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Insert(_) => Err(Error::PlannerUnsupported(
-				"INSERT statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Relate(_) => Err(Error::PlannerUnsupported(
-				"RELATE statements not yet supported in execution plans".to_string(),
-			)),
-
-			// DDL — always fall back to old executor
-			Expr::Define(_) => Err(Error::PlannerUnsupported(
-				"DEFINE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Remove(_) => Err(Error::PlannerUnsupported(
-				"REMOVE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
-				"REBUILD statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Alter(_) => Err(Error::PlannerUnsupported(
-				"ALTER statements not yet supported in execution plans".to_string(),
-			)),
-
-			other => self.require_planned(self.plan_non_ddl_dml_expr(other)),
-		}
-	}
-
-	fn plan_non_ddl_dml_expr(&self, expr: Expr) -> Result<Arc<dyn ExecOperator>, Error> {
-		match expr {
 			Expr::Select(select) => self.plan_select_statement(*select),
 			Expr::Let(let_stmt) => self.plan_let_statement(*let_stmt),
 			Expr::Info(info) => self.plan_info_statement(*info),
@@ -727,18 +726,39 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Break
 			| Expr::Continue) => self.plan_expr_as_operator(expr),
 
-			Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Upsert(_)
-			| Expr::Delete(_)
-			| Expr::Insert(_)
-			| Expr::Relate(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Alter(_) => {
-				unreachable!("DDL/DML statements should be handled in plan_expr")
-			}
+			// DML — always fall back to old executor
+			Expr::Create(_) => Err(Error::PlannerUnsupported(
+				"CREATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Update(_) => Err(Error::PlannerUnsupported(
+				"UPDATE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
+				"UPSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Delete(_) => Err(Error::PlannerUnsupported(
+				"DELETE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Insert(_) => Err(Error::PlannerUnsupported(
+				"INSERT statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Relate(_) => Err(Error::PlannerUnsupported(
+				"RELATE statements not yet supported in execution plans".to_string(),
+			)),
+
+			// DDL — always fall back to old executor
+			Expr::Define(_) => Err(Error::PlannerUnsupported(
+				"DEFINE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Remove(_) => Err(Error::PlannerUnsupported(
+				"REMOVE statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
+				"REBUILD statements not yet supported in execution plans".to_string(),
+			)),
+			Expr::Alter(_) => Err(Error::PlannerUnsupported(
+				"ALTER statements not yet supported in execution plans".to_string(),
+			)),
 		}
 	}
 
@@ -882,7 +902,7 @@ impl<'ctx> Planner<'ctx> {
 /// This is the main entry point for the planner, delegating to `Planner::plan()`.
 /// Returns `Error::PlannerUnsupported` when `ComputeOnly` strategy is active.
 pub(crate) fn try_plan_expr(
-	expr: Expr,
+	expr: &Expr,
 	ctx: &FrozenContext,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {

@@ -180,7 +180,7 @@ async fn execute_block_with_context(
 		let frozen_ctx = planning_context(&current_ctx).clone();
 
 		// Try to plan the expression with current context
-		match try_plan_expr(expr.clone(), &frozen_ctx) {
+		match try_plan_expr(&expr, &frozen_ctx) {
 			Ok(plan) => {
 				// Handle context-mutating operators (like LET)
 				if plan.mutates_context() {
