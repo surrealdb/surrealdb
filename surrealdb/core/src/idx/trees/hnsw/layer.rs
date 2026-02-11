@@ -1,6 +1,6 @@
 use ahash::HashSet;
 use anyhow::Result;
-use async_graphql::futures_util::StreamExt;
+use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
