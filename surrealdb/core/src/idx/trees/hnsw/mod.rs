@@ -116,15 +116,17 @@ where
 		let tx = ctx.tx();
 		// Read the state
 		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
-		// Compare versions
+		// Possible migration
 		let mut migrated = false;
-		if st.layer0.version != self.state.layer0.version {
+		let force_migration = tx.writeable() && st.layer0.chunks > 0;
+		// Compare versions
+		if st.layer0.version != self.state.layer0.version || force_migration {
 			migrated |= self.layer0.load(ctx, &tx, &mut st.layer0).await?;
 		}
 		for ((new_stl, stl), layer) in
 			st.layers.iter_mut().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
 		{
-			if new_stl.version != stl.version {
+			if new_stl.version != stl.version || force_migration {
 				migrated |= layer.load(ctx, &tx, new_stl).await?;
 			}
 		}
