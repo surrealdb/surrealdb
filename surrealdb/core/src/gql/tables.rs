@@ -18,6 +18,7 @@ use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::Selector;
 use crate::expr::order::{OrderList, Ordering};
+use crate::expr::part::Part;
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
 	self, BinaryOperator, Cond, Expr, Fields, Function, FunctionCall, Idiom, Kind, Limit, Literal,
@@ -27,7 +28,7 @@ use crate::gql::error::internal_error;
 use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::{Datastore, Transaction};
-use crate::val::{Datetime, RecordId, TableName, Value};
+use crate::val::{Datetime, Object as SurObject, RecordId, TableName, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
@@ -73,6 +74,313 @@ fn parse_version_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Datetime>
 		}
 		Some(GqlValue::Null) | None => Ok(None),
 		Some(_) => Err(resolver_error("version must be a datetime string")),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Nested object and array sub-field resolution
+// ---------------------------------------------------------------------------
+
+/// Information about a sub-field of a nested object type.
+struct NestedSubField {
+	/// The GraphQL field name (e.g., "createdAt").
+	name: String,
+	/// The field's SurrealDB kind, if defined.
+	kind: Option<Kind>,
+	/// Optional comment from the field definition.
+	comment: Option<String>,
+}
+
+/// Information about a parent field that has nested object children, requiring
+/// a generated GraphQL Object type instead of the opaque `object` scalar.
+struct NestedObjectInfo {
+	/// The generated GraphQL type name (e.g., "item_time").
+	gql_type_name: String,
+	/// Whether the parent field is `TYPE array<object>` (vs. plain `TYPE object`).
+	is_array: bool,
+	/// Whether the parent field type is optional (nullable in GraphQL).
+	optional: bool,
+	/// The direct sub-fields of this nested object.
+	sub_fields: Vec<NestedSubField>,
+}
+
+/// Analyze field definitions for a table and detect fields with nested object
+/// children.
+///
+/// A parent field of `TYPE object` with children like `time.createdAt` or a
+/// parent of `TYPE array<object>` with wildcard children like `tags.*.name`
+/// will be detected. Returns a map from the parent field name to its nested
+/// object info.
+///
+/// Currently handles one level of nesting (direct children of top-level fields).
+fn detect_nested_objects(
+	table_name: &str,
+	fds: &[FieldDefinition],
+) -> HashMap<String, NestedObjectInfo> {
+	let mut children_by_parent: HashMap<String, Vec<NestedSubField>> = HashMap::new();
+	let mut parent_has_wildcard: HashMap<String, bool> = HashMap::new();
+
+	for fd in fds.iter() {
+		let parts = &fd.name.0;
+		if parts.len() < 2 {
+			continue; // Skip top-level fields
+		}
+
+		// Get the parent field name (first part must be a Field)
+		let parent_name = match &parts[0] {
+			Part::Field(name) => name.clone(),
+			_ => continue,
+		};
+
+		// Get the child field name (last part must be a Field)
+		let child_name = match parts.last() {
+			Some(Part::Field(name)) => name.clone(),
+			_ => continue,
+		};
+
+		// Check if there's a Part::All (wildcard `*`) between parent and child
+		let has_wildcard = parts[1..parts.len() - 1].iter().any(|p| matches!(p, Part::All));
+
+		// Only handle direct children:
+		// - depth 2 for plain object: [Field("parent"), Field("child")]
+		// - depth 3 for array element: [Field("parent"), All, Field("child")]
+		let expected_len = if has_wildcard {
+			3
+		} else {
+			2
+		};
+		if parts.len() != expected_len {
+			continue; // Skip deeper nesting for now
+		}
+
+		parent_has_wildcard.entry(parent_name.clone()).or_insert(has_wildcard);
+
+		children_by_parent.entry(parent_name.clone()).or_default().push(NestedSubField {
+			name: child_name,
+			kind: fd.field_kind.clone(),
+			comment: fd.comment.clone(),
+		});
+	}
+
+	// Now verify that each parent actually exists and is of the right type
+	// (TYPE object or TYPE array<object>, including option<...> variants)
+	let mut result = HashMap::new();
+
+	for (parent_name, sub_fields) in children_by_parent {
+		// Find the parent field definition
+		let parent_fd = fds.iter().find(|fd| {
+			fd.name.0.len() == 1 && matches!(&fd.name.0[0], Part::Field(n) if n == &parent_name)
+		});
+
+		let is_array = parent_has_wildcard.get(&parent_name).copied().unwrap_or(false);
+
+		// Verify the parent is `TYPE object` or `TYPE array<object>` (or their
+		// option<...> variants). Also track whether the type is optional.
+		let parent_kind = parent_fd.and_then(|fd| fd.field_kind.as_ref());
+		let (kind_ok, optional) = match parent_kind {
+			Some(Kind::Object) if !is_array => (true, false),
+			Some(Kind::Array(inner, _)) if is_array => (matches!(**inner, Kind::Object), false),
+			// Handle option<object> = Either([None, Object])
+			// and option<array<object>> = Either([None, Array(Object)])
+			Some(Kind::Either(ks)) => {
+				let has_none = ks.iter().any(|k| matches!(k, Kind::None));
+				if !is_array {
+					let has_object = ks.iter().any(|k| matches!(k, Kind::Object));
+					(has_none && has_object, has_none)
+				} else {
+					let has_array_obj = ks.iter().any(
+						|k| matches!(k, Kind::Array(inner, _) if matches!(**inner, Kind::Object)),
+					);
+					(has_none && has_array_obj, has_none)
+				}
+			}
+			// Also allow flexible/untyped parents if they have children defined
+			None => (true, true),
+			_ => (false, false),
+		};
+
+		if !kind_ok {
+			continue;
+		}
+
+		let gql_type_name = format!("{table_name}_{parent_name}");
+		result.insert(
+			parent_name,
+			NestedObjectInfo {
+				gql_type_name,
+				is_array,
+				optional,
+				sub_fields,
+			},
+		);
+	}
+
+	result
+}
+
+/// Build a GraphQL Object type for a nested object (e.g., `item_time`).
+///
+/// Sub-fields are resolved by extracting values from the parent `SurObject`.
+fn make_nested_object_type(
+	type_name: &str,
+	sub_fields: &[NestedSubField],
+	types: &mut Vec<Type>,
+) -> Result<Object, GqlError> {
+	let mut obj = Object::new(type_name);
+
+	for sf in sub_fields {
+		let Some(ref kind) = sf.kind else {
+			continue;
+		};
+		let fd_type = kind_to_type(kind.clone(), types, false)?;
+		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone());
+		let mut field = Field::new(&sf.name, fd_type, resolver);
+		if let Some(ref comment) = sf.comment {
+			field = field.description(comment.clone());
+		}
+		obj = obj.field(field);
+	}
+
+	Ok(obj)
+}
+
+/// Create a resolver for a sub-field within a nested object type.
+///
+/// The resolver downcasts the parent value to `SurObject` and extracts the
+/// named field, converting it to the appropriate GraphQL value.
+fn make_sub_field_resolver(
+	field_name: String,
+	kind: Option<Kind>,
+) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
+	move |ctx: ResolverContext| {
+		let field_name = field_name.clone();
+		let field_kind = kind.clone();
+		FieldFuture::new(async move {
+			let obj = ctx.parent_value.try_downcast_ref::<SurObject>()?;
+
+			match obj.get(&field_name) {
+				Some(val) => match val {
+					Value::None | Value::Null => Ok(None),
+					Value::RecordId(rid) => {
+						// Record-link: store as owned_any for dereferencing
+						let field_val = FieldValue::owned_any(VersionedRecord {
+							rid: rid.clone(),
+							version: None,
+						});
+						let field_val = match field_kind {
+							Some(Kind::Record(ref ts)) if ts.is_empty() || ts.len() > 1 => {
+								field_val.with_type(rid.table.clone())
+							}
+							_ => field_val,
+						};
+						Ok(Some(field_val))
+					}
+					Value::Geometry(g) => {
+						let type_name = geometry_gql_type_name(g);
+						let field_val = FieldValue::owned_any(g.clone());
+						let field_val = match &field_kind {
+							Some(Kind::Geometry(ks)) if ks.is_empty() || ks.len() > 1 => {
+								field_val.with_type(type_name)
+							}
+							_ => field_val,
+						};
+						Ok(Some(field_val))
+					}
+					v => {
+						let gql_val = sql_value_to_gql_value(v.clone())
+							.map_err(|_| "SQL to GQL translation failed")?;
+						Ok(Some(FieldValue::value(gql_val)))
+					}
+				},
+				None => Ok(None),
+			}
+		})
+	}
+}
+
+/// Create a resolver for a parent field that is a nested object (`TYPE object`
+/// with sub-fields). Returns the `SurObject` as `owned_any` so sub-field
+/// resolvers can extract values from it.
+fn make_nested_object_field_resolver(
+	fd_name: impl Into<String>,
+	is_array: bool,
+) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
+	let fd_name = fd_name.into();
+	move |ctx: ResolverContext| {
+		let fd_name = fd_name.clone();
+		FieldFuture::new(async move {
+			let ds = ctx.data::<Arc<Datastore>>()?;
+			let sess = ctx.data::<Arc<Session>>()?;
+
+			// Extract record ID and optional version
+			let (rid, version) = match ctx.parent_value.try_downcast_ref::<VersionedRecord>() {
+				Ok(vr) => (vr.rid.clone(), vr.version.clone()),
+				Err(_) => {
+					let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
+					(rid.clone(), None)
+				}
+			};
+
+			// Build SELECT VALUE <field> FROM ONLY <record_id>
+			let select_stmt = SelectStatement {
+				what: vec![Value::RecordId(rid.clone()).into_literal()],
+				fields: Fields::Value(Box::new(Selector {
+					expr: Expr::Idiom(Idiom::field(fd_name.clone())),
+					alias: None,
+				})),
+				only: true,
+				omit: vec![],
+				with: None,
+				cond: None,
+				split: None,
+				group: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: version_to_expr(&version),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
+			};
+
+			let plan = LogicalPlan {
+				expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
+			};
+
+			let val = execute_plan(ds, sess, plan).await?;
+
+			if is_array {
+				// Array<object>: return a list of SurObjects
+				match val {
+					Value::Array(arr) => {
+						let items: Vec<FieldValue> = arr
+							.0
+							.into_iter()
+							.filter_map(|v| match v {
+								Value::Object(obj) => Some(FieldValue::owned_any(obj)),
+								_ => None,
+							})
+							.collect();
+						Ok(Some(FieldValue::list(items)))
+					}
+					Value::None | Value::Null => Ok(None),
+					_ => Ok(None),
+				}
+			} else {
+				// Plain object: return a single SurObject
+				match val {
+					Value::Object(obj) => Ok(Some(FieldValue::owned_any(obj))),
+					Value::None | Value::Null => Ok(None),
+					_ => {
+						// Fallback: convert to GQL value
+						let out = sql_value_to_gql_value(val)
+							.map_err(|_| "SQL to GQL translation failed")?;
+						Ok(Some(FieldValue::value(out)))
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -139,6 +447,12 @@ pub async fn process_tbs(
 		types.push(Type::InputObject(filter_id()));
 
 		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
+
+		// Detect nested object fields (TYPE object with children, TYPE array<object>
+		// with wildcard children). These will get generated GraphQL Object types
+		// instead of the opaque `object` scalar.
+		let nested_objects = detect_nested_objects(&tb.name.clone().into_string(), &fds);
+
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
@@ -417,8 +731,61 @@ pub async fn process_tbs(
 				// so we don't take any new definition for it.
 				continue;
 			};
+
+			// Skip nested child fields (multi-part idioms like `time.createdAt`
+			// or `tags.*.name`). These are handled by their parent's generated
+			// nested object type.
+			if fd.name.0.len() > 1 {
+				continue;
+			}
+
 			let fd_name = Name::new(fd.name.to_sql());
 			existing_field_names.insert(fd_name.to_string());
+
+			// Check if this field has nested children and should use a generated
+			// GraphQL Object type instead of the default scalar/type mapping.
+			if let Some(nested) = nested_objects.get(fd_name.as_str()) {
+				// Generate the nested object type and register it
+				let nested_type =
+					make_nested_object_type(&nested.gql_type_name, &nested.sub_fields, types)?;
+				types.push(Type::Object(nested_type));
+
+				// Determine the GraphQL type for this field, respecting nullability.
+				let fd_type = if nested.is_array {
+					let list = TypeRef::List(Box::new(TypeRef::named_nn(&nested.gql_type_name)));
+					if nested.optional {
+						list
+					} else {
+						TypeRef::NonNull(Box::new(list))
+					}
+				} else if nested.optional {
+					TypeRef::named(&nested.gql_type_name)
+				} else {
+					TypeRef::named_nn(&nested.gql_type_name)
+				};
+
+				// Add to orderable (parent field name only, not sub-fields)
+				table_orderable = table_orderable.item(fd_name.to_string());
+
+				// Use the nested object resolver instead of the default one
+				table_ty_obj = table_ty_obj
+					.field(Field::new(
+						fd_name.as_str(),
+						fd_type,
+						make_nested_object_field_resolver(
+							fd_name.as_str().to_string(),
+							nested.is_array,
+						),
+					))
+					.description(if let Some(ref c) = fd.comment {
+						c.clone()
+					} else {
+						format!("Nested object field `{}`", fd_name.as_str())
+					});
+
+				continue;
+			}
+
 			let fd_type = kind_to_type(kind.clone(), types, false)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
