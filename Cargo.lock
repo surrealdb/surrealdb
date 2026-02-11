@@ -7264,8 +7264,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2f7d74f51208e21c096ea79815cd461aa72627ff2110145fb6c91b4d7d7937a"
+source = "git+https://github.com/surrealdb/surrealkv?branch=fix-vlog-compaction-bug#1ef5b0097cc9219e4c5c567fc14b290282569a45"
 dependencies = [
  "arc-swap",
  "async-trait",
