@@ -220,10 +220,7 @@ impl BlockPhysicalExpr {
 							.await?
 					}
 					Err(e) => {
-						return Err(ControlFlow::Err(anyhow::anyhow!(
-							"Failed to plan LET expression: {}",
-							e
-						)));
+						return Err(ControlFlow::Err(e.into()));
 					}
 				};
 
@@ -289,10 +286,7 @@ impl BlockPhysicalExpr {
 							.finish()
 							.await
 					}
-					Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(
-						"Failed to plan block expression: {}",
-						e
-					))),
+					Err(e) => Err(ControlFlow::Err(e.into())),
 				}
 			}
 		}

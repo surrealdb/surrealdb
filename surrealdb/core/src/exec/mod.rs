@@ -41,8 +41,8 @@ use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
-// Re-export FlowResult and FlowResultExt for operator implementations
-pub(crate) use crate::expr::{FlowResult, FlowResultExt};
+// Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
+pub(crate) use crate::expr::{ControlFlowExt, FlowResult, FlowResultExt};
 use crate::val::Value;
 
 // =========================================================================

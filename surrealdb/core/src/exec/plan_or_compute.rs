@@ -15,7 +15,7 @@ use crate::err::Error;
 use crate::exec::context::ExecutionContext;
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{FlowResult, ValueBatchStream};
-use crate::expr::{ControlFlow, Expr};
+use crate::expr::{ControlFlow, ControlFlowExt, Expr};
 use crate::val::Value;
 
 // ============================================================================
@@ -73,12 +73,12 @@ pub(crate) async fn evaluate_expr(
 			collect_single_value(stream).await
 		}
 		Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
-			let (opt, frozen) = get_legacy_context(ctx)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
+			let (opt, frozen) =
+				get_legacy_context(ctx).context("Legacy compute fallback context unavailable")?;
 			let mut stack = TreeStack::new();
 			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
 		}
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
+		Err(e) => Err(ControlFlow::Err(e.into())),
 	}
 }
 
@@ -99,10 +99,7 @@ pub(crate) async fn evaluate_body_expr(
 	match try_plan_expr(expr, &frozen_ctx) {
 		Ok(plan) => {
 			if plan.mutates_context() {
-				*ctx = plan
-					.output_context(ctx)
-					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
+				*ctx = plan.output_context(ctx).await.map_err(|e| ControlFlow::Err(e.into()))?;
 				Ok(Value::None)
 			} else {
 				let stream = plan.execute(ctx)?;
@@ -111,11 +108,11 @@ pub(crate) async fn evaluate_body_expr(
 		}
 		Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!(e.to_string())))?;
+				.context("Legacy compute fallback context unavailable")?;
 			let mut stack = TreeStack::new();
 			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
 		}
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(e.to_string()))),
+		Err(e) => Err(ControlFlow::Err(e.into())),
 	}
 }
 

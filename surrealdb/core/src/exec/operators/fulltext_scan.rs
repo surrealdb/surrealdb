@@ -8,27 +8,31 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use reblessive::TreeStack;
 
+use super::common::fetch_and_filter_record;
 use crate::catalog::Index;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	ValueBatch, ValueBatchStream, monitor_stream,
 };
-use crate::expr::ControlFlow;
 use crate::expr::operator::MatchesOperator;
+use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::MatchesHitsIterator;
-use crate::val::{RecordId, Value};
 
-/// Batch size for result batching.
+/// Batch size for full-text result batching.
+///
+/// Smaller than the default [`super::common::BATCH_SIZE`] because full-text
+/// results are ordered by relevance score, so smaller batches let downstream
+/// operators begin processing sooner.
 const BATCH_SIZE: usize = 100;
 
 /// Full-text search scan operator.
@@ -110,7 +114,7 @@ impl ExecOperator for FullTextScan {
 
 		let stream = async_stream::try_stream! {
 			// Get namespace and database IDs
-			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+			let db_ctx = ctx.database().context("FullTextScan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
@@ -118,20 +122,18 @@ impl ExecOperator for FullTextScan {
 			// Get the FrozenContext and Options from the root context
 			let root = ctx.root();
 			let frozen_ctx = &root.ctx;
-			let opt = root.options.as_ref().ok_or_else(|| {
-				ControlFlow::Err(anyhow::anyhow!("FullTextScan requires Options context"))
-			})?;
+			let opt = root.options.as_ref().context("FullTextScan requires Options context")?;
 
 			// Resolve table permissions
 			let select_permission = if check_perms {
 				let table_def = txn
 					.get_tb_by_name(&ns.name, &db.name, &table_name)
 					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
+					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
 					convert_permission_to_physical(&def.permissions.select, ctx.ctx())
-						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}")))?
+						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
 						name: table_name.clone(),
@@ -169,7 +171,7 @@ impl ExecOperator for FullTextScan {
 				ft_params,
 			)
 			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to open full-text index: {}", e)))?;
+			.context("Failed to open full-text index")?;
 
 			// Extract query terms using TreeStack for stack management
 			let query_terms = {
@@ -178,7 +180,7 @@ impl ExecOperator for FullTextScan {
 					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, opt, query.clone()))
 					.finish()
 					.await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to extract query terms: {}", e)))?
+					.context("Failed to extract query terms")?
 			};
 
 			// If query terms are empty, no results
@@ -205,7 +207,7 @@ impl ExecOperator for FullTextScan {
 			loop {
 				// Get the next hit
 				let hit = hits_iter.next(txn.as_ref()).await
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get next hit: {}", e)))?;
+					.context("Failed to get next hit")?;
 
 				match hit {
 					Some((rid, _doc_id)) => {
@@ -243,43 +245,4 @@ impl ExecOperator for FullTextScan {
 
 		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
 	}
-}
-
-/// Fetch a record by ID and apply permission filtering.
-async fn fetch_and_filter_record(
-	ctx: &ExecutionContext,
-	txn: &crate::kvs::Transaction,
-	ns: crate::catalog::NamespaceId,
-	db: crate::catalog::DatabaseId,
-	rid: &RecordId,
-	select_permission: &PhysicalPermission,
-	check_perms: bool,
-) -> Result<Option<Value>, ControlFlow> {
-	// Fetch the record
-	let record = txn
-		.get_record(ns, db, &rid.table, &rid.key, None)
-		.await
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
-
-	// Check if record exists
-	if record.data.as_ref().is_none() {
-		return Ok(None);
-	}
-
-	// Inject the id field into the document
-	let mut value = record.data.as_ref().clone();
-	value.def(rid);
-
-	// Check permission
-	if check_perms {
-		let allowed = check_permission_for_value(select_permission, &value, ctx)
-			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))?;
-
-		if !allowed {
-			return Ok(None);
-		}
-	}
-
-	Ok(Some(value))
 }

@@ -10,19 +10,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::catalog::providers::TableProvider;
+use super::common::{BATCH_SIZE, evaluate_bound_key, extract_record_ids, resolve_record_batch};
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
 use crate::kvs::KVKey;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
-
-/// Batch size for collecting graph edges before yielding.
-const BATCH_SIZE: usize = 1000;
+use crate::val::{RecordId, TableName};
 
 /// What kind of output the GraphEdgeScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -117,12 +115,10 @@ impl ExecOperator for GraphEdgeScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Graph edge scanning requires database context
 		ContextLevel::Database
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Graph scan is read-only, but propagate source expression's access mode
 		self.source.access_mode()
 	}
 
@@ -137,30 +133,17 @@ impl ExecOperator for GraphEdgeScan {
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;
 		let ctx = ctx.clone();
+		let fetch_full = output_mode == GraphScanOutput::FullEdge;
 
 		let stream = async_stream::try_stream! {
 			let txn = ctx.txn();
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
+			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+			let db_id = db_ctx.db.database_id;
 
 			// Evaluate the source expression to get RecordId(s)
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let source_value = source_expr.evaluate(eval_ctx).await?;
-
-			// Convert source value to a list of RecordIds
-			let source_rids = match source_value {
-				Value::RecordId(rid) => vec![rid],
-				Value::Array(arr) => {
-					let mut rids = Vec::with_capacity(arr.len());
-					for v in arr.iter() {
-						if let Value::RecordId(rid) = v {
-							rids.push(rid.clone());
-						}
-					}
-					rids
-				}
-				_ => vec![],
-			};
+			let source_rids = extract_record_ids(source_value);
 
 			if source_rids.is_empty() {
 				return;
@@ -179,170 +162,35 @@ impl ExecOperator for GraphEdgeScan {
 				}
 			};
 
-			let mut batch = Vec::with_capacity(BATCH_SIZE);
+			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
 
 			// Scan edges for each source record
 			for rid in &source_rids {
 				for dir in &directions {
-					// If specific edge tables are provided, scan each one
-					// Otherwise, scan all edges in that direction
-					if edge_tables.is_empty() {
-						// Scan all edges in this direction
-						let beg = crate::key::graph::egprefix(
-							ns.namespace_id,
-							db.database_id,
-							&rid.table,
-							&rid.key,
-							dir,
-						).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?;
+					// Compute all key ranges to scan for this rid + direction
+					let ranges = compute_graph_ranges(
+						ns_id, db_id, rid, dir, &edge_tables, &ctx,
+					).await?;
 
-						let end = crate::key::graph::egsuffix(
-							ns.namespace_id,
-							db.database_id,
-							&rid.table,
-							&rid.key,
-							dir,
-						).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?;
-
-						let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
+					for (beg, end) in ranges {
+						let kv_stream = txn.stream_keys(
+							beg..end, None, None, ScanDirection::Forward,
+						);
 						futures::pin_mut!(kv_stream);
 
 						while let Some(result) = kv_stream.next().await {
-							let keys = result.map_err(|e| {
-								ControlFlow::Err(anyhow::anyhow!("Failed to scan graph edge: {}", e))
-							})?;
+							let keys = result.context("Failed to scan graph edge")?;
 
 							for key in keys {
-								let value = decode_graph_key(&key, output_mode, &ctx).await?;
-								batch.push(value);
+								let target_rid = decode_graph_edge(&key)?;
+								rid_batch.push(target_rid);
 
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
-							}
-						}
-					} else {
-						// Scan specific edge tables, applying range bounds when present
-						for spec in &edge_tables {
-							let edge_table = &spec.table;
-
-							// Compute scan start key based on range start bound
-							let beg = match &spec.range_start {
-								Bound::Unbounded => {
-									crate::key::graph::ftprefix(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										edge_table,
-									).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix: {}", e)))?
-								}
-								Bound::Included(expr) => {
-									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
-									let val = expr.evaluate(bound_ctx).await?;
-									let key = value_to_record_id_key(val);
-									crate::key::graph::new(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										&RecordId {
-											table: edge_table.clone(),
-											key,
-										},
-									).encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range start key: {}", e)))?
-								}
-								Bound::Excluded(expr) => {
-									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
-									let val = expr.evaluate(bound_ctx).await?;
-									let key = value_to_record_id_key(val);
-									let mut k = crate::key::graph::new(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										&RecordId {
-											table: edge_table.clone(),
-											key,
-										},
-									).encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range start key: {}", e)))?;
-									k.push(0x00);
-									k
-								}
-							};
-
-							// Compute scan end key based on range end bound
-							let end = match &spec.range_end {
-								Bound::Unbounded => {
-									crate::key::graph::ftsuffix(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										edge_table,
-									).map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix: {}", e)))?
-								}
-								Bound::Excluded(expr) => {
-									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
-									let val = expr.evaluate(bound_ctx).await?;
-									let key = value_to_record_id_key(val);
-									crate::key::graph::new(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										&RecordId {
-											table: edge_table.clone(),
-											key,
-										},
-									).encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range end key: {}", e)))?
-								}
-								Bound::Included(expr) => {
-									let bound_ctx = EvalContext::from_exec_ctx(&ctx);
-									let val = expr.evaluate(bound_ctx).await?;
-									let key = value_to_record_id_key(val);
-									let mut k = crate::key::graph::new(
-										ns.namespace_id,
-										db.database_id,
-										&rid.table,
-										&rid.key,
-										dir,
-										&RecordId {
-											table: edge_table.clone(),
-											key,
-										},
-									).encode_key()
-									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to encode range end key: {}", e)))?;
-									k.push(0x00);
-									k
-								}
-							};
-
-							let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
-							futures::pin_mut!(kv_stream);
-
-							while let Some(result) = kv_stream.next().await {
-								let keys = result.map_err(|e| {
-									ControlFlow::Err(anyhow::anyhow!("Failed to scan graph edge: {}", e))
-								})?;
-
-								for key in keys {
-									let value = decode_graph_key(&key, output_mode, &ctx).await?;
-									batch.push(value);
-
-									if batch.len() >= BATCH_SIZE {
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
+								if rid_batch.len() >= BATCH_SIZE {
+									let values = resolve_record_batch(
+										&txn, ns_id, db_id, &rid_batch, fetch_full,
+									).await?;
+									yield ValueBatch { values };
+									rid_batch.clear();
 								}
 							}
 						}
@@ -351,8 +199,11 @@ impl ExecOperator for GraphEdgeScan {
 			}
 
 			// Yield remaining batch
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
+			if !rid_batch.is_empty() {
+				let values = resolve_record_batch(
+					&txn, ns_id, db_id, &rid_batch, fetch_full,
+				).await?;
+				yield ValueBatch { values };
 			}
 		};
 
@@ -360,68 +211,135 @@ impl ExecOperator for GraphEdgeScan {
 	}
 }
 
-/// Decode a graph key and return the appropriate value based on output mode.
-async fn decode_graph_key(
-	key: &[u8],
-	output_mode: GraphScanOutput,
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Compute all KV key ranges to scan for a single record + direction.
+///
+/// When `edge_tables` is empty, returns a single wildcard range covering all
+/// edges in the given direction. Otherwise returns one range per edge table,
+/// respecting any range bounds on each [`EdgeTableSpec`].
+async fn compute_graph_ranges(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	dir: &Dir,
+	edge_tables: &[EdgeTableSpec],
 	ctx: &ExecutionContext,
-) -> Result<Value, ControlFlow> {
-	// Decode the graph key to extract the foreign table and key
-	let decoded = crate::key::graph::Graph::decode_key(key)
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode graph key: {}", e)))?;
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>, ControlFlow> {
+	if edge_tables.is_empty() {
+		// Scan all edges in this direction
+		let beg = crate::key::graph::egprefix(ns_id, db_id, &rid.table, &rid.key, dir)
+			.context("Failed to create graph prefix")?;
+		let end = crate::key::graph::egsuffix(ns_id, db_id, &rid.table, &rid.key, dir)
+			.context("Failed to create graph suffix")?;
+		Ok(vec![(beg, end)])
+	} else {
+		let mut ranges = Vec::with_capacity(edge_tables.len());
+		for spec in edge_tables {
+			let beg =
+				eval_graph_bound(ns_id, db_id, rid, dir, &spec.table, &spec.range_start, true, ctx)
+					.await?;
+			let end =
+				eval_graph_bound(ns_id, db_id, rid, dir, &spec.table, &spec.range_end, false, ctx)
+					.await?;
+			ranges.push((beg, end));
+		}
+		Ok(ranges)
+	}
+}
 
-	// The foreign record ID is what we're looking for (the target of the edge)
-	let target_rid = RecordId {
-		table: decoded.ft.into_owned(),
-		key: decoded.fk.into_owned(),
-	};
-
-	match output_mode {
-		GraphScanOutput::TargetId => Ok(Value::RecordId(target_rid)),
-		GraphScanOutput::FullEdge => {
-			// Fetch the full edge record
-			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
-			let txn = ctx.txn();
-
-			let record = txn
-				.get_record(
-					db_ctx.ns_ctx.ns.namespace_id,
-					db_ctx.db.database_id,
-					&target_rid.table,
-					&target_rid.key,
-					None,
-				)
-				.await
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch record: {}", e)))?;
-
-			if record.data.as_ref().is_none() {
-				Ok(Value::None)
+/// Evaluate a single start or end bound of a graph edge key range.
+///
+/// `is_start` determines the fallback for `Unbounded` (prefix vs suffix) and
+/// the suffix byte semantics for `Included` / `Excluded` bounds:
+///
+/// | Bound     | start (`is_start=true`)  | end (`is_start=false`)     |
+/// |-----------|--------------------------|----------------------------|
+/// | Unbounded | `ftprefix`               | `ftsuffix`                 |
+/// | Included  | exact key                | key + `0x00` (include key) |
+/// | Excluded  | key + `0x00` (skip past) | exact key (stop before)    |
+#[allow(clippy::too_many_arguments)]
+async fn eval_graph_bound(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	dir: &Dir,
+	edge_table: &TableName,
+	bound: &Bound<Arc<dyn PhysicalExpr>>,
+	is_start: bool,
+	ctx: &ExecutionContext,
+) -> Result<Vec<u8>, ControlFlow> {
+	match bound {
+		Bound::Unbounded => {
+			if is_start {
+				crate::key::graph::ftprefix(ns_id, db_id, &rid.table, &rid.key, dir, edge_table)
+					.context("Failed to create graph table prefix")
 			} else {
-				let mut value = record.data.as_ref().clone();
-				value.def(&target_rid);
-				Ok(value)
+				crate::key::graph::ftsuffix(ns_id, db_id, &rid.table, &rid.key, dir, edge_table)
+					.context("Failed to create graph table suffix")
 			}
+		}
+		Bound::Included(expr) => {
+			let fk = evaluate_bound_key(expr, ctx).await?;
+			let mut key = encode_graph_key(ns_id, db_id, rid, dir, edge_table, fk)?;
+			// Included start: exact key; Included end: append suffix to include key
+			if !is_start {
+				key.push(0x00);
+			}
+			Ok(key)
+		}
+		Bound::Excluded(expr) => {
+			let fk = evaluate_bound_key(expr, ctx).await?;
+			let mut key = encode_graph_key(ns_id, db_id, rid, dir, edge_table, fk)?;
+			// Excluded start: append suffix to skip past key; Excluded end: exact key
+			if is_start {
+				key.push(0x00);
+			}
+			Ok(key)
 		}
 	}
 }
 
-/// Convert a `Value` to a `RecordIdKey` for use in graph key range construction.
-fn value_to_record_id_key(val: Value) -> RecordIdKey {
-	match val {
-		Value::Number(n) => RecordIdKey::Number(n.as_int()),
-		Value::String(s) => RecordIdKey::String(s),
-		Value::Uuid(u) => RecordIdKey::Uuid(u),
-		Value::Array(a) => RecordIdKey::Array(a),
-		Value::Object(o) => RecordIdKey::Object(o),
-		// For other types, convert to string representation
-		other => RecordIdKey::String(other.to_raw_string()),
-	}
+/// Encode a graph key for a specific edge table and record ID key.
+fn encode_graph_key(
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	dir: &Dir,
+	edge_table: &TableName,
+	fk: crate::val::RecordIdKey,
+) -> Result<Vec<u8>, ControlFlow> {
+	crate::key::graph::new(
+		ns_id,
+		db_id,
+		&rid.table,
+		&rid.key,
+		dir,
+		&RecordId {
+			table: edge_table.clone(),
+			key: fk,
+		},
+	)
+	.encode_key()
+	.context("Failed to encode graph range key")
+}
+
+/// Decode a graph key into the target [`RecordId`].
+fn decode_graph_edge(key: &[u8]) -> Result<RecordId, ControlFlow> {
+	let decoded =
+		crate::key::graph::Graph::decode_key(key).context("Failed to decode graph key")?;
+	Ok(RecordId {
+		table: decoded.ft.into_owned(),
+		key: decoded.fk.into_owned(),
+	})
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::val::RecordIdKey;
+	use crate::val::{RecordIdKey, Value};
 
 	#[test]
 	fn test_graph_edge_scan_attrs() {

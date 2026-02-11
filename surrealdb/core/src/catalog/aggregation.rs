@@ -44,7 +44,6 @@ use std::mem;
 
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
-
 use revision::revisioned;
 use surrealdb_types::ToSql;
 

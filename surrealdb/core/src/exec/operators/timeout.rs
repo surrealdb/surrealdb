@@ -1,3 +1,9 @@
+//! Timeout operator for query time limits.
+//!
+//! Wraps an input operator stream and enforces a maximum execution
+//! duration. If the timeout expires before the input completes, a
+//! `QueryTimedout` error is returned.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -8,7 +14,7 @@ use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	PhysicalExpr, ValueBatchStream, monitor_stream,
 };
-use crate::expr::ControlFlow;
+use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::val::Duration;
 
 /// Applies a timeout to the execution of its input operator.
@@ -99,7 +105,7 @@ impl ExecOperator for Timeout {
 			// Convert to duration
 			let duration: Duration = timeout_value
 				.coerce_to::<Duration>()
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Invalid timeout value: {}", e)))?;
+				.context("Invalid timeout value")?;
 
 			// Convert our Duration to std::time::Duration for tokio
 			let std_duration: std::time::Duration = duration.0;

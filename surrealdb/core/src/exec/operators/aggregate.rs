@@ -1,3 +1,10 @@
+//! Aggregate operator for GROUP BY processing.
+//!
+//! Collects all input rows into groups keyed by GROUP BY expressions,
+//! then applies aggregate functions (COUNT, SUM, array::group, etc.)
+//! to each group. This is a pipeline-breaking operator: the entire
+//! input stream must be consumed before any output is produced.
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -603,7 +610,7 @@ async fn compute_aggregate_field_value(
 		let value = match acc.finalize() {
 			Ok(v) => v,
 			Err(e) => {
-				debug!(error = %e, idx, "Accumulator finalize failed, using Null");
+				tracing::debug!(error = %e, idx, "Accumulator finalize failed, using Null");
 				Value::Null
 			}
 		};
@@ -617,7 +624,7 @@ async fn compute_aggregate_field_value(
 		match post_expr.evaluate(eval_ctx).await {
 			Ok(v) => Ok(v),
 			Err(cf) if cf.is_ignorable() => {
-				debug!(error = %cf, "Post-expression evaluation failed (ignorable), using Null");
+				tracing::debug!(error = %cf, "Post-expression evaluation failed (ignorable), using Null");
 				Ok(Value::Null)
 			}
 			Err(cf) => Err(cf),

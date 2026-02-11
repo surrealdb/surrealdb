@@ -24,7 +24,7 @@ use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
-use crate::expr::{Block, ControlFlow, Expr};
+use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::{Array, Value};
 
 /// Sequence operator with deferred planning.
@@ -172,7 +172,7 @@ async fn execute_block_with_context(
 			Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
 				// Fallback to legacy compute path
 				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
-					.map_err(|e| ControlFlow::Err(e.into()))?;
+					.context("Legacy compute fallback context unavailable")?;
 
 				if let Expr::Let(set_stmt) = expr {
 					let mut stack = TreeStack::new();

@@ -22,8 +22,42 @@ use crate::exec::{
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
-use crate::expr::part::Part;
+use crate::expr::part::{DestructurePart, Part};
 use crate::val::{Object, Value};
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/// Parse an output name string into a [`FieldPath`].
+///
+/// Simple dot-separated names (e.g. `"tags.id"`) are split into nested
+/// [`FieldPathPart::Field`] components so that the projection can build nested
+/// objects.  Names containing `[`, `(`, or spaces are kept as a single field.
+fn parse_output_path(name: &str) -> FieldPath {
+	if name.contains('.') && !name.contains(['[', '(', ' ']) {
+		FieldPath(name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect())
+	} else {
+		FieldPath::field(name.to_string())
+	}
+}
+
+/// Set a value at the given [`FieldPath`] on an [`Object`].
+///
+/// Internally wraps the object in a `Value::Object` so that
+/// `Value::set_at_field_path` can be used, then unwraps the result back.
+#[inline]
+fn set_field_on_object(obj: &mut Object, path: &FieldPath, value: Value) {
+	let mut target = Value::Object(std::mem::take(obj));
+	target.set_at_field_path(path, value);
+	if let Value::Object(new_obj) = target {
+		*obj = new_obj;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FieldSelection
+// ---------------------------------------------------------------------------
 
 /// Field selection specification.
 #[derive(Debug, Clone)]
@@ -43,16 +77,8 @@ impl FieldSelection {
 	/// If the name contains dots and represents a simple field path (no special characters),
 	/// it will be split into path components for nested object construction.
 	pub fn new(output_name: String, expr: Arc<dyn PhysicalExpr>) -> Self {
-		// Parse the output name into path components
-		// For simple dot-separated paths like "tags.id", split into Field parts
-		// For complex names with special chars, keep as single Field
-		let output_path = if output_name.contains('.') && !output_name.contains(['[', '(', ' ']) {
-			FieldPath(output_name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect())
-		} else {
-			FieldPath::field(output_name)
-		};
 		Self {
-			output_path,
+			output_path: parse_output_path(&output_name),
 			expr,
 			has_explicit_alias: false,
 		}
@@ -62,13 +88,8 @@ impl FieldSelection {
 	/// Used when the user specified an alias in the query (e.g., `SELECT expr AS alias`).
 	/// For projection functions, the alias takes precedence over dynamic field names.
 	pub fn with_alias(output_name: String, expr: Arc<dyn PhysicalExpr>) -> Self {
-		let output_path = if output_name.contains('.') && !output_name.contains(['[', '(', ' ']) {
-			FieldPath(output_name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect())
-		} else {
-			FieldPath::field(output_name)
-		};
 		Self {
-			output_path,
+			output_path: parse_output_path(&output_name),
 			expr,
 			has_explicit_alias: true,
 		}
@@ -85,6 +106,10 @@ impl FieldSelection {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Project operator
+// ---------------------------------------------------------------------------
+
 /// Project operator - selects and transforms fields from input records.
 ///
 /// This is a pure transformation operator that evaluates expressions and builds
@@ -93,10 +118,10 @@ impl FieldSelection {
 pub struct Project {
 	/// The input plan to project from
 	pub input: Arc<dyn ExecOperator>,
-	/// The fields to select/project
-	pub fields: Vec<FieldSelection>,
-	/// Fields to omit from output (for SELECT * OMIT)
-	pub omit: Vec<Idiom>,
+	/// The fields to select/project (shared across batches via Arc)
+	pub fields: Arc<[FieldSelection]>,
+	/// Fields to omit from output (for SELECT * OMIT) (shared across batches via Arc)
+	pub omit: Arc<[Idiom]>,
 	/// Whether to include all fields from input (for SELECT *, field1, field2)
 	pub include_all: bool,
 	/// Per-operator metrics for EXPLAIN ANALYZE
@@ -113,8 +138,8 @@ impl Project {
 	) -> Self {
 		Self {
 			input,
-			fields,
-			omit,
+			fields: fields.into(),
+			omit: omit.into(),
 			include_all,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
@@ -157,15 +182,15 @@ impl ExecOperator for Project {
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
-		let fields = self.fields.clone();
-		let omit = self.omit.clone();
+		let fields = Arc::clone(&self.fields);
+		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
 		let ctx = ctx.clone();
 
 		// Create a stream that projects fields
 		let projected = input_stream.then(move |batch_result| {
-			let fields = fields.clone();
-			let omit = omit.clone();
+			let fields = Arc::clone(&fields);
+			let omit = Arc::clone(&omit);
 			let ctx = ctx.clone();
 
 			async move {
@@ -182,7 +207,7 @@ impl ExecOperator for Project {
 						let mut output_value = match &value {
 							Value::Object(original) => {
 								let mut obj = original.clone();
-								for field in &fields {
+								for field in fields.iter() {
 									evaluate_and_set_field(&mut obj, field, row_ctx.clone())
 										.await?;
 								}
@@ -195,7 +220,7 @@ impl ExecOperator for Project {
 										.map_err(crate::expr::ControlFlow::Err)?;
 								match fetched {
 									Value::Object(mut obj) => {
-										for field in &fields {
+										for field in fields.iter() {
 											evaluate_and_set_field(
 												&mut obj,
 												field,
@@ -217,7 +242,7 @@ impl ExecOperator for Project {
 									other.clone()
 								} else {
 									let mut obj = Object::default();
-									for field in &fields {
+									for field in fields.iter() {
 										evaluate_and_set_field(&mut obj, field, row_ctx.clone())
 											.await?;
 									}
@@ -226,7 +251,7 @@ impl ExecOperator for Project {
 							}
 						};
 
-						for field in &omit {
+						for field in omit.iter() {
 							omit_field_sync(&mut output_value, field);
 						}
 						values.push(output_value);
@@ -240,7 +265,7 @@ impl ExecOperator for Project {
 					let mut objects: Vec<Object> =
 						(0..batch_len).map(|_| Object::default()).collect();
 
-					for field in &fields {
+					for field in fields.iter() {
 						if field.expr.is_projection_function() {
 							// Projection functions return multiple field bindings;
 							// handle per-row since they need special object assembly.
@@ -261,13 +286,12 @@ impl ExecOperator for Project {
 								let row_ctx = eval_ctx.with_value_and_doc(value);
 								field_values.push(field.expr.evaluate(row_ctx).await?);
 							}
-							let field_values = field_values;
 							for (i, field_value) in field_values.into_iter().enumerate() {
-								let mut target = Value::Object(std::mem::take(&mut objects[i]));
-								target.set_at_field_path(&field.output_path, field_value);
-								if let Value::Object(obj) = target {
-									objects[i] = obj;
-								}
+								set_field_on_object(
+									&mut objects[i],
+									&field.output_path,
+									field_value,
+								);
 							}
 						}
 					}
@@ -275,7 +299,7 @@ impl ExecOperator for Project {
 					let mut values: Vec<Value> = objects.into_iter().map(Value::Object).collect();
 					if !omit.is_empty() {
 						for val in &mut values {
-							for field in &omit {
+							for field in omit.iter() {
 								omit_field_sync(val, field);
 							}
 						}
@@ -293,6 +317,10 @@ impl ExecOperator for Project {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// evaluate_and_set_field
+// ---------------------------------------------------------------------------
+
 /// Evaluate a field expression and set the resulting value(s) on the output object.
 ///
 /// For regular expressions, evaluates the expression and sets the result at the output_path.
@@ -304,69 +332,43 @@ async fn evaluate_and_set_field(
 	field: &FieldSelection,
 	eval_ctx: EvalContext<'_>,
 ) -> Result<(), crate::expr::ControlFlow> {
-	// Check if this is a projection function
-	if field.expr.is_projection_function() {
-		// Evaluate as projection function to get field bindings
-		match field.expr.evaluate_projection(eval_ctx.clone()).await {
-			Ok(Some(bindings)) => {
-				if field.has_explicit_alias {
-					// User provided an alias - use it as the field name
-					// For multiple bindings, collect values into an array
-					let value = if bindings.len() == 1 {
-						bindings.into_iter().next().expect("bindings verified non-empty").1
-					} else {
-						// Multiple bindings with alias - collect as array
-						Value::Array(
-							bindings.into_iter().map(|(_, v)| v).collect::<Vec<_>>().into(),
-						)
-					};
-					let mut target = Value::Object(std::mem::take(obj));
-					target.set_at_field_path(&field.output_path, value);
-					if let Value::Object(new_obj) = target {
-						*obj = new_obj;
-					}
-				} else {
-					// No alias - use the dynamic field names from the function
-					for (idiom, value) in bindings {
-						// Convert idiom to FieldPath
-						if let Ok(path) = FieldPath::try_from(&idiom)
-							&& !path.is_empty()
-						{
-							let mut target = Value::Object(std::mem::take(obj));
-							target.set_at_field_path(&path, value);
-							if let Value::Object(new_obj) = target {
-								*obj = new_obj;
-							}
-						}
-					}
+	if field.expr.is_projection_function()
+		&& let Some(bindings) = field.expr.evaluate_projection(eval_ctx.clone()).await?
+	{
+		if field.has_explicit_alias {
+			// User provided an alias - use it as the field name.
+			// For multiple bindings, collect values into an array.
+			let value = if bindings.len() == 1 {
+				bindings.into_iter().next().expect("bindings verified non-empty").1
+			} else {
+				Value::Array(bindings.into_iter().map(|(_, v)| v).collect::<Vec<_>>().into())
+			};
+			set_field_on_object(obj, &field.output_path, value);
+		} else {
+			// No alias - use the dynamic field names from the function
+			for (idiom, value) in bindings {
+				if let Ok(path) = FieldPath::try_from(&idiom)
+					&& !path.is_empty()
+				{
+					set_field_on_object(obj, &path, value);
 				}
-				Ok(())
 			}
-			Ok(None) => {
-				// Not actually a projection function (shouldn't happen), fall back to regular eval
-				let field_value = field.expr.evaluate(eval_ctx).await?;
-				let mut target = Value::Object(std::mem::take(obj));
-				target.set_at_field_path(&field.output_path, field_value);
-				if let Value::Object(new_obj) = target {
-					*obj = new_obj;
-				}
-				Ok(())
-			}
-			Err(e) => Err(e),
 		}
-	} else {
-		// Regular expression - evaluate and set at output_path
-		let field_value = field.expr.evaluate(eval_ctx).await?;
-		let mut target = Value::Object(std::mem::take(obj));
-		target.set_at_field_path(&field.output_path, field_value);
-		if let Value::Object(new_obj) = target {
-			*obj = new_obj;
-		}
-		Ok(())
+		return Ok(());
+		// Fall through to regular evaluation if not actually a projection function
 	}
+
+	let field_value = field.expr.evaluate(eval_ctx).await?;
+	set_field_on_object(obj, &field.output_path, field_value);
+	Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// OMIT helpers
+// ---------------------------------------------------------------------------
+
 /// Synchronously remove a field from a value by idiom path.
+#[inline]
 fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
 	// For simple single-part idioms, directly remove from object
 	if idiom.len() == 1 {
@@ -383,42 +385,29 @@ fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
 
 /// Recursively traverse and remove a nested field.
 fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
-	if depth >= idiom.len() {
-		return;
-	}
-
 	let Some(part) = idiom.get(depth) else {
 		return;
 	};
+	let is_last = depth == idiom.len() - 1;
 
 	match part {
 		Part::Field(field_name) => {
 			if let Value::Object(obj) = value {
-				if depth == idiom.len() - 1 {
-					// Last part - remove the field
+				if is_last {
 					obj.remove(&**field_name);
-				} else {
-					// Not last part - recurse into the field
-					if let Some(nested) = obj.get_mut(&**field_name) {
-						omit_nested_field(nested, idiom, depth + 1);
-					}
+				} else if let Some(nested) = obj.get_mut(&**field_name) {
+					omit_nested_field(nested, idiom, depth + 1);
 				}
 			}
 		}
 		Part::All => {
-			if depth == idiom.len() - 1 {
-				// Last part - remove all fields from current object
+			if is_last {
 				match value {
-					Value::Object(obj) => {
-						obj.clear();
-					}
-					Value::Array(arr) => {
-						arr.clear();
-					}
+					Value::Object(obj) => obj.clear(),
+					Value::Array(arr) => arr.clear(),
 					_ => {}
 				}
 			} else {
-				// Not last part - recurse into all elements
 				match value {
 					Value::Object(obj) => {
 						for (_, v) in obj.iter_mut() {
@@ -440,7 +429,7 @@ fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
 				&& let Value::Array(arr) = value
 				&& let Some(nested) = arr.get_mut(*idx as usize)
 			{
-				if depth == idiom.len() - 1 {
+				if is_last {
 					// Can't "remove" an array element by index, set to None
 					*nested = Value::None;
 				} else {
@@ -452,34 +441,30 @@ fn omit_nested_field(value: &mut Value, idiom: &Idiom, depth: usize) {
 			// Destructure in OMIT: remove the listed fields from the current object.
 			// E.g., OMIT obj.c.{ d, f } removes d and f from obj.c.
 			if let Value::Object(obj) = value {
-				use crate::expr::part::DestructurePart;
-				fn omit_destructure_fields(
-					obj: &mut crate::val::Object,
-					parts: &[DestructurePart],
-				) {
-					for dp in parts {
-						match dp {
-							DestructurePart::Field(name) | DestructurePart::All(name) => {
-								obj.remove(name.as_str());
-							}
-							DestructurePart::Destructure(name, nested) => {
-								if let Some(crate::val::Value::Object(inner)) =
-									obj.get_mut(name.as_str())
-								{
-									omit_destructure_fields(inner, nested);
-								}
-							}
-							DestructurePart::Aliased(name, _) => {
-								obj.remove(name.as_str());
-							}
-						}
-					}
-				}
 				omit_destructure_fields(obj, destructure_parts);
 			}
 		}
 		_ => {
 			// Other part types are not supported for omit
+		}
+	}
+}
+
+/// Recursively remove fields described by destructure parts from an object.
+fn omit_destructure_fields(obj: &mut Object, parts: &[DestructurePart]) {
+	for dp in parts {
+		match dp {
+			DestructurePart::Field(name) | DestructurePart::All(name) => {
+				obj.remove(name.as_str());
+			}
+			DestructurePart::Destructure(name, nested) => {
+				if let Some(Value::Object(inner)) = obj.get_mut(name.as_str()) {
+					omit_destructure_fields(inner, nested);
+				}
+			}
+			DestructurePart::Aliased(name, _) => {
+				obj.remove(name.as_str());
+			}
 		}
 	}
 }
@@ -519,8 +504,8 @@ pub enum Projection {
 pub struct SelectProject {
 	/// The input plan to project from
 	pub input: Arc<dyn ExecOperator>,
-	/// The projections to apply
-	pub projections: Vec<Projection>,
+	/// The projections to apply (shared across batches via Arc)
+	pub projections: Arc<[Projection]>,
 	/// Per-operator metrics for EXPLAIN ANALYZE
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -534,7 +519,7 @@ impl SelectProject {
 	) -> Self {
 		Self {
 			input,
-			projections,
+			projections: projections.into(),
 			metrics,
 		}
 	}
@@ -592,12 +577,12 @@ impl ExecOperator for SelectProject {
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
-		let projections = self.projections.clone();
+		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();
 
 		// Create a stream that applies projections
 		let projected = input_stream.then(move |batch_result| {
-			let projections = projections.clone();
+			let projections = Arc::clone(&projections);
 			let ctx = ctx.clone();
 
 			async move {
@@ -623,13 +608,18 @@ impl ExecOperator for SelectProject {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// SelectProject helpers
+// ---------------------------------------------------------------------------
+
 /// Apply projections to a single value.
 async fn apply_projections(
 	value: &Value,
 	projections: &[Projection],
 	ctx: &ExecutionContext,
 ) -> Result<Value, crate::expr::ControlFlow> {
-	// Determine if we have an All projection
+	// Classify projections in a single pass (used by both the async dereference
+	// path and the sync object-shaping path).
 	let has_all = projections.iter().any(|p| matches!(p, Projection::All));
 
 	// Get the input object, dereferencing RecordId if needed for SELECT *
@@ -650,32 +640,25 @@ async fn apply_projections(
 		_ => return Ok(value.clone()),
 	};
 
-	Ok(apply_projections_to_object(&input_obj, projections))
+	Ok(apply_projections_to_object(&input_obj, projections, has_all))
 }
 
 /// Apply projections to an already-resolved object (sync version).
 /// This is the core projection logic used by both the async apply_projections
 /// and by tests.
-fn apply_projections_to_object(input_obj: &Object, projections: &[Projection]) -> Value {
-	// Determine if we have an All projection
-	let has_all = projections.iter().any(|p| matches!(p, Projection::All));
-
-	// Collect fields to omit
-	let omit_fields: Vec<&str> = projections
-		.iter()
-		.filter_map(|p| match p {
-			Projection::Omit(name) => Some(name.as_str()),
-			_ => None,
-		})
-		.collect();
-
+fn apply_projections_to_object(
+	input_obj: &Object,
+	projections: &[Projection],
+	has_all: bool,
+) -> Value {
 	// Build output object
 	let mut output = if has_all {
-		// Start with all fields from input
+		// Start with all fields from input, removing any omitted ones
 		let mut obj = input_obj.clone();
-		// Apply omits
-		for field in &omit_fields {
-			obj.remove(*field);
+		for p in projections {
+			if let Projection::Omit(name) = p {
+				obj.remove(name.as_str());
+			}
 		}
 		obj
 	} else {
@@ -727,7 +710,7 @@ mod tests {
 		let projections =
 			vec![Projection::Include("a".to_string()), Projection::Include("c".to_string())];
 
-		let result = apply_projections_to_object(&obj, &projections);
+		let result = apply_projections_to_object(&obj, &projections, false);
 		if let Value::Object(result_obj) = result {
 			assert!(result_obj.contains_key("a"));
 			assert!(!result_obj.contains_key("b"));
@@ -746,7 +729,7 @@ mod tests {
 			to: "new_name".to_string(),
 		}];
 
-		let result = apply_projections_to_object(&obj, &projections);
+		let result = apply_projections_to_object(&obj, &projections, false);
 		if let Value::Object(result_obj) = result {
 			assert!(!result_obj.contains_key("old_name"));
 			assert!(result_obj.contains_key("new_name"));
@@ -766,7 +749,7 @@ mod tests {
 
 		let projections = vec![Projection::All, Projection::Omit("b".to_string())];
 
-		let result = apply_projections_to_object(&obj, &projections);
+		let result = apply_projections_to_object(&obj, &projections, true);
 		if let Value::Object(result_obj) = result {
 			assert!(result_obj.contains_key("a"));
 			assert!(!result_obj.contains_key("b"));

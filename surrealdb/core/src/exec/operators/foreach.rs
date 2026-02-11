@@ -16,7 +16,7 @@ use crate::exec::plan_or_compute::{evaluate_body_expr, evaluate_expr};
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
-use crate::expr::{Block, ControlFlow, Expr, Param};
+use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr, Param};
 use crate::val::Value;
 use crate::val::range::IntegerRangeIter;
 
@@ -144,10 +144,7 @@ async fn execute_foreach(
 	let iter = match range_value {
 		Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 		Value::Range(r) => {
-			let r = r
-				.coerce_to_typed::<i64>()
-				.map_err(Error::from)
-				.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+			let r = r.coerce_to_typed::<i64>().map_err(Error::from).context("Invalid FOR range")?;
 			ForeachIter::Range(r.iter().map(Value::from))
 		}
 		v => {

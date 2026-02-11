@@ -196,3 +196,78 @@ impl FlowResultExt for FlowResult<Value> {
 		}
 	}
 }
+
+/// Extension trait for wrapping errors with context and converting them into
+/// [`ControlFlow`].
+///
+/// Modelled on [`anyhow::Context`], this provides `.context()` and
+/// `.with_context()` methods that map any compatible error into
+/// `ControlFlow::Err` with the given message.
+///
+/// # Implemented for
+///
+/// * `Result<T, E>` where `E: Into<anyhow::Error>` – wraps the error with context and converts it
+///   to `ControlFlow::Err`.
+/// * `Option<T>` – produces `ControlFlow::Err` when `None`.
+///
+/// # Examples
+///
+/// ```ignore
+/// use crate::expr::ControlFlowExt;
+///
+/// // Convert a Result<T, E> into FlowResult<T> with context:
+/// let key = encode_key(data).context("Failed to encode scan key")?;
+///
+/// // Unwrap an Option<T> into FlowResult<T> with context:
+/// let table = opt_table.context("Referencing table is required")?;
+/// ```
+pub(crate) trait ControlFlowExt<T> {
+	/// Wrap the error value with additional context, converting it into a
+	/// `ControlFlow::Err`.
+	fn context<C: std::fmt::Display + Send + Sync + 'static>(
+		self,
+		context: C,
+	) -> std::result::Result<T, ControlFlow>;
+
+	/// Wrap the error value with lazily-evaluated context, converting it into
+	/// a `ControlFlow::Err`.
+	#[allow(dead_code)] // Part of the public API; matches anyhow::Context.
+	fn with_context<C, F>(self, f: F) -> std::result::Result<T, ControlFlow>
+	where
+		C: std::fmt::Display + Send + Sync + 'static,
+		F: FnOnce() -> C;
+}
+
+impl<T, E: Into<anyhow::Error>> ControlFlowExt<T> for std::result::Result<T, E> {
+	fn context<C: std::fmt::Display + Send + Sync + 'static>(
+		self,
+		context: C,
+	) -> std::result::Result<T, ControlFlow> {
+		self.map_err(|e| ControlFlow::Err(e.into().context(context)))
+	}
+
+	fn with_context<C, F>(self, f: F) -> std::result::Result<T, ControlFlow>
+	where
+		C: std::fmt::Display + Send + Sync + 'static,
+		F: FnOnce() -> C,
+	{
+		self.map_err(|e| ControlFlow::Err(e.into().context(f())))
+	}
+}
+
+impl<T> ControlFlowExt<T> for Option<T> {
+	fn context<C: std::fmt::Display + Send + Sync + 'static>(
+		self,
+		context: C,
+	) -> std::result::Result<T, ControlFlow> {
+		self.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("{}", context)))
+	}
+
+	fn with_context<C, F>(self, f: F) -> std::result::Result<T, ControlFlow>
+	where
+		C: std::fmt::Display + Send + Sync + 'static,
+		F: FnOnce() -> C,
+	{
+		self.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("{}", f())))
+	}
+}

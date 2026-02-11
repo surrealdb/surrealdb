@@ -80,21 +80,33 @@ impl ExecOperator for ProjectValue {
 
 			async move {
 				let batch = batch_result?;
-				let mut projected_values = Vec::with_capacity(batch.values.len());
+				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				for value in batch.values {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&value);
-
-					match expr.evaluate(eval_ctx).await {
-						Ok(result) => projected_values.push(result),
-						Err(ControlFlow::Return(v)) => projected_values.push(v),
-						Err(e) => return Err(e),
+				// Try batch evaluation first for better throughput.
+				// Falls back to per-row evaluation when RETURN signals
+				// are encountered (rare -- only from explicit RETURN
+				// statements in function bodies).
+				match expr.evaluate_batch(eval_ctx.clone(), &batch.values).await {
+					Ok(projected_values) => Ok(ValueBatch {
+						values: projected_values,
+					}),
+					Err(ControlFlow::Return(_)) => {
+						// Batch hit a RETURN signal; re-evaluate per-row
+						// so we can catch RETURN as a value.
+						let mut projected_values = Vec::with_capacity(batch.values.len());
+						for value in &batch.values {
+							match expr.evaluate(eval_ctx.with_value(value)).await {
+								Ok(result) => projected_values.push(result),
+								Err(ControlFlow::Return(v)) => projected_values.push(v),
+								Err(e) => return Err(e),
+							}
+						}
+						Ok(ValueBatch {
+							values: projected_values,
+						})
 					}
+					Err(e) => Err(e),
 				}
-
-				Ok(ValueBatch {
-					values: projected_values,
-				})
 			}
 		});
 

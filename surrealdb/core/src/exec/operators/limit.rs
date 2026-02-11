@@ -11,6 +11,7 @@ use crate::exec::{
 	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
+use crate::val::Value;
 
 /// Applies LIMIT and OFFSET (START) to an input stream.
 ///
@@ -40,6 +41,22 @@ impl Limit {
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
+
+	/// Coerce a Value to usize for limit/offset.
+	fn coerce_to_usize(value: &Value) -> Result<usize, String> {
+		match value {
+			Value::Number(n) => {
+				let i = n.to_int();
+				if i >= 0 {
+					Ok(i as usize)
+				} else {
+					Err(format!("expected non-negative integer, got {}", i))
+				}
+			}
+			Value::None | Value::Null => Ok(0),
+			_ => Err(format!("expected integer, got {:?}", value)),
+		}
+	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -50,7 +67,7 @@ impl ExecOperator for Limit {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = Vec::new();
+		let mut attrs = Vec::with_capacity(2);
 		if let Some(limit) = &self.limit {
 			attrs.push(("limit".to_string(), limit.to_sql()));
 		}
@@ -67,14 +84,11 @@ impl ExecOperator for Limit {
 
 	fn access_mode(&self) -> AccessMode {
 		// Combine input's mode with limit/offset expressions
-		let mut mode = self.input.access_mode();
-		if let Some(limit) = &self.limit {
-			mode = mode.combine(limit.access_mode());
-		}
-		if let Some(offset) = &self.offset {
-			mode = mode.combine(offset.access_mode());
-		}
-		mode
+		[self.limit.as_ref(), self.offset.as_ref()]
+			.into_iter()
+			.flatten()
+			.map(|e| e.access_mode())
+			.fold(self.input.access_mode(), AccessMode::combine)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -86,7 +100,7 @@ impl ExecOperator for Limit {
 	}
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		let mut exprs = Vec::new();
+		let mut exprs = Vec::with_capacity(2);
 		if let Some(limit) = &self.limit {
 			exprs.push(("limit", limit));
 		}
@@ -113,17 +127,12 @@ impl ExecOperator for Limit {
 					let value = expr.evaluate(eval_ctx.clone()).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
 					})?;
-					Some(coerce_to_usize(&value).map_err(|e| {
+					Some(Limit::coerce_to_usize(&value).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("LIMIT must be a non-negative integer: {}", e))
 					})?)
 				}
 				None => None,
 			};
-
-			// If limit is 0, produce no output
-			if limit_value == Some(0) {
-				return;
-			}
 
 			// Evaluate offset expression
 			let offset = match &offset_expr {
@@ -131,7 +140,7 @@ impl ExecOperator for Limit {
 					let value = expr.evaluate(eval_ctx).await.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
 					})?;
-					coerce_to_usize(&value).map_err(|e| {
+					Limit::coerce_to_usize(&value).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("START must be a non-negative integer: {}", e))
 					})?
 				}
@@ -158,12 +167,9 @@ impl ExecOperator for Limit {
 					batch.values.drain(..to_skip);
 				}
 
-				// Apply limit - only take as many as we need
+				// Apply limit - truncate is a no-op when len <= remaining
 				if let Some(limit) = limit_value {
-					let remaining = limit.saturating_sub(emitted);
-					if batch.values.len() > remaining {
-						batch.values.truncate(remaining);
-					}
+					batch.values.truncate(limit.saturating_sub(emitted));
 				}
 
 				emitted += batch.values.len();
@@ -173,34 +179,13 @@ impl ExecOperator for Limit {
 					yield batch;
 				}
 
-				// Stop if we've hit the limit
-				if let Some(limit) = limit_value
-					&& emitted >= limit
-				{
+				// Stop once the limit is exhausted (also handles limit == 0)
+				if limit_value.is_some_and(|l| emitted >= l) {
 					break;
 				}
 			}
 		};
 
 		Ok(monitor_stream(Box::pin(limited), "Limit", &self.metrics))
-	}
-}
-
-/// Coerce a Value to usize for limit/offset
-fn coerce_to_usize(value: &crate::val::Value) -> Result<usize, String> {
-	use crate::val::Value;
-
-	match value {
-		Value::Number(n) => {
-			// Try to get as int first
-			let i = (*n).to_int();
-			if i >= 0 {
-				Ok(i as usize)
-			} else {
-				Err(format!("expected non-negative integer, got {}", i))
-			}
-		}
-		Value::None | Value::Null => Ok(0),
-		_ => Err(format!("expected integer, got {:?}", value)),
 	}
 }

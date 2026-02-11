@@ -1,3 +1,10 @@
+//! Union operator for multi-source queries.
+//!
+//! Combines results from multiple execution plans sequentially,
+//! used for `SELECT * FROM a, b, c` which fetches from each source
+//! in order. Sequential execution preserves atomicity guarantees
+//! when branches contain mutations.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

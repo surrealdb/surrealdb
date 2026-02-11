@@ -23,7 +23,7 @@ use crate::exec::{
 };
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, ControlFlow};
+use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::record;
@@ -205,7 +205,7 @@ impl ExecOperator for Scan {
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
-			let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+			let db_ctx = ctx.database().context("Scan requires database context")?;
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
@@ -249,7 +249,7 @@ impl ExecOperator for Scan {
 			let table_def = txn
 				.get_tb_by_name(&ns.name, &db.name, &table_name)
 				.await
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get table: {e}")))?;
+				.context("Failed to get table")?;
 
 			if table_def.is_none() {
 				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -262,9 +262,8 @@ impl ExecOperator for Scan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx()).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("Failed to convert permission: {e}"))
-				})?
+				convert_permission_to_physical(&catalog_perm, ctx.ctx())
+					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
 			};
@@ -292,7 +291,7 @@ impl ExecOperator for Scan {
 					let record = txn
 						.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
 						.await
-						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get record: {e}")))?;
+						.context("Failed to get record")?;
 
 					if record.data.as_ref().is_none() {
 						return;
@@ -535,8 +534,7 @@ fn kv_scan_stream(
 
 		let mut skipped = 0usize;
 		while let Some(result) = kv_stream.next().await {
-			let entries = result
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+			let entries = result.context("Failed to scan record")?;
 			// Fast path: skip entire batch when all entries fall within pre_skip
 			let remaining_to_skip = pre_skip - skipped;
 			if entries.len() <= remaining_to_skip {
@@ -590,7 +588,7 @@ async fn resolve_table_scan_stream(
 		let indexes = txn
 			.all_tb_indexes(cfg.ns_id, cfg.db_id, &cfg.table_name)
 			.await
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch indexes: {e}")))?;
+			.context("Failed to fetch indexes")?;
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
@@ -700,15 +698,16 @@ fn range_start_key(
 	bound: &Bound<RecordIdKey>,
 ) -> Result<crate::kvs::Key, ControlFlow> {
 	match bound {
-		Bound::Unbounded => record::prefix(ns_id, db_id, table)
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create prefix key: {e}"))),
-		Bound::Included(v) => record::new(ns_id, db_id, table, v)
-			.encode_key()
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}"))),
+		Bound::Unbounded => {
+			record::prefix(ns_id, db_id, table).context("Failed to create prefix key")
+		}
+		Bound::Included(v) => {
+			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create begin key")
+		}
 		Bound::Excluded(v) => {
-			let mut key = record::new(ns_id, db_id, table, v).encode_key().map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to create begin key: {e}"))
-			})?;
+			let mut key = record::new(ns_id, db_id, table, v)
+				.encode_key()
+				.context("Failed to create begin key")?;
 			key.push(0x00);
 			Ok(key)
 		}
@@ -723,15 +722,16 @@ fn range_end_key(
 	bound: &Bound<RecordIdKey>,
 ) -> Result<crate::kvs::Key, ControlFlow> {
 	match bound {
-		Bound::Unbounded => record::suffix(ns_id, db_id, table)
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create suffix key: {e}"))),
-		Bound::Excluded(v) => record::new(ns_id, db_id, table, v)
-			.encode_key()
-			.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}"))),
+		Bound::Unbounded => {
+			record::suffix(ns_id, db_id, table).context("Failed to create suffix key")
+		}
+		Bound::Excluded(v) => {
+			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create end key")
+		}
 		Bound::Included(v) => {
 			let mut key = record::new(ns_id, db_id, table, v)
 				.encode_key()
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to create end key: {e}")))?;
+				.context("Failed to create end key")?;
 			key.push(0x00);
 			Ok(key)
 		}
@@ -770,16 +770,16 @@ async fn eval_limit_expr(
 /// Decode a record from its key and value bytes.
 #[inline]
 fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
-	let decoded_key = crate::key::record::RecordKey::decode_key(key)
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode record key: {e}")))?;
+	let decoded_key =
+		crate::key::record::RecordKey::decode_key(key).context("Failed to decode record key")?;
 
 	let rid = crate::val::RecordId {
 		table: decoded_key.tb.into_owned(),
 		key: decoded_key.id,
 	};
 
-	let mut record = crate::catalog::Record::kv_decode_value(val)
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to deserialize record: {e}")))?;
+	let mut record =
+		crate::catalog::Record::kv_decode_value(val).context("Failed to deserialize record")?;
 
 	// Inject the id field into the document
 	record.data.to_mut().def(&rid);
@@ -821,13 +821,13 @@ async fn build_field_state(
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
-	let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+	let db_ctx = ctx.database().context("build_field_state requires database context")?;
 	let txn = ctx.txn();
 
 	let field_defs = txn
 		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table_name, None)
 		.await
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to get field definitions: {}", e)))?;
+		.context("Failed to get field definitions")?;
 
 	// Collect computed fields and their dependency metadata
 	let mut raw_computed: Vec<(
@@ -854,13 +854,10 @@ async fn build_field_state(
 
 			dep_map.insert(field_name.clone(), deps.clone());
 
-			let physical_expr = expr_to_physical_expr(expr.clone(), ctx.ctx()).map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!(
-					"Computed field '{}' has unsupported expression: {}",
-					field_name,
-					e
-				))
-			})?;
+			let physical_expr =
+				expr_to_physical_expr(expr.clone(), ctx.ctx()).with_context(|| {
+					format!("Computed field '{field_name}' has unsupported expression")
+				})?;
 
 			raw_computed.push((field_name, physical_expr, fd.field_kind.clone(), deps.fields));
 		}
@@ -902,9 +899,7 @@ async fn build_field_state(
 		for fd in field_defs.iter() {
 			let field_name = fd.name.to_raw_string();
 			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
-				.map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("Failed to convert field permission: {}", e))
-				})?;
+				.context("Failed to convert field permission")?;
 			field_permissions.insert(field_name, physical_perm);
 		}
 	}
@@ -938,13 +933,9 @@ async fn compute_fields_for_value(
 
 		// Apply type coercion if specified
 		let final_value = if let Some(kind) = &cf.kind {
-			computed_value.coerce_to_kind(kind).map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!(
-					"Failed to coerce computed field '{}': {}",
-					cf.field_name,
-					e
-				))
-			})?
+			computed_value
+				.coerce_to_kind(kind)
+				.with_context(|| format!("Failed to coerce computed field '{}'", cf.field_name))?
 		} else {
 			computed_value
 		};
@@ -981,9 +972,9 @@ async fn filter_fields_by_permission(
 	for field_name in field_names {
 		// Check if there's a permission for this field
 		if let Some(perm) = state.field_permissions.get(&field_name) {
-			let allowed = check_permission_for_value(perm, &*value, ctx).await.map_err(|e| {
-				ControlFlow::Err(anyhow::anyhow!("Failed to check field permission: {}", e))
-			})?;
+			let allowed = check_permission_for_value(perm, &*value, ctx)
+				.await
+				.context("Failed to check field permission")?;
 
 			if !allowed && let Value::Object(obj) = value {
 				obj.remove(&field_name);

@@ -1,3 +1,9 @@
+//! Filter operator for WHERE clause processing.
+//!
+//! Applies a predicate expression to each row in the input stream,
+//! retaining only rows for which the predicate evaluates to a truthy value.
+//! Uses batch evaluation for efficiency.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -68,9 +74,6 @@ impl ExecOperator for Filter {
 
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// Get database context - we declared Database level, so this should succeed
-		// let db_ctx = ctx.database()?;
-
 		let input_stream = self.input.execute(ctx)?;
 		let predicate = Arc::clone(&self.predicate);
 

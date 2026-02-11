@@ -37,6 +37,20 @@ pub struct Compute {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
+impl Compute {
+	/// Create a new Compute operator with fresh metrics.
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		fields: Vec<(String, Arc<dyn PhysicalExpr>)>,
+	) -> Self {
+		Self {
+			input,
+			fields,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Compute {
@@ -161,20 +175,6 @@ async fn compute_batch(
 	Ok(ValueBatch {
 		values: objects.into_iter().map(Value::Object).collect(),
 	})
-}
-
-impl Compute {
-	/// Create a new Compute operator.
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		fields: Vec<(String, Arc<dyn PhysicalExpr>)>,
-	) -> Self {
-		Self {
-			input,
-			fields,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
 }
 
 #[cfg(test)]

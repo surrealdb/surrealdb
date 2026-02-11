@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-error = "Cannot scan a specific range of record references without a referencing field"
+error = "Range-bounded reference scans require a referencing field"
 
 */
 DEFINE TABLE a;

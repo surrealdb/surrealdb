@@ -22,6 +22,7 @@ use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
+use crate::expr::ControlFlowExt;
 use crate::val::Value;
 
 /// Sorts the input stream by the specified ORDER BY fields.
@@ -186,7 +187,7 @@ async fn sort_keyed_values(
 		keyed.into_iter().map(|(_, v)| v).collect()
 	})
 	.await
-	.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!("Sort error: {}", e)))
+	.context("Sort error")
 }
 
 /// Sort keyed values using single-threaded sort on WASM.
@@ -333,7 +334,7 @@ async fn sort_by_keys(
 		values
 	})
 	.await
-	.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!("Sort error: {}", e)))
+	.context("Sort error")
 }
 
 /// Sort values by extracting fields and comparing (WASM version).

@@ -26,6 +26,7 @@ use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
+use crate::expr::ControlFlowExt;
 use crate::val::Value;
 
 /// External merge sort operator for disk-based sorting.
@@ -114,20 +115,14 @@ impl ExecOperator for ExternalSort {
 
 		let sorted_stream = futures::stream::once(async move {
 			// Create temp directory for this sort operation
-			let dir = Builder::new().prefix("SURREAL_SORT").tempdir_in(&temp_dir).map_err(|e| {
-				crate::expr::ControlFlow::Err(anyhow::anyhow!(
-					"Failed to create temp directory: {}",
-					e
-				))
-			})?;
+			let dir = Builder::new()
+				.prefix("SURREAL_SORT")
+				.tempdir_in(&temp_dir)
+				.context("Failed to create temp directory")?;
 
 			// Collect all values and compute sort keys, writing to temp files
-			let mut writer = TempFileWriter::new(&dir).map_err(|e| {
-				crate::expr::ControlFlow::Err(anyhow::anyhow!(
-					"Failed to create temp file writer: {}",
-					e
-				))
-			})?;
+			let mut writer =
+				TempFileWriter::new(&dir).context("Failed to create temp file writer")?;
 
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let mut count = 0usize;
@@ -168,12 +163,8 @@ impl ExecOperator for ExternalSort {
 						Ok::<TempFileWriter, Error>(w)
 					})
 					.await
-					.map_err(|e| {
-						crate::expr::ControlFlow::Err(anyhow::anyhow!("Write error: {}", e))
-					})?
-					.map_err(|e| {
-						crate::expr::ControlFlow::Err(anyhow::anyhow!("Write error: {}", e))
-					})?;
+					.context("Write task join error")?
+					.context("Write error")?;
 					writer = w;
 
 					count += 1;
@@ -187,16 +178,10 @@ impl ExecOperator for ExternalSort {
 			}
 
 			// Flush and prepare for reading
-			writer.flush().map_err(|e| {
-				crate::expr::ControlFlow::Err(anyhow::anyhow!("Flush error: {}", e))
-			})?;
+			writer.flush().context("Flush error")?;
 
-			let reader = TempFileReader::new(count, &dir).map_err(|e| {
-				crate::expr::ControlFlow::Err(anyhow::anyhow!(
-					"Failed to create temp file reader: {}",
-					e
-				))
-			})?;
+			let reader =
+				TempFileReader::new(count, &dir).context("Failed to create temp file reader")?;
 
 			// Create sort directory
 			let sort_dir = dir.path().join("sort");
@@ -226,8 +211,8 @@ impl ExecOperator for ExternalSort {
 				Ok::<Vec<Value>, Error>(values)
 			})
 			.await
-			.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!("Sort error: {}", e)))?
-			.map_err(|e| crate::expr::ControlFlow::Err(anyhow::anyhow!("Sort error: {}", e)))?;
+			.context("Sort task join error")?
+			.context("Sort error")?;
 
 			Ok(ValueBatch {
 				values: sorted,
