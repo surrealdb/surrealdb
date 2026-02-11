@@ -30,9 +30,6 @@ use crate::key::record;
 use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::val::{RecordIdKey, TableName, Value};
 
-/// Batch size for collecting records before yielding.
-const BATCH_SIZE: usize = 1000;
-
 /// Check if a value passes the permission check.
 ///
 /// Inlined at each call site so the `Allow`/`Deny` branches are pure synchronous
@@ -473,15 +470,14 @@ fn kv_scan_stream(
 ) -> ValueBatchStream {
 	let stream = async_stream::try_stream! {
 		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, direction);
-		let chunks = kv_stream.ready_chunks(BATCH_SIZE);
-		futures::pin_mut!(chunks);
+		futures::pin_mut!(kv_stream);
 
 		let mut skipped = 0usize;
-		while let Some(chunk) = chunks.next().await {
-			let mut batch = Vec::with_capacity(chunk.len());
-			for result in chunk {
-				let (key, val) = result
-					.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+		while let Some(result) = kv_stream.next().await {
+			let entries = result
+				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to scan record: {e}")))?;
+			let mut batch = Vec::with_capacity(entries.len());
+			for (key, val) in entries {
 				if skipped < pre_skip {
 					skipped += 1;
 					continue; // discard without decoding

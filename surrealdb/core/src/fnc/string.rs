@@ -29,7 +29,7 @@ fn check_similarity_input_length(name: &str, a: &str, b: &str) -> Result<()> {
 	let max = *STRING_SIMILARITY_LIMIT;
 	ensure!(
 		a.len() <= max && b.len() <= max,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!(
 				"Input strings must not exceed {} bytes (got {} and {}).",

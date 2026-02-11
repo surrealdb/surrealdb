@@ -184,16 +184,18 @@ impl ExecOperator for GraphEdgeScan {
 						futures::pin_mut!(kv_stream);
 
 						while let Some(result) = kv_stream.next().await {
-							let key = result.map_err(|e| {
+							let keys = result.map_err(|e| {
 								ControlFlow::Err(anyhow::anyhow!("Failed to scan graph edge: {}", e))
 							})?;
 
-							let value = decode_graph_key(&key, output_mode, &ctx).await?;
-							batch.push(value);
+							for key in keys {
+								let value = decode_graph_key(&key, output_mode, &ctx).await?;
+								batch.push(value);
 
-							if batch.len() >= BATCH_SIZE {
-								yield ValueBatch { values: std::mem::take(&mut batch) };
-								batch.reserve(BATCH_SIZE);
+								if batch.len() >= BATCH_SIZE {
+									yield ValueBatch { values: std::mem::take(&mut batch) };
+									batch.reserve(BATCH_SIZE);
+								}
 							}
 						}
 					} else {
@@ -305,16 +307,18 @@ impl ExecOperator for GraphEdgeScan {
 							futures::pin_mut!(kv_stream);
 
 							while let Some(result) = kv_stream.next().await {
-								let key = result.map_err(|e| {
+								let keys = result.map_err(|e| {
 									ControlFlow::Err(anyhow::anyhow!("Failed to scan graph edge: {}", e))
 								})?;
 
-								let value = decode_graph_key(&key, output_mode, &ctx).await?;
-								batch.push(value);
+								for key in keys {
+									let value = decode_graph_key(&key, output_mode, &ctx).await?;
+									batch.push(value);
 
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
+									if batch.len() >= BATCH_SIZE {
+										yield ValueBatch { values: std::mem::take(&mut batch) };
+										batch.reserve(BATCH_SIZE);
+									}
 								}
 							}
 						}

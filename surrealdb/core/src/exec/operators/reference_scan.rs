@@ -318,51 +318,53 @@ impl ExecOperator for ReferenceScan {
 				futures::pin_mut!(kv_stream);
 
 				while let Some(result) = kv_stream.next().await {
-					let key = result.map_err(|e| {
+					let keys = result.map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to scan reference: {}", e))
 					})?;
 
-					// Decode the reference key to get the referencing record ID
-					let decoded = crate::key::r#ref::Ref::decode_key(&key)
-						.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode ref key: {}", e)))?;
+					for key in keys {
+						// Decode the reference key to get the referencing record ID
+						let decoded = crate::key::r#ref::Ref::decode_key(&key)
+							.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to decode ref key: {}", e)))?;
 
-					// The referencing record ID (fk = foreign key, ft = foreign table)
-					let referencing_rid = RecordId {
-						table: decoded.ft.into_owned(),
-						key: decoded.fk.into_owned(),
-					};
+						// The referencing record ID (fk = foreign key, ft = foreign table)
+						let referencing_rid = RecordId {
+							table: decoded.ft.into_owned(),
+							key: decoded.fk.into_owned(),
+						};
 
-					let value = match output_mode {
-						ReferenceScanOutput::RecordId => Value::RecordId(referencing_rid),
-						ReferenceScanOutput::FullRecord => {
-							// Fetch the full record from the datastore
-							let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
-							let record = txn
-								.get_record(
-									db_ctx.ns_ctx.ns.namespace_id,
-									db_ctx.db.database_id,
-									&referencing_rid.table,
-									&referencing_rid.key,
-									None,
-								)
-								.await
-								.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch record: {}", e)))?;
+						let value = match output_mode {
+							ReferenceScanOutput::RecordId => Value::RecordId(referencing_rid),
+							ReferenceScanOutput::FullRecord => {
+								// Fetch the full record from the datastore
+								let db_ctx = ctx.database().map_err(|e| ControlFlow::Err(e.into()))?;
+								let record = txn
+									.get_record(
+										db_ctx.ns_ctx.ns.namespace_id,
+										db_ctx.db.database_id,
+										&referencing_rid.table,
+										&referencing_rid.key,
+										None,
+									)
+									.await
+									.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to fetch record: {}", e)))?;
 
-							if record.data.as_ref().is_none() {
-								Value::None
-							} else {
-								let mut v = record.data.as_ref().clone();
-								v.def(&referencing_rid);
-								v
+								if record.data.as_ref().is_none() {
+									Value::None
+								} else {
+									let mut v = record.data.as_ref().clone();
+									v.def(&referencing_rid);
+									v
+								}
 							}
+						};
+
+						batch.push(value);
+
+						if batch.len() >= BATCH_SIZE {
+							yield ValueBatch { values: std::mem::take(&mut batch) };
+							batch.reserve(BATCH_SIZE);
 						}
-					};
-
-					batch.push(value);
-
-					if batch.len() >= BATCH_SIZE {
-						yield ValueBatch { values: std::mem::take(&mut batch) };
-						batch.reserve(BATCH_SIZE);
 					}
 				}
 			}
