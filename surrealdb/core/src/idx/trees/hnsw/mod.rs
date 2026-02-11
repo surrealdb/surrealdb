@@ -794,6 +794,7 @@ mod tests {
 				})
 				.finish()
 				.await;
+			tx.cancel().await.unwrap();
 		}
 
 		// Delete collection
@@ -885,6 +886,7 @@ mod tests {
 			let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
 			let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
 			let res = h.knn_search(&tx, &search).await.unwrap();
+			tx.cancel().await.unwrap();
 			assert_eq!(res.len(), 10);
 		}
 	}
@@ -902,7 +904,7 @@ mod tests {
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
-		tx.commit().await.unwrap();
+		tx.commit().await?;
 
 		let collection: Arc<TestCollection> =
 			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
@@ -961,6 +963,7 @@ mod tests {
 							let tx = ctx.tx();
 							let hnsw_res =
 								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
+							tx.cancel().await.unwrap();
 							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);

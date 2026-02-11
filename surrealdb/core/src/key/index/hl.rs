@@ -1,4 +1,4 @@
-//! Store and chunked layers of an HNSW index
+//! Store chunk data for layers of an HNSW index
 use std::borrow::Cow;
 use std::fmt::Debug;
 

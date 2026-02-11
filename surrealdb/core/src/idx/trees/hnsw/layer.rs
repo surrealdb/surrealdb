@@ -1,5 +1,3 @@
-use std::mem;
-
 use ahash::HashSet;
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -67,7 +65,7 @@ where
 		if !self.graph.add_empty_node(node) {
 			return Ok(false);
 		}
-		self.save(tx, st).await?;
+		self.save_nodes(tx, st, &[node]).await?;
 		Ok(true)
 	}
 	pub(super) async fn search_single(
@@ -285,26 +283,30 @@ where
 
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
 
-		for e_id in neighbors {
-			if let Some(e_conn) = self.graph.get_edges(&e_id) {
+		for e_id in &neighbors {
+			if let Some(e_conn) = self.graph.get_edges(e_id) {
 				if e_conn.len() > self.m_max
-					&& let Some(e_pt) = elements.get_vector(tx, &e_id).await?
+					&& let Some(e_pt) = elements.get_vector(tx, e_id).await?
 				{
-					let e_c = self.build_priority_list(tx, elements, e_id, e_conn).await?;
+					let e_c = self.build_priority_list(tx, elements, *e_id, e_conn).await?;
 					let mut e_new_conn = self.graph.new_edges();
 					heuristic
-						.select(tx, elements, self, e_id, &e_pt, e_c, None, &mut e_new_conn)
+						.select(tx, elements, self, *e_id, &e_pt, e_c, None, &mut e_new_conn)
 						.await?;
 					#[cfg(debug_assertions)]
-					assert!(!e_new_conn.contains(&e_id));
-					self.graph.set_node(e_id, e_new_conn);
+					assert!(!e_new_conn.contains(e_id));
+					self.graph.set_node(*e_id, e_new_conn);
 				}
 			} else {
 				#[cfg(debug_assertions)]
 				unreachable!("Element: {}", e_id);
 			}
 		}
-		self.save(tx, st).await?;
+		// Save the new node and all its neighbors (which had bidirectional edges added/pruned)
+		let mut changed_nodes = Vec::with_capacity(neighbors.len() + 1);
+		changed_nodes.push(q_id);
+		changed_nodes.extend_from_slice(&neighbors);
+		self.save_nodes(tx, st, &changed_nodes).await?;
 		Ok(eps)
 	}
 
@@ -337,6 +339,7 @@ where
 		efc: usize,
 	) -> Result<bool> {
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
+			let mut changed_nodes = Vec::with_capacity(f_ids.len());
 			for &q_id in f_ids.iter() {
 				if let Some(q_pt) = elements.get_vector(tx, &q_id).await? {
 					let c = self
@@ -359,50 +362,89 @@ where
 						assert!(q_new_conn.len() <= self.m_max);
 					}
 					self.graph.set_node(q_id, q_new_conn);
+					changed_nodes.push(q_id);
 				}
 			}
-			self.save(tx, st).await?;
+			// Delete the removed node's key and save all modified neighbor nodes
+			self.delete_node(tx, e_id).await?;
+			self.save_nodes(tx, st, &changed_nodes).await?;
 			Ok(true)
 		} else {
 			Ok(false)
 		}
 	}
 
-	// Base on FoundationDB max value size (100K)
-	// https://apple.github.io/foundationdb/known-limitations.html#large-keys-and-values
-	const CHUNK_SIZE: usize = 100_000;
-	async fn save(&mut self, tx: &Transaction, st: &mut LayerState) -> Result<()> {
-		// Serialise the graph
-		let val = self.graph.to_val()?;
-		// Split it into chunks
-		let chunks = val.chunks(Self::CHUNK_SIZE);
-		let old_chunks_len = mem::replace(&mut st.chunks, chunks.len() as u32);
-		for (i, chunk) in chunks.enumerate() {
-			let key = self.ikb.new_hl_key(self.level, i as u32);
-			let chunk = chunk.to_vec();
-			tx.set(&key, &chunk, None).await?;
-		}
-		// Delete larger chunks if they exists
-		for i in st.chunks..old_chunks_len {
-			let key = self.ikb.new_hl_key(self.level, i);
-			tx.del(&key).await?;
+	/// Persists only the specified nodes to the KV store using per-node `Hn` keys.
+	/// Each node's edge list is serialized independently, avoiding full-graph serialization.
+	async fn save_nodes(
+		&self,
+		tx: &Transaction,
+		st: &mut LayerState,
+		nodes: &[ElementId],
+	) -> Result<()> {
+		for &node_id in nodes {
+			if let Some(val) = self.graph.node_to_val(&node_id) {
+				let key = self.ikb.new_hn_key(self.level, node_id);
+				tx.set(&key, &val, None).await?;
+			}
 		}
 		// Increase the version
 		st.version += 1;
 		Ok(())
 	}
 
+	/// Deletes a single node's `Hn` key from the KV store.
+	async fn delete_node(&self, tx: &Transaction, node_id: ElementId) -> Result<()> {
+		let key = self.ikb.new_hn_key(self.level, node_id);
+		tx.del(&key).await?;
+		Ok(())
+	}
+
+	/// Loads the graph for this layer from the KV store.
+	///
+	/// First attempts to load from per-node `Hn` keys (new format).
+	/// If no `Hn` keys are found, falls back to chunk-based `Hl` keys (legacy format),
+	/// migrates all nodes to `Hn` keys, and deletes the old `Hl` chunk keys.
 	pub(super) async fn load(&mut self, tx: &Transaction, st: &LayerState) -> Result<()> {
-		let mut val = Vec::new();
-		// Load the chunks
-		for i in 0..st.chunks {
-			let key = self.ikb.new_hl_key(self.level, i);
-			let chunk =
-				tx.get(&key, None).await?.ok_or_else(|| Error::unreachable("Missing chunk"))?;
-			val.extend(chunk);
+		// First, try to load from new per-node Hn keys
+		self.graph.clear();
+		let range = self.ikb.new_hn_layer_range(self.level)?;
+		let entries = tx.scan(range, u32::MAX, None).await?;
+		if !entries.is_empty() {
+			for (key, val) in entries {
+				if key.len() >= 4 {
+					let id_bytes: [u8; 4] = key[key.len() - 4..].try_into()?;
+					let element_id = u32::from_be_bytes(id_bytes) as ElementId;
+					self.graph.load_node(element_id, &val);
+				}
+			}
+			return Ok(());
 		}
-		// Rebuild the graph
-		self.graph.reload(&val)
+		// Fallback: load from old chunk-based Hl keys and migrate
+		if st.chunks > 0 {
+			let mut val = Vec::new();
+			for i in 0..st.chunks {
+				let key = self.ikb.new_hl_key(self.level, i);
+				let chunk =
+					tx.get(&key, None).await?.ok_or_else(|| Error::unreachable("Missing chunk"))?;
+				val.extend(chunk);
+			}
+			self.graph.reload(&val)?;
+			// Migrate: write all nodes as new Hn keys
+			let node_ids: Vec<ElementId> = self.graph.node_ids();
+			for &node_id in &node_ids {
+				if let Some(node_val) = self.graph.node_to_val(&node_id) {
+					let key = self.ikb.new_hn_key(self.level, node_id);
+					tx.set(&key, &node_val, None).await?;
+				}
+			}
+			// Delete old Hl chunk keys
+			for i in 0..st.chunks {
+				let key = self.ikb.new_hl_key(self.level, i);
+				tx.del(&key).await?;
+			}
+		}
+		Ok(())
 	}
 }
 
