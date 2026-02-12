@@ -8,13 +8,13 @@ auth = { level = "owner" }
 reason = "COUNT() with AS alias and GROUP ALL should use the alias as the output field name"
 
 [[test.results]]
-value = "NONE"
+value = "[{ category: 'One', id: product:a, name: 'A' }]"
 
 [[test.results]]
-value = "NONE"
+value = "[{ category: 'One', id: product:b, name: 'B' }]"
 
 [[test.results]]
-value = "NONE"
+value = "[{ category: 'Two', id: product:c, name: 'C' }]"
 
 [[test.results]]
 value = "[{ c: 3 }]"
