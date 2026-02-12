@@ -126,6 +126,10 @@ impl ExecOperator for GraphEdgeScan {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("source", &self.source)]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		let source_expr = Arc::clone(&self.source);
