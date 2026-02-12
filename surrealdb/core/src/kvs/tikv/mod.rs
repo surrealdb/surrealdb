@@ -489,6 +489,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
@@ -501,16 +502,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Create the iterator
 		let mut iter = inner.tx.scan_keys(rng, count).await?;
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -521,6 +522,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
@@ -533,16 +535,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Create the iterator
 		let mut iter = inner.tx.scan_keys_reverse(rng, count).await?;
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -553,6 +555,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
@@ -565,16 +568,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Create the iterator
 		let mut iter = inner.tx.scan(rng, count).await?;
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -585,6 +588,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
@@ -597,16 +601,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Create the iterator
 		let mut iter = inner.tx.scan_reverse(rng, count).await?;
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -750,7 +754,17 @@ impl TiKVStamp {
 }
 
 // Consume and iterate over only keys
-fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -> Vec<Key> {
+fn consume_keys<I: Iterator<Item = tikv::Key>>(
+	iter: &mut I,
+	limit: ScanLimit,
+	skip: u32,
+) -> Vec<Key> {
+	// Skip entries from the pre-fetched iterator
+	for _ in 0..skip {
+		if iter.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -810,7 +824,14 @@ fn consume_keys<I: Iterator<Item = tikv::Key>>(iter: &mut I, limit: ScanLimit) -
 fn consume_vals<I: Iterator<Item = tikv::KvPair>>(
 	iter: &mut I,
 	limit: ScanLimit,
+	skip: u32,
 ) -> Vec<(Key, Val)> {
+	// Skip entries from the pre-fetched iterator
+	for _ in 0..skip {
+		if iter.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set

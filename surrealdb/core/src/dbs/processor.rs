@@ -721,7 +721,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
+		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), 0, sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		'outer: while let Some(res) = stream.next().await {
@@ -776,7 +776,7 @@ pub(super) trait Collector {
 
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, 0, sc);
 
 		// Loop until no more entries
 		let mut count = 0;
@@ -821,7 +821,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, 0, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: while let Some(res) = stream.next().await {
@@ -913,7 +913,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, 0, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: while let Some(res) = stream.next().await {
@@ -958,7 +958,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, 0, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: while let Some(res) = stream.next().await {
@@ -1054,7 +1054,8 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		'keys: for (beg, end) in keys {
 			// Create a new iterable range
-			let mut stream = txn.stream_keys(beg..end, opt.version, None, ScanDirection::Forward);
+			let mut stream =
+				txn.stream_keys(beg..end, opt.version, None, 0, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {

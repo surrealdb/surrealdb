@@ -371,6 +371,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -388,7 +389,7 @@ impl Transactable for Transaction {
 			None => inner.keys_iter(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -399,6 +400,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -416,7 +418,7 @@ impl Transactable for Transaction {
 			None => inner.keys_iter_reverse(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -427,6 +429,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -444,7 +447,7 @@ impl Transactable for Transaction {
 			None => inner.scan_iter(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -455,6 +458,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -472,7 +476,7 @@ impl Transactable for Transaction {
 			None => inner.scan_iter_reverse(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -496,7 +500,13 @@ impl Transactable for Transaction {
 }
 
 // Consume and iterate over only keys
-fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit) -> Vec<Key> {
+fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -550,7 +560,13 @@ fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit) -> Vec<Key> {
 }
 
 // Consume and iterate over keys and values
-fn consume_vals(cursor: &mut ScanIterator<'_>, limit: ScanLimit) -> Vec<(Key, Val)> {
+fn consume_vals(cursor: &mut ScanIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set

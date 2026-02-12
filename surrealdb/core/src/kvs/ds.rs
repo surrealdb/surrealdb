@@ -917,7 +917,7 @@ impl Datastore {
 			None => {
 				// Fetch any keys immediately following the version key
 				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, None).await);
+				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database

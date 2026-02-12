@@ -750,6 +750,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
@@ -780,7 +781,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit, Direction::Forward);
+		let res = consume_keys(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -793,6 +794,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
@@ -823,7 +825,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit, Direction::Backward);
+		let res = consume_keys(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -836,6 +838,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -866,7 +869,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit, Direction::Forward);
+		let res = consume_vals(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -879,6 +882,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -909,7 +913,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit, Direction::Backward);
+		let res = consume_vals(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -953,8 +957,20 @@ impl Transactable for Transaction {
 fn consume_keys<D: rocksdb::DBAccess>(
 	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
 	limit: ScanLimit,
+	skip: u32,
 	dir: Direction,
 ) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -1026,8 +1042,20 @@ fn consume_keys<D: rocksdb::DBAccess>(
 fn consume_vals<D: rocksdb::DBAccess>(
 	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
 	limit: ScanLimit,
+	skip: u32,
 	dir: Direction,
 ) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
