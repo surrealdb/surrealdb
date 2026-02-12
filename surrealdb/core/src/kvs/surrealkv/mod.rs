@@ -406,11 +406,10 @@ impl Transactable for Transaction {
 					// version for each key. We skip newer versions and only
 					// count non-tombstone entries.
 					while iter.valid() {
-						// Extract key reference once
 						let key_ref = iter.key();
 						// This is the latest relevant version for this key
 						if key_ref.timestamp() <= ts {
-							// Store the current user key (owned to allow mutation)
+							// Store the current user key
 							let user_key = key_ref.user_key().to_vec();
 							// Check if this is a tombstone
 							let is_tombstone = key_ref.is_tombstone();
@@ -725,10 +724,9 @@ impl Cursor for HistoryCursor<'_> {
 				// Newest version first: the first entry with ts <= self.ts
 				// is the latest version. Then skip older versions of same key.
 				while self.inner.valid() {
-					// Extract key reference once
 					let key_ref = self.inner.key();
 					if key_ref.timestamp() <= self.ts {
-						// Store the current user key (owned to allow mutation)
+						// Store the current user key
 						let user_key = key_ref.user_key().to_vec();
 						// Skip remaining older versions of this key
 						loop {
@@ -754,7 +752,6 @@ impl Cursor for HistoryCursor<'_> {
 				while self.inner.valid() {
 					// Track if matched
 					let mut matched = false;
-					// Extract key reference once and store user key
 					let user_key = self.inner.key().user_key().to_vec();
 					// Scan all versions of the current key
 					while self.inner.valid() && self.inner.key().user_key() == user_key {
@@ -785,10 +782,9 @@ impl Cursor for HistoryCursor<'_> {
 				// Newest version first: the first entry with ts <= self.ts
 				// is the latest version. Then skip older versions of same key.
 				while self.inner.valid() {
-					// Extract key reference once
 					let key_ref = self.inner.key();
 					if key_ref.timestamp() <= self.ts {
-						// Store the current user key (owned to allow mutation)
+						// Store the current user key
 						let user_key = key_ref.user_key().to_vec();
 						// Store the current value
 						let value = self.inner.value()?;
