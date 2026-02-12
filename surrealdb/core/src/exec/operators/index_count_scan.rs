@@ -279,6 +279,7 @@ async fn sum_index_count_deltas(
 		range,
 		None, // no version
 		None, // no limit
+		0,    // no skip
 		crate::idx::planner::ScanDirection::Forward,
 	);
 	futures::pin_mut!(key_stream);
@@ -326,6 +327,7 @@ async fn count_with_filter_fallback(
 		beg..end,
 		version,
 		None, // no limit
+		0,    // no skip
 		crate::idx::planner::ScanDirection::Forward,
 	);
 	futures::pin_mut!(kv_stream);
