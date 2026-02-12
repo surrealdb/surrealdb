@@ -9,15 +9,12 @@ use super::util::{extract_table_from_context, key_lit_to_expr};
 use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::operators::{
-	EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField, ReferenceScan,
-	ReferenceScanOutput, SortDirection,
+	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
+	ReferenceScan, ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
 use crate::expr::{Expr, Literal};
-
-/// Special parameter name for passing the lookup source at execution time.
-pub(crate) const LOOKUP_SOURCE_PARAM: &str = "__lookup_source__";
 
 // ============================================================================
 // impl Planner — Source Planning
@@ -133,6 +130,11 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan a Lookup operation (graph edge or reference traversal).
+	///
+	/// Builds a streaming operator chain rooted at `CurrentValueSource`.
+	/// At execution time, `LookupPart` sets `current_value` on the
+	/// `ExecutionContext` before executing this chain, so `CurrentValueSource`
+	/// yields the appropriate RecordId into the stream.
 	pub(crate) fn plan_lookup(
 		&self,
 		crate::expr::lookup::Lookup {
@@ -148,8 +150,8 @@ impl<'ctx> Planner<'ctx> {
 			alias: _,
 		}: crate::expr::lookup::Lookup,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		let source_expr: Arc<dyn crate::exec::PhysicalExpr> =
-			Arc::new(crate::exec::physical_expr::Param(LOOKUP_SOURCE_PARAM.into()));
+		// The leaf of the operator chain: reads current_value from ExecutionContext
+		let input: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
 
 		let needs_full_pipeline = expr.is_some() || group.is_some();
 		let needs_full_records = needs_full_pipeline || cond.is_some() || split.is_some();
@@ -189,7 +191,7 @@ impl<'ctx> Planner<'ctx> {
 					.collect::<Result<Vec<_>, Error>>()?;
 
 				Arc::new(GraphEdgeScan::new(
-					source_expr,
+					input,
 					LookupDirection::from(dir),
 					edge_tables,
 					output_mode,
@@ -229,7 +231,7 @@ impl<'ctx> Planner<'ctx> {
 				};
 
 				Arc::new(ReferenceScan::new(
-					source_expr,
+					input,
 					referencing_table,
 					referencing_field,
 					ref_output_mode,
