@@ -2,9 +2,7 @@ use std::mem::MaybeUninit;
 
 use common::span::Span;
 use logos::Lexer;
-
-use token::Token;
-use token::{BaseTokenKind, Joined, LexError};
+use token::{BaseTokenKind, Joined, LexError, Token};
 
 #[derive(Debug)]
 pub struct PeekableLexer<'source, const SIZE: usize> {
@@ -27,9 +25,11 @@ impl<'source, const SIZE: usize> Clone for PeekableLexer<'source, SIZE> {
 
 impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 	const _ASSERT_SIZE: () = const {
-		assert!(SIZE < u8::MAX as usize, "Peekable Lexer SIZE must be less then u8::MAX");
+		assert!(SIZE <= u8::MAX as usize, "Peekable Lexer SIZE must be less then u8::MAX");
 		assert!(SIZE.is_power_of_two(), "Peekable lexer SIZE must be a power of 2");
 	};
+
+	const MASK: u8 = (SIZE as u8) - 1;
 
 	pub fn new(lexer: Lexer<'source, BaseTokenKind>) -> Self {
 		PeekableLexer {
@@ -63,31 +63,33 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 				"peek offset must be less then size of the peek buffer"
 			)
 		};
+
 		if OFFSET == 0 {
 			if self.read != self.write {
-				return Some(unsafe { self.peek[self.read as usize].assume_init() });
+				return Some(unsafe { self.peek[(self.read & Self::MASK) as usize].assume_init() });
 			} else {
 				let x = self.lex_token()?;
-				self.peek[self.write as usize] = MaybeUninit::new(x);
-				self.write += 1;
-				self.write &= (SIZE as u8) - 1;
+				self.peek[(self.write & Self::MASK) as usize] = MaybeUninit::new(x);
+				self.write = self.write.wrapping_add(1);
 				Some(x)
 			}
 		} else {
-			let mut write = self.write as usize;
-			let read = self.read as usize;
-			if write < read {
-				write += SIZE;
-			}
-			for i in write..(read + OFFSET as usize) {
+			let write = self.write & Self::MASK;
+			let read = self.read.wrapping_add(OFFSET) & Self::MASK;
+
+			let write = if write < read {
+				write + SIZE as u8
+			} else {
+				write
+			};
+
+			for _ in write..=read {
 				let x = self.lex_token()?;
-				let idx = i & SIZE - 1;
-				self.peek[idx] = MaybeUninit::new(x);
-				self.write = idx as u8;
+				self.peek[(self.write & Self::MASK) as usize] = MaybeUninit::new(x);
+				self.write = self.write.wrapping_add(1);
 			}
-			Some(unsafe {
-				self.peek[((self.read + OFFSET) & ((SIZE as u8) - 1)) as usize].assume_init()
-			})
+
+			Some(unsafe { self.peek[read as usize].assume_init() })
 		}
 	}
 
@@ -113,8 +115,8 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		if self.read == self.write {
 			return self.lex_token();
 		}
-		let res = unsafe { self.peek[self.read as usize].assume_init() };
-		self.read = (self.read + 1) & ((SIZE as u8) - 1);
+		let res = unsafe { self.peek[(self.read & Self::MASK) as usize].assume_init() };
+		self.read = self.read.wrapping_add(1);
 		Some(res)
 	}
 
@@ -131,7 +133,7 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 	#[inline]
 	pub fn pop_peek(&mut self) {
 		debug_assert_ne!(self.read, self.write);
-		self.read = (self.read + 1) & ((SIZE as u8) - 1)
+		self.read = self.read.wrapping_add(1);
 	}
 
 	#[inline]

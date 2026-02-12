@@ -7115,6 +7115,7 @@ dependencies = [
  "reblessive",
  "surrealdb-ast",
  "surrealdb-common",
+ "surrealdb-token",
 ]
 
 [[package]]
@@ -7250,6 +7251,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.10.2",
+]
+
+[[package]]
+name = "surrealdb-token"
+version = "3.0.0"
+dependencies = [
+ "logos",
+ "surrealdb-common",
 ]
 
 [[package]]

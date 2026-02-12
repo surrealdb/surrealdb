@@ -1,6 +1,6 @@
 //! Module implementing spans, types indicating a region of code.
 
-use std::ops::{RangeBounds, RangeInclusive};
+use std::ops::{Range, RangeBounds};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct Span {
@@ -9,6 +9,8 @@ pub struct Span {
 }
 
 impl Span {
+	pub const MAX_LENGHT: u32 = u32::MAX;
+
 	#[inline]
 	pub const fn new(start: u32, end: u32) -> Self {
 		Span {
@@ -17,11 +19,17 @@ impl Span {
 		}
 	}
 
+	#[inline]
 	pub const fn empty() -> Self {
 		Span {
 			start: 0,
 			end: 0,
 		}
+	}
+
+	#[inline]
+	pub const fn is_empty(&self) -> bool {
+		self.start > self.end
 	}
 
 	#[inline]
@@ -36,8 +44,8 @@ impl Span {
 		};
 
 		let end = match r.end_bound() {
-			std::ops::Bound::Included(x) => *x,
-			std::ops::Bound::Excluded(x) => (*x).saturating_sub(1),
+			std::ops::Bound::Excluded(x) => *x,
+			std::ops::Bound::Included(x) => (*x).saturating_add(1),
 			std::ops::Bound::Unbounded => u32::MAX,
 		};
 
@@ -47,21 +55,26 @@ impl Span {
 		}
 	}
 
-	pub fn to_range(&self) -> RangeInclusive<u32> {
-		self.start..=self.end
+	#[inline]
+	pub fn to_range(&self) -> Range<u32> {
+		self.start..self.end
 	}
 
 	/// The length of the span.
+	#[inline]
 	pub fn len(&self) -> u32 {
 		self.end.saturating_sub(self.start)
 	}
 
 	/// Returns if a span is within the region of this span.
+	#[inline]
 	pub fn contains(&self, other: Span) -> bool {
 		self.start <= other.start && self.end >= other.end
 	}
 
-	/// Returns a span which covers the region of both span, as well as possible uncovered space inbetween.
+	/// Returns a span which covers the region of both span, as well as possible uncovered space
+	/// inbetween.
+	#[inline]
 	pub fn extend(&self, other: Span) -> Self {
 		Span {
 			start: self.start.min(other.start),

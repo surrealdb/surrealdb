@@ -1,4 +1,4 @@
-use std::io::{Read, stdout};
+use std::io::stdout;
 
 use ast::Query;
 

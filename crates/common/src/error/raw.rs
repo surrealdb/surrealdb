@@ -1,10 +1,8 @@
 use core::fmt;
-use std::{
-	alloc::{self, Layout},
-	any::TypeId,
-	ops::{Deref, DerefMut},
-	ptr::NonNull,
-};
+use std::alloc::{self, Layout};
+use std::any::TypeId;
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 
 use super::{ErrorCode, ErrorTrait};
 
@@ -160,6 +158,23 @@ impl<E: ErrorTrait> RawTypedError<E> {
 
 	pub fn erase(self) -> RawError {
 		RawError(self.0.cast())
+	}
+
+	pub fn into_raw(self) -> NonNull<()> {
+		let ptr = self.0;
+		std::mem::forget(self);
+		ptr.cast()
+	}
+
+	pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
+		Self(ptr.cast())
+	}
+
+	pub unsafe fn ref_from_raw<'a>(ptr: NonNull<()>) -> &'a E {
+		unsafe {
+			let ptr: ErrorPtr<E> = ptr.cast();
+			&ptr.as_ref().t
+		}
 	}
 }
 

@@ -1,4 +1,5 @@
 use std::{
+	fmt::{self, Debug},
 	hash::{BuildHasher, Hash, Hasher, RandomState},
 	ops::{Index, IndexMut},
 };
@@ -28,6 +29,21 @@ where
 			storage: Vec::new(),
 			hasher: RandomState::new(),
 		}
+	}
+}
+
+impl<I, V> Debug for IdSet<I, V>
+where
+	I: Id + Debug,
+	V: Eq + Hash + Debug,
+{
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let mut fmt = f.debug_list();
+		for bucket in unsafe { self.map.iter() } {
+			let id = unsafe { *bucket.as_ref() };
+			fmt.entry(&self.storage[id.idx()]);
+		}
+		fmt.finish()
 	}
 }
 
