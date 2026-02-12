@@ -337,12 +337,9 @@ impl ExecOperator for Scan {
 			// so rows are discarded before deserialization.
 			let pre_skip = if !needs_processing { start_val } else { 0 };
 
-			// Push start+limit to the storage layer for the pure fast path.
-			let effective_storage_limit = if !needs_processing {
-				limit_val.map(|l| start_val.saturating_add(l))
-			} else {
-				None
-			};
+			// Push limit to the storage layer for the pure fast path.
+			// The KV scanner's skip is applied before the limit, so no adjustment needed.
+			let effective_storage_limit = if !needs_processing { limit_val } else { None };
 
 			let direction = determine_scan_direction(&order);
 
@@ -533,9 +530,10 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 
 /// Produce a `ValueBatchStream` from a raw KV range scan.
 ///
-/// When `pre_skip > 0`, that many KV pairs are discarded *before* decoding,
-/// avoiding deserialization work for rows that will be skipped anyway (the
-/// fast-path optimisation for `START` without a pushdown predicate).
+/// When `pre_skip > 0`, that many entries are skipped at the KV storage layer
+/// before any data is returned, avoiding I/O, allocation, and deserialization
+/// for rows that will be discarded anyway (the fast-path optimisation for
+/// `START` without a pushdown predicate).
 fn kv_scan_stream(
 	txn: Arc<Transaction>,
 	beg: crate::kvs::Key,
@@ -545,26 +543,15 @@ fn kv_scan_stream(
 	direction: ScanDirection,
 	pre_skip: usize,
 ) -> ValueBatchStream {
+	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = async_stream::try_stream! {
-		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, 0, direction);
+		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, skip, direction);
 		futures::pin_mut!(kv_stream);
 
-		let mut skipped = 0usize;
 		while let Some(result) = kv_stream.next().await {
 			let entries = result.context("Failed to scan record")?;
-			// Fast path: skip entire batch when all entries fall within pre_skip
-			let remaining_to_skip = pre_skip - skipped;
-			if entries.len() <= remaining_to_skip {
-				skipped += entries.len();
-				continue;
-			}
-			// Allocate only for entries that will actually be decoded
-			let mut batch = Vec::with_capacity(entries.len() - remaining_to_skip);
+			let mut batch = Vec::with_capacity(entries.len());
 			for (key, val) in entries {
-				if skipped < pre_skip {
-					skipped += 1;
-					continue; // discard without decoding
-				}
 				batch.push(decode_record(&key, val)?);
 			}
 			if !batch.is_empty() {
