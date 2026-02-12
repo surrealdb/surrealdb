@@ -450,7 +450,16 @@ impl<'ctx> Planner<'ctx> {
 				)) as Arc<dyn ExecOperator>)
 			}
 
-			Expr::Select(inner_select) => self.plan_select_statement(*inner_select),
+			Expr::Select(inner_select) => {
+				if version.is_some() {
+					return Err(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					});
+				}
+				self.plan_select_statement(*inner_select)
+			}
 
 			Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
 				let phys_expr = self.physical_expr(expr)?;
