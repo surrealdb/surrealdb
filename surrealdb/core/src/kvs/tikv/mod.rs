@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use savepoint::{Operation, Savepoint};
-use tikv::{CheckLevel, Config, TransactionClient, TransactionOptions};
+use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
@@ -746,6 +746,15 @@ impl TimeStampImpl for TiKVStampImpl {
 	}
 
 	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
+		if bytes.len() == 8 {
+			// Backwards compatibilty with old timestamp
+			let Ok(b) = <[u8; 8]>::try_from(&bytes[0..8]) else {
+				unreachable!()
+			};
+			let ts = u64::from_be_bytes(b);
+			return Ok(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp::from_version(ts))));
+		}
+
 		if bytes.len() != 20 {
 			return Err(Error::TimestampInvalid(
 				"Encoded timestamp is not the right length".to_string(),
