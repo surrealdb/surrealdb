@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
-use crate::expr::{Base, Expr, FlowResultExt, Kind, Literal, Part};
+use crate::expr::{Base, Expr, FlowResultExt, Literal, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
@@ -98,7 +98,10 @@ impl DefineIndexStatement {
 		// If the table is schemafull, ensure that every indexed field is defined.
 		// For sub-field paths (e.g. `document.visible`), we allow the index if
 		// either the full path is explicitly defined, or the top-level parent
-		// field is defined with type `object` (which permits arbitrary sub-fields).
+		// field has a type that permits sub-field access — this includes `object`,
+		// `any`, literal object types (e.g. `{ key: string }`), and union types
+		// where every non-none variant is object-like. A parent field with no
+		// explicit type is also accepted, since it is unconstrained.
 		if tb.schemafull {
 			for idiom in cols.iter() {
 				let fd = idiom.to_raw_string();
@@ -108,17 +111,16 @@ impl DefineIndexStatement {
 					continue;
 				}
 				// For sub-field paths, extract the top-level parent field name
-				if let Some(Part::Field(first)) = idiom.0.first() {
-					// Allow the index if the parent field exists and is typed as `object`,
-					// since object-typed fields permit nested sub-fields without explicit
-					// definitions. Otherwise, the index cannot be created.
-					if let Some(f) =
+				if let Some(Part::Field(first)) = idiom.0.first() &&
+					// Allow the index when the parent field exists and its type
+					// permits sub-field access. If no type is set (field_kind is
+					// None), the field is unconstrained and sub-fields are allowed.
+					 let Some(f) =
 						txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first).await?
-						&& let Some(Kind::Object) = f.field_kind
-					{
-						continue;
-					}
-				};
+				&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
+				{
+					continue;
+				}
 				bail!(Error::FdNotFound {
 					name: idiom.to_raw_string(),
 				});
