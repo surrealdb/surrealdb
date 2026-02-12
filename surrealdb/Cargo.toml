@@ -119,7 +119,6 @@ ciborium.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
-nanoid.workspace = true
 parking_lot.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 radix_trie.workspace = true

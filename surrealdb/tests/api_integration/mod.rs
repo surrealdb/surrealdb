@@ -107,6 +107,80 @@ where
 	}
 }
 
+// --------------------------------------------------
+// Any engine tests
+// --------------------------------------------------
+
+#[cfg(feature = "protocol-http")]
+mod any {
+	use surrealdb::Surreal;
+	use surrealdb::engine::any::Any;
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
+	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+
+	static PERMITS: Semaphore = Semaphore::const_new(1);
+
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Any>) {
+		let permit = PERMITS.acquire().await.unwrap();
+		let db = surrealdb::engine::any::connect(("http://127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		})
+		.await
+		.unwrap();
+		(permit, db)
+	}
+
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+}
+
+// --------------------------------------------------
+// HTTP engine tests
+// --------------------------------------------------
+
+#[cfg(feature = "protocol-http")]
+mod http {
+
+	use surrealdb::Surreal;
+	use surrealdb::engine::remote::http::{Client, Http};
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
+	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+
+	static PERMITS: Semaphore = Semaphore::const_new(1);
+
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
+		let permit = PERMITS.acquire().await.unwrap();
+		let db = Surreal::new::<Http>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		})
+		.await
+		.unwrap();
+		(permit, db)
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn any_engine_can_connect() {
+		let permit = PERMITS.acquire().await.unwrap();
+		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
+		drop(permit);
+	}
+
+	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+}
+
+// --------------------------------------------------
+// WebSocket engine tests
+// --------------------------------------------------
+
 #[cfg(feature = "protocol-ws")]
 mod ws {
 	use std::pin::pin;
@@ -279,40 +353,9 @@ mod ws {
 	include_tests!(new_db => basic, serialisation, live, session_isolation);
 }
 
-#[cfg(feature = "protocol-http")]
-mod http {
-
-	use surrealdb::Surreal;
-	use surrealdb::engine::remote::http::{Client, Http};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Client>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let db = Surreal::new::<Http>(("127.0.0.1:8000", config)).await.unwrap();
-		db.signin(Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		})
-		.await
-		.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
-		drop(permit);
-	}
-
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
-}
+// --------------------------------------------------
+// Storage engine tests
+// --------------------------------------------------
 
 #[cfg(feature = "kv-mem")]
 mod mem {
@@ -479,40 +522,6 @@ mod rocksdb {
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
-#[cfg(feature = "kv-tikv")]
-mod tikv {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, TiKv};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		let permit = PERMITS.acquire().await.unwrap();
-		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
-		drop(permit);
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
-}
-
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 	use surrealdb::Surreal;
@@ -561,6 +570,76 @@ mod surrealkv {
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
 }
 
+#[cfg(feature = "kv-tikv")]
+mod tikv {
+	use surrealdb::Surreal;
+	use surrealdb::engine::local::{Db, TiKv};
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
+	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+
+	static PERMITS: Semaphore = Semaphore::const_new(1);
+
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
+		let permit = PERMITS.acquire().await.unwrap();
+		let root = Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		};
+		let config = config.user(root.clone());
+		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
+		db.signin(root).await.unwrap();
+		(permit, db)
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn any_engine_can_connect() {
+		let permit = PERMITS.acquire().await.unwrap();
+		surrealdb::engine::any::connect("tikv://127.0.0.1:2379").await.unwrap();
+		drop(permit);
+	}
+
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+}
+
+// --------------------------------------------------
+// Versioned storage engine tests
+// --------------------------------------------------
+
+#[cfg(feature = "kv-mem")]
+mod mem_versioned {
+	use surrealdb::Surreal;
+	use surrealdb::engine::local::{Db, Mem};
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
+	use tokio::sync::{Semaphore, SemaphorePermit};
+
+	use super::{ROOT_PASS, ROOT_USER};
+
+	static PERMITS: Semaphore = Semaphore::const_new(1);
+
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
+		let permit = PERMITS.acquire().await.unwrap();
+		let root = Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		};
+		let config = config.user(root.clone());
+		let db = Surreal::new::<Mem>(config).versioned().await.unwrap();
+		db.signin(root).await.unwrap();
+		(permit, db)
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn any_engine_can_connect() {
+		surrealdb::engine::any::connect("memory?versioned=true").await.unwrap();
+	}
+
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
+}
+
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
 	use surrealdb::Surreal;
@@ -592,7 +671,7 @@ mod surrealkv_versioned {
 		let db_dir = Ulid::new().to_string();
 		// Create a database directory using an absolute path
 		surrealdb::engine::any::connect(format!(
-			"surrealkv+versioned://{}",
+			"surrealkv://{}?versioned=true",
 			TEMP_DIR.join("absolute").join(&db_dir).display()
 		))
 		.await
@@ -600,38 +679,13 @@ mod surrealkv_versioned {
 		// Switch to the temporary directory, if possible, to test relative paths
 		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
 			// Create a database directory using a relative path
-			surrealdb::engine::any::connect(format!("surrealkv+versioned://relative/{db_dir}"))
-				.await
-				.unwrap();
+			surrealdb::engine::any::connect(format!(
+				"surrealkv://relative/{db_dir}?versioned=true"
+			))
+			.await
+			.unwrap();
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, version, live, backup, backup_version, session_isolation);
-}
-
-#[cfg(feature = "protocol-http")]
-mod any {
-	use surrealdb::Surreal;
-	use surrealdb::engine::any::Any;
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Any>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let db = surrealdb::engine::any::connect(("http://127.0.0.1:8000", config)).await.unwrap();
-		db.signin(Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		})
-		.await
-		.unwrap();
-		(permit, db)
-	}
-
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
 }

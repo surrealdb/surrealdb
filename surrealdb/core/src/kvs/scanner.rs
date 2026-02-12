@@ -52,6 +52,8 @@ pub struct Scanner<'a, I> {
 	exhausted: bool,
 	/// An optional maximum number of keys to scan
 	limit: Option<usize>,
+	/// The number of entries to skip (applied to first batch only)
+	skip: u32,
 	/// The scan direction
 	dir: Direction,
 	/// Version as timestamp, 0 means latest.
@@ -80,6 +82,7 @@ impl<'a, I> Scanner<'a, I> {
 			range,
 			limit,
 			dir,
+			skip: 0,
 			exhausted,
 			future: None,
 			prefetched: None,
@@ -89,6 +92,12 @@ impl<'a, I> Scanner<'a, I> {
 			initial_batch_size: ScanLimit::Count(100),
 			subsequent_batch_size: ScanLimit::Bytes(4 * 1024 * 1024),
 		}
+	}
+
+	/// Set the number of entries to skip (applied to first batch only)
+	pub fn skip(mut self, skip: u32) -> Self {
+		self.skip = skip;
+		self
 	}
 
 	/// Set the version timestamp for the scan.
@@ -170,13 +179,15 @@ impl<'a, I> Scanner<'a, I> {
 	#[inline]
 	fn start_prefetch<S>(&mut self, cx: &mut Context, scan: S)
 	where
-		S: Fn(Range<Key>, ScanLimit) -> FutureResult<'a, I>,
+		S: Fn(Range<Key>, ScanLimit, u32) -> FutureResult<'a, I>,
 	{
 		if self.enable_prefetch && !self.exhausted {
 			// Calculate the limit for the next batch
 			let limit = self.next_scan_limit();
+			// Get the skip value for the first batch
+			let skip = self.skip;
 			// Setup the next range scan
-			let mut future = scan(self.range.clone(), limit);
+			let mut future = scan(self.range.clone(), limit, skip);
 			// Poll the future to kick off I/O
 			match future.poll_unpin(cx) {
 				Poll::Pending => {
@@ -226,6 +237,8 @@ impl<'a, I> Scanner<'a, I> {
 				self.update_range(last_key);
 				// Mark that we've fetched the first batch
 				self.first_batch = false;
+				// Reset skip after the first batch
+				self.skip = 0;
 				// Return the batch
 				Poll::Ready(Some(Ok(batch)))
 			}
@@ -248,7 +261,7 @@ impl<'a, I> Scanner<'a, I> {
 
 	fn next_poll<S, K>(&mut self, cx: &mut Context, scan: S, key: K) -> Poll<Option<Result<Vec<I>>>>
 	where
-		S: Fn(Range<Key>, ScanLimit) -> FutureResult<'a, I>,
+		S: Fn(Range<Key>, ScanLimit, u32) -> FutureResult<'a, I>,
 		K: Fn(&I) -> &Key,
 	{
 		// Return early if exhausted
@@ -266,8 +279,10 @@ impl<'a, I> Scanner<'a, I> {
 		}
 		// Calculate the limit for this fetch
 		let limit = self.next_scan_limit();
+		// Get the skip value (only applies to first batch)
+		let skip = self.skip;
 		// Fetch or start a new fetch if none is pending
-		let future = self.future.get_or_insert_with(|| scan(self.range.clone(), limit));
+		let future = self.future.get_or_insert_with(|| scan(self.range.clone(), limit, skip));
 		// Try to resolve the main future
 		match future.poll_unpin(cx) {
 			// The future is pending
@@ -294,12 +309,12 @@ impl Stream for Scanner<'_, Key> {
 		match self.dir {
 			Direction::Forward => self.next_poll(
 				cx,
-				move |range, limit| Box::pin(store.keys(range, limit, version)),
+				move |range, limit, skip| Box::pin(store.keys(range, limit, skip, version)),
 				|v| v,
 			),
 			Direction::Backward => self.next_poll(
 				cx,
-				move |range, limit| Box::pin(store.keysr(range, limit, version)),
+				move |range, limit, skip| Box::pin(store.keysr(range, limit, skip, version)),
 				|v| v,
 			),
 		}
@@ -316,12 +331,12 @@ impl Stream for Scanner<'_, (Key, Val)> {
 		match self.dir {
 			Direction::Forward => self.next_poll(
 				cx,
-				move |range, limit| Box::pin(store.scan(range, limit, version)),
+				move |range, limit, skip| Box::pin(store.scan(range, limit, skip, version)),
 				|v| &v.0,
 			),
 			Direction::Backward => self.next_poll(
 				cx,
-				move |range, limit| Box::pin(store.scanr(range, limit, version)),
+				move |range, limit, skip| Box::pin(store.scanr(range, limit, skip, version)),
 				|v| &v.0,
 			),
 		}

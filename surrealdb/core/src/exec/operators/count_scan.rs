@@ -41,23 +41,33 @@ use crate::val::{Number, Object, RecordIdKey, TableName, Value};
 ///
 /// Counts records by iterating KV keys (`txn.count()`) instead of
 /// deserializing every record through the Scan -> Aggregate pipeline.
-/// Emits a single `ValueBatch` containing `{ "count": N }`.
+/// Emits a single `ValueBatch` containing one field per count expression,
+/// e.g. `{ "count": N }` or `{ "c": N }` when an alias is used.
 #[derive(Debug, Clone)]
 pub struct CountScan {
 	/// Expression that evaluates to the table name (or a record range).
 	pub(crate) source: Arc<dyn PhysicalExpr>,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<u64>,
+	/// Optional VERSION expression for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+	/// Output field names for the count result (one per SELECT field).
+	/// For `SELECT count() as c FROM t GROUP ALL` this would be `["c"]`.
+	/// For `SELECT count() FROM t GROUP ALL` this would be `["count"]`.
+	pub(crate) field_names: Vec<String>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl CountScan {
 	/// Create a new CountScan operator.
-	pub(crate) fn new(source: Arc<dyn PhysicalExpr>, version: Option<u64>) -> Self {
+	pub(crate) fn new(
+		source: Arc<dyn PhysicalExpr>,
+		version: Option<Arc<dyn PhysicalExpr>>,
+		field_names: Vec<String>,
+	) -> Self {
 		Self {
 			source,
 			version,
+			field_names,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -83,7 +93,11 @@ impl ExecOperator for CountScan {
 	}
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		vec![("source", &self.source)]
+		let mut exprs = vec![("source", &self.source)];
+		if let Some(ref version) = self.version {
+			exprs.push(("version", version));
+		}
+		exprs
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -99,7 +113,8 @@ impl ExecOperator for CountScan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		let source_expr = Arc::clone(&self.source);
-		let version = self.version;
+		let version = self.version.clone();
+		let field_names = self.field_names.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -107,6 +122,20 @@ impl ExecOperator for CountScan {
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
+
+			// Evaluate VERSION expression to a timestamp
+			let version: Option<u64> = match &version {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
 
 			// Evaluate the source expression to get the table name (or range).
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
@@ -162,7 +191,7 @@ impl ExecOperator for CountScan {
 						&ctx, ns.namespace_id, db.database_id,
 						&table_name, rid.as_ref(), version, &select_permission,
 					).await?;
-					yield make_count_batch(count);
+					yield make_count_batch(count, &field_names);
 					return;
 				}
 				PhysicalPermission::Allow => {
@@ -185,7 +214,7 @@ impl ExecOperator for CountScan {
 					.context("Failed to count table records")?
 			};
 
-			yield make_count_batch(count);
+			yield make_count_batch(count, &field_names);
 		};
 
 		Ok(monitor_stream(Box::pin(stream), "CountScan", &self.metrics))
@@ -196,11 +225,20 @@ impl ExecOperator for CountScan {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build the single-row `{ "count": N }` batch that the Aggregate operator
-/// would normally produce for `SELECT count() … GROUP ALL`.
-fn make_count_batch(count: usize) -> ValueBatch {
+/// Build the single-row batch that the Aggregate operator would normally
+/// produce for `SELECT count() … GROUP ALL`.
+///
+/// Each entry in `field_names` becomes a key in the output object, all
+/// mapping to the same count value. For example:
+/// - `SELECT count() FROM t GROUP ALL`      → `{ "count": N }`
+/// - `SELECT count() AS c FROM t GROUP ALL`  → `{ "c": N }`
+/// - `SELECT count() AS a, count() AS b …`  → `{ "a": N, "b": N }`
+fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
 	let mut obj = Object::default();
-	obj.insert("count".to_string(), Value::Number(Number::Int(count as i64)));
+	let count_val = Value::Number(Number::Int(count as i64));
+	for name in field_names {
+		obj.insert(name.clone(), count_val.clone());
+	}
 	ValueBatch {
 		values: vec![Value::Object(obj)],
 	}
@@ -332,6 +370,7 @@ async fn count_with_perm_fallback(
 		beg..end,
 		version,
 		None, // no limit
+		0,    // no skip
 		crate::idx::planner::ScanDirection::Forward,
 	);
 	futures::pin_mut!(kv_stream);

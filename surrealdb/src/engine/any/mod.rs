@@ -195,8 +195,19 @@ impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
+			// Handle bare "memory" and "mem://" (no query params)
 			"memory" | "mem://" => {
 				(Url::parse("mem://").expect("valid memory url"), "memory".to_owned())
+			}
+			// Handle "memory?..." with query parameters
+			url if url.starts_with("memory?") => {
+				let query = &url["memory?".len()..];
+				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
+			}
+			// Handle "mem://?..." with query parameters
+			url if url.starts_with("mem://?") => {
+				let query = &url["mem://?".len()..];
+				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
 			}
 			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
 				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
@@ -300,9 +311,6 @@ impl Surreal<Any> {
 ///
 /// // Instantiate an in-memory instance
 /// let db = connect("mem://").await?;
-///
-/// // Instantiate a file-backed instance (currently uses RocksDB)
-/// let db = connect("file://path/to/database-folder").await?;
 ///
 /// // Instantiate a RocksDB-backed instance
 /// let db = connect("rocksdb://path/to/database-folder").await?;

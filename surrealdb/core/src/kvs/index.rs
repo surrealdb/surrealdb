@@ -676,7 +676,8 @@ impl Building {
 				queue.clean_batch_ids(clean_queue);
 				let keys = {
 					let tx = self.new_read_tx().await?;
-					let keys = catch!(tx, tx.keys(rng.clone(), *INDEXING_BATCH_SIZE, None).await);
+					let keys =
+						catch!(tx, tx.keys(rng.clone(), *INDEXING_BATCH_SIZE, 0, None).await);
 					tx.cancel().await?;
 					keys
 				};

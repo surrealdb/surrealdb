@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 
 use super::Direction;
 use super::api::ScanLimit;
+use super::config::{SurrealKvConfig, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
@@ -20,6 +21,7 @@ const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 pub struct Datastore {
 	db: Tree,
 	enable_versions: bool,
+	sync_data: bool,
 }
 
 pub struct Transaction {
@@ -35,9 +37,18 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
+		// Determine sync mode: query param overrides env var
+		let sync_data = match config.sync_mode {
+			SyncMode::Every => true,
+			SyncMode::Never => false,
+			SyncMode::Interval(_) => false,
+		};
 		// Configure custom options
 		let builder = TreeBuilder::new();
+		// Configure versioned queries with retention period
+		info!(target: TARGET, "Versioning enabled: {} with retention period: {}ns", config.versioned, config.retention_ns);
+		let builder = builder.with_versioning(config.versioned, config.retention_ns);
 		// Enable separated keys and values
 		info!(target: TARGET, "Enabling value log separation: {}", *cnf::SURREALKV_ENABLE_VLOG);
 		let builder = builder.with_enable_vlog(*cnf::SURREALKV_ENABLE_VLOG);
@@ -47,21 +58,19 @@ impl Datastore {
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
-		// Configure versioned queries
-		info!(target: TARGET, "Versioning enabled: {} with unlimited retention period", enable_versions);
-		let builder = builder.with_versioning(enable_versions, 0);
 		// Set the block size
 		info!(target: TARGET, "Setting block size: {}", *cnf::SURREALKV_BLOCK_SIZE);
 		let builder = builder.with_block_size(*cnf::SURREALKV_BLOCK_SIZE);
 		// Log if writes should be synced
-		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
+		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", sync_data);
 		// Set the data storage directory
 		let builder = builder.with_path(path.to_string().into());
 		// Create a new datastore
 		match builder.build() {
 			Ok(db) => Ok(Datastore {
 				db,
-				enable_versions,
+				enable_versions: config.versioned,
+				sync_data,
 			}),
 			Err(e) => Err(Error::Datastore(e.to_string())),
 		}
@@ -85,7 +94,7 @@ impl Datastore {
 			false => self.db.begin_with_mode(Mode::ReadOnly),
 		}?;
 		// Set the transaction durability
-		match *cnf::SYNC_DATA {
+		match self.sync_data {
 			true => txn.set_durability(Durability::Immediate),
 			false => txn.set_durability(Durability::Eventual),
 		};
@@ -451,6 +460,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -475,7 +485,7 @@ impl Transactable for Transaction {
 					dir: Direction::Forward,
 					ts,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -487,7 +497,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Forward,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -500,6 +510,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -524,7 +535,7 @@ impl Transactable for Transaction {
 					dir: Direction::Backward,
 					ts,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -536,7 +547,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Backward,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -549,6 +560,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -573,7 +585,7 @@ impl Transactable for Transaction {
 					dir: Direction::Forward,
 					ts,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -585,7 +597,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Forward,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -598,6 +610,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -622,7 +635,7 @@ impl Transactable for Transaction {
 					dir: Direction::Backward,
 					ts,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -634,7 +647,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Backward,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -830,7 +843,13 @@ impl Cursor for HistoryCursor<'_> {
 }
 
 // Consume and iterate over only keys
-fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> {
+fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit, skip: u32) -> Result<Vec<Key>> {
+	// Skip entries efficiently by discarding cursor results
+	for _ in 0..skip {
+		if cursor.next_key()?.is_none() {
+			return Ok(Vec::new());
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -887,7 +906,13 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 }
 
 // Consume and iterate over keys and values
-fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, Val)>> {
+fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit, skip: u32) -> Result<Vec<(Key, Val)>> {
+	// Skip entries efficiently by discarding cursor results
+	for _ in 0..skip {
+		if cursor.next_entry()?.is_none() {
+			return Ok(Vec::new());
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
