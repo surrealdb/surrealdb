@@ -36,28 +36,24 @@ pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
+	// Split the endpoint into scheme and path
 	fn split_endpoint(v: &str) -> (&str, &str) {
-		match v {
-			"memory" => ("mem", ""),
+		// Strip query parameters before extracting the scheme
+		let without_query = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
+		// Split the endpoint into scheme and path
+		match without_query {
+			"memory" | "mem" => ("mem", ""),
 			v => match v.split_once("://") {
 				Some(parts) => parts,
 				None => v.split_once(':').unwrap_or_default(),
 			},
 		}
 	}
-
-	let scheme = split_endpoint(v).0;
-	match scheme {
-		"http"
-		| "https"
-		| "ws"
-		| "wss"
-		| "mem"
-		| "rocksdb"
-		| "surrealkv"
-		| "surrealkv+versioned"
-		| "file"
-		| "tikv" => Ok(v.to_string()),
+	// Validate the scheme
+	match split_endpoint(v).0 {
+		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "file" | "tikv" => {
+			Ok(v.to_string())
+		}
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }

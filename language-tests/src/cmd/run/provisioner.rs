@@ -64,10 +64,17 @@ impl CreateInfo {
 		})
 	}
 
-	pub async fn produce_ds(&self) -> Result<(Datastore, Option<String>)> {
+	pub async fn produce_ds(&self, versioned: bool) -> Result<(Datastore, Option<String>)> {
 		let mut path = None;
 		let ds = match self.backend {
-			Backend::Memory => Datastore::new("memory").await?,
+			Backend::Memory => {
+				let ds = if versioned {
+					Datastore::new(&format!("memory?versioned=true")).await?;
+				} else {
+					Datastore::new("memory").await?;
+				};
+				ds
+			}
 			Backend::RocksDb => {
 				let p = self.produce_path();
 				let ds = Datastore::new(&format!("rocksdb://{p}")).await?;
@@ -76,13 +83,11 @@ impl CreateInfo {
 			}
 			Backend::SurrealKv => {
 				let p = self.produce_path();
-				let ds = Datastore::new(&format!("surrealkv://{p}")).await?;
-				path = Some(p);
-				ds
-			}
-			Backend::SurrealKvVersioned => {
-				let p = self.produce_path();
-				let ds = Datastore::new(&format!("surrealkv+versioned://{p}")).await?;
+				let ds = if versioned {
+					Datastore::new(&format!("surrealkv://{p}?versioned=true")).await?;
+				} else {
+					Datastore::new(&format!("surrealkv://{p}")).await?;
+				};
 				path = Some(p);
 				ds
 			}
@@ -133,6 +138,7 @@ enum PermitInner {
 	},
 	Create {
 		info: Arc<CreateInfo>,
+		versioned: bool,
 	},
 }
 
@@ -171,8 +177,9 @@ impl Permit {
 			}
 			PermitInner::Create {
 				info,
+				versioned,
 			} => {
-				let (ds, path) = info.produce_ds().await.map_err(PermitError::Other)?;
+				let (ds, path) = info.produce_ds(versioned).await.map_err(PermitError::Other)?;
 				remove_path = path;
 				ds
 			}
@@ -228,7 +235,7 @@ impl Provisioner {
 
 		let (send, recv) = mpsc::channel(num_jobs);
 		for _ in 0..num_jobs {
-			let (db, _) = info.produce_ds().await?;
+			let (db, _) = info.produce_ds(false).await?;
 			send.try_send(db).unwrap();
 		}
 
@@ -249,10 +256,11 @@ impl Provisioner {
 		}
 	}
 
-	pub fn create(&mut self) -> Permit {
+	pub fn create(&mut self, versioned: bool) -> Permit {
 		Permit {
 			inner: PermitInner::Create {
 				info: self.create_info.clone(),
+				versioned,
 			},
 		}
 	}

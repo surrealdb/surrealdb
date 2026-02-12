@@ -9,6 +9,7 @@ use rocksdb::{OptimisticTransactionDB, Options};
 use tokio::sync::oneshot::{self, Sender};
 
 use super::{TARGET, cnf};
+use crate::kvs::config::{RocksDbConfig, SyncMode};
 use crate::kvs::err::{Error, Result};
 
 /// Shared state for producer-consumer communication between transaction submitters and the batcher.
@@ -66,7 +67,18 @@ struct SyncRequest {
 /// are enabled, multiple waiters are grouped together and woken up after a single `flush_wal(true)`
 /// operation, significantly improving throughput while maintaining durability guarantees.
 ///
-/// # Design Philosophy
+/// ## Configuration
+///
+/// Grouped commit is configured via the `sync` query parameter on the connection string:
+/// - `rocksdb:///path?sync=every` -- groups transaction commits together and wait for sync
+///
+/// Batching behavior is controlled by environment variables:
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT`: Maximum wait time for collecting a batch
+///   (nanoseconds)
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD`: Waiter count to trigger waiting
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE`: Maximum waiters per batch
+///
+/// # Design philosophy
 ///
 /// Unlike traditional grouped commit implementations that serialize all commit operations,
 /// this coordinator:
@@ -74,9 +86,7 @@ struct SyncRequest {
 /// - Groups **only the fsync**: Multiple threads wait together for a single WAL flush
 /// - Maximizes **CPU parallelism**: No single-threaded commit bottleneck
 ///
-/// This design is inspired by MongoDB/WiredTiger's journal flushing approach.
-///
-/// # Adaptive Batching Strategy
+/// # Adaptive batching
 ///
 /// The coordinator employs an adaptive batching algorithm that balances latency and throughput:
 ///
@@ -84,14 +94,6 @@ struct SyncRequest {
 /// - **Moderate load** (≥ `wait_threshold`, < `max_batch_size`): Waits up to `timeout` to collect
 ///   more waiters for better batching efficiency
 /// - **High load** (≥ `max_batch_size`): Flushes immediately to maintain high throughput
-///
-/// # Configuration
-///
-/// Batching behavior is controlled by environment variables:
-/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT`: Maximum wait time for collecting a batch
-///   (nanoseconds)
-/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD`: Waiter count to trigger waiting
-/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE`: Maximum waiters per batch
 ///
 /// # Durability
 ///
@@ -106,40 +108,26 @@ pub struct CommitCoordinator {
 }
 
 impl CommitCoordinator {
-	/// Pre-configure the commit coordinator
-	pub(super) fn configure(opts: &mut Options) -> Result<bool> {
-		// If the user has enabled synced transaction writes and enabled grouped commits,
-		// we configure grouped commit. This means that the transaction commits are batched
-		// together, written to WAL, and then flushed to disk. This ensures that transactions
-		// are grouped together and flushed to disk in a single operation, reducing the impact
-		// of disk syncing for each individual transaction. In this mode, when a transaction is
-		// committed, the data is fully durable and will not be lost in the event of a system crash.
-		if *cnf::SYNC_DATA && *cnf::ROCKSDB_GROUPED_COMMIT {
-			// Log the batched group commit configuration options
-			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={})",
-				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
-				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
-				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-			);
-			// Set incremental asynchronous bytes per sync to 512KiB
-			opts.set_wal_bytes_per_sync(512 * 1024);
-			// Enable manual WAL flushing
-			opts.set_manual_wal_flush(true);
-			// Continue
-			Ok(true)
+	/// Pre-configure RocksDB options for grouped commit.
+	pub(super) fn configure(opts: &mut Options, config: &RocksDbConfig) {
+		// Don't configure if the sync mode is not every
+		if config.sync_mode != SyncMode::Every {
+			return;
 		}
-		// If the user has disabled disabled grouped commit, skip coordinator setup entirely.
-		// When grouped commit is disabled, we defer to the operating system buffers for disk sync.
-		// This means that the transaction commits are written to WAL on commit, but are then
-		// flushed to disk by the operating system at an unspecified time. In the event of a system
-		// crash, data may be lost if the operating system has not yet synced the data to disk.
-		else {
-			// Log that the batched commit coordinator is disabled
-			info!(target: TARGET, "Grouped commit coordinator: disabled");
-			// Continue
-			Ok(false)
-		}
+		// Log the sync mode specifically
+		info!(target: TARGET, "Sync mode: every transaction commit");
+		// Log the batched group commit configuration options
+		info!(target: TARGET, "Grouped commit: enabled (timeout={}ns, wait_threshold={}, max_batch_size={})",
+			*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
+			*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
+			*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
+		);
+		// Set incremental asynchronous bytes per sync to 512KiB
+		opts.set_wal_bytes_per_sync(512 * 1024);
+		// Enable manual WAL flushing
+		opts.set_manual_wal_flush(true);
 	}
+
 	/// Create a new commit coordinator
 	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>) -> Result<Self> {
 		// Get the batched commit configuration options

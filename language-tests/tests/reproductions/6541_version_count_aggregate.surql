@@ -1,6 +1,7 @@
 /**
 [env]
-backend = ["surrealkv+versioned"]
+backend = ["mem", "surrealkv"]
+versioned = true
 timeout = 5000
 
 [test]

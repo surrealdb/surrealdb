@@ -105,10 +105,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(feature = "backend-surrealkv")]
-		Backend::SurrealKvVersioned => {}
-		#[cfg(not(feature = "backend-surrealkv"))]
-		Backend::SurrealKvVersioned => bail!("SurrealKV backend feature is not enabled"),
 		#[cfg(feature = "backend-tikv")]
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
@@ -201,10 +197,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		let config = subset[id].config.as_ref();
 		progress.start_item(id, subset[id].path.as_str()).unwrap();
 
+		let versioned = config.env.as_ref().map(|e| e.versioned).unwrap_or(false);
 		let ds = if config.can_use_reusable_ds() {
 			provisioner.obtain().await
 		} else {
-			provisioner.create()
+			provisioner.create(versioned)
 		};
 
 		let context = TestTaskContext {

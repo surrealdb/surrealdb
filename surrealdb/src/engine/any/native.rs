@@ -103,7 +103,7 @@ impl conn::Sealed for Any {
 				);
 				}
 
-				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
+				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::Backup);
