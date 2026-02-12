@@ -380,10 +380,13 @@ fn test_public_error_surreal_value_roundtrip() {
 }
 
 #[test]
-fn test_error_kind_unknown_roundtrip() {
-	// Unknown wire strings deserialize to ErrorKind::Unknown and roundtrip as the same string.
-	let err = Error::new(ErrorKind::Unknown("future_kind".to_string()), "Message");
-	let value = err.clone().into_value();
+fn test_error_kind_unknown_deserializes_to_internal() {
+	// Unknown wire kind strings deserialize to Internal (forward compatibility).
+	let mut obj = Object::new();
+	obj.insert("kind", "future_kind");
+	obj.insert("message", "Message");
+	let value = Value::Object(obj);
 	let restored = Error::from_value(value).unwrap();
-	assert!(matches!(restored.kind, ErrorKind::Unknown(s) if s == "future_kind"));
+	assert_eq!(restored.kind, ErrorKind::Internal);
+	assert_eq!(restored.message, "Message");
 }
