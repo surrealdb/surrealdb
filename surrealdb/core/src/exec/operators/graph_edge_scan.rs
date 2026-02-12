@@ -174,7 +174,7 @@ impl ExecOperator for GraphEdgeScan {
 
 					for (beg, end) in ranges {
 						let kv_stream = txn.stream_keys(
-							beg..end, None, None, ScanDirection::Forward,
+							beg..end, None, None, 0, ScanDirection::Forward,
 						);
 						futures::pin_mut!(kv_stream);
 

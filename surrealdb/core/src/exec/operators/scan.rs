@@ -546,7 +546,7 @@ fn kv_scan_stream(
 	pre_skip: usize,
 ) -> ValueBatchStream {
 	let stream = async_stream::try_stream! {
-		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, direction);
+		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, 0, direction);
 		futures::pin_mut!(kv_stream);
 
 		let mut skipped = 0usize;
