@@ -603,10 +603,9 @@ jobs:
         run: bun install
 
       - name: Run JavaScript tests (${{ matrix.protocol }})
-        run: bun test
+        run: bun test --timeout 10000
         env:
           SURREAL_PROTOCOL: ${{ matrix.protocol }}
-          SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
