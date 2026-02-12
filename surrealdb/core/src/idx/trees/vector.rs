@@ -80,7 +80,7 @@ impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
 	}
 }
 
-impl From<Vector> for SerializedVector {
+impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {
 		match value {
 			Vector::F64(v) => Self::F64(v.to_vec()),
@@ -105,6 +105,66 @@ impl From<SerializedVector> for Vector {
 }
 
 impl SerializedVector {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
+		let res = match t {
+			VectorType::F64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::F64(vec)
+			}
+			VectorType::F32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::F32(vec)
+			}
+			VectorType::I64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I64(vec)
+			}
+			VectorType::I32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I32(vec)
+			}
+			VectorType::I16 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I16(vec)
+			}
+		};
+		Ok(res)
+	}
+
+	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
+	where
+		T: TryFrom<Number, Error = Error>,
+	{
+		match value {
+			Value::Array(a) => {
+				for v in a.0.iter() {
+					Self::check_vector_value(v, vec)?;
+				}
+				Ok(())
+			}
+			Value::Number(n) => {
+				vec.push((*n).try_into()?);
+				Ok(())
+			}
+			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
+		}
+	}
+
+	pub(super) fn dimension(&self) -> usize {
+		match self {
+			Self::F64(v) => v.len(),
+			Self::F32(v) => v.len(),
+			Self::I64(v) => v.len(),
+			Self::I32(v) => v.len(),
+			Self::I16(v) => v.len(),
+		}
+	}
+
 	/// Computes a BLAKE3 hash of the vector's bytes.
 	///
 	/// This is used for deduplicating vectors in the HNSW index when `HASHED_VECTOR` is enabled.
@@ -497,54 +557,36 @@ impl From<&Vector> for Value {
 }
 
 impl Vector {
+	#[cfg(test)]
 	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::F64(Array1::from_vec(vec))
 			}
 			VectorType::F32 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::F32(Array1::from_vec(vec))
 			}
 			VectorType::I64 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I64(Array1::from_vec(vec))
 			}
 			VectorType::I32 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I32(Array1::from_vec(vec))
 			}
 			VectorType::I16 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I16(Array1::from_vec(vec))
 			}
 		};
 		Ok(res)
-	}
-
-	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
-	where
-		T: TryFrom<Number, Error = Error>,
-	{
-		match value {
-			Value::Array(a) => {
-				for v in a.0.iter() {
-					Self::check_vector_value(v, vec)?;
-				}
-				Ok(())
-			}
-			Value::Number(n) => {
-				vec.push((*n).try_into()?);
-				Ok(())
-			}
-			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
-		}
 	}
 
 	pub(super) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {

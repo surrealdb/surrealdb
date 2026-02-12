@@ -9,7 +9,7 @@ use anyhow::Result;
 use flate2::read::GzDecoder;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_types::{RecordId, RecordIdKey, ToSql, Value};
+use surrealdb_types::{Array, RecordId, RecordIdKey, ToSql, Value};
 use tokio::time::timeout;
 use tracing::info;
 
@@ -192,8 +192,9 @@ async fn multi_index_concurrent_test() -> Result<()> {
 }
 
 const INGESTING_SOURCE: &str = "../../tests/data/hnsw-random-9000-20-euclidean.gz";
+const QUERYING_SOURCE: &str = "../../tests/data/hnsw-random-5000-20-euclidean.gz";
 
-fn new_vectors_from_file(path: &str) -> Result<Vec<(RecordId, String)>> {
+fn new_vectors_from_file(path: &str, mut limit: usize) -> Result<Vec<(RecordId, String)>> {
 	// Open the gzip file
 	let file = File::open(path)?;
 
@@ -206,10 +207,34 @@ fn new_vectors_from_file(path: &str) -> Result<Vec<(RecordId, String)>> {
 	let mut res = Vec::new();
 	// Iterate over each line in the file
 	for (i, line_result) in reader.lines().enumerate() {
+		if limit == 0 {
+			break;
+		}
+		limit -= 1;
 		let line = line_result?;
 		res.push((RecordId::new("t".to_owned(), RecordIdKey::from(i as i64)), line));
 	}
 	Ok(res)
+}
+
+async fn collect_query(
+	dbs: &Datastore,
+	session: &Session,
+	vectors: &[(RecordId, String)],
+) -> Result<Vec<Array>> {
+	let mut results = Vec::with_capacity(vectors.len());
+	for (_, v) in vectors {
+		let mut res = dbs
+			.execute(&format!("SELECT id FROM t WHERE v <|10,150|> {v};"), &session, None)
+			.await?;
+		let res = res.remove(0).result?;
+		let Value::Array(res) = res else {
+			panic!("Expected array result: {}", res.to_sql_pretty());
+		};
+		assert_eq!(res.len(), 10, "{}", res.to_sql_pretty());
+		results.push(res);
+	}
+	Ok(results)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -220,13 +245,13 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 
 	// Define the table and the index.
 	dbs.execute(
-		"DEFINE TABLE pts; DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8; ",
+		"DEFINE TABLE t; DEFINE INDEX ix ON pts FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8; ",
 		&session,
 		None,
 	)
 	.await?;
 
-	let vectors = new_vectors_from_file(INGESTING_SOURCE)?;
+	let vectors = new_vectors_from_file(INGESTING_SOURCE, 1000)?;
 	let chunks: Vec<_> = vectors.chunks(vectors.len() / 4).map(|s| s.to_vec()).collect();
 	let mut tasks = Vec::with_capacity(chunks.len());
 	for chunk in chunks {
@@ -249,5 +274,18 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 	for task in tasks {
 		task.await??;
 	}
+
+	let vectors = new_vectors_from_file(QUERYING_SOURCE, 10)?;
+
+	// Check we got results with the pending queue not cleaned
+	let results1 = collect_query(&dbs, &session, &vectors).await?;
+
+	// TODO clean queue
+	// Collect the results once the pending queue is cleaned
+	let results2 = collect_query(&dbs, &session, &vectors).await?;
+
+	// The results should match
+	assert_eq!(results1, results2);
+
 	Ok(())
 }

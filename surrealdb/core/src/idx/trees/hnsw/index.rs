@@ -91,26 +91,52 @@ impl HnswIndex {
 		})
 	}
 
+	fn content_to_vectors(&self, content: &[Value]) -> Result<Vec<SerializedVector>> {
+		let mut vectors = Vec::with_capacity(content.len());
+		// Index the values
+		for value in content.iter().filter(|v| !v.is_nullish()) {
+			// Extract the vector
+			let vector = SerializedVector::try_from_value(self.vector_type, self.dim, value)?;
+			Vector::check_expected_dimension(vector.dimension(), self.dim)?;
+			// Insert the vector
+			vectors.push(vector);
+		}
+		Ok(vectors)
+	}
+
+	async fn vector_pending_update<F>(
+		&self,
+		ctx: &Context,
+		id: &RecordIdKey,
+		content: &[Value],
+		func: F,
+	) -> Result<()>
+	where
+		F: FnOnce(Vec<SerializedVector>) -> VectorPendingUpdate,
+	{
+		let vectors = self.content_to_vectors(content)?;
+		let key = self.ikb.new_hp_key(id);
+		let batch = func(vectors);
+		ctx.tx().put(&key, &batch, None).await?;
+		Ok(())
+	}
+
 	pub(crate) async fn index_document(
 		&mut self,
 		ctx: &Context,
 		id: &RecordIdKey,
 		content: &[Value],
 	) -> Result<()> {
-		let mut vectors = Vec::with_capacity(content.len());
-		// Index the values
-		for value in content.iter().filter(|v| !v.is_nullish()) {
-			// Extract the vector
-			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
-			vector.check_dimension(self.dim)?;
-			let vector: SerializedVector = vector.into();
-			// Insert the vector
-			vectors.push(vector);
-		}
-		let key = self.ikb.new_hp_key(id);
-		let batch = VectorPendingUpdate::Add(vectors);
-		ctx.tx().put(&key, &batch, None).await?;
-		Ok(())
+		self.vector_pending_update(ctx, id, content, VectorPendingUpdate::Add).await
+	}
+
+	pub(crate) async fn remove_document(
+		&mut self,
+		ctx: &Context,
+		id: &RecordIdKey,
+		content: &[Value],
+	) -> Result<()> {
+		self.vector_pending_update(ctx, id, content, VectorPendingUpdate::Remove).await
 	}
 
 	async fn index_document_vectors(
@@ -135,20 +161,19 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	pub(crate) async fn remove_document(
+	async fn remove_document_vectors(
 		&mut self,
 		ctx: &Context,
 		id: &RecordIdKey,
-		content: &[Value],
+		vectors: Vec<SerializedVector>,
 	) -> Result<()> {
 		let tx = ctx.tx();
 		if let Some(doc_id) = self.docs.remove(&tx, id).await? {
 			// Ensure the layers are up-to-date
 			self.hnsw.check_state(ctx).await?;
-			for v in content.iter().filter(|v| !v.is_nullish()) {
+			for vector in vectors {
 				// Extract the vector
-				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
-				vector.check_dimension(self.dim)?;
+				let vector: Vector = vector.into();
 				// Remove the vector
 				self.vec_docs.remove(&tx, &vector, doc_id, &mut self.hnsw).await?;
 			}
