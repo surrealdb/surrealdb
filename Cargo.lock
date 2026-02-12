@@ -7264,7 +7264,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.18.1"
-source = "git+https://github.com/surrealdb/surrealkv?branch=fix-vlog-compaction-bug#1ef5b0097cc9219e4c5c567fc14b290282569a45"
+source = "git+https://github.com/surrealdb/surrealkv?branch=change-internal-iterator-name#31ba07a89a9c0ec97801340a4269ddcd51627e98"
 dependencies = [
  "arc-swap",
  "async-trait",
