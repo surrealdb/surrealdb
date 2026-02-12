@@ -50,7 +50,7 @@ impl IndexEqualIterator {
 			return Ok(Vec::new());
 		}
 
-		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, None).await?;
+		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
 
 		if res.is_empty() {
 			self.done = true;
@@ -168,7 +168,7 @@ impl IndexRangeIterator {
 			return Ok(Vec::new());
 		}
 
-		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, None).await?;
+		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
 
 		if res.is_empty() {
 			self.done = true;
@@ -252,7 +252,7 @@ impl UniqueRangeIterator {
 
 		// For unique indexes, we need to handle boundaries carefully
 		let limit = INDEX_BATCH_SIZE + 1; // Extra to check boundaries
-		let res = tx.scan(self.beg.clone()..self.end.clone(), limit, None).await?;
+		let res = tx.scan(self.beg.clone()..self.end.clone(), limit, 0, None).await?;
 
 		if res.is_empty() {
 			self.done = true;

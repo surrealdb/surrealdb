@@ -168,7 +168,7 @@ impl ExecOperator for ReferenceScan {
 					&ctx,
 				).await?;
 
-				let kv_stream = txn.stream_keys(beg..end, None, None, ScanDirection::Forward);
+				let kv_stream = txn.stream_keys(beg..end, None, None, 0, ScanDirection::Forward);
 				futures::pin_mut!(kv_stream);
 
 				while let Some(result) = kv_stream.next().await {
