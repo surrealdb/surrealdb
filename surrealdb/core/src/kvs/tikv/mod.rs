@@ -574,7 +574,7 @@ impl Transactable for Transaction {
 			let skipped = inner.tx.scan_keys(rng.clone(), skip).await?;
 			match skipped.last() {
 				Some(last) => {
-					let mut start: Key = Key::from(last.clone());
+					let mut start: Key = Key::from(last);
 					util::advance_key(&mut start);
 					start..rng.end
 				}
@@ -622,7 +622,7 @@ impl Transactable for Transaction {
 			let skipped = inner.tx.scan_keys_reverse(rng.clone(), skip).await?;
 			match skipped.last() {
 				Some(last) => {
-					let end: Key = Key::from(last.clone());
+					let end: Key = Key::from(last);
 					rng.start..end
 				}
 				// Fewer entries than skip -- nothing to return
