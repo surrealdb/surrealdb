@@ -77,12 +77,6 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
-	#[arg(
-		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
-	)]
-	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
-	#[arg(default_value = "best-effort")]
-	planner_strategy: NewPlannerStrategy,
 }
 
 #[derive(Args, Debug)]
@@ -268,6 +262,13 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
+
+	#[arg(
+		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
+	)]
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
+	#[arg(default_value = "best-effort")]
+	planner_strategy: NewPlannerStrategy,
 }
 
 impl DbsCapabilities {
@@ -587,6 +588,7 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 		.without_experimental(caps.get_deny_experimental())
 		.with_arbitrary_query(caps.get_allow_arbitrary_query())
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
+		.with_planner_strategy(caps.planner_strategy)
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -697,7 +699,6 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
-		planner_strategy,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
@@ -739,8 +740,6 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
-	// Log the planner strategy
-	debug!("Planner strategy: {planner_strategy}");
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
 		.await?
@@ -749,7 +748,6 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth_enabled(!unauthenticated)
 		.with_capabilities(capabilities)
-		.with_planner_strategy(planner_strategy)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	#[cfg(storage)]
 	let dbs = dbs.with_temporary_directory(temporary_directory);
@@ -1225,6 +1223,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
@@ -1255,6 +1254,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
@@ -1285,6 +1285,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_http(),
@@ -1315,6 +1316,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),

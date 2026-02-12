@@ -16,6 +16,7 @@ use surrealism_runtime::capabilities::SurrealismCapabilities;
 use tokio::net::lookup_host;
 use url::Url;
 
+use crate::dbs::session::NewPlannerStrategy;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 
@@ -602,13 +603,14 @@ pub struct Capabilities {
 	deny_experimental: Targets<ExperimentalTarget>,
 	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	planner_strategy: NewPlannerStrategy,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, planner_strategy={}",
 			self.scripting,
 			self.guest_access,
 			self.live_query_notifications,
@@ -624,6 +626,7 @@ impl fmt::Display for Capabilities {
 			self.deny_experimental,
 			self.allow_arbitrary_query,
 			self.deny_arbitrary_query,
+			self.planner_strategy,
 		)
 	}
 }
@@ -647,6 +650,7 @@ impl Default for Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 }
@@ -670,6 +674,7 @@ impl Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -691,6 +696,7 @@ impl Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::None,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -797,6 +803,15 @@ impl Capabilities {
 	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
 		self.deny_http = deny_http;
 		self
+	}
+
+	pub fn with_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Self {
+		self.planner_strategy = strategy;
+		self
+	}
+
+	pub fn planner_strategy(&self) -> &NewPlannerStrategy {
+		&self.planner_strategy
 	}
 
 	pub fn allows_scripting(&self) -> bool {

@@ -46,9 +46,7 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::{Node, Timestamp};
-use crate::dbs::{
-	Capabilities, Executor, NewPlannerStrategy, Options, QueryResult, QueryResultBuilder, Session,
-};
+use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
@@ -134,8 +132,6 @@ pub struct Datastore {
 	surrealism_cache: Arc<SurrealismCache>,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
-	// Strategy for the new streaming planner/executor
-	new_planner_strategy: NewPlannerStrategy,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -725,7 +721,6 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger,
-			new_planner_strategy: NewPlannerStrategy::default(),
 		})
 	}
 
@@ -768,7 +763,6 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger: self.async_event_trigger,
-			new_planner_strategy: self.new_planner_strategy,
 		}
 	}
 
@@ -824,12 +818,6 @@ impl Datastore {
 	/// Set specific capabilities for this Datastore
 	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
 		self.capabilities = Arc::new(caps);
-		self
-	}
-
-	/// Set the planner strategy for this Datastore
-	pub fn with_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Self {
-		self.new_planner_strategy = strategy;
 		self
 	}
 
@@ -2288,8 +2276,6 @@ impl Datastore {
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
-		// Set the planner strategy from the datastore configuration
-		ctx.set_planner_strategy(self.new_planner_strategy.clone());
 		Ok(ctx)
 	}
 

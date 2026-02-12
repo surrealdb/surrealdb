@@ -265,6 +265,7 @@ impl Context {
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
+		let planner_strategy = capabilities.planner_strategy().clone();
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -288,7 +289,7 @@ impl Context {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
-			new_planner_strategy: NewPlannerStrategy::default(),
+			new_planner_strategy: planner_strategy,
 			matches_context: None,
 		};
 		if let Some(timeout) = time_out {
@@ -670,18 +671,13 @@ impl Context {
 		)
 	}
 
-	/// Set the planner strategy for this context.
-	pub(crate) fn set_planner_strategy(&mut self, strategy: NewPlannerStrategy) {
-		self.new_planner_strategy = strategy;
-	}
-
 	/// Attach a session to the context and add any session variables to the
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		// Only override the planner strategy if the session explicitly sets a
-		// non-default value (e.g. language tests). Otherwise the Datastore-level
-		// strategy (set via setup_ctx) is preserved.
+		// non-default value (e.g. language tests). Otherwise the capability-level
+		// strategy (set via from_ds) is preserved.
 		if session.new_planner_strategy != NewPlannerStrategy::default() {
 			self.new_planner_strategy = session.new_planner_strategy.clone();
 		}
