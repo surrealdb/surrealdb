@@ -191,6 +191,7 @@ async fn http_delete_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<V
 // =========================================================================
 
 #[cfg(feature = "http")]
+#[allow(unused_variables)]
 async fn http_request(
 	ctx: &EvalContext<'_>,
 	method: reqwest::Method,
@@ -198,6 +199,7 @@ async fn http_request(
 	body: Option<Value>,
 	opts: Object,
 ) -> Result<Value> {
+	#[cfg(not(target_family = "wasm"))]
 	use std::sync::Arc;
 	#[cfg(not(target_family = "wasm"))]
 	use std::time::Duration;

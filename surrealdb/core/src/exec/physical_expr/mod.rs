@@ -210,7 +210,7 @@ impl<'a> EvalContext<'a> {
 	}
 
 	/// Get the capabilities as an Arc (cloned from FrozenContext).
-	#[cfg(not(target_family = "wasm"))]
+	#[allow(dead_code)]
 	pub fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.exec_ctx.ctx().get_capabilities()
 	}
