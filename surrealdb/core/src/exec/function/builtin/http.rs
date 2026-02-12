@@ -213,7 +213,7 @@ async fn http_request(
 	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 
 	// Build the HTTP client
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(any(not(target_family = "wasm"), feature = "http"))]
 	let cli = {
 		let capabilities = ctx.get_capabilities();
 		let capabilities_clone = Arc::clone(&capabilities);
