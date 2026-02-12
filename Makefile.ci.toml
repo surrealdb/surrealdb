@@ -84,7 +84,7 @@ args = [
 
 [tasks.ci-clippy]
 category = "CI - CHECK"
-description = "Run code quality linting"
+description = "Run clippy linting"
 command = "cargo"
 args = [
     "clippy",
@@ -98,6 +98,23 @@ args = [
     "--",
     "-D",
     "warnings",
+]
+
+[tasks.ci-clippy-fix]
+category = "CI - CHECK"
+description = "Fix clippy lint issues"
+command = "cargo"
+args = [
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--features",
+    "${ALL_FEATURES}",
+    "--tests",
+    "--benches",
+    "--bins",
+    "--fix",
+    "--allow-dirty",
 ]
 
 [tasks.ci-clippy-release]

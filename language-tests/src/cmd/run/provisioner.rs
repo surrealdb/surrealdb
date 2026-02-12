@@ -9,9 +9,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use futures::FutureExt as _;
 use surrealdb_core::dbs::Capabilities;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::kvs::LockType;
-use surrealdb_core::kvs::TransactionType;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
@@ -211,8 +209,8 @@ impl Permit {
 				sender.try_send(store).expect("Too many datastores entered into datastore channel");
 			}
 		} else if remove_path.is_some() {
-			// Shutdown the datastore before removing its directory to ensure all file descriptors are closed
-			// This is critical for RocksDB which can have many open file handles
+			// Shutdown the datastore before removing its directory to ensure all file descriptors
+			// are closed This is critical for RocksDB which can have many open file handles
 			if let Err(e) = store.shutdown().await {
 				println!("Failed to shutdown datastore before cleanup: {e}");
 			}

@@ -24,7 +24,7 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 
 			match result {
 				Some(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 					name: String::from("time::ceil"),
 					message: String::from(
 						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -32,7 +32,7 @@ pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 				})),
 			}
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: String::from("time::ceil"),
 			message: String::from(
 				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -57,7 +57,7 @@ pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
 			}
 			match val.duration_trunc(d) {
 				Ok(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 					name: String::from("time::floor"),
 					message: String::from(
 						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -65,7 +65,7 @@ pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
 				})),
 			}
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: String::from("time::floor"),
 			message: String::from(
 				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -117,7 +117,7 @@ pub fn group((val, group): (Datetime, String)) -> Result<Value> {
 			.earliest()
 			.expect("valid datetime")
 			.into()),
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: String::from("time::group"),
 			message: String::from(
 				"The second argument must be a string, and can be one of 'year', 'month', 'day', 'hour', 'minute', or 'second'.",
@@ -195,7 +195,7 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
 			}
 			match val.duration_round(d) {
 				Ok(v) => Ok(v.into()),
-				_ => Err(anyhow::Error::new(Error::InvalidArguments {
+				_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 					name: String::from("time::round"),
 					message: String::from(
 						"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -203,7 +203,7 @@ pub fn round((val, duration): (Datetime, Duration)) -> Result<Value> {
 				})),
 			}
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: String::from("time::round"),
 			message: String::from(
 				"The second argument must be a duration, and must be able to be represented as nanoseconds.",
@@ -289,7 +289,7 @@ pub mod from {
 
 		match DateTime::from_timestamp(seconds, nanoseconds) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_nanos"),
 				message: String::from(
 					"The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
@@ -301,7 +301,7 @@ pub mod from {
 	pub fn micros((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp_micros(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_micros"),
 				message: String::from(
 					"The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
@@ -313,7 +313,7 @@ pub mod from {
 	pub fn millis((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp_millis(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_millis"),
 				message: String::from(
 					"The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
@@ -325,7 +325,7 @@ pub mod from {
 	pub fn secs((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_secs"),
 				message: String::from(
 					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
@@ -337,7 +337,7 @@ pub mod from {
 	pub fn unix((val,): (i64,)) -> Result<Value> {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_unix"),
 				message: String::from(
 					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
@@ -349,7 +349,7 @@ pub mod from {
 	pub fn ulid((val,): (String,)) -> Result<Value> {
 		match Ulid::from_string(&val) {
 			Ok(v) => Ok(Datetime::from(DateTime::from(v.datetime())).into()),
-			_ => Err(anyhow::Error::new(Error::InvalidArguments {
+			_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_ulid"),
 				message: String::from(
 					"The first argument must be a string, containing a valid ULID.",
@@ -367,7 +367,7 @@ pub mod from {
 					_ => fail!("Failed to convert UUID Timestamp to Datetime."),
 				}
 			}
-			None => Err(anyhow::Error::new(Error::InvalidArguments {
+			None => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: String::from("time::from_uuid"),
 				message: String::from("The first argument must be a v1, v6 or v7 UUID."),
 			})),

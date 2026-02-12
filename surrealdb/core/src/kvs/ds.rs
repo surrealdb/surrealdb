@@ -1836,7 +1836,7 @@ impl Datastore {
 			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
 		}
 
-		// Create a new query options
+		// Create a new query options (currently unused but may be needed for future enhancements)
 		let opt = self.setup_options(sess);
 
 		// Create a default context

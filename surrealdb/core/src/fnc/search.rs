@@ -129,7 +129,7 @@ impl Ord for ScoredDoc {
 ///
 /// # Errors
 ///
-/// * `Error::InvalidArguments` - If `limit` < 1 or `rrf_constant` < 0
+/// * `Error::InvalidFunctionArguments` - If `limit` < 1 or `rrf_constant` < 0
 /// * Context cancellation errors if the operation is cancelled during processing
 ///
 /// # Example
@@ -145,7 +145,7 @@ pub async fn rrf(
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::rrf".to_string(),
 			message: "limit must be at least 1".to_string(),
 		});
@@ -154,7 +154,7 @@ pub async fn rrf(
 	};
 	let rrf_constant = if let Some(rrf_constant) = rrf_constant.0 {
 		if rrf_constant < 0 {
-			anyhow::bail!(Error::InvalidArguments {
+			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: "search::rrf".to_string(),
 				message: "RRF constant must be at least 0".to_string(),
 			});
@@ -297,7 +297,7 @@ enum LinearNorm {
 ///
 /// # Errors
 ///
-/// * `Error::InvalidArguments` - If:
+/// * `Error::InvalidFunctionArguments` - If:
 ///   - `limit` < 1
 ///   - `results` and `weights` arrays have different lengths
 ///   - Any weight is not a numeric value
@@ -336,7 +336,7 @@ pub async fn linear(
 	(results, weights, limit, norm): (Array, Array, i64, String),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "Limit must be at least 1".to_string(),
 		});
@@ -344,7 +344,7 @@ pub async fn linear(
 		limit as usize
 	};
 	if weights.len() != results.len() {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "The results and the weights array should have the same length".to_string(),
 		});
@@ -352,7 +352,7 @@ pub async fn linear(
 	// Validate that all weights are numeric
 	for (i, weight) in weights.iter().enumerate() {
 		if !matches!(weight, Value::Number(_)) {
-			anyhow::bail!(Error::InvalidArguments {
+			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: "search::linear".to_string(),
 				message: format!("Weight at index {} must be a number", i),
 			});
@@ -361,7 +361,7 @@ pub async fn linear(
 	let norm = match norm.as_str() {
 		"minmax" => LinearNorm::MinMax,
 		"zscore" => LinearNorm::ZScore,
-		_ => anyhow::bail!(Error::InvalidArguments {
+		_ => anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "Norm must be 'minmax' or 'zscore'".to_string()
 		}),

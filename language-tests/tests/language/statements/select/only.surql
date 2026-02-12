@@ -7,7 +7,7 @@ value = "1"
 
 # 1: Test ONLY with NONE
 [[test.results]]
-value = "NONE"
+error = "Expected a single result output when using the ONLY keyword"
 
 # 2: Test ONLY with an empty array
 [[test.results]]
@@ -15,7 +15,7 @@ error = "Expected a single result output when using the ONLY keyword"
 
 # 3: Test ONLY with a single element array
 [[test.results]]
-error = "Expected a single result output when using the ONLY keyword"
+value = "1"
 
 # 4: Test ONLY with a two element array
 [[test.results]]
@@ -23,7 +23,7 @@ error = "Expected a single result output when using the ONLY keyword"
 
 # 5: Test ONLY with an empty array and a limit
 [[test.results]]
-value = "NONE"
+error = "Expected a single result output when using the ONLY keyword"
 
 # 6: Test ONLY with a single element array and a limit
 [[test.results]]
