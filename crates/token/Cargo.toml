@@ -1,5 +1,5 @@
 [package]
-name = "surrealdb-ast"
+name = "surrealdb-token"
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true
@@ -13,11 +13,8 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+logos = { version = "0.16" }
 common.workspace = true
-rust_decimal.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-visualize = []

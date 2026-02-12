@@ -31,7 +31,7 @@ macro_rules! impl_non_max {
 			}
 
 			pub const fn get(self) -> $zeroable{
-				self.0.get()
+				self.0.get() ^ impl_non_max!(@max $signed, $zeroable)
 			}
 		}
 

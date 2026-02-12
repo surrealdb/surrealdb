@@ -1,14 +1,24 @@
-use common::id;
+use common::{id, span::Span};
 use std::{
 	any::Any,
 	hash::Hash,
-	ops::{Index, IndexMut},
+	ops::{Deref, DerefMut},
 };
 
+mod ast;
 mod collections;
+
+pub use ast::Ast;
 
 id!(NodeId<T>);
 
+impl<T: Any> NodeId<T> {
+	fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a T {
+		&ast[self]
+	}
+}
+
+/// Trait for types which contain ast nodes.
 pub trait NodeCollection<T> {
 	fn get_node(&self, idx: u32) -> Option<&T>;
 
@@ -16,17 +26,46 @@ pub trait NodeCollection<T> {
 	fn get_mut_node(&mut self, idx: u32) -> Option<&mut T>;
 }
 
+/// Trait for types which contain ast nodes as a vector.
 pub trait NodeVec<T: Node>: NodeCollection<T> {
 	fn insert_node(&mut self, value: T) -> u32;
 }
 
+/// Trait for types which contain ast nodes as hash-consed set.
 pub trait NodeSet<T: UniqueNode>: NodeCollection<T> {
 	fn insert_node(&mut self, value: T) -> u32;
 }
 
+/// Trait for types which can be part of the ast.
 pub trait Node: Any {}
+/// Trait for types which can be part of the ast in a hash-consed set.
 pub trait UniqueNode: Any + Eq + Hash {}
 
+impl UniqueNode for String {}
+impl Node for f64 {}
+
+#[derive(Debug)]
+pub struct Spanned<T> {
+	pub value: T,
+	pub span: Span,
+}
+
+impl<T: Node> Node for Spanned<T> {}
+
+impl<T> Deref for Spanned<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		&self.value
+	}
+}
+impl<T> DerefMut for Spanned<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.value
+	}
+}
+
+/// A struct for a linked list of nodes.
 #[derive(Debug)]
 pub struct NodeList<T> {
 	pub cur: NodeId<T>,
@@ -38,12 +77,51 @@ impl<T: Node> Node for NodeList<T> {}
 /// An id for a linked list of nodes.
 #[derive(Eq, PartialEq, Hash, Debug)]
 pub struct NodeListId<T>(pub NodeId<NodeList<T>>);
+
+impl<T: Any> NodeListId<T> {
+	fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a NodeList<T> {
+		&ast[self]
+	}
+}
+
 impl<T> Clone for NodeListId<T> {
 	fn clone(&self) -> Self {
 		*self
 	}
 }
 impl<T> Copy for NodeListId<T> {}
+impl<T: Node> Node for NodeListId<T> {}
+
+/// Trait for types which have an ast, possibly needing access to the full ast to calculate.
+pub trait AstSpan {
+	fn ast_span<L: NodeLibrary>(&self, ast: &Ast<L>) -> Span;
+}
+
+impl AstSpan for Span {
+	fn ast_span<L: NodeLibrary>(&self, _: &Ast<L>) -> Span {
+		self.clone()
+	}
+}
+
+impl<T> AstSpan for Spanned<T> {
+	fn ast_span<L: NodeLibrary>(&self, _: &Ast<L>) -> Span {
+		self.span
+	}
+}
+
+impl<T: AstSpan + Node> AstSpan for NodeId<T> {
+	fn ast_span<L: NodeLibrary>(&self, ast: &Ast<L>) -> Span {
+		ast[*self].ast_span(ast)
+	}
+}
+
+impl<T: AstSpan + Node> AstSpan for NodeListId<T> {
+	fn ast_span<L: NodeLibrary>(&self, ast: &Ast<L>) -> Span {
+		let start = self.index(ast).cur.index(ast).ast_span(ast);
+		let end = ast.iter_list(Some(*self)).last().unwrap();
+		start.extend(end.ast_span(ast))
+	}
+}
 
 pub trait NodeLibrary {
 	fn empty() -> Self;
@@ -57,79 +135,6 @@ pub trait NodeLibrary {
 	fn insert_set<T: UniqueNode>(&mut self, value: T) -> NodeId<T>;
 
 	fn clear(&mut self);
-}
-
-pub struct Ast<L> {
-	library: L,
-}
-
-impl<L: NodeLibrary> Ast<L> {
-	pub fn empty() -> Self {
-		Ast {
-			library: L::empty(),
-		}
-	}
-
-	pub fn push<T: Node>(&mut self, value: T) -> NodeId<T> {
-		self.library.insert(value)
-	}
-
-	pub fn push_set<T: UniqueNode>(&mut self, value: T) -> NodeId<T> {
-		self.library.insert_set(value)
-	}
-
-	pub fn push_list<T: Node>(
-		&mut self,
-		value: T,
-		head: &mut Option<NodeListId<T>>,
-		tail: &mut Option<NodeListId<T>>,
-	) {
-		let node = self.push(value);
-		let list_entry = NodeListId(self.push(NodeList {
-			cur: node,
-			next: None,
-		}));
-
-		if tail.is_none() {
-			*tail = Some(list_entry)
-		}
-
-		if let Some(prev) = head.replace(list_entry) {
-			self[prev].next = Some(list_entry);
-		}
-	}
-
-	pub fn clear(&mut self) {
-		self.library.clear();
-	}
-}
-
-impl<T: Any, L: NodeLibrary> Index<NodeId<T>> for Ast<L> {
-	type Output = T;
-
-	fn index(&self, index: NodeId<T>) -> &Self::Output {
-		self.library.get(index).expect("Tried to access node in ast which did not exist")
-	}
-}
-
-impl<T: Any, L: NodeLibrary> IndexMut<NodeId<T>> for Ast<L> {
-	fn index_mut(&mut self, index: NodeId<T>) -> &mut Self::Output {
-		self.library.get_mut(index).expect("Tried to access node in ast which did not exist")
-	}
-}
-
-impl<T: Any, L: NodeLibrary> Index<NodeListId<T>> for Ast<L> {
-	type Output = NodeList<T>;
-
-	fn index(&self, index: NodeListId<T>) -> &Self::Output {
-		self.library.get(index.0).expect("Tried to access node in ast which did not exist")
-	}
-}
-
-impl<T: Any, L: NodeLibrary> IndexMut<NodeListId<T>> for Ast<L> {
-	fn index_mut(&mut self, index: NodeListId<T>) -> &mut Self::Output {
-		self.library.get_mut(index.0).expect("Tried to access node in ast which did not exist")
-	}
 }
 
 #[macro_export]
@@ -167,11 +172,12 @@ macro_rules! library {
                             let cntr = std::mem::transmute::<&$container<$ty>,&$container<T>>(&self.$field);
                             return $crate::types::NodeCollection::<T>::get_node(cntr,id.into_u32());
                         }
-                    }
+                    } else
 
                 )*
-
-                panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				{
+					panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				}
             }
 
             fn get_mut<T: ::std::any::Any>(&mut self, idx: NodeId<T>) -> Option<&mut T>{
@@ -182,9 +188,11 @@ macro_rules! library {
                             let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut self.$field);
                             return $crate::types::NodeCollection::<T>::get_mut_node(cntr,idx.into_u32());
                         }
-                    }
+                    } else
                 )*
-                panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				{
+					panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				}
             }
 
             fn insert<T: crate::types::Node>(&mut self, value: T) -> NodeId<T>{
@@ -192,7 +200,9 @@ macro_rules! library {
                 $(
 					library!{@push $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
-                panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				{
+					panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				}
             }
 
             fn insert_set<T: crate::types::UniqueNode>(&mut self, value: T) -> NodeId<T>{
@@ -200,7 +210,9 @@ macro_rules! library {
                 $(
 					library!{@push_set $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
-                panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				{
+					panic!("type '{}' not part of node library",std::any::type_name::<T>());
+				}
             }
 
             fn clear(&mut self){
@@ -224,9 +236,15 @@ macro_rules! library {
 	};
 
 	(@push set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
+		if std::any::TypeId::of::<$ty>() == $ty_id{
+			panic!("tried to push type `{}` as part of a set which is not a unique node",std::any::type_name::<$ty>())
+		}
 	};
 
 	(@push_set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
+		if std::any::TypeId::of::<$ty>() == $ty_id{
+			panic!("tried to push type `{}` as part of a vector which is a unique node",std::any::type_name::<$ty>())
+		}
 	};
 
 	(@push_set set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {

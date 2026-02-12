@@ -5,19 +5,18 @@ use std::ops::{Deref, DerefMut};
 use ast::{Ast, Node, NodeId};
 use bitflags::bitflags;
 use common::TypedError;
-use common::{
-	source_error::{AnnotationKind, Diagnostic, Level, Snippet},
-	span::Span,
-};
+use common::source_error::{AnnotationKind, Diagnostic, Level, Snippet};
+use common::span::Span;
 use logos::{Lexer, Logos};
 use reblessive::{Stack, Stk};
+use token::{BaseTokenKind, Joined, LexError, Token};
 
 use crate::peekable::PeekableLexer;
-use token::{BaseTokenKind, LexError, Token};
 
 mod basic;
 mod error;
 mod expr;
+mod peek;
 pub mod prime;
 mod top_level_expr;
 mod unescape;
@@ -37,18 +36,19 @@ pub trait ParseSync: Sized {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self>;
 }
 
+/// Configuration struct for the parser.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-	depth_limit: usize,
+	pub depth_limit: usize,
 
-	flexible_record_ids: bool,
-	generate_warnings: bool,
+	pub flexible_record_ids: bool,
+	pub generate_warnings: bool,
 
-	feature_references: bool,
-	feature_bearer_access: bool,
-	feature_define_api: bool,
-	feature_files: bool,
-	legacy_strands: bool,
+	pub feature_references: bool,
+	pub feature_bearer_access: bool,
+	pub feature_define_api: bool,
+	pub feature_files: bool,
+	pub legacy_strands: bool,
 }
 
 impl Config {
@@ -79,7 +79,7 @@ impl Default for Config {
 }
 
 bitflags! {
-	pub struct ParserSettings: u8 {
+	struct ParserSettings: u8 {
 		/// Are legacy_strands strands enabled.
 		const LEGACY_STRAND      = 1 << 0;
 		/// Is the emmiting of warnings enabled.
@@ -99,7 +99,7 @@ bitflags! {
 
 bitflags! {
 	#[derive(Clone,Copy)]
-	pub struct ParserState: u8 {
+	struct ParserState: u8 {
 		/// Is the parser in a cancelable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
@@ -109,6 +109,7 @@ bitflags! {
 	}
 }
 
+/// The parser, holds the lexer, parsing state and configurations as well as some reusable buffers.
 pub struct Parser<'source, 'ast> {
 	lex: PeekableLexer<'source, 4>,
 	last_span: Span,
@@ -177,6 +178,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			unescape_buffer: String::new(),
 		};
 
+		if source.len() > u32::MAX as usize {
+			return Err(parser
+				.error("Query length exceeds maximum length supported by the parser")
+				.to_diagnostic()
+				.unwrap());
+		}
+
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
 		// loops because we can maintain it's savety guarentees within the parser.
 		let mut runner = stack.enter(|_| parser.parse_push());
@@ -231,7 +239,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Please limit the use of this function to small branches that can't recurse.
 	pub async fn speculate<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
 	where
-		F: AsyncFnOnce(&mut Parser) -> ParseResult<Option<T>>,
+		F: AsyncFnOnce(&mut Parser) -> ParseResult<T>,
 	{
 		let backup = self.lex.clone();
 		let old_state = self.state;
@@ -239,20 +247,41 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let res = cb(self).await;
 		self.state = old_state;
 		match res {
-			Ok(Some(x)) => Ok(Some(x)),
-			Ok(None) => {
-				self.lex = backup;
-				Ok(None)
-			}
+			Ok(x) => Ok(Some(x)),
 			Err(e) => {
-				self.lex = backup;
 				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					self.lex = backup;
 					Ok(None)
 				} else {
 					Err(e)
 				}
 			}
 		}
+	}
+
+	/// Returns a speculative error,
+	pub fn recover(&self) -> ParseResult<()> {
+		assert!(
+			self.state.contains(ParserState::SPECULATING),
+			"Parser::recover can only be called in a speculating context"
+		);
+
+		Err(ParseError::speculate_error())
+	}
+
+	/// Undoes the speculative state within it's closure.
+	///
+	/// Use to commit to some branching paths in a speculative context while still able to
+	/// speulcate in other branches.
+	pub async fn commit<T, F>(&mut self, cb: F) -> ParseResult<T>
+	where
+		F: AsyncFnOnce(&mut Parser) -> ParseResult<T>,
+	{
+		let old_state = self.state;
+		self.state &= !ParserState::SPECULATING;
+		let res = cb(self).await;
+		self.state = old_state;
+		res
 	}
 
 	// Returns ParseError::recover if the parser is in partial mode and the next token is either
@@ -354,6 +383,54 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let peek = self.peek()?;
 		if let Some(token) = peek {
 			if token.token == kind {
+				self.lex.pop_peek();
+				self.last_span = token.span;
+				return Ok(Some(token));
+			}
+		}
+		Ok(None)
+	}
+
+	/// Returns the next token after the first in the lexer without consuming it.
+	///
+	/// Also returns None if the token was not joined to the previous token.
+	pub fn peek_joined1(&mut self) -> ParseResult<Option<Token>> {
+		match self.lex.peek::<1>() {
+			Some(Ok(x)) => {
+				if let Joined::Joined = x.joined {
+					Ok(Some(x))
+				} else {
+					Ok(None)
+				}
+			}
+			None => Ok(None),
+			Some(Err(e)) => Err(self.lex_error(e)),
+		}
+	}
+
+	/// Returns the next token after the second in the lexer without consuming it.
+	///
+	/// Also returns None if the token was not joined to the previous token.
+	pub fn peek_joined2(&mut self) -> ParseResult<Option<Token>> {
+		match self.lex.peek::<2>() {
+			Some(Ok(x)) => {
+				if let Joined::Joined = x.joined {
+					Ok(Some(x))
+				} else {
+					Ok(None)
+				}
+			}
+			None => Ok(None),
+			Some(Err(e)) => Err(self.lex_error(e)),
+		}
+	}
+
+	/// Consumes the next token and returns it, if the token has the same kind as the argument and
+	/// it was joined to previous token.
+	pub fn eat_joined(&mut self, kind: BaseTokenKind) -> ParseResult<Option<Token>> {
+		let peek = self.peek()?;
+		if let Some(token) = peek {
+			if token.token == kind && token.joined == Joined::Joined {
 				self.lex.pop_peek();
 				self.last_span = token.span;
 				return Ok(Some(token));
@@ -473,6 +550,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(self.push(p))
 	}
 
+	/// Enter into a new stack context, use when running a recursive function.
 	pub async fn enter<R, F>(&mut self, cb: F) -> R
 	where
 		F: AsyncFnOnce(&mut Self) -> R,
@@ -482,9 +560,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Returns sub string of full source that corresponds to the given span.
 	pub fn slice(&self, span: Span) -> &'source str {
-		&self.lex.source()[(span.start as usize)..=(span.end as usize)]
+		&self.lex.source()[(span.start as usize)..(span.end as usize)]
 	}
 
+	/// Returns the snippet belonging to the current source code.
 	pub fn snippet(&self) -> Snippet<'source> {
 		Snippet::source(self.lex.source())
 	}
@@ -543,28 +622,47 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		&mut self,
 		delimiter: BaseTokenKind,
 		open_span: Span,
-	) -> ParseResult<()> {
-		let next = self.next_expect(delimiter.as_str())?;
-		if next.token != delimiter {
-			let span = self.peek_span();
+	) -> ParseResult<Token> {
+		if let Some(next) = self.next()? {
+			if next.token != delimiter {
+				let span = self.peek_span();
+				return Err(self.with_error(|this| {
+					Level::Error
+						.title(format!(
+							"Unexpected token `{}`, expected closing delimiter `{}`",
+							this.slice(span),
+							delimiter
+						))
+						.snippet(
+							this.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
+								AnnotationKind::Context
+									.span(open_span)
+									.label("expected this delimiter to close"),
+							),
+						)
+						.to_diagnostic()
+				}));
+			}
+			Ok(next)
+		} else {
 			return Err(self.with_error(|this| {
 				Level::Error
 					.title(format!(
-						"Unexpected token `{}`, expected closing delimiter `{}`",
-						this.slice(span),
+						"Unexpected end of query, expected closing delimiter `{}`",
 						delimiter
 					))
 					.snippet(
-						this.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-							AnnotationKind::Context
-								.span(open_span)
-								.label("expected this delimiter to close"),
-						),
+						this.snippet()
+							.annotate(AnnotationKind::Primary.span(this.eof_span()))
+							.annotate(
+								AnnotationKind::Context
+									.span(open_span)
+									.label("expected this delimiter to close"),
+							),
 					)
 					.to_diagnostic()
 			}));
 		}
-		Ok(())
 	}
 
 	/// Returns the span for the next token in the lexer.
@@ -579,7 +677,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Returns the span of that points to the end of the source.
 	pub fn eof_span(&mut self) -> Span {
-		todo!()
+		self.lex.eof_span()
 	}
 }
 

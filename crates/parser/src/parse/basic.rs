@@ -15,3 +15,12 @@ impl ParseSync for ast::Ident {
 		})
 	}
 }
+
+impl ParseSync for f64 {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::Float)?;
+		let slice = parser.slice(token.span);
+		let float = slice.trim_end_matches("f").parse().expect("lexer should ensure valid floats");
+		Ok(float)
+	}
+}
