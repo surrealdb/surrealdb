@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
 use super::err::{Error, Result};
+use super::util;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
@@ -255,6 +256,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
@@ -267,16 +269,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Scan the keys
 		let res = inner.keys(rng, count).await?;
 		// Consume the results
-		let res = consume_keys(&mut res.into_iter(), limit);
+		let res = consume_keys(&mut res.into_iter(), limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -287,6 +289,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
@@ -299,16 +302,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Extract the limit count
+		// Extract the limit count, adding skip to fetch enough entries
 		let count = match limit {
-			ScanLimit::Count(c) => c,
-			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1),
-			ScanLimit::BytesOrCount(_, c) => c,
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
 		};
 		// Scan the keys
 		let res = inner.keysr(rng, count).await?;
 		// Consume the results
-		let res = consume_keys(&mut res.into_iter(), limit);
+		let res = consume_keys(&mut res.into_iter(), limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -319,6 +322,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -331,6 +335,21 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Skip entries using keys-only scan to avoid fetching values
+		let rng = if skip > 0 {
+			let skipped = inner.keys(rng.clone(), skip).await?;
+			match skipped.last() {
+				Some(last) => {
+					let mut start = last.clone();
+					util::advance_key(&mut start);
+					start..rng.end
+				}
+				// Fewer entries than skip -- nothing to return
+				None => return Ok(Vec::new()),
+			}
+		} else {
+			rng
+		};
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
@@ -351,6 +370,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -363,6 +383,20 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Skip entries using keys-only scan to avoid fetching values
+		let rng = if skip > 0 {
+			let skipped = inner.keysr(rng.clone(), skip).await?;
+			match skipped.last() {
+				Some(last) => {
+					let end = last.clone();
+					rng.start..end
+				}
+				// Fewer entries than skip -- nothing to return
+				None => return Ok(Vec::new()),
+			}
+		} else {
+			rng
+		};
 		// Extract the limit count
 		let count = match limit {
 			ScanLimit::Count(c) => c,
@@ -396,7 +430,13 @@ impl Transactable for Transaction {
 }
 
 // Consume and iterate over keys
-fn consume_keys<I: Iterator<Item = Key>>(iter: &mut I, limit: ScanLimit) -> Vec<Key> {
+fn consume_keys<I: Iterator<Item = Key>>(iter: &mut I, limit: ScanLimit, skip: u32) -> Vec<Key> {
+	// Skip entries from the pre-fetched iterator
+	for _ in 0..skip {
+		if iter.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set

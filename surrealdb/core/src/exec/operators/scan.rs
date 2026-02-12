@@ -70,7 +70,7 @@ macro_rules! check_perm {
 pub struct Scan {
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional version timestamp for time-travel queries (VERSION clause)
-	pub(crate) version: Option<u64>,
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Optional WHERE condition for index selection (AST form)
 	pub(crate) cond: Option<Cond>,
 	/// Optional ORDER BY for index selection and scan direction
@@ -98,7 +98,7 @@ impl Scan {
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
-		version: Option<u64>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		cond: Option<Cond>,
 		order: Option<Ordering>,
 		with: Option<With>,
@@ -153,6 +153,9 @@ impl ExecOperator for Scan {
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		let mut exprs = vec![("source", &self.source)];
+		if let Some(ref version) = self.version {
+			exprs.push(("version", version));
+		}
 		if let Some(ref pred) = self.predicate {
 			exprs.push(("predicate", pred));
 		}
@@ -194,7 +197,7 @@ impl ExecOperator for Scan {
 
 		// Clone for the async block
 		let source_expr = Arc::clone(&self.source);
-		let version = self.version;
+		let version = self.version.clone();
 		let cond = self.cond.clone();
 		let order = self.order.clone();
 		let with = self.with.clone();
@@ -238,6 +241,20 @@ impl ExecOperator for Scan {
 			let start_val: usize = match &start_expr {
 				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
 				None => 0,
+			};
+
+			// Evaluate VERSION expression to a timestamp
+			let version: Option<u64> = match &version {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
 			};
 
 			// Early exit if limit is 0

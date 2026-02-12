@@ -8,9 +8,6 @@ use sysinfo::System;
 // Basic options
 // --------------------------------------------------
 
-/// Should we sync writes to disk before acknowledgement
-pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, true);
-
 /// The number of threads to start for flushing and compaction (default: number
 /// of CPUs)
 pub(super) static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
@@ -228,30 +225,8 @@ pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
 
 // --------------------------------------------------
-// Background flusher options
-// --------------------------------------------------
-
-/// Whether to enable background WAL file flushing (default: true)
-pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, true);
-
-/// The interval in nanoseconds between background flushes (default: 200ms)
-pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
-	lazy_env_parse!(duration, "SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, || {
-		Duration::from_millis(200).as_nanos() as u64
-	});
-
-// --------------------------------------------------
 // Commit coordinator options
 // --------------------------------------------------
-
-/// Whether to enable grouped commit when sync is enabled (default: true)
-/// When enabled, multiple transaction commits are batched together and flushed to disk with a
-/// single fsync operation, improving throughput. When disabled, each transaction is committed
-/// and synced individually, which may provide lower latency for single transactions at the cost
-/// of reduced throughput under high load.
-pub(super) static ROCKSDB_GROUPED_COMMIT: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT", bool, true);
 
 /// The maximum wait time in nanoseconds before forcing a grouped commit (default: 5ms).
 /// This timeout ensures that transactions don't wait indefinitely under low concurrency and

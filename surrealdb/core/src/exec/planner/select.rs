@@ -86,7 +86,7 @@ impl<'ctx> Planner<'ctx> {
 			));
 		}
 
-		let version = extract_version(version)?;
+		let version = extract_version(version, self)?;
 
 		// ── COUNT fast-path ─────────────────────────────────────────
 		// Detect `SELECT count() FROM <table> GROUP ALL` (no WHERE,
@@ -363,7 +363,7 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn plan_sources(
 		&self,
 		what: Vec<Expr>,
-		version: Option<u64>,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
@@ -382,7 +382,7 @@ impl<'ctx> Planner<'ctx> {
 		for expr in what {
 			let plan = self.plan_source(
 				expr,
-				version,
+				version.clone(),
 				cond,
 				order,
 				with,
@@ -406,7 +406,7 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn plan_source(
 		&self,
 		expr: Expr,
-		version: Option<u64>,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
@@ -450,7 +450,16 @@ impl<'ctx> Planner<'ctx> {
 				)) as Arc<dyn ExecOperator>)
 			}
 
-			Expr::Select(inner_select) => self.plan_select_statement(*inner_select),
+			Expr::Select(inner_select) => {
+				if version.is_some() {
+					return Err(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					});
+				}
+				self.plan_select_statement(*inner_select)
+			}
 
 			Expr::Literal(crate::expr::literal::Literal::Array(_)) => {
 				let phys_expr = self.physical_expr(expr)?;

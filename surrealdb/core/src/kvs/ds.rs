@@ -331,8 +331,22 @@ impl TransactionBuilderFactory for CommunityComposer {
 		clock: Option<Arc<SizedClock>>,
 		_canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
-		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
-			None if path == "memory" => ("memory", ""),
+		// Extract query parameters from the path before scheme extraction
+		let (raw_path, query_string) = match path.split_once('?') {
+			Some((p, q)) => (p, Some(q)),
+			None => (path, None),
+		};
+
+		// Parse any query parameters into a map
+		let params = query_string.map(super::config::parse_query_params).unwrap_or_default();
+
+		// Extract the scheme and path components
+		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
+		{
+			None if raw_path == "memory" => ("memory", ""),
+			// Treat "mem" as an alias for "memory"
+			None if raw_path == "mem" => ("memory", ""),
+			Some(("mem", path)) => ("memory", path),
 			Some((flavour, path)) => (flavour, path),
 			// Validated already in the CLI, should never happen
 			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
@@ -358,8 +372,11 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealMX configuration from query parameters
+					let config =
+						super::config::MemoryConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
+					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
 					Ok((Box::<DatastoreFlavor>::new(v), c))
@@ -367,35 +384,17 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
-			// Initiate a File (RocksDB) datastore
-			(flavour @ "file", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					warn!(
-						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
-					);
-
-					let v = super::rocksdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse RocksDB-specific configuration from query parameters
+					let config =
+						super::config::RocksDbConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path)
+					let v = super::rocksdb::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
@@ -405,35 +404,21 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
-			// Initiate a SurrealKV versioned database
-			(flavour @ "surrealkv+versioned", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, true)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a SurrealKV non-versioned database
+			// Initiate a SurrealKV database
 			(flavour @ "surrealkv", path) => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealKV-specific configuration from query parameters
+					let config =
+						super::config::SurrealKvConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, false)
+					let v = super::surrealkv::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
+					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
@@ -475,13 +460,16 @@ impl TransactionBuilderFactory for CommunityComposer {
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
-		match v {
+		// Strip query parameters before validating the scheme
+		let scheme_part = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
+		match scheme_part {
 			"memory" => Ok(v.to_string()),
-			v if v.starts_with("file:") => Ok(v.to_string()),
-			v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-			v if v.starts_with("tikv:") => Ok(v.to_string()),
+			"mem" => Ok(v.to_string()),
+			v_s if v_s.starts_with("file:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("rocksdb:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("surrealkv:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("mem:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("tikv:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -917,7 +905,7 @@ impl Datastore {
 			None => {
 				// Fetch any keys immediately following the version key
 				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, None).await);
+				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
@@ -1568,7 +1556,7 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("file://database.db").await?;
+	///     let ds = Datastore::new("rocksdb://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
