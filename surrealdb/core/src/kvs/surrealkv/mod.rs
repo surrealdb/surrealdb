@@ -50,8 +50,10 @@ impl Datastore {
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		// Configure versioned queries
-		info!(target: TARGET, "Versioning enabled: {} with unlimited retention period", enable_versions);
+		let versioned_index = enable_versions && *cnf::SURREALKV_VERSIONED_INDEX;
+		info!(target: TARGET, "Versioning enabled: {} with unlimited retention period (versioned_index: {})", enable_versions, versioned_index);
 		let builder = builder.with_versioning(enable_versions, 0);
+		let builder = builder.with_versioned_index(versioned_index);
 		// Set the block size
 		info!(target: TARGET, "Setting block size: {}", *cnf::SURREALKV_BLOCK_SIZE);
 		let builder = builder.with_block_size(*cnf::SURREALKV_BLOCK_SIZE);
