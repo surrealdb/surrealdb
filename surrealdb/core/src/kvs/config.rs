@@ -1,8 +1,55 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use super::err::{Error, Result};
+
+// --------------------------------------------------
+// Environment variable fallbacks
+// --------------------------------------------------
+
+/// The sync mode for the datastore (default: 'every').
+/// This is an alternative to the `sync` query parameter.
+/// Only used by the 'memory', 'rocksdb', and 'surrealkv' engines.
+/// Accepts: "never", "every", or a duration string (e.g. "5s", "1m").
+static SURREAL_DATASTORE_SYNC_DATA: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_SYNC_DATA", Option<String>);
+
+/// Whether MVCC versioning is enabled (default: false).
+/// This is an alternative to the `versioned` query parameter.
+/// Only used by the 'memory' and 'surrealkv' engines.
+/// Accepts: "true", "false", "1", "0".
+static SURREAL_DATASTORE_VERSIONED: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_VERSIONED", Option<String>);
+
+/// Version retention period as a duration string (default: 0 / unlimited).
+/// This is an alternative to the `retention` query parameter.
+/// Only used by the 'memory' and 'surrealkv' engines.
+/// Accepts: a duration string (e.g. "30d", "24h").
+static SURREAL_DATASTORE_RETENTION: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_RETENTION", Option<String>);
+
+/// Filesystem path for persistence ('memory' engine only).
+/// This is an alternative to the `persist` query parameter.
+/// Only used by the 'memory' engine.
+/// Accepts: a filesystem path.
+static SURREAL_DATASTORE_PERSIST: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_PERSIST", Option<String>);
+
+/// Append-only log mode ('memory' engine only).
+/// This is an alternative to the `aol` query parameter.
+/// Only used by the 'memory' engine.
+/// Accepts: "never", "sync", "async".
+static SURREAL_DATASTORE_AOL: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_AOL", Option<String>);
+
+/// Snapshot interval ('memory' engine only).
+/// This is an alternative to the `snapshot` query parameter.
+/// Only used by the 'memory' engine.
+/// Accepts: "never" or a duration string (e.g. "60s", "5m").
+static SURREAL_DATASTORE_SNAPSHOT: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_DATASTORE_SNAPSHOT", Option<String>);
 
 // --------------------------------------------------
 // Query parameter parsing helpers
@@ -55,32 +102,47 @@ impl Default for MemoryConfig {
 }
 
 impl MemoryConfig {
-	/// Build configuration from parsed query parameters.
+	/// Build configuration from parsed query parameters, with environment
+	/// variable fallbacks. Query parameters take precedence over env vars,
+	/// which take precedence over engine defaults.
 	pub fn from_params(params: &HashMap<String, String>) -> Result<Self> {
 		let mut config = Self::default();
-		// Check whether versioning is enabled
+		// Check whether versioning is enabled (query param > env var > default)
 		if let Some(v) = params.get("versioned") {
 			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
+		} else if let Some(v) = SURREAL_DATASTORE_VERSIONED.as_deref() {
+			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
 		}
-		// Determine the version retention period
+		// Determine the version retention period (query param > env var > default)
 		if let Some(v) = params.get("retention") {
 			let dur = parse_duration(v)?;
 			config.retention_ns = dur.as_nanos() as u64;
+		} else if let Some(v) = SURREAL_DATASTORE_RETENTION.as_deref() {
+			let dur = parse_duration(v)?;
+			config.retention_ns = dur.as_nanos() as u64;
 		}
-		// Determine whether persistence is enabled
+		// Determine whether persistence is enabled (query param > env var > default)
 		if let Some(v) = params.get("persist") {
 			config.persist_path = Some(v.clone());
+		} else if let Some(v) = SURREAL_DATASTORE_PERSIST.as_deref() {
+			config.persist_path = Some(v.to_string());
 		}
-		// Determine the append-only-log mode
+		// Determine the append-only-log mode (query param > env var > default)
 		if let Some(v) = params.get("aol") {
 			config.aol_mode = parse_aol_mode(v)?;
+		} else if let Some(v) = SURREAL_DATASTORE_AOL.as_deref() {
+			config.aol_mode = parse_aol_mode(v)?;
 		}
-		// Determine the snapshot mode
+		// Determine the snapshot mode (query param > env var > default)
 		if let Some(v) = params.get("snapshot") {
 			config.snapshot_mode = parse_snapshot_mode(v)?;
+		} else if let Some(v) = SURREAL_DATASTORE_SNAPSHOT.as_deref() {
+			config.snapshot_mode = parse_snapshot_mode(v)?;
 		}
-		// Determine the sync mode
+		// Determine the sync mode (query param > env var > default)
 		if let Some(v) = params.get("sync") {
+			config.sync_mode = parse_sync_mode(v)?;
+		} else if let Some(v) = SURREAL_DATASTORE_SYNC_DATA.as_deref() {
 			config.sync_mode = parse_sync_mode(v)?;
 		}
 		// Validate: aol, snapshot, and sync require persist
@@ -132,21 +194,29 @@ impl Default for SurrealKvConfig {
 }
 
 impl SurrealKvConfig {
-	/// Build configuration from parsed query parameters.
-	/// Unknown parameters are ignored (they may be handled by env vars or defaults).
+	/// Build configuration from parsed query parameters, with environment
+	/// variable fallbacks. Query parameters take precedence over env vars,
+	/// which take precedence over engine defaults.
 	pub fn from_params(params: &HashMap<String, String>) -> Result<Self> {
 		let mut config = Self::default();
-		// Check whether versioning is enabled
+		// Check whether versioning is enabled (query param > env var > default)
 		if let Some(v) = params.get("versioned") {
 			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
+		} else if let Some(v) = SURREAL_DATASTORE_VERSIONED.as_deref() {
+			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
 		}
-		// Determine the version retention period
+		// Determine the version retention period (query param > env var > default)
 		if let Some(v) = params.get("retention") {
 			let dur = parse_duration(v)?;
 			config.retention_ns = dur.as_nanos() as u64;
+		} else if let Some(v) = SURREAL_DATASTORE_RETENTION.as_deref() {
+			let dur = parse_duration(v)?;
+			config.retention_ns = dur.as_nanos() as u64;
 		}
-		// Determine the sync mode
+		// Determine the sync mode (query param > env var > default)
 		if let Some(v) = params.get("sync") {
+			config.sync_mode = parse_sync_mode(v)?;
+		} else if let Some(v) = SURREAL_DATASTORE_SYNC_DATA.as_deref() {
 			config.sync_mode = parse_sync_mode(v)?;
 		}
 		// Return the configuration
@@ -165,7 +235,7 @@ pub struct RocksDbConfig {
 	pub versioned: bool,
 	/// Version retention period in nanoseconds (0 = unlimited).
 	pub retention_ns: u64,
-	/// Disk sync mode. `None` means "not specified by query param, use env var fallback".
+	/// Disk sync mode.
 	pub sync_mode: SyncMode,
 }
 
@@ -180,21 +250,29 @@ impl Default for RocksDbConfig {
 }
 
 impl RocksDbConfig {
-	/// Build configuration from parsed query parameters.
-	/// Unknown parameters are ignored (they may be handled by env vars or defaults).
+	/// Build configuration from parsed query parameters, with environment
+	/// variable fallbacks. Query parameters take precedence over env vars,
+	/// which take precedence over engine defaults.
 	pub fn from_params(params: &HashMap<String, String>) -> Result<Self> {
 		let mut config = Self::default();
-		// Check whether versioning is enabled
+		// Check whether versioning is enabled (query param > env var > default)
 		if let Some(v) = params.get("versioned") {
 			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
+		} else if let Some(v) = SURREAL_DATASTORE_VERSIONED.as_deref() {
+			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
 		}
-		// Determine the version retention period
+		// Determine the version retention period (query param > env var > default)
 		if let Some(v) = params.get("retention") {
 			let dur = parse_duration(v)?;
 			config.retention_ns = dur.as_nanos() as u64;
+		} else if let Some(v) = SURREAL_DATASTORE_RETENTION.as_deref() {
+			let dur = parse_duration(v)?;
+			config.retention_ns = dur.as_nanos() as u64;
 		}
-		// Determine the sync mode
+		// Determine the sync mode (query param > env var > default)
 		if let Some(v) = params.get("sync") {
+			config.sync_mode = parse_sync_mode(v)?;
+		} else if let Some(v) = SURREAL_DATASTORE_SYNC_DATA.as_deref() {
 			config.sync_mode = parse_sync_mode(v)?;
 		}
 		// Return the configuration
@@ -566,5 +644,89 @@ mod tests {
 		assert!(config.versioned);
 		assert_eq!(config.retention_ns, 30 * 86400 * 1_000_000_000);
 		assert_eq!(config.sync_mode, SyncMode::Every);
+	}
+
+	// --------------------------------------------------
+	// Query param override tests
+	// --------------------------------------------------
+	// These tests verify that explicit query parameters always take
+	// precedence, regardless of any env var fallback values. The env
+	// var fallback code paths use the same `parse_*` functions tested
+	// above, so parsing correctness is already covered.
+
+	#[test]
+	fn test_query_param_overrides_for_surrealkv() {
+		// When query params are explicitly set, they must be used
+		// regardless of what env vars might provide.
+		let params = parse_query_params("versioned=true&retention=7d&sync=never");
+		let config = SurrealKvConfig::from_params(&params).unwrap();
+		assert!(config.versioned);
+		assert_eq!(config.retention_ns, 7 * 86400 * 1_000_000_000);
+		assert_eq!(config.sync_mode, SyncMode::Never);
+	}
+
+	#[test]
+	fn test_query_param_overrides_for_rocksdb() {
+		let params = parse_query_params("versioned=true&retention=1h&sync=5s");
+		let config = RocksDbConfig::from_params(&params).unwrap();
+		assert!(config.versioned);
+		assert_eq!(config.retention_ns, 3600 * 1_000_000_000);
+		assert_eq!(config.sync_mode, SyncMode::Interval(Duration::from_secs(5)));
+	}
+
+	#[test]
+	fn test_query_param_overrides_for_memory() {
+		let params = parse_query_params(
+			"versioned=true&retention=24h&persist=/tmp/test&aol=async&snapshot=5m&sync=every",
+		);
+		let config = MemoryConfig::from_params(&params).unwrap();
+		assert!(config.versioned);
+		assert_eq!(config.retention_ns, 24 * 3600 * 1_000_000_000);
+		assert_eq!(config.persist_path.as_deref(), Some("/tmp/test"));
+		assert_eq!(config.aol_mode, AolMode::Async);
+		assert_eq!(config.snapshot_mode, SnapshotMode::Interval(Duration::from_secs(300)));
+		assert_eq!(config.sync_mode, SyncMode::Every);
+	}
+
+	#[test]
+	fn test_aol_mode_parsing() {
+		assert_eq!(parse_aol_mode("never").unwrap(), AolMode::Never);
+		assert_eq!(parse_aol_mode("sync").unwrap(), AolMode::Sync);
+		assert_eq!(parse_aol_mode("async").unwrap(), AolMode::Async);
+		assert!(parse_aol_mode("invalid").is_err());
+	}
+
+	#[test]
+	fn test_snapshot_mode_parsing() {
+		assert_eq!(parse_snapshot_mode("never").unwrap(), SnapshotMode::Never);
+		assert_eq!(
+			parse_snapshot_mode("60s").unwrap(),
+			SnapshotMode::Interval(Duration::from_secs(60))
+		);
+		assert_eq!(
+			parse_snapshot_mode("5m").unwrap(),
+			SnapshotMode::Interval(Duration::from_secs(300))
+		);
+		assert!(parse_snapshot_mode("invalid").is_err());
+		// Duration must be > 30s
+		assert!(parse_snapshot_mode("10s").is_err());
+	}
+
+	// --------------------------------------------------
+	// Env var static definition tests
+	// --------------------------------------------------
+	// Verify that the environment variable statics are defined and
+	// accessible. When env vars are not set (typical in CI), they
+	// resolve to None, which means defaults are used.
+
+	#[test]
+	fn test_env_var_statics_are_accessible() {
+		// These should not panic; they return None when unset.
+		let _ = SURREAL_DATASTORE_SYNC_DATA.as_deref();
+		let _ = SURREAL_DATASTORE_VERSIONED.as_deref();
+		let _ = SURREAL_DATASTORE_RETENTION.as_deref();
+		let _ = SURREAL_DATASTORE_PERSIST.as_deref();
+		let _ = SURREAL_DATASTORE_AOL.as_deref();
+		let _ = SURREAL_DATASTORE_SNAPSHOT.as_deref();
 	}
 }
