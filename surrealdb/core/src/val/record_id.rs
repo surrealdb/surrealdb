@@ -197,7 +197,7 @@ impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
 		let mut rng = rand::thread_rng();
-		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap()).collect();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
 		Self::String(id)
 	}
 	/// Generate a new random ULID

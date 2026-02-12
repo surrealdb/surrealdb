@@ -841,7 +841,7 @@ impl Document {
 					max,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -871,7 +871,7 @@ impl Document {
 					min,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -898,7 +898,7 @@ impl Document {
 					sum,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::sum".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -921,7 +921,7 @@ impl Document {
 					..
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::mean".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -942,7 +942,7 @@ impl Document {
 					max,
 				} => {
 					let Value::Datetime(after) = &after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "time::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -970,7 +970,7 @@ impl Document {
 					min,
 				} => {
 					let Value::Datetime(after) = &after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "time::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",

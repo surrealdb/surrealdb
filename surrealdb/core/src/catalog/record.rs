@@ -175,6 +175,22 @@ impl Data {
 		}
 	}
 
+	/// Consumes the Data and returns the owned Value.
+	///
+	/// For `Mutable` data this is a zero-cost move. For `ReadOnly` data it
+	/// attempts to unwrap the Arc, falling back to a clone if other references
+	/// exist.
+	///
+	/// # Returns
+	///
+	/// The owned Value
+	pub(crate) fn into_value(self) -> Value {
+		match self {
+			Data::Mutable(v) => v,
+			Data::ReadOnly(arc) => Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()),
+		}
+	}
+
 	/// Converts the data to read-only format and returns an Arc reference
 	///
 	/// If the data is already read-only, it returns a clone of the existing Arc.

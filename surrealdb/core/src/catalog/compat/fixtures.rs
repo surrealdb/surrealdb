@@ -485,6 +485,7 @@ pub fn field_basic() -> FieldDefinition {
 		comment: None,
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
+		computed_deps: None,
 	}
 }
 
@@ -506,6 +507,7 @@ pub fn field_with_type() -> FieldDefinition {
 		comment: Some("User email address".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
+		computed_deps: None,
 	}
 }
 
@@ -527,6 +529,7 @@ pub fn field_readonly() -> FieldDefinition {
 		comment: Some("Record creation timestamp".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
+		computed_deps: None,
 	}
 }
 

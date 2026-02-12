@@ -1,4 +1,6 @@
 /**
+[env]
+new-planner-strategy = "best-effort-ro"
 
 [test]
 

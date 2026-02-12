@@ -47,6 +47,7 @@ lcov.info
 
 .idea/
 .vscode/
+.cursor/plans/
 /result
 /bin/
 /.direnv/

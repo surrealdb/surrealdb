@@ -1,4 +1,7 @@
 /**
+[env]
+new-planner-strategy = "best-effort-ro"
+
 [test]
 
 [[test.results]]
@@ -39,7 +42,7 @@ DEFINE INDEX page_title ON page FIELDS title FULLTEXT ANALYZER simple BM25;
 DEFINE INDEX page_content ON page FIELDS content FULLTEXT ANALYZER simple BM25;
 DEFINE INDEX page_host ON page FIELDS host;
 SELECT id, search::score(1) as sc1, search::score(2) as sc2
-FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
+	FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
 SELECT id, search::score(1) as sc1, search::score(2) as sc2
 	FROM page WHERE host = 'test'
 	AND (title @1@ 'dog' OR content @2@ 'dog') explain;

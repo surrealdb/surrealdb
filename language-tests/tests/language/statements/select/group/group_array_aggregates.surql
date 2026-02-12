@@ -6,16 +6,19 @@ reason = "Test GROUP BY with array aggregation functions and patterns"
 value = "'OK'"
 
 [[test.results]]
-value = "[{ names: ['apple', 'banana'], type: 'fruit' }, { names: ['carrot', 'broccoli'], type: 'vegetable' }]"
+value = "[{ names: ['apple', 'banana', 'apple', 'banana'], type: 'fruit' }, { names: ['carrot', 'broccoli'], type: 'vegetable' }]"
 
 [[test.results]]
 value = "[{ type: 'fruit', unique_names: ['apple', 'banana'] }, { type: 'vegetable', unique_names: ['carrot', 'broccoli'] }]"
 
 [[test.results]]
-value = "[{ count: 2, type: 'fruit' }, { count: 2, type: 'vegetable' }]"
+value = "[{ type: 'fruit', unique_names: ['apple', 'banana'] }, { type: 'vegetable', unique_names: ['carrot', 'broccoli'] }]"
 
 [[test.results]]
-value = "[{ all_names: ['apple', 'banana'], count: 4, type: 'fruit' }, { all_names: ['carrot', 'broccoli'], count: 2, type: 'vegetable' }]"
+value = "[{ count: 4, type: 'fruit' }, { count: 2, type: 'vegetable' }]"
+
+[[test.results]]
+value = "[{ all_names: ['apple', 'banana', 'apple', 'banana'], count: 4, type: 'fruit' }, { all_names: ['carrot', 'broccoli'], count: 2, type: 'vegetable' }]"
 
 */
 
@@ -35,6 +38,7 @@ SELECT type, array::group(name) as names FROM items GROUP BY type;
 
 -- Test array::distinct on grouped data
 SELECT type, array::distinct(array::group(name)) as unique_names FROM items GROUP BY type;
+SELECT type, array::distinct(name) as unique_names FROM items GROUP BY type;
 
 -- Test array::len with grouping
 SELECT type, array::len(array::group(name)) as count FROM items GROUP BY type;

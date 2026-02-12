@@ -7,6 +7,7 @@ use surrealdb_types::ToSql;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exe::try_join_all_buffered;
+use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::part::Part;
 use crate::expr::{Expr, FlowResultExt as _, Literal};
 use crate::val::{Object, Value};
@@ -242,6 +243,82 @@ impl Value {
 
 		*place = val;
 		Ok(())
+	}
+
+	/// Synchronous method for setting a value at a FieldPath.
+	///
+	/// Unlike `set()`, this doesn't require async/computation - just navigation.
+	/// When encountering an array, applies the remaining path to all elements.
+	/// This is used for output path navigation in the projection operator.
+	pub fn set_at_field_path(&mut self, path: &FieldPath, val: Value) {
+		self.set_at_field_path_depth(path, &val, 0);
+	}
+
+	fn set_at_field_path_depth(&mut self, path: &FieldPath, val: &Value, depth: usize) {
+		if depth >= path.len() {
+			*self = val.clone();
+			return;
+		}
+
+		let part = &path.0[depth];
+		let is_last = depth == path.len() - 1;
+
+		match (self, part) {
+			// Object with Field/Lookup key
+			(Value::Object(obj), FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
+				if is_last {
+					obj.insert(key.clone(), val.clone());
+				} else {
+					let nested =
+						obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
+					nested.set_at_field_path_depth(path, val, depth + 1);
+				}
+			}
+			// Index on array - must come before the catch-all array pattern
+			(Value::Array(arr), FieldPathPart::Index(i)) if *i < arr.len() => {
+				if is_last {
+					arr[*i] = val.clone();
+				} else {
+					arr[*i].set_at_field_path_depth(path, val, depth + 1);
+				}
+			}
+			// First element - must come before the catch-all array pattern
+			(Value::Array(arr), FieldPathPart::First) if !arr.is_empty() => {
+				if is_last {
+					arr[0] = val.clone();
+				} else {
+					arr[0].set_at_field_path_depth(path, val, depth + 1);
+				}
+			}
+			// Last element - must come before the catch-all array pattern
+			(Value::Array(arr), FieldPathPart::Last) if !arr.is_empty() => {
+				let last_idx = arr.len() - 1;
+				if is_last {
+					arr[last_idx] = val.clone();
+				} else {
+					arr[last_idx].set_at_field_path_depth(path, val, depth + 1);
+				}
+			}
+			// Array with Field/Lookup key: apply remaining path to all elements
+			(Value::Array(arr), FieldPathPart::Field(_) | FieldPathPart::Lookup(_)) => {
+				for elem in arr.iter_mut() {
+					elem.set_at_field_path_depth(path, val, depth);
+				}
+			}
+			// Non-object with Field/Lookup: replace with object containing the path
+			(target, FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
+				let mut obj = Object::default();
+				if is_last {
+					obj.insert(key.clone(), val.clone());
+				} else {
+					let mut nested = Value::Object(Object::default());
+					nested.set_at_field_path_depth(path, val, depth + 1);
+					obj.insert(key.clone(), nested);
+				}
+				*target = Value::Object(obj);
+			}
+			_ => {} // Other cases: no-op
+		}
 	}
 
 	async fn assign(

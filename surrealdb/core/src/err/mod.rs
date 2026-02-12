@@ -138,7 +138,15 @@ pub(crate) enum Error {
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
 	#[error("Incorrect arguments for function {name}(). {message}")]
-	InvalidArguments {
+	InvalidFunctionArguments {
+		name: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
+	#[error("Incorrect arguments for method {name}(). {message}")]
+	InvalidMethodArguments {
 		name: String,
 		message: String,
 	},
@@ -683,6 +691,16 @@ pub(crate) enum Error {
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
 
+	/// The planner does not support this statement type (e.g. DML/DDL).
+	/// Callers should always fall back to the compute path.
+	#[error("Planner unsupported: {0}")]
+	PlannerUnsupported(String),
+
+	/// The planner intends to support this but it is not yet implemented.
+	/// Callers fall back in BestEffort mode; hard error in AllReadOnlyStatements mode.
+	#[error("Planner not yet implemented: {0}")]
+	PlannerUnimplemented(String),
+
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),
@@ -1143,6 +1161,10 @@ pub(crate) enum Error {
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
 
+	/// Cyclic dependency detected among computed fields
+	#[error("Cyclic dependency detected among computed fields: {0}")]
+	ComputedFieldCycle(String),
+
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` keyword on the `id` field.")]
 	IdFieldKeywordConflict(String),
@@ -1182,6 +1204,27 @@ impl Error {
 				| Error::FieldValue { .. }
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Returns true if this error represents a data-shape problem
+	/// (type mismatch, coercion failure, etc.) that can be safely
+	/// treated as NONE in expression evaluation contexts.
+	///
+	/// Returns false for system errors (storage, I/O, timeout,
+	/// permissions) that must always propagate.
+	pub fn is_ignorable(&self) -> bool {
+		matches!(
+			self,
+			Error::Coerce(_)
+				| Error::Cast(_)
+				| Error::InvalidFunctionArguments { .. }
+				| Error::TryAdd(..)
+				| Error::TrySub(..)
+				| Error::TryMul(..)
+				| Error::TryDiv(..)
+				| Error::TryPow(..)
+				| Error::TryNeg(..)
 		)
 	}
 }
