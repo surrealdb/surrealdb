@@ -23,6 +23,7 @@ use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hn::HnswNode;
+use crate::key::index::hp::HnswPending;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::ib::Ib;
@@ -72,8 +73,12 @@ impl IndexKeyBase {
 		He::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, element_id)
 	}
 
-	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
+	fn new_hi_key<'a>(&'a self, id: &'a RecordIdKey) -> Hi<'a> {
 		Hi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
+	}
+
+	fn new_hp_key<'a>(&'a self, id: &'a RecordIdKey) -> HnswPending<'a> {
+		HnswPending::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {

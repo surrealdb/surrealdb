@@ -1,5 +1,5 @@
 use ahash::HashSet;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -450,7 +450,7 @@ where
 			for (k, v) in batch {
 				// Check if the context is finished
 				if ctx.is_done(Some(count)).await? {
-					return Ok(false);
+					bail!(Error::QueryCancelled);
 				}
 				let key = HnswNode::decode_key(&k)?;
 				self.graph.load_node(key.node, &v);

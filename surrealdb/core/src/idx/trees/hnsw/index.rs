@@ -12,14 +12,15 @@ use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
-use crate::idx::trees::hnsw::{ElementId, HnswSearch};
+use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorPendingUpdate};
 use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
-use crate::idx::trees::vector::{SharedVector, Vector};
+use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
 
 pub(crate) struct HnswIndex {
 	dim: usize,
+	ikb: IndexKeyBase,
 	vector_type: VectorType,
 	hnsw: HnswFlavor,
 	docs: HnswDocs,
@@ -85,15 +86,38 @@ impl HnswIndex {
 			vector_type: p.vector_type,
 			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
 			docs: HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
-			vec_docs: VecDocs::new(ikb, p.use_hashed_vector),
+			vec_docs: VecDocs::new(ikb.clone(), p.use_hashed_vector),
+			ikb,
 		})
 	}
 
-	pub async fn index_document(
+	pub(crate) async fn index_document(
 		&mut self,
 		ctx: &Context,
 		id: &RecordIdKey,
 		content: &[Value],
+	) -> Result<()> {
+		let mut vectors = Vec::with_capacity(content.len());
+		// Index the values
+		for value in content.iter().filter(|v| !v.is_nullish()) {
+			// Extract the vector
+			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
+			vector.check_dimension(self.dim)?;
+			let vector: SerializedVector = vector.into();
+			// Insert the vector
+			vectors.push(vector);
+		}
+		let key = self.ikb.new_hp_key(id);
+		let batch = VectorPendingUpdate::Add(vectors);
+		ctx.tx().put(&key, &batch, None).await?;
+		Ok(())
+	}
+
+	async fn index_document_vectors(
+		&mut self,
+		ctx: &Context,
+		id: &RecordIdKey,
+		vectors: Vec<SerializedVector>,
 	) -> Result<()> {
 		let tx = ctx.tx();
 		// Ensure the layers are up-to-date
@@ -101,10 +125,9 @@ impl HnswIndex {
 		// Resolve the doc_id
 		let doc_id = self.docs.resolve(&tx, id).await?;
 		// Index the values
-		for value in content.iter().filter(|v| !v.is_nullish()) {
+		for vector in vectors {
 			// Extract the vector
-			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
-			vector.check_dimension(self.dim)?;
+			let vector: Vector = vector.into();
 			// Insert the vector
 			self.vec_docs.insert(&tx, vector, doc_id, &mut self.hnsw).await?;
 		}
@@ -115,7 +138,7 @@ impl HnswIndex {
 	pub(crate) async fn remove_document(
 		&mut self,
 		ctx: &Context,
-		id: RecordIdKey,
+		id: &RecordIdKey,
 		content: &[Value],
 	) -> Result<()> {
 		let tx = ctx.tx();

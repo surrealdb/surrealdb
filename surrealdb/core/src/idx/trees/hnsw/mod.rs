@@ -26,7 +26,7 @@ use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::kvs::{KVValue, Transaction};
+use crate::kvs::{KVValue, Transaction, impl_kv_value_revisioned};
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -66,6 +66,14 @@ impl KVValue for HnswState {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
+
+#[revisioned(revision = 1)]
+pub(crate) enum VectorPendingUpdate {
+	Add(Vec<SerializedVector>),
+	Remove(Vec<SerializedVector>),
+}
+
+impl_kv_value_revisioned!(VectorPendingUpdate);
 
 struct Hnsw<L0, L>
 where
@@ -733,7 +741,8 @@ mod tests {
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(ctx, RecordIdKey::Number(*doc_id as i64), &content).await?;
+			let id = RecordIdKey::Number(*doc_id as i64);
+			h.remove_document(ctx, &id, &content).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);

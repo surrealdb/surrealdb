@@ -302,7 +302,7 @@ impl<'a> IndexOperation<'a> {
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.ctx, self.rid.key.clone(), &o).await?;
+			hnsw.remove_document(self.ctx, &self.rid.key, &o).await?;
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {

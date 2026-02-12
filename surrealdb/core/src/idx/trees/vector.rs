@@ -80,7 +80,7 @@ impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
 	}
 }
 
-impl From<&Vector> for SerializedVector {
+impl From<Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {
 		match value {
 			Vector::F64(v) => Self::F64(v.to_vec()),

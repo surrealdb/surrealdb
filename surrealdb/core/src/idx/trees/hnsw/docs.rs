@@ -43,12 +43,11 @@ impl HnswDocs {
 	}
 
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id.clone()), None).await? {
+		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id), None).await? {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			let id_key = self.ikb.new_hi_key(id.clone());
-			tx.set(&id_key, &doc_id, None).await?;
+			tx.set(&self.ikb.new_hi_key(id), &doc_id, None).await?;
 			let doc_key = self.ikb.new_hd_key(doc_id);
 			tx.set(&doc_key, id, None).await?;
 			Ok(doc_id)
@@ -86,7 +85,7 @@ impl HnswDocs {
 	pub(super) async fn remove(
 		&mut self,
 		tx: &Transaction,
-		id: RecordIdKey,
+		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
 		let id_key = self.ikb.new_hi_key(id);
 		if let Some(doc_id) = tx.get(&id_key, None).await? {
