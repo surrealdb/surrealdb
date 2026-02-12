@@ -9,6 +9,58 @@ use crate::{Kind, Object, SurrealValue, ToSql, Value};
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
 
+/// Curated error kind for public APIs.
+///
+/// Maps the full set of internal/database errors into a smaller set of
+/// categories. Serializes as a snake_case string on the wire (e.g. `"validation"`).
+/// Use `Unknown` for forward compatibility when deserialising unknown kinds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ErrorKind {
+	/// Invalid input: parse error, invalid request or params.
+	Validation,
+	/// RPC/protocol: method not found or not allowed.
+	Method,
+	/// Feature or config not supported (e.g. live query, GraphQL config).
+	Configuration,
+	/// Authentication or authorisation failure.
+	Auth,
+	/// User-thrown error (e.g. from THROW in SurrealQL).
+	Thrown,
+	/// Query execution failure (not executed, timeout, cancelled).
+	Query,
+	/// Serialisation or deserialisation error.
+	Serialization,
+	/// Resource not found (e.g. table, record, namespace).
+	NotFound,
+	/// Resource already exists (e.g. table, record).
+	AlreadyExists,
+	/// Internal or unexpected error (server or client).
+	Internal,
+	/// Unknown kind from the wire (forward compatibility).
+	#[serde(untagged)]
+	Unknown(String),
+}
+
+impl fmt::Display for ErrorKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			ErrorKind::Validation => f.write_str("validation"),
+			ErrorKind::Method => f.write_str("method"),
+			ErrorKind::Configuration => f.write_str("configuration"),
+			ErrorKind::Auth => f.write_str("auth"),
+			ErrorKind::Thrown => f.write_str("thrown"),
+			ErrorKind::Query => f.write_str("query"),
+			ErrorKind::Serialization => f.write_str("serialization"),
+			ErrorKind::NotFound => f.write_str("not_found"),
+			ErrorKind::AlreadyExists => f.write_str("already_exists"),
+			ErrorKind::Internal => f.write_str("internal"),
+			ErrorKind::Unknown(s) => f.write_str(s),
+		}
+	}
+}
+
 /// Public error type for SurrealDB APIs.
 ///
 /// Designed to be returned from public APIs (including over the wire). It is
@@ -17,8 +69,8 @@ use crate::{Kind, Object, SurrealValue, ToSql, Value};
 /// an API boundary (e.g. server response, SDK method return).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Error {
-	/// Machine-readable error kind (e.g. `"tb_not_found"`, `"query_timed_out"`).
-	pub kind: String,
+	/// Machine-readable error kind.
+	pub kind: ErrorKind,
 	/// Human-readable error message.
 	pub message: String,
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
@@ -31,9 +83,9 @@ pub struct Error {
 
 impl Error {
 	/// Creates a new error with the given `kind` and `message`.
-	pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
+	pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
 		Self {
-			kind: kind.into(),
+			kind,
 			message: message.into(),
 			details: None,
 			cause: None,
@@ -110,7 +162,8 @@ impl SurrealValue for Error {
 
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
-		obj.insert("kind", self.kind);
+		let kind_str = serde_json::to_string(&self.kind).expect("ErrorKind serializes to a string");
+		obj.insert("kind", kind_str.trim_matches('"').to_string());
 		obj.insert("message", self.message);
 		if let Some(details) = self.details {
 			obj.insert("details", details);
@@ -125,7 +178,8 @@ impl SurrealValue for Error {
 		let Value::Object(mut obj) = value else {
 			anyhow::bail!("expected object for Error");
 		};
-		let kind = obj.remove("kind").context("missing 'kind'")?.into_string()?;
+		let kind_str = obj.remove("kind").context("missing 'kind'")?.into_string()?;
+		let kind = serde_json::from_str(&format!("\"{}\"", kind_str)).context("invalid 'kind'")?;
 		let message = obj.remove("message").context("missing 'message'")?.into_string()?;
 		let details = obj.remove("details").map(Object::from_value).transpose()?;
 		let cause = obj.remove("cause").map(Error::from_value).transpose()?.map(Box::new);
