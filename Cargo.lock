@@ -7264,7 +7264,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.18.1"
-source = "git+https://github.com/surrealdb/surrealkv?branch=change-internal-iterator-name#31ba07a89a9c0ec97801340a4269ddcd51627e98"
+source = "git+https://github.com/surrealdb/surrealkv?branch=main#dd2e8a57be6d62f938042ce15a4da0004df230dc"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -7272,6 +7272,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "crossbeam-skiplist",
  "fs2",
  "getrandom 0.3.4",
  "guardian",

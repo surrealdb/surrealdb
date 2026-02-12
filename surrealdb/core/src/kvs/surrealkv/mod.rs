@@ -695,7 +695,7 @@ impl Cursor for RangeCursor<'_> {
 	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
 		if self.inner.valid() {
 			let key = self.inner.key().user_key().to_vec();
-			let value = self.inner.value_owned()?;
+			let value = self.inner.value()?;
 			match self.dir {
 				Direction::Forward => self.inner.next()?,
 				Direction::Backward => self.inner.prev()?,
@@ -789,7 +789,7 @@ impl Cursor for HistoryCursor<'_> {
 						// Store the current user key (owned to allow mutation)
 						let user_key = key_ref.user_key().to_vec();
 						// Store the current value
-						let value = self.inner.value_owned()?;
+						let value = self.inner.value()?;
 						// Skip remaining older versions of this key
 						loop {
 							// Continue to the next version
@@ -820,7 +820,7 @@ impl Cursor for HistoryCursor<'_> {
 						// Check the first version at or before the timestamp
 						if self.inner.key().timestamp() <= self.ts {
 							// Store the current value
-							value = Some(self.inner.value_owned()?);
+							value = Some(self.inner.value()?);
 						}
 						// Continue to the previous version
 						self.inner.prev()?;
