@@ -154,7 +154,10 @@ use crate::val::{Datetime, TableName, Value};
 #[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
 	tables: GraphQLTablesConfig::default(),
 	functions: GraphQLFunctionsConfig::default(),
-}), 7)]
+	depth_limit: None,
+	complexity_limit: None,
+	introspection: GraphQLIntrospectionConfig::default(),
+}), 11)]
 #[case::event(EventDefinition {
 	name: "test".to_string(),
 	target_table: TableName::from("test"),

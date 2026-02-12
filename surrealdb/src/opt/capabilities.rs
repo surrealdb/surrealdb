@@ -12,7 +12,6 @@ use surrealdb_core::dbs::capabilities::{
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	GraphQl,
 	DefineApi,
 	Surrealism,
 }
@@ -22,7 +21,6 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
