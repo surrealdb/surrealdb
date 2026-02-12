@@ -45,7 +45,7 @@ error = "Invalid query: VERSION clause cannot be used with a subquery source. Pl
 value = "[{ count: 4 }]"
 
 [[test.results]]
-error = "Invalid query: cVERSION clause cannot be used with a subquery source. Place the VERSION clause inside the subquery instead."
+error = "Invalid query: VERSION clause cannot be used with a subquery source. Place the VERSION clause inside the subquery instead."
 */
 
 -- Reproduction test for issue #6541: VERSION clause with aggregate functions
