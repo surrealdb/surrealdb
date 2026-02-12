@@ -1,3 +1,4 @@
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate as surrealdb_types;
@@ -34,7 +35,9 @@ pub enum RecordIdKey {
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid::nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {

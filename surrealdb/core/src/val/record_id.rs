@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use nanoid::nanoid;
+use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -196,7 +196,9 @@ impl_kv_value_revisioned!(RecordIdKey);
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap()).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {

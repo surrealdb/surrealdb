@@ -1,9 +1,9 @@
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
-use nanoid::nanoid;
 use rand::Rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
+use rand::seq::SliceRandom;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
@@ -122,7 +122,9 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 	};
 
 	// Generate the random id
-	Ok(nanoid!(len, &ID_CHARS).into())
+	let mut rng = rand::thread_rng();
+	let id: String = (0..len).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+	Ok(Value::from(id))
 }
 
 pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
@@ -298,6 +300,34 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 		None => Uuid::new(),
 	};
 	Ok(uuid.into())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::thread;
+
+	use super::*;
+
+	#[test]
+	fn test_rand_id_concurrency() {
+		let mut handles = vec![];
+		for _ in 0..100 {
+			handles.push(thread::spawn(|| {
+				for _ in 0..1000 {
+					let _ = id((Optional(Some(0)), Optional(Some(10)))).unwrap();
+				}
+			}));
+		}
+		for handle in handles {
+			handle.join().unwrap();
+		}
+	}
+
+	#[test]
+	fn test_rand_id_len_0() {
+		let res = id((Optional(Some(0)), Optional(Some(0)))).unwrap();
+		assert_eq!(res, Value::from(""));
+	}
 }
 
 pub mod uuid {
