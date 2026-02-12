@@ -1,14 +1,14 @@
 use core::fmt;
-use std::{
-	fmt::{Debug, Display},
-	ops::{Deref, DerefMut},
-	result::Result as StdResult,
-};
+use std::fmt::{Debug, Display};
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
+use std::result::Result as StdResult;
 
 mod code;
-pub mod source;
-pub use code::ErrorCode;
 mod raw;
+pub mod source;
+
+pub use code::ErrorCode;
 use raw::{RawError, RawTypedError};
 
 pub trait ErrorTrait: Display + Debug + 'static {
@@ -84,7 +84,6 @@ impl fmt::Display for Error {
 pub struct TypedError<T: ErrorTrait>(RawTypedError<T>);
 
 impl<T: ErrorTrait> TypedError<T> {
-	#[cold]
 	pub fn new(e: T) -> Self {
 		TypedError(RawTypedError::new(e))
 	}
@@ -96,6 +95,18 @@ impl<T: ErrorTrait> TypedError<T> {
 
 	pub fn into_inner(self) -> T {
 		self.0.into_inner()
+	}
+
+	pub fn into_raw(self) -> NonNull<()> {
+		self.0.into_raw()
+	}
+
+	pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
+		unsafe { TypedError(RawTypedError::from_raw(ptr)) }
+	}
+
+	pub unsafe fn ref_from_raw<'a>(ptr: NonNull<()>) -> &'a T {
+		unsafe { RawTypedError::<T>::ref_from_raw(ptr) }
 	}
 }
 
