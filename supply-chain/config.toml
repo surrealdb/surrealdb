@@ -1540,7 +1540,7 @@ version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealkv]]
-version = "0.18.1"
+version = "0.19.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealmx]]
