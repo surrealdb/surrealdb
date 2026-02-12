@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 use std::{io, mem, str, thread};
 
@@ -159,13 +160,21 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				}
 			}
 
-			// Ensure this test imports can run on this version as specified by the imports.
-			for import in test.imports.iter() {
+			let mut set = test.imports.iter().copied().collect::<HashSet<_>>();
+			let mut import_stack = test.imports.clone();
+
+			while let Some(import) = import_stack.pop() {
 				if let Some(version_req) =
-					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
+					subset[import].config.test.as_ref().and_then(|x| x.version.as_ref())
 				{
 					if !version_req.matches(&core_version) {
 						return None;
+					}
+				}
+
+				for import in subset[import].imports.iter().copied() {
+					if set.insert(import) {
+						import_stack.push(import);
 					}
 				}
 			}
@@ -383,30 +392,73 @@ async fn run_test_with_dbs(
 		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(2));
 
-	let mut import_session = Session::owner();
-	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
+	let mut import_stack = Vec::new();
+	let mut import_set = HashSet::new();
 
-	for import in set[id].config.imports() {
-		let Some(test) = set.find_all(import) else {
-			return Ok(TestTaskResult::Import(
-				import.to_string(),
-				"Could not find import.".to_string(),
-			));
-		};
+	for i in set[id].imports.iter() {
+		if import_set.insert(*i) {
+			import_stack.push(*i);
+		}
+	}
 
-		let Ok(source) = str::from_utf8(&set[test].source) else {
+	// run all imports recursively in post order traversal.
+	while let Some(import) = import_stack.last().copied() {
+		let mut added_imports = false;
+		for i in set[import].imports.iter() {
+			if import_set.insert(*i) {
+				import_stack.push(*i);
+				added_imports = true;
+			}
+		}
+
+		if added_imports {
+			continue;
+		}
+
+		let config = &set[import].config;
+
+		let mut import_session = util::session_from_test_config(config);
+		dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
+
+		if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
+			if let Err(e) = surrealdb_core::iam::signup::signup(
+				dbs,
+				&mut import_session,
+				signup_vars.0.clone().into(),
+			)
+			.await
+			{
+				return Ok(TestTaskResult::SignupError(e));
+			}
+		}
+
+		if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
+			if let Err(e) = surrealdb_core::iam::signin::signin(
+				dbs,
+				&mut import_session,
+				signin_vars.0.clone().into(),
+			)
+			.await
+			{
+				return Ok(TestTaskResult::SigninError(e));
+			}
+		}
+
+		let Ok(source) = str::from_utf8(&set[import].source) else {
 			return Ok(TestTaskResult::Import(
-				import.to_string(),
+				set[import].path.clone(),
 				"Import file was not valid utf-8.".to_string(),
 			));
 		};
 
 		if let Err(e) = dbs.execute(source, &import_session, None).await {
 			return Ok(TestTaskResult::Import(
-				import.to_string(),
+				set[import].path.clone(),
 				format!("Failed to run import: `{e}`"),
 			));
 		}
+
+		import_stack.pop();
 	}
 
 	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {

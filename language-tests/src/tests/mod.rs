@@ -62,19 +62,15 @@ pub enum ConfigKind {
 	None,
 }
 
-pub struct ResolvedImport {
-	pub id: TestId,
-	pub path: String,
-}
-
 pub struct TestCase {
+	// Path without
 	pub path: String,
 	pub toml: DocumentMut,
 	pub config: Arc<TestConfig>,
 	pub source: Vec<u8>,
 	pub config_slice: Range<usize>,
 	pub config_kind: ConfigKind,
-	pub imports: Vec<ResolvedImport>,
+	pub imports: Vec<TestId>,
 	pub contains_error: bool,
 }
 

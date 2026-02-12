@@ -89,6 +89,8 @@ impl ToSql for EscapeSqonIdent<'_> {
 		if s.is_empty()
 			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
+			|| s.eq_ignore_ascii_case("NONE")
+			|| s.eq_ignore_ascii_case("NULL")
 		{
 			f.push('`');
 			EscapeWriter::escape(f, '`', self.0);
