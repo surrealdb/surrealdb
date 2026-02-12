@@ -69,9 +69,9 @@ impl CreateInfo {
 		let ds = match self.backend {
 			Backend::Memory => {
 				let ds = if versioned {
-					Datastore::new(&format!("memory?versioned=true")).await?;
+					Datastore::new(&format!("memory?versioned=true")).await?
 				} else {
-					Datastore::new("memory").await?;
+					Datastore::new("memory").await?
 				};
 				ds
 			}
@@ -84,9 +84,9 @@ impl CreateInfo {
 			Backend::SurrealKv => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					Datastore::new(&format!("surrealkv://{p}?versioned=true")).await?;
+					Datastore::new(&format!("surrealkv://{p}?versioned=true")).await?
 				} else {
-					Datastore::new(&format!("surrealkv://{p}")).await?;
+					Datastore::new(&format!("surrealkv://{p}")).await?
 				};
 				path = Some(p);
 				ds
