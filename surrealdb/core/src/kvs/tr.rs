@@ -323,6 +323,7 @@ impl Transactor {
 		&self,
 		rng: Range<K>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -333,7 +334,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.keys(beg..end, limit, version).await
+		self.inner.keys(beg..end, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -345,6 +346,7 @@ impl Transactor {
 		&self,
 		rng: Range<K>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -355,7 +357,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.keysr(beg..end, limit, version).await
+		self.inner.keysr(beg..end, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -367,6 +369,7 @@ impl Transactor {
 		&self,
 		rng: Range<K>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -377,7 +380,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.scan(beg..end, limit, version).await
+		self.inner.scan(beg..end, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -389,6 +392,7 @@ impl Transactor {
 		&self,
 		rng: Range<K>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -399,7 +403,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.scanr(beg..end, limit, version).await
+		self.inner.scanr(beg..end, limit, skip, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -474,6 +478,7 @@ impl Transactor {
 		rng: Range<K>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: Direction,
 	) -> impl Stream<Item = Result<Vec<Key>>> + '_
 	where
@@ -481,11 +486,17 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		let scanner = Scanner::<Key>::new(self, beg..end, limit, dir);
-		match version {
-			Some(v) => scanner.version(v),
-			None => scanner,
+		let mut scanner = Scanner::<Key>::new(self, beg..end, limit, dir);
+		// Set the version
+		if let Some(v) = version {
+			scanner = scanner.version(v);
 		}
+		// Set the skip
+		if skip > 0 {
+			scanner = scanner.skip(skip);
+		}
+		// Return the stream
+		scanner
 	}
 
 	/// Retrieve a stream of key-value batches over a specific range in the datastore.
@@ -500,6 +511,7 @@ impl Transactor {
 		rng: Range<K>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: Direction,
 	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_
 	where
@@ -507,11 +519,17 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		let scanner = Scanner::<(Key, Val)>::new(self, beg..end, limit, dir);
-		match version {
-			Some(v) => scanner.version(v),
-			None => scanner,
+		let mut scanner = Scanner::<(Key, Val)>::new(self, beg..end, limit, dir);
+		// Set the version
+		if let Some(v) = version {
+			scanner = scanner.version(v);
 		}
+		// Set the skip
+		if skip > 0 {
+			scanner = scanner.skip(skip);
+		}
+		// Return the stream
+		scanner
 	}
 
 	// --------------------------------------------------

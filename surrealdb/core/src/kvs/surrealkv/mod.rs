@@ -460,6 +460,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -484,7 +485,7 @@ impl Transactable for Transaction {
 					dir: Direction::Forward,
 					ts,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -496,7 +497,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Forward,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -509,6 +510,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -533,7 +535,7 @@ impl Transactable for Transaction {
 					dir: Direction::Backward,
 					ts,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -545,7 +547,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Backward,
 				};
-				consume_keys(&mut cursor, limit)?
+				consume_keys(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -558,6 +560,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -582,7 +585,7 @@ impl Transactable for Transaction {
 					dir: Direction::Forward,
 					ts,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -594,7 +597,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Forward,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -607,6 +610,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -631,7 +635,7 @@ impl Transactable for Transaction {
 					dir: Direction::Backward,
 					ts,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 			None => {
 				// Create the iterator
@@ -643,7 +647,7 @@ impl Transactable for Transaction {
 					inner: iter,
 					dir: Direction::Backward,
 				};
-				consume_vals(&mut cursor, limit)?
+				consume_vals(&mut cursor, limit, skip)?
 			}
 		};
 		// Return result
@@ -839,7 +843,13 @@ impl Cursor for HistoryCursor<'_> {
 }
 
 // Consume and iterate over only keys
-fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> {
+fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit, skip: u32) -> Result<Vec<Key>> {
+	// Skip entries efficiently by discarding cursor results
+	for _ in 0..skip {
+		if cursor.next_key()?.is_none() {
+			return Ok(Vec::new());
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -896,7 +906,13 @@ fn consume_keys(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<Key>> 
 }
 
 // Consume and iterate over keys and values
-fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit) -> Result<Vec<(Key, Val)>> {
+fn consume_vals(cursor: &mut impl Cursor, limit: ScanLimit, skip: u32) -> Result<Vec<(Key, Val)>> {
+	// Skip entries efficiently by discarding cursor results
+	for _ in 0..skip {
+		if cursor.next_entry()?.is_none() {
+			return Ok(Vec::new());
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
