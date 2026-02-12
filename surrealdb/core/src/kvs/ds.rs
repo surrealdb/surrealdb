@@ -384,30 +384,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
-			// Initiate a File (RocksDB) datastore
-			(flavour @ "file", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					warn!("file:// is deprecated, please use surrealkv:// or rocksdb://");
-					// Parse RocksDB-specific configuration from query parameters
-					let config = super::config::RocksDbConfig::from_params(&params)
-						.map_err(|e| Error::Kvs(e))?;
-					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
 			// Initiate a RocksDB datastore
-			(flavour @ "rocksdb", path) | (flavour @ "file", path) => {
+			(flavour @ "rocksdb", path) => {
 				#[cfg(feature = "kv-rocksdb")]
 				{
 					// Create a new blocking threadpool
@@ -1578,7 +1556,7 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("file://database.db").await?;
+	///     let ds = Datastore::new("rocksdb://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())

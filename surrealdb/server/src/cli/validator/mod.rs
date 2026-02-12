@@ -51,7 +51,7 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 	}
 	// Validate the scheme
 	match split_endpoint(v).0 {
-		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "file" | "tikv" => {
+		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "tikv" => {
 			Ok(v.to_string())
 		}
 		_ => Err(String::from("Provide a valid database connection string")),

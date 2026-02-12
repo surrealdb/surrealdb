@@ -312,9 +312,6 @@ impl Surreal<Any> {
 /// // Instantiate an in-memory instance
 /// let db = connect("mem://").await?;
 ///
-/// // Instantiate a file-backed instance (currently uses RocksDB)
-/// let db = connect("file://path/to/database-folder").await?;
-///
 /// // Instantiate a RocksDB-backed instance
 /// let db = connect("rocksdb://path/to/database-folder").await?;
 ///

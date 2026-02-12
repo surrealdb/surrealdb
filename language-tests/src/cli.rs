@@ -48,7 +48,7 @@ impl ValueEnum for Backend {
 		match self {
 			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			Backend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
 		}
 	}
@@ -79,7 +79,7 @@ impl ValueEnum for UpgradeBackend {
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
 			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 		}
 	}
 }

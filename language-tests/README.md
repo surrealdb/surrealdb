@@ -31,7 +31,7 @@ the tests. By default, tests run using the in-memory storage engine (`mem` or `m
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
-- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
