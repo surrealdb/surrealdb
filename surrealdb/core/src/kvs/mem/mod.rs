@@ -2,11 +2,13 @@
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transaction as Tx};
 use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
+use super::config::{AolMode, MemoryConfig, SnapshotMode, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
@@ -27,15 +29,47 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new() -> Result<Datastore> {
+	pub(crate) async fn new(config: MemoryConfig) -> Result<Datastore> {
 		// Create new configuration options
 		let opts = DatabaseOptions {
-			enable_gc: true,
+			enable_gc: config.retention_ns > 0,
 			enable_cleanup: true,
 			..Default::default()
 		};
-		// Create a new in-memory database
-		let db = Database::new_with_options(opts);
+		// Create the database, optionally with persistence
+		let db = if let Some(ref persist_path) = config.persist_path {
+			// Build persistence options from config
+			let mut persistence_opts = surrealmx::PersistenceOptions::new(persist_path);
+			// Map AOL mode
+			persistence_opts.aol_mode = match config.aol_mode {
+				AolMode::Never => surrealmx::AolMode::Never,
+				AolMode::Sync => surrealmx::AolMode::SynchronousOnCommit,
+				AolMode::Async => surrealmx::AolMode::AsynchronousAfterCommit,
+			};
+			// Map snapshot mode
+			persistence_opts.snapshot_mode = match config.snapshot_mode {
+				SnapshotMode::Never => surrealmx::SnapshotMode::Never,
+				SnapshotMode::Interval(interval) => surrealmx::SnapshotMode::Interval(interval),
+			};
+			// Map sync mode to fsync mode
+			persistence_opts.fsync_mode = match config.sync_mode {
+				SyncMode::Never => surrealmx::FsyncMode::Never,
+				SyncMode::Every => surrealmx::FsyncMode::EveryAppend,
+				SyncMode::Interval(d) => surrealmx::FsyncMode::Interval(d),
+			};
+			// Create a persistent database
+			Database::new_with_persistence(opts, persistence_opts)
+				.map_err(|e| Error::Datastore(e.to_string()))?
+		} else {
+			// Create a non-persistent database
+			Database::new_with_options(opts)
+		};
+		// Configure GC retention if a retention period is specified
+		let db = if config.retention_ns > 0 {
+			db.with_gc_history(Duration::from_nanos(config.retention_ns))
+		} else {
+			db
+		};
 		// Return the new datastore
 		Ok(Datastore {
 			db,
@@ -371,6 +405,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -388,7 +423,7 @@ impl Transactable for Transaction {
 			None => inner.keys_iter(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -399,6 +434,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
@@ -416,7 +452,7 @@ impl Transactable for Transaction {
 			None => inner.keys_iter_reverse(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit);
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -427,6 +463,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -444,7 +481,7 @@ impl Transactable for Transaction {
 			None => inner.scan_iter(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -455,6 +492,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -472,7 +510,7 @@ impl Transactable for Transaction {
 			None => inner.scan_iter_reverse(beg..end)?,
 		};
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit);
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -496,7 +534,13 @@ impl Transactable for Transaction {
 }
 
 // Consume and iterate over only keys
-fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit) -> Vec<Key> {
+fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -550,7 +594,13 @@ fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit) -> Vec<Key> {
 }
 
 // Consume and iterate over keys and values
-fn consume_vals(cursor: &mut ScanIterator<'_>, limit: ScanLimit) -> Vec<(Key, Val)> {
+fn consume_vals(cursor: &mut ScanIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set

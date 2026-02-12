@@ -1,24 +1,24 @@
 [workspace]
 resolver = "3"
 members = [
-	# Root package
-	".",
-	# SurrealDB crates
-	"surrealdb",
-	"surrealdb/core",
-	"surrealdb/server",
-	"surrealdb/types",
-	"surrealdb/types/derive",
+    # Root package
+    ".",
+    # SurrealDB crates
+    "surrealdb",
+    "surrealdb/core",
+    "surrealdb/server",
+    "surrealdb/types",
+    "surrealdb/types/derive",
     # SurrealML crates
-	"surrealml/core",
-	# Surrealism crates
-	"surrealism",
-	"surrealism/demo",
-	"surrealism/macros",
-	"surrealism/runtime",
-	"surrealism/types",
-	# Other
-	"profiling",
+    "surrealml/core",
+    # Surrealism crates
+    "surrealism",
+    "surrealism/demo",
+    "surrealism/macros",
+    "surrealism/runtime",
+    "surrealism/types",
+    # Other
+    "profiling",
 ]
 
 [workspace.package]
@@ -128,7 +128,6 @@ jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
-nanoid = "0.4.0"
 native-tls = "0.2.14"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
@@ -146,7 +145,7 @@ pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.11.0"
 regex = "1.12.2"
 regex-syntax = "0.8.8"
