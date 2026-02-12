@@ -47,7 +47,7 @@ impl Default for MemoryConfig {
 			versioned: false,
 			retention_ns: 0,
 			persist_path: None,
-			sync_mode: SyncMode::Every,
+			sync_mode: SyncMode::Never,
 			aol_mode: AolMode::Never,
 			snapshot_mode: SnapshotMode::Never,
 		}
@@ -463,7 +463,7 @@ mod tests {
 		let config = SurrealKvConfig::from_params(&HashMap::new()).unwrap();
 		assert!(!config.versioned);
 		assert_eq!(config.retention_ns, 0);
-		assert_eq!(config.sync_mode, SyncMode::Never);
+		assert_eq!(config.sync_mode, SyncMode::Every);
 	}
 
 	#[test]
