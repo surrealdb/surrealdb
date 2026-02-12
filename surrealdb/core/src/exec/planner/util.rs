@@ -188,20 +188,20 @@ pub(super) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> cra
 // VERSION Extraction
 // ============================================================================
 
-/// Extract version timestamp from VERSION clause expression.
-pub(super) fn extract_version(version_expr: Expr) -> Result<Option<u64>, Error> {
+/// Extract version expression from VERSION clause.
+///
+/// Returns a physical expression that, when evaluated at execution time,
+/// produces the version timestamp (u64).
+pub(super) fn extract_version(
+	version_expr: Expr,
+	planner: &super::Planner,
+) -> Result<Option<std::sync::Arc<dyn crate::exec::PhysicalExpr>>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
-		Expr::Literal(Literal::Datetime(dt)) => {
-			let stamp = dt.to_version_stamp().map_err(|e| Error::Query {
-				message: format!("Invalid VERSION timestamp: {}", e),
-			})?;
-			Ok(Some(stamp))
+		_ => {
+			let expr = planner.physical_expr(version_expr)?;
+			Ok(Some(expr))
 		}
-		_ => Err(Error::Query {
-			message: "VERSION clause only supports literal datetime values in execution plans"
-				.to_string(),
-		}),
 	}
 }
 

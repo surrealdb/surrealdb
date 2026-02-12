@@ -55,8 +55,9 @@ impl TestConfig {
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
+	/// Versioned tests always need a fresh datastore since they require different configuration.
 	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean).unwrap_or(false)
+		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -115,6 +116,10 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub backend: Vec<String>,
 
+	/// Whether the test requires MVCC versioning to be enabled on the datastore.
+	/// When true, the datastore is created with `?versioned=true` in the connection string.
+	#[serde(default)]
+	pub versioned: bool,
 	/// Strategy for the new streaming planner/executor.
 	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
 	/// - "all-ro": require new planner for all read-only statements (hard fail)

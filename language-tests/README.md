@@ -31,7 +31,7 @@ the tests. By default, tests run using the in-memory storage engine (`mem` or `m
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
-- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
@@ -383,7 +383,6 @@ The value should be an array of strings with valid backend identifiers:
 - `"mem"`: In-memory storage engine
 - `"rocksdb"`: RocksDB embedded storage engine
 - `"surrealkv"`: SurrealKV file-based storage engine
-- `"surrealkv+versioned"`: SurrealKV file-based storage engine with versioned history support
 - `"tikv"`: TiKV distributed storage engine
 
 **Behavior:**
@@ -423,6 +422,32 @@ example, the `ALTER TABLE COMPACT` statement behaves differently on different
 backends: it succeeds on RocksDB but returns an error on the memory backend.
 
 Defaults to `[]` (runs on all backends)
+
+#### `[env.versioned]`
+
+Specifies whether the test requires MVCC versioning to be enabled on the datastore.
+When set to `true`, the datastore is created with versioning support, enabling
+temporal queries using the `VERSION` clause.
+
+Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
+shared datastore pool) since they require different datastore configuration.
+
+**Examples:**
+
+```toml
+# Test that requires versioning on memory and SurrealKV backends
+[env]
+backend = ["mem", "surrealkv"]
+versioned = true
+```
+
+```toml
+# Test with versioning on all backends that support it
+[env]
+versioned = true
+```
+
+Defaults to `false`
 
 #### `[env.timeout]`
 

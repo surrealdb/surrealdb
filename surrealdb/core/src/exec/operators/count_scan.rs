@@ -46,15 +46,18 @@ use crate::val::{Number, Object, RecordIdKey, TableName, Value};
 pub struct CountScan {
 	/// Expression that evaluates to the table name (or a record range).
 	pub(crate) source: Arc<dyn PhysicalExpr>,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<u64>,
+	/// Optional VERSION expression for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl CountScan {
 	/// Create a new CountScan operator.
-	pub(crate) fn new(source: Arc<dyn PhysicalExpr>, version: Option<u64>) -> Self {
+	pub(crate) fn new(
+		source: Arc<dyn PhysicalExpr>,
+		version: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
 		Self {
 			source,
 			version,
@@ -83,7 +86,11 @@ impl ExecOperator for CountScan {
 	}
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		vec![("source", &self.source)]
+		let mut exprs = vec![("source", &self.source)];
+		if let Some(ref version) = self.version {
+			exprs.push(("version", version));
+		}
+		exprs
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -99,7 +106,7 @@ impl ExecOperator for CountScan {
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
 		let source_expr = Arc::clone(&self.source);
-		let version = self.version;
+		let version = self.version.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -107,6 +114,20 @@ impl ExecOperator for CountScan {
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
+
+			// Evaluate VERSION expression to a timestamp
+			let version: Option<u64> = match &version {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
 
 			// Evaluate the source expression to get the table name (or range).
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
