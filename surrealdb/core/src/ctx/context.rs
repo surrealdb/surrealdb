@@ -30,8 +30,9 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Options, Session, Variables};
+use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
+use crate::exec::function::FunctionRegistry;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -92,6 +93,12 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
+	// Function registry for built-in and custom functions
+	function_registry: Arc<FunctionRegistry>,
+	// Strategy for the new streaming planner/executor
+	new_planner_strategy: NewPlannerStrategy,
+	// Matches context for index functions (search::highlight, search::score, etc.)
+	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 }
 
 impl Default for Context {
@@ -144,6 +151,9 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: NewPlannerStrategy::default(),
+			matches_context: None,
 		}
 	}
 
@@ -171,6 +181,9 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
+			matches_context: parent.matches_context.clone(),
 		}
 	}
 
@@ -200,6 +213,9 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
+			matches_context: parent.matches_context.clone(),
 		}
 	}
 
@@ -229,6 +245,9 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
+			function_registry: from.function_registry.clone(),
+			new_planner_strategy: from.new_planner_strategy.clone(),
+			matches_context: from.matches_context.clone(),
 		}
 	}
 
@@ -246,6 +265,7 @@ impl Context {
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
+		let planner_strategy = capabilities.planner_strategy().clone();
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -268,6 +288,9 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: planner_strategy,
+			matches_context: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -652,6 +675,12 @@ impl Context {
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
+		// Only override the planner strategy if the session explicitly sets a
+		// non-default value (e.g. language tests). Otherwise the capability-level
+		// strategy (set via from_ds) is preserved.
+		if session.new_planner_strategy != NewPlannerStrategy::default() {
+			self.new_planner_strategy = session.new_planner_strategy.clone();
+		}
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}
@@ -695,6 +724,28 @@ impl Context {
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
+	}
+
+	/// Get the function registry for this context
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.function_registry
+	}
+
+	/// Set the matches context for index functions (search::highlight, etc.)
+	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
+		self.matches_context = Some(Arc::new(ctx));
+	}
+
+	/// Get the matches context for index functions
+	pub(crate) fn get_matches_context(
+		&self,
+	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
+		self.matches_context.as_ref()
+	}
+
+	/// Get the new planner strategy for this context
+	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
+		&self.new_planner_strategy
 	}
 
 	/// Check if scripting is allowed

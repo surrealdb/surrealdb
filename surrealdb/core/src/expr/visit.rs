@@ -134,10 +134,10 @@ implement_visitor! {
 			TopLevelExpr::Access(s) => {this.visit_access(s)? },
 			TopLevelExpr::Kill(s) => {this.visit_kill(s)?; },
 			TopLevelExpr::Live(s) => {this.visit_live(s)?; },
-			TopLevelExpr::Option(s) =>{ this.visit_option(s)?; },
-			TopLevelExpr::Use(s) => {this.visit_use(s)?; },
-			TopLevelExpr::Show(s) => {this.visit_show(s)?; },
-			TopLevelExpr::Expr(e) => {this.visit_expr(e)?; },
+		TopLevelExpr::Option(s) =>{ this.visit_option(s)?; },
+		TopLevelExpr::Use(s) => {this.visit_use(s)?; },
+		TopLevelExpr::Show(s) => {this.visit_show(s)?; },
+		TopLevelExpr::Expr(e) => {this.visit_expr(e)?; },
 		}
 		Ok(())
 	}
@@ -290,15 +290,18 @@ implement_visitor! {
 			Expr::Foreach(s) => {
 				this.visit_foreach(s)?;
 			},
-			Expr::Let(s) => {
-				this.visit_set(s)?;
-			},
-			Expr::Sleep(s) => {
-				this.visit_sleep(s)?;
-			},
-		}
+		Expr::Let(s) => {
+			this.visit_set(s)?;
+		},
+		Expr::Sleep(s) => {
+			this.visit_sleep(s)?;
+		},
+		Expr::Explain { statement, .. } => {
+			this.visit_expr(statement)?;
+		},
+	}
 
-		Ok(())
+	Ok(())
 	}
 
 	fn visit_literal(this, s: &Literal){
@@ -1536,10 +1539,10 @@ implement_visitor_mut! {
 			TopLevelExpr::Access(s) => {this.visit_mut_access(s)? },
 			TopLevelExpr::Kill(s) => {this.visit_mut_kill(s)?; },
 			TopLevelExpr::Live(s) => {this.visit_mut_live(s)?; },
-			TopLevelExpr::Option(s) =>{ this.visit_mut_option(s)?; },
-			TopLevelExpr::Use(s) => {this.visit_mut_use(s)?; },
-			TopLevelExpr::Show(s) => {this.visit_mut_show(s)?; },
-			TopLevelExpr::Expr(e) => {this.visit_mut_expr(e)?; },
+		TopLevelExpr::Option(s) =>{ this.visit_mut_option(s)?; },
+		TopLevelExpr::Use(s) => {this.visit_mut_use(s)?; },
+		TopLevelExpr::Show(s) => {this.visit_mut_show(s)?; },
+		TopLevelExpr::Expr(e) => {this.visit_mut_expr(e)?; },
 		}
 		Ok(())
 	}
@@ -1692,15 +1695,18 @@ implement_visitor_mut! {
 			Expr::Foreach(s) => {
 				this.visit_mut_foreach(s)?;
 			},
-			Expr::Let(s) => {
-				this.visit_mut_set(s)?;
-			},
-			Expr::Sleep(s) => {
-				this.visit_mut_sleep(s)?;
-			},
-		}
+		Expr::Let(s) => {
+			this.visit_mut_set(s)?;
+		},
+		Expr::Sleep(s) => {
+			this.visit_mut_sleep(s)?;
+		},
+		Expr::Explain { statement, .. } => {
+			this.visit_mut_expr(statement)?;
+		},
+	}
 
-		Ok(())
+	Ok(())
 	}
 
 	fn visit_mut_liter_mutal(this, s: &mut Literal){

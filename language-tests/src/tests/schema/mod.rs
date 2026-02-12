@@ -115,6 +115,12 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub backend: Vec<String>,
 
+	/// Strategy for the new streaming planner/executor.
+	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
+	/// - "all-ro": require new planner for all read-only statements (hard fail)
+	/// - "compute-only": skip new planner entirely
+	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -192,6 +198,21 @@ impl TestEnv {
 
 		res
 	}
+}
+
+/// Strategy for the new streaming planner/executor in language tests.
+///
+/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
+/// kebab-case names for TOML configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewPlannerStrategyConfig {
+	/// Try new planner, fall back on Unimplemented.
+	BestEffortRo,
+	/// Require new planner for all read-only statements (hard fail on Unimplemented).
+	AllRo,
+	/// Skip new planner entirely; always use legacy compute.
+	ComputeOnly,
 }
 
 #[derive(Clone, Debug, Serialize)]

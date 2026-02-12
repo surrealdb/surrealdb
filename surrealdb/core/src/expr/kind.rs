@@ -378,6 +378,12 @@ impl HasKind for File {
 	}
 }
 
+impl HasKind for TableName {
+	fn kind() -> Kind {
+		Kind::Table(Vec::new())
+	}
+}
+
 macro_rules! impl_basic_has_kind{
 	($($name:ident => $kind:ident),*$(,)?) => {
 		$(

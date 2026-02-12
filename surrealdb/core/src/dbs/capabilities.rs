@@ -16,6 +16,7 @@ use surrealism_runtime::capabilities::SurrealismCapabilities;
 use tokio::net::lookup_host;
 use url::Url;
 
+use crate::dbs::session::NewPlannerStrategy;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 
@@ -120,7 +121,6 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
-	GraphQL,
 	DefineApi,
 	Files,
 	Surrealism,
@@ -129,7 +129,6 @@ pub enum ExperimentalTarget {
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::GraphQL => write!(f, "graphql"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
@@ -146,7 +145,6 @@ impl Target for ExperimentalTarget {
 impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
-			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
@@ -175,7 +173,6 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim().to_ascii_lowercase().as_str() {
-			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
@@ -602,13 +599,14 @@ pub struct Capabilities {
 	deny_experimental: Targets<ExperimentalTarget>,
 	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
+	planner_strategy: NewPlannerStrategy,
 }
 
 impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, planner_strategy={}",
 			self.scripting,
 			self.guest_access,
 			self.live_query_notifications,
@@ -624,6 +622,7 @@ impl fmt::Display for Capabilities {
 			self.deny_experimental,
 			self.allow_arbitrary_query,
 			self.deny_arbitrary_query,
+			self.planner_strategy,
 		)
 	}
 }
@@ -647,6 +646,7 @@ impl Default for Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 }
@@ -670,6 +670,7 @@ impl Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -691,6 +692,7 @@ impl Capabilities {
 			deny_experimental: Targets::None,
 			allow_arbitrary_query: Targets::None,
 			deny_arbitrary_query: Targets::None,
+			planner_strategy: NewPlannerStrategy::default(),
 		}
 	}
 
@@ -797,6 +799,15 @@ impl Capabilities {
 	pub fn without_http_routes(mut self, deny_http: Targets<RouteTarget>) -> Self {
 		self.deny_http = deny_http;
 		self
+	}
+
+	pub fn with_planner_strategy(mut self, strategy: NewPlannerStrategy) -> Self {
+		self.planner_strategy = strategy;
+		self
+	}
+
+	pub fn planner_strategy(&self) -> &NewPlannerStrategy {
+		&self.planner_strategy
 	}
 
 	pub fn allows_scripting(&self) -> bool {
@@ -1096,25 +1107,35 @@ mod tests {
 	#[tokio::test]
 	#[cfg(all(not(target_family = "wasm"), feature = "http"))]
 	async fn test_net_target_resolve_async() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
 		let r = NetTarget::from_str("localhost").unwrap().resolve().await.unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 
 	#[test]
 	#[cfg(all(target_family = "wasm", feature = "http"))]
 	fn test_net_target_resolve_sync() {
-		// This test is dependend on system configuration.
-		// Some systems don't configure localhost to have a ipv6 address for example.
-		// You can ignore this test failing on your own machine as long as they work on the github
-		// runners.
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
 		let r = NetTarget::from_str("localhost").unwrap().resolve().unwrap();
-		assert!(r.contains(&NetTarget::from_str("127.0.0.1").unwrap()));
-		assert!(r.contains(&NetTarget::from_str("::1/128").unwrap()));
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 
 	#[test]

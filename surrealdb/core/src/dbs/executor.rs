@@ -30,11 +30,12 @@ use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::types::PublicNotification;
-use crate::val::{Value, convert_value_to_public_value};
+use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
+/// An executor which relies on the `compute` methods of the logical expressions.
 pub struct Executor {
 	stack: TreeStack,
 	results: Vec<QueryResult>,
@@ -93,6 +94,209 @@ impl Executor {
 	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
+		}
+	}
+
+	/// Extract session information from the FrozenContext.
+	///
+	/// The session is stored as a Value object in the context with keys like
+	/// "ns", "db", "id", "ip", "or", "ac", "rd", "tk".
+	fn extract_session_info(&self) -> Option<std::sync::Arc<crate::exec::context::SessionInfo>> {
+		use crate::exec::context::SessionInfo;
+		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+
+		let session_value = self.ctx.value("session")?;
+
+		// Extract fields from the session Value
+		let ns = match session_value.pick(NS.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let db = match session_value.pick(DB.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let id = match session_value.pick(ID.as_ref()) {
+			Value::Uuid(u) => Some(*u.as_ref()),
+			_ => None,
+		};
+
+		let ip = match session_value.pick(IP.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let origin = match session_value.pick(OR.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let ac = match session_value.pick(AC.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let rd = match session_value.pick(RD.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		let token = match session_value.pick(TK.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		// Note: exp is not in the session object, it's in the Session struct
+		// For now, we leave it as None
+		let exp = None;
+
+		Some(std::sync::Arc::new(SessionInfo {
+			ns,
+			db,
+			id,
+			ip,
+			origin,
+			ac,
+			rd,
+			token,
+			exp,
+		}))
+	}
+
+	/// Execute an OperatorPlan and collect results into a Value.
+	///
+	/// This builds an ExecutionContext from the current session state and executes
+	/// the streaming operator plan, collecting all results into an array.
+	async fn execute_operator_plan(
+		&self,
+		plan: Arc<dyn crate::exec::ExecOperator>,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		use tokio_util::sync::CancellationToken;
+
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::exec::context::{
+			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
+		};
+
+		/// Guard that aborts a spawned task when dropped, ensuring the
+		/// timeout task is cleaned up when execution finishes or errors.
+		struct AbortOnDrop(tokio::task::JoinHandle<()>);
+		impl Drop for AbortOnDrop {
+			fn drop(&mut self) {
+				self.0.abort();
+			}
+		}
+
+		let cancellation = CancellationToken::new();
+
+		// If a query timeout is configured, spawn a task that cancels the
+		// token when the timeout expires. This lets operators that check
+		// the cancellation token (e.g. SleepPlan, long-running scans)
+		// stop promptly instead of running to completion.
+		// AbortOnDrop ensures the task is cleaned up when execution finishes.
+		let _timeout_guard = self.ctx.timeout().map(|timeout| {
+			let token = cancellation.clone();
+			AbortOnDrop(tokio::spawn(async move {
+				tokio::time::sleep(timeout).await;
+				token.cancel();
+			}))
+		});
+
+		// Build the root context.
+		// The FrozenContext is the single source of truth for params, txn,
+		// capabilities, and other context fields. We only extract auth and
+		// session info which are not trivially accessible from FrozenContext.
+		let root_ctx = RootContext {
+			ctx: self.ctx.clone(),
+			options: Some(self.opt.clone()),
+			datastore: None,
+			cancellation,
+			auth: self.opt.auth.clone(),
+			auth_enabled: self.opt.auth_enabled,
+			session: self.extract_session_info(),
+		};
+
+		// Check what level of context we need
+		let required_level = plan.required_context();
+
+		let exec_ctx = match required_level {
+			crate::exec::context::ContextLevel::Root => ExecutionContext::Root(root_ctx),
+			crate::exec::context::ContextLevel::Namespace => {
+				// Get namespace definition
+				let ns_name = self.opt.ns()?;
+				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				ExecutionContext::Namespace(NamespaceContext {
+					root: root_ctx,
+					ns: ns_def,
+				})
+			}
+			crate::exec::context::ContextLevel::Database => {
+				// Get namespace and database definitions
+				let ns_name = self.opt.ns()?;
+				let db_name = self.opt.db()?;
+				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				let db_def = txn.get_or_add_db_upwards(None, ns_name, db_name, true).await?;
+				ExecutionContext::Database(DatabaseContext {
+					ns_ctx: NamespaceContext {
+						root: root_ctx,
+						ns: ns_def,
+					},
+					db: db_def,
+				})
+			}
+		};
+
+		// Execute the plan
+		// Handle control flow signals from execute()
+		let stream = match plan.execute(&exec_ctx) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(v)) => {
+				// RETURN - propagate as control flow signal
+				return Err(ControlFlow::Return(v));
+			}
+			Err(crate::expr::ControlFlow::Break) => {
+				return Err(ControlFlow::Break);
+			}
+			Err(crate::expr::ControlFlow::Continue) => {
+				return Err(ControlFlow::Continue);
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(ControlFlow::Err(e));
+			}
+		};
+
+		// Collect all results
+		let mut results = Vec::new();
+		futures::pin_mut!(stream);
+		while let Some(batch_result) = stream.next().await {
+			match batch_result {
+				Ok(batch) => {
+					results.extend(batch.values);
+				}
+				Err(crate::expr::ControlFlow::Err(e)) => {
+					return Err(ControlFlow::Err(e));
+				}
+				Err(crate::expr::ControlFlow::Return(v)) => {
+					// RETURN - propagate as control flow signal
+					return Err(ControlFlow::Return(v));
+				}
+				Err(crate::expr::ControlFlow::Break) => {
+					return Err(ControlFlow::Break);
+				}
+				Err(crate::expr::ControlFlow::Continue) => {
+					return Err(ControlFlow::Continue);
+				}
+			}
+		}
+
+		// Return results as an array if it's a query, or the scalar value if it's a scalar plan
+		if plan.is_scalar() && results.len() == 1 {
+			Ok(results.pop().expect("results verified non-empty"))
+		} else {
+			Ok(Value::Array(Array::from(results)))
 		}
 	}
 
@@ -294,16 +498,33 @@ impl Executor {
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
-				// The transaction began successfully
-				ctx_mut!().set_transaction(txn);
-				// Process the statement
-				let res = self
-					.stack
-					.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
-					.finish()
-					.await;
-				self.check_slow_log(start, &e);
-				res
+				// Try the new streaming execution path first
+				match crate::exec::planner::try_plan_expr(&e, &self.ctx) {
+					Ok(plan) => {
+						// Set the transaction on the context
+						ctx_mut!().set_transaction(txn.clone());
+
+						// Build execution context and execute the plan
+						let exec_result = self.execute_operator_plan(plan, txn.clone()).await;
+
+						self.check_slow_log(start, &e);
+
+						// exec_result is now FlowResult<Value>, propagate directly
+						exec_result
+					}
+					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+						// Fallback to existing compute path
+						ctx_mut!().set_transaction(txn);
+						let res = self
+							.stack
+							.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+							.finish()
+							.await;
+						self.check_slow_log(start, &e);
+						res
+					}
+					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+				}
 			}
 		};
 
@@ -708,9 +929,9 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		qry: LogicalPlan,
+		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
+		let stream = futures::stream::iter(plan.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
 	}
 
@@ -719,15 +940,15 @@ impl Executor {
 	pub(crate) async fn execute_plan_with_transaction(
 		ctx: FrozenContext,
 		opt: Options,
-		qry: LogicalPlan,
+		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
 		// The transaction is already set in the context
 		// Execute each expression with the transaction
 		let tx = ctx.tx();
-		let mut executor = Executor::new(ctx, opt);
+		let mut executor = Self::new(ctx, opt);
 		let mut results = Vec::new();
 
-		for expr in qry.expressions {
+		for expr in plan.expressions {
 			let start = Instant::now();
 			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
 

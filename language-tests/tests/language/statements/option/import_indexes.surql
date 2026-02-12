@@ -1,4 +1,9 @@
 /**
+[env]
+namespace = "test"
+database = "test"
+new-planner-strategy = "best-effort-ro"
+
 [test]
 reason = "Test that OPTION IMPORT populates indexes correctly"
 
@@ -16,10 +21,6 @@ value = "[{ id: test:1, num: 123 }]"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'field_num', operator: '=', value: 123 }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
-
-[env]
-namespace = "test"
-database = "test"
 
 */
 

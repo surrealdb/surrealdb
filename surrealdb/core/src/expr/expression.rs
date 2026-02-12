@@ -26,6 +26,13 @@ use crate::fnc;
 use crate::types::PublicValue;
 use crate::val::{Array, Range, TableName, Value};
 
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
+pub(crate) enum ExplainFormat {
+	#[default]
+	Text,
+	Json,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
 	Literal(Literal),
@@ -76,6 +83,11 @@ pub(crate) enum Expr {
 	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
 	Sleep(Box<SleepStatement>),
+	Explain {
+		format: ExplainFormat,
+		analyze: bool,
+		statement: Box<Expr>,
+	},
 }
 
 impl Expr {
@@ -114,6 +126,10 @@ impl Expr {
 			Expr::Select(s) => s.read_only(),
 			Expr::Let(s) => s.read_only(),
 			Expr::Foreach(s) => s.read_only(),
+			Expr::Explain {
+				statement,
+				..
+			} => statement.read_only(),
 			Expr::Closure(_) => true,
 			Expr::Create(_)
 			| Expr::Update(_)
@@ -303,7 +319,10 @@ impl Expr {
 			| Expr::Info(_)
 			| Expr::Foreach(_)
 			| Expr::Let(_)
-			| Expr::Sleep(_) => false,
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => false,
 		}
 	}
 
@@ -369,7 +388,7 @@ impl Expr {
 				Ok(Value::Array(Array(record_ids)))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,
-			Expr::Constant(constant) => constant.compute().map_err(ControlFlow::Err),
+			Expr::Constant(constant) => Ok(constant.compute()),
 			Expr::Prefix {
 				op,
 				expr,
@@ -440,6 +459,11 @@ impl Expr {
 			Expr::Sleep(sleep_statement) => {
 				sleep_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
+			Expr::Explain {
+				..
+			} => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				"EXPLAIN is only supported with the new execution model".to_string(),
+			)))),
 		}
 	}
 
@@ -743,7 +767,10 @@ impl Expr {
 			| Expr::Info(_)
 			| Expr::Foreach(_)
 			| Expr::Let(_)
-			| Expr::Sleep(_) => true,
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => true,
 
 			Expr::Literal(_)
 			| Expr::Param(_)
