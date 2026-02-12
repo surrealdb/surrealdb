@@ -101,7 +101,7 @@ impl Model {
 
 		// Check the minimum argument length
 		if args.len() != 1 {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
+			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
 			})));
@@ -117,7 +117,7 @@ impl Model {
 					.into_iter()
 					.map(|(k, v)| Ok((k, v.coerce_to::<f64>()? as f32)))
 					.collect::<std::result::Result<HashMap<String, f32>, CoerceError>>()
-					.map_err(|_| Error::InvalidArguments {
+					.map_err(|_| Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -147,7 +147,7 @@ impl Model {
 				// Compute the model function arguments
 				let args: f32 = Value::Number(v)
 					.coerce_to::<f64>()
-					.map_err(|_| Error::InvalidArguments {
+					.map_err(|_| Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -181,7 +181,7 @@ impl Model {
 					.into_iter()
 					.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
 					.collect::<std::result::Result<Vec<f32>, _>>()
-					.map_err(|_| Error::InvalidArguments {
+					.map_err(|_| Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -209,7 +209,7 @@ impl Model {
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			//
-			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
+			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
 			}))),

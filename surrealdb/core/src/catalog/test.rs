@@ -186,7 +186,8 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	reference: None,
 	auth_limit: AuthLimit::default(),
-}, 43)]
+	computed_deps: None,
+}, 44)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],

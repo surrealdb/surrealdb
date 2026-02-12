@@ -71,7 +71,7 @@ pub mod hash {
 		let len = match len {
 			Some(len) if (1..=12).contains(&len) => len as usize,
 			None => 12usize,
-			_ => bail!(Error::InvalidArguments {
+			_ => bail!(Error::InvalidFunctionArguments {
 				name: String::from("geo::encode"),
 				message: String::from(
 					"The second argument must be an integer greater than 0 and less than or equal to 12."

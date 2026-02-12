@@ -77,6 +77,7 @@ impl Parser<'_> {
 			t!("RETURN")
 				| t!("SELECT")
 				| t!("CREATE")
+				| t!("EXPLAIN")
 				| t!("UPSERT")
 				| t!("UPDATE")
 				| t!("DELETE")

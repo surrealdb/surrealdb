@@ -8,10 +8,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Expected `regex` but found `'a'`"
+error = "Incorrect arguments for function fn::takes_regex(). Failed to coerce argument `$r`: Expected `regex` but found `'a'`"
 
 [[test.results]]
-error = "Expected `regex` but found `1`"
+error = "Incorrect arguments for function fn::takes_regex(). Failed to coerce argument `$r`: Expected `regex` but found `1`"
 
 */
 DEFINE FUNCTION fn::takes_regex($r: regex){};

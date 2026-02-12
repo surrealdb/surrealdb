@@ -634,7 +634,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let name = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -833,7 +833,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineEventStatement {
 			kind,
@@ -920,7 +920,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -1029,7 +1029,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineIndexStatement {
 			name,

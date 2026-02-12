@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::time::Duration;
 use std::{io, mem, str, thread};
 
@@ -194,7 +195,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let mut progress = Progress::from_stderr(tasks.len(), color);
+	let num_tasks = tasks.len();
+	let mut progress = Progress::from_stderr(num_tasks, color);
 
 	// spawn all tests.
 	for id in tasks {
@@ -265,6 +267,48 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	for e in load_errors.iter() {
 		e.display(color);
 	}
+
+	// Print summary line.
+	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
+	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
+	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
+	let skipped = subset.len() - num_tasks;
+	let use_color = match color {
+		ColorMode::Always => true,
+		ColorMode::Never => false,
+		ColorMode::Auto => std::io::stdout().is_terminal(),
+	};
+	if use_color {
+		let green = "\x1b[32m";
+		let red = "\x1b[31m";
+		let yellow = "\x1b[33m";
+		let dim = "\x1b[2m";
+		let reset = "\x1b[0m";
+		print!(" {green}{passed} passed{reset}");
+		if failed > 0 {
+			print!(", {red}{failed} failed{reset}");
+		}
+		if warned > 0 {
+			print!(", {yellow}{warned} warnings{reset}");
+		}
+		if skipped > 0 {
+			print!(", {dim}{skipped} skipped{reset}");
+		}
+		println!();
+	} else {
+		print!(" {passed} passed");
+		if failed > 0 {
+			print!(", {failed} failed");
+		}
+		if warned > 0 {
+			print!(", {warned} warnings");
+		}
+		if skipped > 0 {
+			print!(", {skipped} skipped");
+		}
+		println!();
+	}
+	println!();
 
 	// possibly update test configs with acquired results.
 	match failure_mode {
