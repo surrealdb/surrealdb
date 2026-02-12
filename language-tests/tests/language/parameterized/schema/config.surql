@@ -1,8 +1,8 @@
 /**
-[test]
-
 [env]
 ns = "test"
+
+[test]
 
 [[test.results]]
 value = "NONE"

@@ -14,7 +14,7 @@ use crate::val::{Regex, Value};
 fn limit(name: &str, n: usize) -> Result<()> {
 	ensure!(
 		n <= *GENERATION_ALLOCATION_LIMIT,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
 		}
@@ -29,7 +29,7 @@ fn check_similarity_input_length(name: &str, a: &str, b: &str) -> Result<()> {
 	let max = *STRING_SIMILARITY_LIMIT;
 	ensure!(
 		a.len() <= max && b.len() <= max,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!(
 				"Input strings must not exceed {} bytes (got {} and {}).",
@@ -83,7 +83,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 
 pub fn join(Any(args): Any) -> Result<Value> {
 	let mut args = args.into_iter().map(Value::into_raw_string);
-	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
+	let chr = args.next().ok_or_else(|| Error::InvalidFunctionArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
 	})?;
@@ -155,7 +155,7 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 			limit("string::replace", new_val.len())?;
 			Ok(new_val.into())
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
@@ -176,10 +176,11 @@ pub fn slice(
 	};
 
 	let range = if let Some(end) = end {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::slice"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::slice"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 
 		TypedRange {
 			start: Bound::Included(start),
@@ -188,15 +189,16 @@ pub fn slice(
 	} else if range_start.is_range() {
 		// Condition checked above, cannot fail
 		let range = range_start.into_range().expect("is_range() check passed");
-		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidFunctionArguments {
 			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::slice"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::slice"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 		TypedRange {
 			start: Bound::Included(start),
 			end: Bound::Unbounded,
@@ -324,13 +326,13 @@ pub mod distance {
 	///
 	/// Uses [`strsim::hamming`].
 	///
-	/// Will result in an [`Error::InvalidArguments`] if the given strings are
+	/// Will result in an [`Error::InvalidFunctionArguments`] if the given strings are
 	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length("string::distance::hamming", &a, &b)?;
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
-			Err(_) => Err(anyhow::Error::new(Error::InvalidArguments {
+			Err(_) => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 				name: "string::distance::hamming".into(),
 				message: "Strings must be of equal length.".into(),
 			})),
@@ -510,7 +512,7 @@ pub mod is {
 				Some(Value::String(tb)) => t.table.as_str() == tb.as_str(),
 				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "string::is_record()".into(),
 						message:
 							"Expected an optional string or table type for the second argument"
@@ -608,7 +610,7 @@ pub mod semver {
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version> {
 		Version::parse(ver)
-			.map_err(|_| Error::InvalidArguments {
+			.map_err(|_| Error::InvalidFunctionArguments {
 				name: String::from(func),
 				message: String::from(msg),
 			})

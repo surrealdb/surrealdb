@@ -1,3 +1,16 @@
+//! HTTP service layer for GraphQL.
+//!
+//! Implements an Axum [`Service`] that handles incoming GraphQL HTTP requests.
+//! The service:
+//!
+//! 1. Checks that the GraphQL HTTP route is allowed by the datastore's capabilities.
+//! 2. Validates that the session specifies a namespace and database.
+//! 3. Retrieves (or generates) the GraphQL schema via [`GraphQLSchemaCache`].
+//! 4. Injects the [`Datastore`](surrealdb_core::kvs::Datastore) and [`Session`] into the
+//!    `async_graphql` request context so resolvers can access them.
+//! 5. Executes the request -- either as a batch request or as a streaming `multipart/mixed`
+//!    response, depending on the `Accept` header.
+
 use std::convert::Infallible;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -23,14 +36,18 @@ use tower_service::Service;
 
 use crate::ntw::error::Error as NetError;
 
-/// A GraphQL service.
+/// Axum service that handles GraphQL HTTP requests.
+///
+/// Each instance holds a [`GraphQLSchemaCache`] that is shared across all
+/// requests handled by this service.  The cache is cheap to clone (backed
+/// by `Arc<RwLock<...>>`).
 #[derive(Clone)]
 pub struct GraphQLService {
 	cache: GraphQLSchemaCache,
 }
 
 impl GraphQLService {
-	/// Create a GraphQL HTTP handler.
+	/// Create a new GraphQL HTTP service with an empty schema cache.
 	pub fn new() -> Self {
 		GraphQLService {
 			cache: GraphQLSchemaCache::default(),
@@ -142,6 +159,7 @@ where
 	}
 }
 
+/// Wrap an error as a GraphQL rejection (HTTP 400-level response).
 fn to_rejection(err: impl std::error::Error + Send + Sync + 'static) -> GraphQLRejection {
 	GraphQLRejection(ParseRequestError::InvalidRequest(Box::new(err)))
 }

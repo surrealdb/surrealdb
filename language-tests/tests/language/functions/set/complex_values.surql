@@ -48,7 +48,7 @@ value = "{[1, 2], [3, 4]}"
 -- Sets with objects
 RETURN {{ foo: 1 }, { foo: 2 }, { foo: 1 }};
 
--- Sets with record IDs
+-- Sets with record IDs (they're interpreted as objects as there's no way to tell them apart from objects)
 RETURN {person:john, person:jane, person:john};
 
 -- Sets with sets
