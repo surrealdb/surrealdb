@@ -29,6 +29,18 @@ pub trait Accumulator: crate::exec::SendSyncRequirement + Debug {
 	/// argument expression result.
 	fn update(&mut self, value: Value) -> Result<()>;
 
+	/// Update the accumulator with a batch of values.
+	///
+	/// The default implementation calls `update()` for each value.
+	/// Accumulators can override this for better performance (e.g.,
+	/// `CountAccumulator` can just add `values.len()` without iterating).
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			self.update(value.clone())?;
+		}
+		Ok(())
+	}
+
 	/// Merge another accumulator into this one.
 	///
 	/// Used for parallel execution where partial aggregates from

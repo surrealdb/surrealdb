@@ -491,6 +491,52 @@ pub(super) fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPat
 /// Check if a SELECT statement is eligible for the CountScan optimisation.
 ///
 /// Returns `true` when the query matches:
+///   `SELECT count() FROM <single-table> WHERE <cond> GROUP ALL`
+/// with a WHERE clause and no SPLIT, ORDER BY, FETCH, or OMIT clauses.
+///
+/// When this returns `true`, the `IndexCountScan` operator can be used.
+/// At execution time it will look up the table's indexes and, if a COUNT
+/// index with a matching condition exists, sum delta counts instead of
+/// scanning all records.
+#[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // Ready for use when plan-time index detection is added.
+pub(super) fn is_indexed_count_eligible(
+	fields: &Fields,
+	group: &Option<crate::expr::group::Groups>,
+	cond: &Option<crate::expr::cond::Cond>,
+	split: &Option<crate::expr::split::Splits>,
+	order: &Option<crate::expr::order::Ordering>,
+	fetch: &Option<crate::expr::fetch::Fetchs>,
+	omit: &[Expr],
+	what: &[Expr],
+) -> bool {
+	// Must be count()-only fields.
+	if !fields.is_count_all_only() {
+		return false;
+	}
+	// Must have GROUP ALL.
+	let Some(groups) = group else {
+		return false;
+	};
+	if !groups.is_group_all_only() {
+		return false;
+	}
+	// Must have a WHERE clause (the no-WHERE case is handled by `is_count_all_eligible`).
+	if cond.is_none() {
+		return false;
+	}
+	// No SPLIT, ORDER BY, FETCH, or OMIT.
+	if split.is_some() || order.is_some() || fetch.is_some() || !omit.is_empty() {
+		return false;
+	}
+	// Source must be a single table (no record-id ranges for indexed counts).
+	if what.len() != 1 {
+		return false;
+	}
+	matches!(&what[0], Expr::Table(_) | Expr::Param(_))
+}
+
+/// Returns `true` when the query matches:
 ///   `SELECT count() FROM <single-table-or-range> GROUP ALL`
 /// with no WHERE, SPLIT, ORDER BY, FETCH, or OMIT clauses.
 ///

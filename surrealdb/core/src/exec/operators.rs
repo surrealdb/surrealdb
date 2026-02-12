@@ -10,6 +10,7 @@ mod foreach;
 mod fulltext_scan;
 mod graph_edge_scan;
 mod ifelse;
+mod index_count_scan;
 mod index_scan;
 mod info;
 mod let_plan;
@@ -56,7 +57,9 @@ pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use sort::ExternalSort;
-pub use sort::{OrderByField, RandomShuffle, Sort, SortByKey, SortDirection, SortKey, SortTopK};
+pub use sort::{
+	OrderByField, RandomShuffle, Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey,
+};
 pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;

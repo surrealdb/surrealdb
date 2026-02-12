@@ -351,6 +351,7 @@ impl ToSql for UserDefinedFunctionExec {
 /// JavaScript function expression - embedded script functions.
 #[derive(Debug, Clone)]
 pub struct JsFunctionExec {
+	#[cfg_attr(not(feature = "scripting"), allow(unused_variables))]
 	pub(crate) script: Script,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
 }

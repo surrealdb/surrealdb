@@ -21,4 +21,4 @@ pub use common::{OrderByField, SortDirection, SortKey};
 pub use external::ExternalSort;
 pub use full_sort::{Sort, SortByKey};
 pub use shuffle::RandomShuffle;
-pub use topk::SortTopK;
+pub use topk::{SortTopK, SortTopKByKey};

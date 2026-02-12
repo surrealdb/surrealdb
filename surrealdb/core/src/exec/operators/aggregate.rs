@@ -371,14 +371,10 @@ impl ExecOperator for Aggregate {
 				}
 
 				// Phase 3: Dispatch rows to groups and update accumulators
-				for (row_idx, value) in batch.values.iter().enumerate() {
-					// Build group key from pre-computed columns
-					let key: GroupKey = group_key_columns
-						.iter()
-						.map(|col| col[row_idx].clone())
-						.collect();
-
-					let state = groups.entry(key).or_insert_with(|| {
+				if group_by_exprs.is_empty() {
+					// GROUP ALL fast path: single group, pass entire columns
+					// to update_batch to avoid per-row virtual dispatch.
+					let state = groups.entry(vec![]).or_insert_with(|| {
 						create_group_state(&aggregates, &evaluated_extra_args)
 					});
 
@@ -388,31 +384,77 @@ impl ExecOperator for Aggregate {
 						}
 
 						if agg.aggregate_expr_info.is_some() {
-							// Use pre-computed aggregate argument values
 							for (agg_idx, arg_col) in
 								agg_arg_columns[field_idx].iter().enumerate()
 							{
-								let arg_value = arg_col[row_idx].clone();
 								if let Some(acc) =
 									state.accumulators[field_idx].get_mut(agg_idx)
-									&& let Err(e) = acc.update(arg_value)
+									&& let Err(e) = acc.update_batch(arg_col)
 								{
-									tracing::debug!(error = %e, "Accumulator update failed, skipping value");
+									tracing::debug!(error = %e, "Accumulator batch update failed, skipping batch");
 								}
 							}
-					} else if let Some(expr) = &agg.fallback_expr {
-						// Non-aggregate field - store first value (per-row, lazy)
-						if state.first_values[field_idx].is_none() {
-							match expr.evaluate(eval_ctx.with_value(value)).await {
-								Ok(field_value) => {
-									state.first_values[field_idx] = field_value;
-								}
-								Err(cf) if cf.is_ignorable() => {
-									tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
-								}
-								Err(cf) => Err(cf)?,
+						} else if let Some(expr) = &agg.fallback_expr {
+							// Non-aggregate field - store first value
+							if state.first_values[field_idx].is_none()
+								&& let Some(first_value) = batch.values.first() {
+									match expr.evaluate(eval_ctx.with_value(first_value)).await {
+										Ok(field_value) => {
+											state.first_values[field_idx] = field_value;
+										}
+										Err(cf) if cf.is_ignorable() => {
+											tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+										}
+										Err(cf) => Err(cf)?,
+									}
 							}
 						}
+					}
+				} else {
+					// GROUP BY: per-row dispatch to separate groups
+					for (row_idx, value) in batch.values.iter().enumerate() {
+						// Build group key from pre-computed columns
+						let key: GroupKey = group_key_columns
+							.iter()
+							.map(|col| col[row_idx].clone())
+							.collect();
+
+						let state = groups.entry(key).or_insert_with(|| {
+							create_group_state(&aggregates, &evaluated_extra_args)
+						});
+
+						for (field_idx, agg) in aggregates.iter().enumerate() {
+							if agg.is_group_key {
+								continue;
+							}
+
+							if agg.aggregate_expr_info.is_some() {
+								// Use pre-computed aggregate argument values
+								for (agg_idx, arg_col) in
+									agg_arg_columns[field_idx].iter().enumerate()
+								{
+									let arg_value = arg_col[row_idx].clone();
+									if let Some(acc) =
+										state.accumulators[field_idx].get_mut(agg_idx)
+										&& let Err(e) = acc.update(arg_value)
+									{
+										tracing::debug!(error = %e, "Accumulator update failed, skipping value");
+									}
+								}
+							} else if let Some(expr) = &agg.fallback_expr {
+								// Non-aggregate field - store first value (per-row, lazy)
+								if state.first_values[field_idx].is_none() {
+									match expr.evaluate(eval_ctx.with_value(value)).await {
+										Ok(field_value) => {
+											state.first_values[field_idx] = field_value;
+										}
+										Err(cf) if cf.is_ignorable() => {
+											tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+										}
+										Err(cf) => Err(cf)?,
+									}
+								}
+							}
 						}
 					}
 				}

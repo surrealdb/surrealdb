@@ -43,6 +43,11 @@ impl Accumulator for CountAccumulator {
 		Ok(())
 	}
 
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		self.count += values.len() as i64;
+		Ok(())
+	}
+
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
 		let other = other
 			.as_any()
@@ -102,6 +107,11 @@ impl Accumulator for CountFieldAccumulator {
 		if value.is_truthy() {
 			self.count += 1;
 		}
+		Ok(())
+	}
+
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		self.count += values.iter().filter(|v| v.is_truthy()).count() as i64;
 		Ok(())
 	}
 
@@ -263,6 +273,80 @@ mod tests {
 
 		acc1.merge(acc2).unwrap();
 		let result = acc1.finalize().unwrap();
+		assert_eq!(as_int(&result), 2);
+	}
+
+	// -------------------------------------------------------------------------
+	// Count update_batch tests
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn count_batch_empty() {
+		let func = Count;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_int(&result), 0);
+	}
+
+	#[test]
+	fn count_batch_multiple() {
+		let func = Count;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(1)), Value::None, Value::String("test".into())];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_int(&result), 3);
+	}
+
+	#[test]
+	fn count_batch_then_single() {
+		let func = Count;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Number(Number::Int(3))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_int(&result), 3);
+	}
+
+	// -------------------------------------------------------------------------
+	// CountField update_batch tests
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn count_field_batch_empty() {
+		let func = CountField;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_int(&result), 0);
+	}
+
+	#[test]
+	fn count_field_batch_mixed() {
+		let func = CountField;
+		let mut acc = func.create_accumulator();
+		let values = vec![
+			Value::Number(Number::Int(1)), // truthy
+			Value::None,                   // falsy
+			Value::String("hello".into()), // truthy
+			Value::Bool(false),            // falsy
+			Value::Bool(true),             // truthy
+		];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_int(&result), 3);
+	}
+
+	#[test]
+	fn count_field_batch_then_single() {
+		let func = CountField;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(1)), Value::None];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Bool(true)).unwrap();
+		let result = acc.finalize().unwrap();
 		assert_eq!(as_int(&result), 2);
 	}
 }

@@ -20,7 +20,7 @@ use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
 	Aggregate, Compute, Fetch, FieldSelection, Filter, Limit, Project, ProjectValue, Projection,
 	RandomShuffle, Scan, SelectProject, Sort, SortByKey, SortDirection, SortKey, SortTopK,
-	SourceExpr, Split, Timeout, Union, UnwrapExactlyOne,
+	SortTopKByKey, SourceExpr, Split, Timeout, Union, UnwrapExactlyOne,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -114,6 +114,16 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 		// ── end COUNT fast-path ─────────────────────────────────────
+
+		// NOTE: IndexCountScan is available for `SELECT count() FROM <table>
+		// WHERE <cond> GROUP ALL` when a matching COUNT index exists.
+		// However, automatic detection is deferred until the planner can
+		// verify COUNT index existence at plan time (requires transaction
+		// access or catalog snapshot). The fallback path (full scan +
+		// filter) is slower than the regular pipeline that can use index
+		// scans, so auto-detection would regress non-COUNT-index cases.
+		// See `is_indexed_count_eligible` in util.rs and `IndexCountScan`
+		// in operators/index_count_scan.rs for the ready-to-use components.
 
 		let is_value_source = all_value_sources(&what);
 
@@ -780,6 +790,17 @@ impl<'ctx> Planner<'ctx> {
 				} else {
 					input
 				};
+
+				// Use heap-based TopK when the effective limit is small.
+				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
+					&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
+				{
+					return Ok((
+						Arc::new(SortTopKByKey::new(computed, sort_keys, effective_limit))
+							as Arc<dyn ExecOperator>,
+						sort_only_fields,
+					));
+				}
 
 				Ok((
 					Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,

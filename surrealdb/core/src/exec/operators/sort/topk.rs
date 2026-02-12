@@ -1,8 +1,13 @@
 //! SortTopK operator - heap-based top-k selection for ORDER BY + LIMIT.
 //!
-//! This operator is optimized for queries with ORDER BY and a small LIMIT.
-//! Instead of sorting all values, it maintains a heap of the top-k values,
-//! which is more efficient when k << n.
+//! This module provides two TopK implementations:
+//!
+//! - [`SortTopK`]: Expression-evaluation variant that pre-computes sort keys. Used by the
+//!   non-consolidated sort path (`plan_sort`).
+//! - [`SortTopKByKey`]: Field-path extraction variant that compares values inline. Used by the
+//!   consolidated sort path (`plan_sort_consolidated`). This is the preferred variant because it
+//!   avoids pre-computing sort keys for every row and instead extracts fields only during
+//!   comparison -- matching the old executor's `MemoryOrderedLimit` strategy.
 
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -11,7 +16,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::common::{OrderByField, SortDirection, compare_keys};
+use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_records_by_keys};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -154,15 +159,23 @@ impl ExecOperator for SortTopK {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
-					// Pre-compute sort keys
-					let row_ctx = eval_ctx.clone().with_value(&value);
-					let mut keys = Vec::with_capacity(order_by.len());
+				// Batch evaluate sort key expressions per-field
+				let num_fields = order_by.len();
+				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
+				for field in order_by.iter() {
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					key_columns.push(keys);
+				}
 
-					for field in order_by.iter() {
-						let key = field.expr.evaluate(row_ctx.clone()).await?;
-						keys.push(key);
-					}
+				// Transpose column-oriented keys to per-row, then insert into heap
+				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
+					key_columns.into_iter().map(|col| col.into_iter()).collect();
+
+				for value in batch.values {
+					let keys: Vec<Value> = key_iters
+						.iter_mut()
+						.map(|iter| iter.next().expect("key column length matches batch size"))
+						.collect();
 
 					let keyed = KeyedValue {
 						keys,
@@ -211,5 +224,188 @@ impl ExecOperator for SortTopK {
 		});
 
 		Ok(monitor_stream(Box::pin(filtered), "SortTopK", &self.metrics))
+	}
+}
+
+// ============================================================================
+// SortTopKByKey - Field-path extraction variant (consolidated approach)
+// ============================================================================
+
+/// A heap entry that stores the value and a shared reference to the sort keys.
+///
+/// Uses `Arc<Vec<SortKey>>` per entry so that `BinaryHeap` can use the `Ord`
+/// trait for comparison. The Arc clone is ~1ns and this mirrors the proven
+/// pattern from the old executor's `MemoryOrderedLimit` (`Arc<OrderList>`).
+struct TopKByKeyEntry {
+	/// The original record value.
+	value: Value,
+	/// Shared reference to the sort key specification.
+	sort_keys: Arc<Vec<SortKey>>,
+}
+
+impl PartialEq for TopKByKeyEntry {
+	fn eq(&self, other: &Self) -> bool {
+		compare_records_by_keys(&self.value, &other.value, &self.sort_keys) == Ordering::Equal
+	}
+}
+
+impl Eq for TopKByKeyEntry {}
+
+impl PartialOrd for TopKByKeyEntry {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for TopKByKeyEntry {
+	fn cmp(&self, other: &Self) -> Ordering {
+		// Reversed: we want a min-heap of the "worst" values so that pop()
+		// removes the worst, keeping the best k values in the heap.
+		compare_records_by_keys(&other.value, &self.value, &self.sort_keys)
+	}
+}
+
+/// Heap-based top-k selection using field-path extraction for comparison.
+///
+/// This is the consolidated-sort counterpart of [`SortTopK`]. Instead of
+/// pre-computing sort keys for every row through expression evaluation, it
+/// extracts field values inline during comparison via [`FieldPath::extract`].
+///
+/// This is significantly faster for ORDER BY + small LIMIT because:
+/// - No per-row `Vec<Value>` allocation for sort keys
+/// - No expression evaluation for rows that will be immediately rejected
+/// - Field extraction is a cheap O(1) path lookup on the `Value` object
+///
+/// Use when `limit <= MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE` (default 1000).
+#[derive(Debug, Clone)]
+pub struct SortTopKByKey {
+	pub(crate) input: Arc<dyn ExecOperator>,
+	pub(crate) sort_keys: Vec<SortKey>,
+	/// The effective limit (start + limit from query)
+	pub(crate) limit: usize,
+	pub(crate) metrics: Arc<OperatorMetrics>,
+}
+
+impl SortTopKByKey {
+	/// Create a new SortTopKByKey operator.
+	pub(crate) fn new(input: Arc<dyn ExecOperator>, sort_keys: Vec<SortKey>, limit: usize) -> Self {
+		Self {
+			input,
+			sort_keys,
+			limit,
+			metrics: Arc::new(OperatorMetrics::new()),
+		}
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+impl ExecOperator for SortTopKByKey {
+	fn name(&self) -> &'static str {
+		"SortTopKByKey"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		let order_str = self
+			.sort_keys
+			.iter()
+			.map(|k| {
+				let dir = match k.direction {
+					SortDirection::Asc => "ASC",
+					SortDirection::Desc => "DESC",
+				};
+				format!("{} {}", k.path, dir)
+			})
+			.collect::<Vec<_>>()
+			.join(", ");
+		vec![("sort_keys".to_string(), order_str), ("limit".to_string(), self.limit.to_string())]
+	}
+
+	fn required_context(&self) -> ContextLevel {
+		// SortTopKByKey does not evaluate expressions; it only extracts fields.
+		// Inherit the child's requirement.
+		self.input.required_context()
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		// Pure comparison — inherits input's access mode.
+		self.input.access_mode()
+	}
+
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		vec![&self.input]
+	}
+
+	fn metrics(&self) -> Option<&OperatorMetrics> {
+		Some(&self.metrics)
+	}
+
+	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		let input_stream = self.input.execute(ctx)?;
+		let sort_keys = Arc::new(self.sort_keys.clone());
+		let limit = self.limit;
+		let cancellation = ctx.cancellation().clone();
+
+		let sorted_stream = futures::stream::once(async move {
+			let mut heap: BinaryHeap<Reverse<TopKByKeyEntry>> =
+				BinaryHeap::with_capacity(limit + 1);
+
+			futures::pin_mut!(input_stream);
+			while let Some(batch_result) = input_stream.next().await {
+				if cancellation.is_cancelled() {
+					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						crate::err::Error::QueryCancelled
+					)));
+				}
+				let batch = match batch_result {
+					Ok(b) => b,
+					Err(e) => return Err(e),
+				};
+
+				for value in batch.values {
+					if heap.len() >= limit {
+						// Heap is full — compare inline before allocating anything.
+						if let Some(worst) = heap.peek() {
+							let cmp = compare_records_by_keys(&value, &worst.0.value, &sort_keys);
+							if cmp == Ordering::Less {
+								heap.push(Reverse(TopKByKeyEntry {
+									value,
+									sort_keys: sort_keys.clone(),
+								}));
+								heap.pop();
+							}
+							// Otherwise skip — the value is worse than everything
+							// already in the heap.
+						}
+					} else {
+						// Heap not full yet — always push.
+						heap.push(Reverse(TopKByKeyEntry {
+							value,
+							sort_keys: sort_keys.clone(),
+						}));
+					}
+				}
+			}
+
+			// Extract sorted values from heap (pop gives worst-first, so reverse).
+			let mut sorted: Vec<Value> = Vec::with_capacity(heap.len());
+			while let Some(Reverse(entry)) = heap.pop() {
+				sorted.push(entry.value);
+			}
+			sorted.reverse();
+
+			Ok(ValueBatch {
+				values: sorted,
+			})
+		});
+
+		let filtered = sorted_stream.filter_map(|result| async move {
+			match result {
+				Ok(batch) if batch.values.is_empty() => None,
+				other => Some(other),
+			}
+		});
+
+		Ok(monitor_stream(Box::pin(filtered), "SortTopKByKey", &self.metrics))
 	}
 }

@@ -140,15 +140,23 @@ impl ExecOperator for ExternalSort {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
-					// Pre-compute sort keys
-					let row_ctx = eval_ctx.clone().with_value(&value);
-					let mut keys = Vec::with_capacity(order_by.len());
+				// Batch evaluate sort key expressions per-field
+				let num_fields = order_by.len();
+				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
+				for field in order_by.iter() {
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					key_columns.push(keys);
+				}
 
-					for field in order_by.iter() {
-						let key = field.expr.evaluate(row_ctx.clone()).await?;
-						keys.push(key);
-					}
+				// Transpose column-oriented keys to per-row, then write to temp files
+				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
+					key_columns.into_iter().map(|col| col.into_iter()).collect();
+
+				for value in batch.values {
+					let keys: Vec<Value> = key_iters
+						.iter_mut()
+						.map(|iter| iter.next().expect("key column length matches batch size"))
+						.collect();
 
 					// Write keyed value to temp file
 					let keyed = KeyedValue {

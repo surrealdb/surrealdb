@@ -45,6 +45,15 @@ impl Accumulator for SumAccumulator {
 		Ok(())
 	}
 
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			if let Value::Number(n) = value {
+				self.sum = self.sum + *n;
+			}
+		}
+		Ok(())
+	}
+
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
 		let other = other
 			.as_any()
@@ -106,6 +115,16 @@ impl Accumulator for MeanAccumulator {
 			self.count += 1;
 		}
 		// Skip non-numbers
+		Ok(())
+	}
+
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			if let Value::Number(n) = value {
+				self.sum = self.sum + *n;
+				self.count += 1;
+			}
+		}
 		Ok(())
 	}
 
@@ -183,6 +202,24 @@ impl Accumulator for MinAccumulator {
 					}
 				}
 			});
+		}
+		Ok(())
+	}
+
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			if let Value::Number(n) = value {
+				self.min = Some(match &self.min {
+					None => *n,
+					Some(current) => {
+						if *n < *current {
+							*n
+						} else {
+							*current
+						}
+					}
+				});
+			}
 		}
 		Ok(())
 	}
@@ -267,6 +304,24 @@ impl Accumulator for MaxAccumulator {
 					}
 				}
 			});
+		}
+		Ok(())
+	}
+
+	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
+		for value in values {
+			if let Value::Number(n) = value {
+				self.max = Some(match &self.max {
+					None => *n,
+					Some(current) => {
+						if *n > *current {
+							*n
+						} else {
+							*current
+						}
+					}
+				});
+			}
 		}
 		Ok(())
 	}
@@ -964,5 +1019,169 @@ mod tests {
 		let result = acc1.finalize().unwrap();
 		// [1, 5, 3] -> sorted [1, 3, 5] -> median = 3
 		assert_eq!(as_float(&result), 3.0);
+	}
+
+	// -------------------------------------------------------------------------
+	// update_batch tests - Sum
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn sum_batch_empty() {
+		let func = MathSum;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 0.0);
+	}
+
+	#[test]
+	fn sum_batch_multiple() {
+		let func = MathSum;
+		let mut acc = func.create_accumulator();
+		let values = vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3)),
+		];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 6.0);
+	}
+
+	#[test]
+	fn sum_batch_skips_non_numbers() {
+		let func = MathSum;
+		let mut acc = func.create_accumulator();
+		let values = vec![
+			Value::Number(Number::Int(5)),
+			Value::None,
+			Value::String("test".into()),
+			Value::Number(Number::Int(3)),
+		];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 8.0);
+	}
+
+	#[test]
+	fn sum_batch_then_single() {
+		let func = MathSum;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Number(Number::Int(7))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 10.0);
+	}
+
+	// -------------------------------------------------------------------------
+	// update_batch tests - Mean
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn mean_batch_empty() {
+		let func = MathMean;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert!(as_float(&result).is_nan());
+	}
+
+	#[test]
+	fn mean_batch_multiple() {
+		let func = MathMean;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(2)), Value::Number(Number::Int(4))];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 3.0);
+	}
+
+	#[test]
+	fn mean_batch_then_single() {
+		let func = MathMean;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(2))];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Number(Number::Int(4))).unwrap();
+		acc.update(Value::Number(Number::Int(6))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 4.0);
+	}
+
+	// -------------------------------------------------------------------------
+	// update_batch tests - Min
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn min_batch_empty() {
+		let func = MathMin;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), f64::INFINITY);
+	}
+
+	#[test]
+	fn min_batch_multiple() {
+		let func = MathMin;
+		let mut acc = func.create_accumulator();
+		let values = vec![
+			Value::Number(Number::Int(3)),
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+		];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 1.0);
+	}
+
+	#[test]
+	fn min_batch_then_single() {
+		let func = MathMin;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(5)), Value::Number(Number::Int(3))];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Number(Number::Int(1))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 1.0);
+	}
+
+	// -------------------------------------------------------------------------
+	// update_batch tests - Max
+	// -------------------------------------------------------------------------
+
+	#[test]
+	fn max_batch_empty() {
+		let func = MathMax;
+		let mut acc = func.create_accumulator();
+		acc.update_batch(&[]).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), f64::NEG_INFINITY);
+	}
+
+	#[test]
+	fn max_batch_multiple() {
+		let func = MathMax;
+		let mut acc = func.create_accumulator();
+		let values = vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(3)),
+			Value::Number(Number::Int(2)),
+		];
+		acc.update_batch(&values).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 3.0);
+	}
+
+	#[test]
+	fn max_batch_then_single() {
+		let func = MathMax;
+		let mut acc = func.create_accumulator();
+		let values = vec![Value::Number(Number::Int(5)), Value::Number(Number::Int(3))];
+		acc.update_batch(&values).unwrap();
+		acc.update(Value::Number(Number::Int(10))).unwrap();
+		let result = acc.finalize().unwrap();
+		assert_eq!(as_float(&result), 10.0);
 	}
 }
