@@ -10,8 +10,10 @@ use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
-use crate::kvs::{DefaultTimestamp, Key, Val};
+use crate::kvs::timestamp::IncTimeStamp;
+use crate::kvs::{
+	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl, Key, Val,
+};
 
 /// Specifies the limit for scan operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,12 +468,20 @@ pub trait Transactable: requirements::TransactionRequirements {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<TimeStamp> {
-		Ok(TimeStamp::Default(DefaultTimestamp::next()))
+	async fn timestamp(&self) -> Result<BoxTimeStamp> {
+		if cfg!(test) {
+			Ok(BoxTimeStamp::new(IncTimeStamp::next()))
+		} else {
+			Ok(BoxTimeStamp::new(HlcTimeStamp::next()))
+		}
 	}
 
-	fn timestamp_impl(&self) -> TimeStampImpl {
-		TimeStampImpl::Default
+	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+		if cfg!(test) {
+			Box::new(IncTimeStampImpl)
+		} else {
+			Box::new(HlcTimeStampImpl)
+		}
 	}
 
 	async fn compact(&self, _range: Option<Range<Key>>) -> anyhow::Result<()> {

@@ -11,14 +11,16 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use savepoint::{Operation, Savepoint};
-use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
+use tikv::{CheckLevel, Config, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
 use super::err::{Error, Result};
+use super::timestamp::MAX_TIMESTAMP_BYTES;
 use crate::cnf::COUNT_BATCH_SIZE;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
+use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use crate::kvs::{Key, TimeStamp, TimeStampImpl, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
@@ -703,49 +705,104 @@ impl Transactable for Transaction {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<TimeStamp> {
+	async fn timestamp(&self) -> Result<BoxTimeStamp> {
 		let ts = self.inner.write().await.tx.current_timestamp().await?;
-		Ok(TimeStamp::TiKV(TiKVStamp(ts)))
+		Ok(BoxTimeStamp::new(TiKVStamp(ts)))
 	}
 
-	fn timestamp_impl(&self) -> TimeStampImpl {
-		TimeStampImpl::TiKV
+	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+		Box::new(TiKVStampImpl)
+	}
+}
+
+pub struct TiKVStampImpl;
+
+impl TimeStampImpl for TiKVStampImpl {
+	fn earliest(&self) -> BoxTimeStamp {
+		BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
+			physical: 0,
+			logical: 0,
+			suffix_bits: 0,
+		}))
+	}
+
+	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
+		let physical = ((version >> 64) as i64) ^ i64::MIN;
+		let logical = (version as i64) ^ i64::MIN;
+		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
+			physical,
+			logical,
+			suffix_bits: 0,
+		})))
+	}
+
+	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
+		let physical = dt.timestamp_micros();
+		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
+			physical,
+			logical: 0,
+			suffix_bits: 0,
+		})))
+	}
+
+	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
+		if bytes.len() != 20 {
+			return Err(Error::TimestampInvalid(
+				"Encoded timestamp is not the right length".to_string(),
+			));
+		}
+		let Ok(b) = <[u8; 8]>::try_from(&bytes[0..8]) else {
+			unreachable!()
+		};
+		let physical = i64::from_be_bytes(b) ^ i64::MIN;
+		let Ok(b) = <[u8; 8]>::try_from(&bytes[8..16]) else {
+			unreachable!()
+		};
+		let logical = i64::from_be_bytes(b) ^ i64::MIN;
+		let Ok(b) = <[u8; 4]>::try_from(&bytes[16..20]) else {
+			unreachable!()
+		};
+		let suffix_bits = u32::from_be_bytes(b);
+		Ok(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
+			physical,
+			logical,
+			suffix_bits,
+		})))
 	}
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TiKVStamp(tikv::Timestamp);
 
-impl TiKVStamp {
-	/// Convert the timestamp to a version
-	pub(crate) fn as_versionstamp(&self) -> u128 {
-		self.0.version() as u128
+impl TimeStamp for TiKVStamp {
+	fn as_versionstamp(&self) -> u128 {
+		(self.0.physical as u128) << 64 | self.0.logical as u128
 	}
-	/// Create a timestamp from a version
-	pub(crate) fn from_versionstamp(version: u128) -> Result<Self> {
-		Ok(Self(tikv::Timestamp::from_version(version as u64)))
+
+	fn as_datetime(&self) -> Option<DateTime<Utc>> {
+		// Will truncate, but is only a problem far in the future
+		DateTime::from_timestamp_micros(self.0.physical)
 	}
-	/// Convert the timestamp to a datetime
-	pub(crate) fn as_datetime(&self) -> DateTime<Utc> {
-		DateTime::from_timestamp_nanos(self.0.physical)
+
+	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
+		let micros = duration.as_micros().try_into().ok()?;
+		let physical = self.0.physical.checked_sub(micros)?;
+		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
+			physical,
+			logical: self.0.logical,
+			suffix_bits: self.0.suffix_bits,
+		})))
 	}
-	/// Create a timestamp from a datetime
-	pub(crate) fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
-		Ok(Self(tikv::Timestamp {
-			physical: datetime.timestamp_millis(),
-			..Default::default()
-		}))
-	}
-	/// Convert the timestamp to a byte array
-	pub(crate) fn as_ts_bytes(&self) -> Vec<u8> {
-		self.0.version().to_be_bytes().to_vec()
-	}
-	/// Create a timestamp from a byte array
-	pub(crate) fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
-		match bytes.try_into() {
-			Ok(v) => Ok(Self(tikv::Timestamp::from_version(u64::from_be_bytes(v)))),
-			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
-		}
+
+	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
+		let b = (self.0.physical ^ i64::MIN).to_be_bytes();
+		bytes[0..8].copy_from_slice(&b);
+		let b = (self.0.logical ^ i64::MIN).to_be_bytes();
+		bytes[8..16].copy_from_slice(&b);
+		let b = self.0.suffix_bits.to_be_bytes();
+		bytes[16..20].copy_from_slice(&b);
+
+		&bytes[..20]
 	}
 }
 

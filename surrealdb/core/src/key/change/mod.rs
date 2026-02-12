@@ -145,15 +145,16 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{KVKey, TimeStampImpl};
+	use crate::kvs::{HlcTimeStampImpl, KVKey, TimeStampImpl};
 
 	#[test]
 	fn cf_key() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 
-		let ts1 = ts_impl.from_versionstamp(12345).unwrap().as_ts_bytes();
+		let buf = &mut [0u8; _];
+		let ts1 = ts_impl.create_from_versionstamp(12345).unwrap().encode(buf);
 		let tb = TableName::from("test");
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, &tb);
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), ts1, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
 		assert_eq!(
@@ -164,8 +165,9 @@ mod tests {
 			]
 		);
 
-		let ts2 = ts_impl.from_versionstamp(12346).unwrap().as_ts_bytes();
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, &tb);
+		let buf = &mut [0; _];
+		let ts2 = ts_impl.create_from_versionstamp(12346).unwrap().encode(buf);
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), ts2, &tb);
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
@@ -189,9 +191,10 @@ mod tests {
 
 	#[test]
 	fn ts_prefix_key() {
-		let ts_impl = TimeStampImpl::Default;
-		let ts = ts_impl.from_versionstamp(12345).unwrap().as_ts_bytes();
-		let val = DatabaseChangeFeedTsRange::new(NamespaceId(1), DatabaseId(2), &ts);
+		let ts_impl = HlcTimeStampImpl;
+		let buf = &mut [0u8; _];
+		let ts = ts_impl.create_from_versionstamp(12345).unwrap().encode(buf);
+		let val = DatabaseChangeFeedTsRange::new(NamespaceId(1), DatabaseId(2), ts);
 		let enc = DatabaseChangeFeedTsRange::encode_key(&val).unwrap();
 		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
 		assert_eq!(

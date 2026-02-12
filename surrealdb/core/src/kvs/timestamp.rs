@@ -1,107 +1,115 @@
+use std::{any::Any, hint::unreachable_unchecked, time::Duration};
+
 use chrono::{DateTime, Utc};
 
 use super::{Error, Result};
-#[cfg(feature = "kv-tikv")]
-use crate::kvs::tikv::TiKVStamp;
+
+pub const MAX_TIMESTAMP_BYTES: usize = 32;
 
 /// The kind of implementation of a version stamp.
 /// Should not be created manually but retrieved from the KV store.
-#[derive(Debug)]
-pub enum TimeStampImpl {
-	Default,
-	#[cfg(feature = "kv-tikv")]
-	TiKV,
+pub trait TimeStampImpl: Any + Send + Sync {
+	fn earliest(&self) -> BoxTimeStamp;
+	/// Create a timestamp from a versionstamp, can return `None` if the versionstamp is out of range from
+	/// the timestamp
+	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp>;
+
+	/// Create a timestamp from a duration, can return `None` if the datetime is out of range from
+	/// the timestamp
+	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp>;
+
+	/// Decode key-encoded bytes into a timestamp
+	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp>;
+}
+pub type BoxTimeStampImpl = Box<dyn TimeStampImpl>;
+
+pub trait TimeStamp: Any + Send + Sync {
+	/// Returns the version stamp for the timestamp.
+	fn as_versionstamp(&self) -> u128;
+
+	/// Returns the datetime that the timestamp belongs to.
+	fn as_datetime(&self) -> Option<DateTime<Utc>>;
+
+	/// Subtract a duration from the timestamp returning a duration that much in the past from this
+	/// timestamp. Can return none if the new time is outside of the range of the timestamp.
+	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp>;
+
+	/// Encode the timestamp into key-encoded bytes.
+	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8];
 }
 
-impl TimeStampImpl {
-	pub fn from_versionstamp(&self, version: u128) -> Result<TimeStamp> {
-		match self {
-			TimeStampImpl::Default => {
-				DefaultTimestamp::from_versionstamp(version).map(TimeStamp::Default)
-			}
-			#[cfg(feature = "kv-tikv")]
-			TimeStampImpl::TiKV => TiKVStamp::from_versionstamp(version).map(TimeStamp::TiKV),
-		}
+pub struct BoxTimeStamp(Box<dyn TimeStamp>);
+
+impl BoxTimeStamp {
+	pub fn new<T: TimeStamp>(t: T) -> Self {
+		BoxTimeStamp(Box::new(t))
 	}
 
-	pub fn from_ts_bytes(&self, bytes: &[u8]) -> Result<TimeStamp> {
-		match self {
-			TimeStampImpl::Default => {
-				DefaultTimestamp::from_ts_bytes(bytes).map(TimeStamp::Default)
-			}
-			#[cfg(feature = "kv-tikv")]
-			TimeStampImpl::TiKV => TiKVStamp::from_ts_bytes(bytes).map(TimeStamp::TiKV),
-		}
-	}
-
-	pub fn from_datetime(&self, dt: DateTime<Utc>) -> Result<TimeStamp> {
-		match self {
-			TimeStampImpl::Default => DefaultTimestamp::from_datetime(dt).map(TimeStamp::Default),
-			#[cfg(feature = "kv-tikv")]
-			TimeStampImpl::TiKV => TiKVStamp::from_datetime(dt).map(TimeStamp::TiKV),
-		}
-	}
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TimeStamp {
-	Default(DefaultTimestamp),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(TiKVStamp),
-}
-
-impl TimeStamp {
-	pub fn kind(&self) -> TimeStampImpl {
-		match self {
-			TimeStamp::Default(_) => TimeStampImpl::Default,
-			#[cfg(feature = "kv-tikv")]
-			TimeStamp::TiKV(_) => TimeStampImpl::TiKV,
+	pub fn downcast<T: TimeStamp>(self) -> std::result::Result<Box<T>, Self> {
+		if (&self.0 as &dyn Any).is::<T>() {
+			let Ok(x) = (self.0 as Box<dyn Any>).downcast::<T>() else {
+				unsafe { unreachable_unchecked() }
+			};
+			Ok(x)
+		} else {
+			Err(self)
 		}
 	}
 
 	pub fn as_versionstamp(&self) -> u128 {
-		match self {
-			TimeStamp::Default(x) => x.as_versionstamp(),
-			#[cfg(feature = "kv-tikv")]
-			TimeStamp::TiKV(x) => x.as_versionstamp(),
-		}
+		self.0.as_versionstamp()
 	}
 
-	pub fn as_datetime(&self) -> DateTime<Utc> {
-		match self {
-			TimeStamp::Default(x) => x.as_datetime(),
-			#[cfg(feature = "kv-tikv")]
-			TimeStamp::TiKV(x) => x.as_datetime(),
-		}
+	pub fn as_datetime(&self) -> Option<DateTime<Utc>> {
+		self.0.as_datetime()
 	}
 
-	pub fn as_ts_bytes(&self) -> Vec<u8> {
-		match self {
-			TimeStamp::Default(x) => x.as_ts_bytes(),
-			#[cfg(feature = "kv-tikv")]
-			TimeStamp::TiKV(x) => x.as_ts_bytes(),
-		}
+	pub fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
+		self.0.sub_checked(duration)
+	}
+
+	pub fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
+		self.0.encode(bytes)
 	}
 }
-
-#[cfg(test)]
-/// The default timestamp, implementation is different depending on if testing is enabled.
-pub type DefaultTimestamp = IncTimestamp;
-#[cfg(not(test))]
-/// The default timestamp, implementation is different depending on if testing is enabled.
-pub type DefaultTimestamp = HlcTimestamp;
 
 /// Simple monotonically incrementing atomic timestamp.
 ///
 /// This uses a global atomic counter that increments for each call to `next()`.
 /// The counter is treated as milliseconds since epoch for datetime conversions.
 /// This provides monotonicity without using system time or bit-splitting.
-#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct IncTimestamp(u64);
+pub struct IncTimeStamp(u64);
 
-#[cfg(test)]
-impl IncTimestamp {
+pub struct IncTimeStampImpl;
+
+impl TimeStampImpl for IncTimeStampImpl {
+	fn earliest(&self) -> BoxTimeStamp {
+		BoxTimeStamp::new(IncTimeStamp(0))
+	}
+
+	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
+		Some(BoxTimeStamp::new(IncTimeStamp(version.try_into().ok()?)))
+	}
+
+	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
+		let milis = dt.timestamp_millis();
+		if milis < 0 {
+			return None;
+		}
+
+		Some(BoxTimeStamp::new(IncTimeStamp(milis as u64)))
+	}
+
+	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
+		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
+			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
+		})?;
+		Ok(BoxTimeStamp::new(HlcTimeStamp(u64::from_be_bytes(bytes))))
+	}
+}
+
+impl IncTimeStamp {
 	/// Generate the next monotonic timestamp.
 	/// Uses a global atomic counter to ensure monotonicity across all calls.
 	///
@@ -109,47 +117,28 @@ impl IncTimestamp {
 	/// returned timestamp. Each call increments the counter by 1.
 	pub fn next() -> Self {
 		static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-		IncTimestamp(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+		IncTimeStamp(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
 	}
 }
 
-#[cfg(test)]
-impl IncTimestamp {
-	/// Convert the timestamp to a version
+impl TimeStamp for IncTimeStamp {
 	fn as_versionstamp(&self) -> u128 {
 		self.0 as u128
 	}
 
-	/// Create a timestamp from a version
-	fn from_versionstamp(version: u128) -> Result<Self> {
-		Ok(IncTimestamp(u64::try_from(version)?))
-	}
-
-	/// Convert the timestamp to a datetime
-	/// Treats the entire counter value as milliseconds since epoch
-	fn as_datetime(&self) -> DateTime<Utc> {
+	fn as_datetime(&self) -> Option<DateTime<Utc>> {
 		DateTime::from_timestamp_millis(self.0 as i64)
-			.expect("timestamp milliseconds should be valid")
 	}
 
-	/// Create a timestamp from a datetime
-	/// Uses the datetime's milliseconds as the counter value
-	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
-		let millis = datetime.timestamp_millis() as u64;
-		Ok(IncTimestamp(millis))
+	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
+		let duration_milis = duration.as_millis().try_into().ok()?;
+		Some(BoxTimeStamp::new(IncTimeStamp(self.0.checked_sub(duration_milis)?)))
 	}
 
-	/// Convert the timestamp to a byte array
-	fn as_ts_bytes(&self) -> Vec<u8> {
-		self.0.to_be_bytes().to_vec()
-	}
-
-	/// Create a timestamp from a byte array
-	fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
-		match bytes.try_into() {
-			Ok(v) => Ok(IncTimestamp(u64::from_be_bytes(v))),
-			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
-		}
+	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
+		let ts_bytes = self.0.to_be_bytes();
+		bytes[..8].copy_from_slice(&ts_bytes);
+		&bytes[..8]
 	}
 }
 
@@ -159,9 +148,37 @@ impl IncTimestamp {
 /// This provides up to 65,535 unique timestamps per millisecond while maintaining monotonicity
 /// even when the system clock goes backwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct HlcTimestamp(pub(crate) u64);
+pub struct HlcTimeStamp(pub(crate) u64);
 
-impl HlcTimestamp {
+pub struct HlcTimeStampImpl;
+
+impl TimeStampImpl for HlcTimeStampImpl {
+	fn earliest(&self) -> BoxTimeStamp {
+		BoxTimeStamp::new(IncTimeStamp(0))
+	}
+
+	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
+		Some(BoxTimeStamp::new(HlcTimeStamp(version.try_into().ok()?)))
+	}
+
+	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
+		let milis = dt.timestamp_millis();
+		if milis < 0 {
+			return None;
+		}
+
+		Some(BoxTimeStamp::new(HlcTimeStamp(milis as u64)))
+	}
+
+	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
+		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
+			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
+		})?;
+		Ok(BoxTimeStamp::new(HlcTimeStamp(u64::from_be_bytes(bytes))))
+	}
+}
+
+impl HlcTimeStamp {
 	/// Generate the next monotonic HLC timestamp.
 	/// Uses a global atomic to ensure monotonicity across all calls.
 	///
@@ -208,50 +225,40 @@ impl HlcTimestamp {
 			// Create the next timestamp
 			let next = (next_millis << 16) | next_counter;
 			// Compare and exchange the last timestamp with the next timestamp
-			if LAST_TIMESTAMP.compare_exchange_weak(last, next, ordering, ordering).is_ok() {
+			if LAST_TIMESTAMP.compare_exchange_weak(last, next, ordering, Ordering::Relaxed).is_ok()
+			{
 				// The timestamp was successfully set, return the new timestamp
-				return HlcTimestamp(next);
+				return HlcTimeStamp(next);
 			}
 		}
 	}
 }
 
-impl HlcTimestamp {
-	/// Convert the timestamp to a version
+impl TimeStamp for HlcTimeStamp {
 	fn as_versionstamp(&self) -> u128 {
 		self.0 as u128
 	}
 
-	/// Create a timestamp from a version
-	fn from_versionstamp(version: u128) -> Result<Self> {
-		Ok(HlcTimestamp(u64::try_from(version)?))
-	}
-
-	/// Convert the timestamp to a datetime
-	/// Extracts the milliseconds component and converts to DateTime
-	fn as_datetime(&self) -> DateTime<Utc> {
+	fn as_datetime(&self) -> Option<DateTime<Utc>> {
 		DateTime::from_timestamp_millis((self.0 >> 16) as i64)
-			.expect("timestamp milliseconds should be valid")
 	}
 
-	/// Create a timestamp from a datetime
-	/// Creates an HLC timestamp with the datetime's milliseconds and counter=0
-	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
-		let millis = datetime.timestamp_millis() as u64;
-		Ok(HlcTimestamp(millis << 16))
-	}
+	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
+		let duration_milis = duration.as_millis().try_into().ok()?;
 
-	/// Convert the timestamp to a byte array
-	fn as_ts_bytes(&self) -> Vec<u8> {
-		self.0.to_be_bytes().to_vec()
-	}
-
-	/// Create a timestamp from a byte array
-	fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
-		match bytes.try_into() {
-			Ok(v) => Ok(HlcTimestamp(u64::from_be_bytes(v))),
-			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
+		let milis = self.0 >> 16;
+		let milis = milis.checked_sub(duration_milis)?;
+		if milis >= 1 << 48 {
+			return None;
 		}
+
+		Some(BoxTimeStamp::new(HlcTimeStamp(milis << 16 | self.0 & 0xFFFF)))
+	}
+
+	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
+		let ts_bytes = self.0.to_be_bytes();
+		bytes[..8].copy_from_slice(&ts_bytes);
+		&bytes[..8]
 	}
 }
 
@@ -263,53 +270,57 @@ mod tests {
 
 	#[test]
 	fn test_versionstamp_bytes_roundtrip() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		let values = [0, 1, 42, (u64::MAX / 2) as u128, u64::MAX as u128];
 
 		for &value in &values {
-			let bytes = ts_impl.from_versionstamp(value).unwrap().as_ts_bytes();
-			let recovered = ts_impl.from_ts_bytes(&bytes).unwrap().as_versionstamp();
+			let buf = &mut [0; _];
+			let bytes = ts_impl.create_from_versionstamp(value).unwrap().encode(buf);
+			let recovered = ts_impl.decode(bytes).unwrap().as_versionstamp();
 			assert_eq!(value, recovered, "Failed roundtrip for u64 value {}", value);
 		}
 	}
 
 	#[test]
 	fn test_u64_bytes_length() {
-		let ts_impl = TimeStampImpl::Default;
-		let bytes = ts_impl.from_versionstamp(12345).unwrap().as_ts_bytes();
+		let ts_impl = HlcTimeStampImpl;
+		let buf = &mut [0; _];
+		let bytes = ts_impl.create_from_versionstamp(12345).unwrap().encode(buf);
 		assert_eq!(bytes.len(), 8, "u64 timestamp should be 8 bytes");
 	}
 
 	#[test]
 	fn test_u64_bytes_big_endian() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		// Verify big-endian encoding for lexicographic ordering
 		let small = 100;
 		let large = 1000;
-		let small_bytes = ts_impl.from_versionstamp(small).unwrap().as_ts_bytes();
-		let large_bytes = ts_impl.from_versionstamp(large).unwrap().as_ts_bytes();
+		let buf = &mut [0; _];
+		let small_bytes = ts_impl.create_from_versionstamp(small).unwrap().encode(buf);
+		let buf = &mut [0; _];
+		let large_bytes = ts_impl.create_from_versionstamp(large).unwrap().encode(buf);
 		assert!(small_bytes < large_bytes, "Bytes should be lexicographically ordered");
 	}
 
 	#[test]
 	fn test_u64_bytes_invalid_length() {
-		let ts_impl = TimeStampImpl::Default;
-		let too_short = vec![0u8; 4];
-		let result = ts_impl.from_ts_bytes(&too_short);
+		let ts_impl = HlcTimeStampImpl;
+		let too_short = [0u8; 4];
+		let result = ts_impl.decode(&too_short);
 		assert!(result.is_err(), "Should fail with invalid byte length");
 
-		let too_long = vec![0u8; 16];
-		let result = ts_impl.from_ts_bytes(&too_long);
+		let too_long = [0u8; 16];
+		let result = ts_impl.decode(&too_long);
 		assert!(result.is_err(), "Should fail with invalid byte length");
 	}
 
 	#[test]
 	fn test_datetime_roundtrip() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		// Test with various timestamps
 		let now = Utc::now();
-		let ts = ts_impl.from_datetime(now).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = ts_impl.create_from_datetime(now).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 
 		// DateTime roundtrip should be within reasonable precision
 		// Note: nanosecond precision might be lost in conversion
@@ -322,45 +333,56 @@ mod tests {
 
 	#[test]
 	fn test_u64_datetime_specific_values() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		// Test epoch
 		let epoch = Utc.timestamp_opt(0, 0).unwrap();
-		let ts = ts_impl.from_datetime(epoch).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = ts_impl.create_from_datetime(epoch).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 		assert_eq!(epoch.timestamp_nanos(), recovered.timestamp_nanos());
 
 		// Test a known timestamp
 		let known_time = Utc.timestamp_opt(1700000000, 123456789).unwrap();
-		let ts = ts_impl.from_datetime(known_time).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = ts_impl.create_from_datetime(known_time).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 		assert_eq!(known_time.timestamp_millis(), recovered.timestamp_millis());
 	}
 
 	#[test]
 	fn test_cross_type_conversions() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		// Test that conversions work correctly across different methods
-		let original = ts_impl.from_versionstamp(1234567890).unwrap();
+		let original = ts_impl.create_from_versionstamp(1234567890).unwrap();
 
 		// Bytes -> Version -> DateTime and back
-		let bytes = original.as_ts_bytes();
-		let from_bytes = ts_impl.from_ts_bytes(&bytes).unwrap();
+		let buf = &mut [0; _];
+		let bytes = original.encode(buf);
+		let from_bytes = ts_impl.decode(bytes).unwrap();
 		let version = from_bytes.as_versionstamp();
-		let from_version = ts_impl.from_versionstamp(version).unwrap();
-		let datetime = from_version.as_datetime();
-		let from_datetime = ts_impl.from_datetime(datetime).unwrap();
+		let from_version = ts_impl.create_from_versionstamp(version).unwrap();
+		let datetime = from_version.as_datetime().unwrap();
+		let from_datetime = ts_impl.create_from_datetime(datetime).unwrap();
 
-		assert_eq!(original, from_datetime, "Cross-type conversion failed");
+		let Ok(original) = original.downcast::<HlcTimeStamp>() else {
+			panic!()
+		};
+		let Ok(from_datetime) = from_datetime.downcast::<HlcTimeStamp>() else {
+			panic!()
+		};
+
+		assert_eq!(*original, *from_datetime, "Cross-type conversion failed");
 	}
 
 	#[test]
 	fn test_monotonic_property() {
-		let ts_impl = TimeStampImpl::Default;
+		let ts_impl = HlcTimeStampImpl;
 		// Ensure that larger timestamps convert to larger byte arrays
 		let timestamps = [1u128, 100, 1000, 10000, 100000];
 		let byte_arrays: Vec<Vec<u8>> = timestamps
 			.iter()
-			.map(|t| ts_impl.from_versionstamp(*t).unwrap().as_ts_bytes())
+			.map(|t| {
+				let buf = &mut [0; _];
+				ts_impl.create_from_versionstamp(*t).unwrap().encode(buf).to_vec()
+			})
 			.collect();
 
 		// Verify that byte arrays are in ascending order
@@ -386,30 +408,39 @@ mod tests {
 		];
 
 		for value in test_cases {
-			let ts = super::HlcTimestamp(value);
-			let bytes = ts.as_ts_bytes();
-			let recovered = super::HlcTimestamp::from_ts_bytes(&bytes).unwrap();
-			assert_eq!(ts, recovered, "Failed roundtrip for HLC value {}", value);
+			let ts = super::HlcTimeStamp(value);
+			let buf = &mut [0u8; _];
+			let bytes = ts.encode(buf);
+			let Ok(recovered) =
+				super::HlcTimeStampImpl.decode(bytes).unwrap().downcast::<HlcTimeStamp>()
+			else {
+				panic!()
+			};
+			assert_eq!(ts, *recovered, "Failed roundtrip for HLC value {}", value);
 		}
 	}
 
 	#[test]
 	fn test_hlc_bytes_length() {
-		let ts = super::HlcTimestamp::next();
-		let bytes = ts.as_ts_bytes();
+		let ts = super::HlcTimeStamp::next();
+		let buf = &mut [0u8; _];
+		let bytes = ts.encode(buf);
 		assert_eq!(bytes.len(), 8, "HLC timestamp should be 8 bytes");
 	}
 
 	#[test]
 	fn test_hlc_bytes_lexicographic_ordering() {
 		// Create timestamps with increasing values
-		let ts1 = super::HlcTimestamp(1000u64 << 16);
-		let ts2 = super::HlcTimestamp((1000u64 << 16) | 1);
-		let ts3 = super::HlcTimestamp(1001u64 << 16);
+		let ts1 = super::HlcTimeStamp(1000u64 << 16);
+		let ts2 = super::HlcTimeStamp((1000u64 << 16) | 1);
+		let ts3 = super::HlcTimeStamp(1001u64 << 16);
 
-		let bytes1 = ts1.as_ts_bytes();
-		let bytes2 = ts2.as_ts_bytes();
-		let bytes3 = ts3.as_ts_bytes();
+		let buf = &mut [0u8; _];
+		let bytes1 = ts1.encode(buf);
+		let buf = &mut [0u8; _];
+		let bytes2 = ts2.encode(buf);
+		let buf = &mut [0u8; _];
+		let bytes3 = ts3.encode(buf);
 
 		assert!(bytes1 < bytes2, "Same millisecond, counter should order lexicographically");
 		assert!(bytes2 < bytes3, "Different milliseconds should order lexicographically");
@@ -420,10 +451,14 @@ mod tests {
 		let test_values = vec![1000u64 << 16, (1000u64 << 16) | 100, (u64::MAX >> 16) << 16];
 
 		for value in test_values {
-			let ts = super::HlcTimestamp(value);
+			let ts = super::HlcTimeStamp(value);
 			let version = ts.as_versionstamp();
-			let recovered = super::HlcTimestamp::from_versionstamp(version).unwrap();
-			assert_eq!(ts, recovered, "Failed versionstamp roundtrip for HLC value {}", value);
+			let Ok(recovered) =
+				super::HlcTimeStampImpl.create_from_versionstamp(version).unwrap().downcast()
+			else {
+				panic!()
+			};
+			assert_eq!(ts, *recovered, "Failed versionstamp roundtrip for HLC value {}", value);
 		}
 	}
 
@@ -431,8 +466,8 @@ mod tests {
 	fn test_hlc_datetime_roundtrip() {
 		// Test with various timestamps
 		let now = Utc::now();
-		let ts = super::HlcTimestamp::from_datetime(now).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = super::HlcTimeStampImpl.create_from_datetime(now).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 
 		// Should match at millisecond precision (counter is lost)
 		assert_eq!(
@@ -446,14 +481,14 @@ mod tests {
 	fn test_hlc_datetime_specific_values() {
 		// Test epoch
 		let epoch = Utc.timestamp_opt(0, 0).unwrap();
-		let ts = super::HlcTimestamp::from_datetime(epoch).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = super::HlcTimeStampImpl.create_from_datetime(epoch).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 		assert_eq!(epoch.timestamp_millis(), recovered.timestamp_millis());
 
 		// Test a known timestamp
 		let known_time = Utc.timestamp_opt(1700000000, 123456789).unwrap();
-		let ts = super::HlcTimestamp::from_datetime(known_time).unwrap();
-		let recovered = ts.as_datetime();
+		let ts = super::HlcTimeStampImpl.create_from_datetime(known_time).unwrap();
+		let recovered = ts.as_datetime().unwrap();
 		assert_eq!(known_time.timestamp_millis(), recovered.timestamp_millis());
 	}
 
@@ -462,7 +497,7 @@ mod tests {
 		// Generate multiple timestamps in quick succession
 		let mut timestamps = Vec::new();
 		for _ in 0..100 {
-			timestamps.push(super::HlcTimestamp::next());
+			timestamps.push(super::HlcTimeStamp::next());
 		}
 
 		// Verify strict monotonicity
@@ -479,8 +514,9 @@ mod tests {
 		// Generate multiple timestamps and verify byte ordering
 		let mut byte_arrays = Vec::new();
 		for _ in 0..100 {
-			let ts = super::HlcTimestamp::next();
-			byte_arrays.push(ts.as_ts_bytes());
+			let ts = super::HlcTimeStamp::next();
+			let buf = &mut [0u8; _];
+			byte_arrays.push(ts.encode(buf).to_vec());
 		}
 
 		// Verify that byte arrays are in ascending order
@@ -509,7 +545,7 @@ mod tests {
 				barrier_clone.wait();
 				let mut local_timestamps = Vec::new();
 				for _ in 0..timestamps_per_thread {
-					local_timestamps.push(super::HlcTimestamp::next());
+					local_timestamps.push(super::HlcTimeStamp::next());
 				}
 				local_timestamps
 			});
@@ -536,9 +572,9 @@ mod tests {
 	#[test]
 	fn test_hlc_ordering_property() {
 		// Verify that HlcTimestamp implements proper ordering
-		let ts1 = super::HlcTimestamp(1000u64 << 16);
-		let ts2 = super::HlcTimestamp((1000u64 << 16) | 1);
-		let ts3 = super::HlcTimestamp(1001u64 << 16);
+		let ts1 = super::HlcTimeStamp(1000u64 << 16);
+		let ts2 = super::HlcTimeStamp((1000u64 << 16) | 1);
+		let ts3 = super::HlcTimeStamp(1001u64 << 16);
 
 		assert!(ts1 < ts2);
 		assert!(ts2 < ts3);

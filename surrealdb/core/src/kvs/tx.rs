@@ -32,8 +32,7 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
-use crate::kvs::{KVKey, KVValue, Transactor, cache};
+use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
 pub struct Transaction {
@@ -611,12 +610,12 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	pub async fn timestamp(&self) -> Result<TimeStamp> {
+	pub async fn timestamp(&self) -> Result<BoxTimeStamp> {
 		Ok(self.tr.timestamp().await.map_err(Error::from)?)
 	}
 
 	/// Returns the implementation of timestamp that this transaction uses.
-	pub fn timestamp_impl(&self) -> TimeStampImpl {
+	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.tr.timestamp_impl()
 	}
 
@@ -683,9 +682,8 @@ impl Transaction {
 			return Ok(());
 		}
 		// Get the current transaction timestamp
-		let ts = self.timestamp().await?.as_ts_bytes();
-		// Convert the timestamp bytes to a slice
-		let ts = ts.as_slice();
+		let buf = &mut [0u8; _];
+		let ts = self.timestamp().await?.encode(buf);
 		// Collect all changefeed write operations as futures
 		let futures = changes.into_iter().map(|(ns, db, tb, value)| async move {
 			// Create the changefeed key with the current timestamp
