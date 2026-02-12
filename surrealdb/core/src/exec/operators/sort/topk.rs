@@ -31,11 +31,13 @@ struct KeyedValue {
 	value: Value,
 	/// Reference to the order-by specification for comparison
 	order_by: Arc<Vec<OrderByField>>,
+	/// Insertion sequence number for stable sorting — earlier entries win ties.
+	seq: u64,
 }
 
 impl PartialEq for KeyedValue {
 	fn eq(&self, other: &Self) -> bool {
-		self.keys == other.keys
+		self.cmp(other) == Ordering::Equal
 	}
 }
 
@@ -52,7 +54,10 @@ impl Ord for KeyedValue {
 		// Note: We compare other to self (reversed) because we want a min-heap
 		// of the "worst" values in the top-k. When we pop, we get the worst,
 		// allowing us to keep the best k values.
-		compare_keys(&other.keys, &self.keys, &self.order_by)
+		//
+		// The seq tiebreaker ensures stability: for equal keys, earlier entries
+		// (lower seq) are considered "better" and remain in the heap.
+		compare_keys(&other.keys, &self.keys, &self.order_by).then_with(|| other.seq.cmp(&self.seq))
 	}
 }
 
@@ -142,6 +147,7 @@ impl ExecOperator for SortTopK {
 			// Use a min-heap to track the top-k values
 			// We use Reverse to turn BinaryHeap's max-heap into a min-heap
 			let mut heap: BinaryHeap<Reverse<KeyedValue>> = BinaryHeap::with_capacity(limit + 1);
+			let mut seq: u64 = 0;
 
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
@@ -181,7 +187,9 @@ impl ExecOperator for SortTopK {
 						keys,
 						value,
 						order_by: order_by.clone(),
+						seq,
 					};
+					seq += 1;
 
 					if heap.len() >= limit {
 						// Heap is full - only add if better than the worst in heap
@@ -241,11 +249,13 @@ struct TopKByKeyEntry {
 	value: Value,
 	/// Shared reference to the sort key specification.
 	sort_keys: Arc<Vec<SortKey>>,
+	/// Insertion sequence number for stable sorting — earlier entries win ties.
+	seq: u64,
 }
 
 impl PartialEq for TopKByKeyEntry {
 	fn eq(&self, other: &Self) -> bool {
-		compare_records_by_keys(&self.value, &other.value, &self.sort_keys) == Ordering::Equal
+		self.cmp(other) == Ordering::Equal
 	}
 }
 
@@ -261,7 +271,11 @@ impl Ord for TopKByKeyEntry {
 	fn cmp(&self, other: &Self) -> Ordering {
 		// Reversed: we want a min-heap of the "worst" values so that pop()
 		// removes the worst, keeping the best k values in the heap.
+		//
+		// The seq tiebreaker ensures stability: for equal keys, earlier entries
+		// (lower seq) are considered "better" and remain in the heap.
 		compare_records_by_keys(&other.value, &self.value, &self.sort_keys)
+			.then_with(|| other.seq.cmp(&self.seq))
 	}
 }
 
@@ -349,6 +363,7 @@ impl ExecOperator for SortTopKByKey {
 		let sorted_stream = futures::stream::once(async move {
 			let mut heap: BinaryHeap<Reverse<TopKByKeyEntry>> =
 				BinaryHeap::with_capacity(limit + 1);
+			let mut seq: u64 = 0;
 
 			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
@@ -371,7 +386,9 @@ impl ExecOperator for SortTopKByKey {
 								heap.push(Reverse(TopKByKeyEntry {
 									value,
 									sort_keys: sort_keys.clone(),
+									seq,
 								}));
+								seq += 1;
 								heap.pop();
 							}
 							// Otherwise skip — the value is worse than everything
@@ -382,7 +399,9 @@ impl ExecOperator for SortTopKByKey {
 						heap.push(Reverse(TopKByKeyEntry {
 							value,
 							sort_keys: sort_keys.clone(),
+							seq,
 						}));
+						seq += 1;
 					}
 				}
 			}

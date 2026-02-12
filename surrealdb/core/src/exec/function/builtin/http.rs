@@ -213,10 +213,10 @@ async fn http_request(
 	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 
 	// Build the HTTP client
-	#[cfg(any(not(target_family = "wasm"), feature = "http"))]
+	#[cfg(not(target_family = "wasm"))]
 	let cli = {
-		let capabilities = ctx.get_capabilities();
-		let capabilities_clone = Arc::clone(&capabilities);
+		let capabilities = ctx.capabilities();
+		let capabilities_clone: Arc<crate::dbs::Capabilities> = Arc::clone(&capabilities);
 
 		let redirect_checker = move |rurl: &url::Url| -> Result<(), Error> {
 			use std::str::FromStr;

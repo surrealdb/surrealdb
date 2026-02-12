@@ -22,7 +22,6 @@ use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
-use crate::expr::ControlFlowExt;
 use crate::val::Value;
 
 /// Sorts the input stream by the specified ORDER BY fields.

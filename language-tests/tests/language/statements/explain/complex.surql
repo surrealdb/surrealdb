@@ -17,7 +17,7 @@ value = '''
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 5]
-       └────> SortByKey [ctx: Db] [sort_keys: rating DESC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
               └────> Split [ctx: Db] [on: tags]
                      └────> Scan [ctx: Db] [source: product, predicate: price < 50]
 "'''
@@ -26,7 +26,7 @@ value = '''
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1, offset: 0]
-       └────> SortByKey [ctx: Db] [sort_keys: price ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
               └────> Scan [ctx: Db] [source: product, predicate: category = 'electronics' AND brand = 'Acme']
 "'''
 
@@ -46,7 +46,7 @@ value = '''
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 5]
-       └────> SortByKey [ctx: Db] [sort_keys: id ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
               └────> Union [ctx: Db]
                      ├────> Scan [ctx: Db] [source: product]
                      └────> Scan [ctx: Db] [source: review]

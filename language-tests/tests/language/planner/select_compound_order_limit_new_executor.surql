@@ -28,7 +28,7 @@ value = "[1, 2, 3, 4, 5]"
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1]
-       └────> SortByKey [ctx: Db] [sort_keys: i DESC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 1]
               └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
 "'''
 
@@ -39,7 +39,7 @@ value = "[5]"
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1]
-       └────> SortByKey [ctx: Db] [sort_keys: i ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 1]
               └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
 "'''
 
@@ -50,7 +50,7 @@ value = "[1]"
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1, offset: 1]
-       └────> SortByKey [ctx: Db] [sort_keys: i DESC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 2]
               └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
 "'''
 
@@ -61,7 +61,7 @@ value = "[4]"
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1, offset: 1]
-       └────> SortByKey [ctx: Db] [sort_keys: i ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 2]
               └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
 "'''
 

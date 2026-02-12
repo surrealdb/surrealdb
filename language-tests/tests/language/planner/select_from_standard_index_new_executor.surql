@@ -8,7 +8,7 @@ value = "'OK'"
 value = '''
 "Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 4]
-       └────> SortByKey [ctx: Db] [sort_keys: time ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 4]
               └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']
 "'''
 
@@ -29,7 +29,7 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 value = '''
 'Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 4]
-       └────> SortByKey [ctx: Db] [sort_keys: time ASC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 4]
               └────> Scan [ctx: Db] [source: session]
 ''''
 
@@ -50,7 +50,7 @@ value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id:
 value = '''
 'Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 4]
-       └────> SortByKey [ctx: Db] [sort_keys: time DESC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 4]
               └────> Scan [ctx: Db] [source: session]
 ''''
 

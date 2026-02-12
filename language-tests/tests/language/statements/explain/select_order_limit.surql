@@ -34,7 +34,7 @@ value = '''
 [[test.results]]
 value = '''"Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 2, offset: 1]
-       └────> SortByKey [ctx: Db] [sort_keys: val DESC]
+       └────> SortTopKByKey [ctx: Db] [sort_keys: val DESC, limit: 3]
               └────> Scan [ctx: Db] [source: record]
 "'''
 */
