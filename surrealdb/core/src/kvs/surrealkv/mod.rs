@@ -48,6 +48,14 @@ impl Datastore {
 		};
 		// Configure custom options
 		let builder = TreeBuilder::new();
+
+		// Enable separated keys and values
+		info!(target: TARGET, "Enabling value log separation: {}", *cnf::SURREALKV_ENABLE_VLOG);
+		let builder = builder.with_enable_vlog(*cnf::SURREALKV_ENABLE_VLOG);
+		// Configure the maximum value log file size
+		info!(target: TARGET, "Setting value log max file size: {}", *cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
+		let builder = builder.with_vlog_max_file_size(*cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
+
 		// Configure versioned queries with retention period
 		info!(target: TARGET, "Versioning enabled: {} with retention period: {}ns", config.versioned, config.retention_ns);
 		let builder = builder.with_versioning(config.versioned, config.retention_ns);
@@ -55,12 +63,7 @@ impl Datastore {
 		let versioned_index = config.versioned && *cnf::SURREALKV_VERSIONED_INDEX;
 		info!(target: TARGET, "Versioning with versioned_index: {}", versioned_index);
 		let builder = builder.with_versioned_index(versioned_index);
-		// Enable separated keys and values
-		info!(target: TARGET, "Enabling value log separation: {}", *cnf::SURREALKV_ENABLE_VLOG);
-		let builder = builder.with_enable_vlog(*cnf::SURREALKV_ENABLE_VLOG);
-		// Configure the maximum value log file size
-		info!(target: TARGET, "Setting value log max file size: {}", *cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
-		let builder = builder.with_vlog_max_file_size(*cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
+
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
