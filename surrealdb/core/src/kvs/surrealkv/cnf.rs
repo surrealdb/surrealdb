@@ -7,6 +7,10 @@ use sysinfo::System;
 pub(super) static SURREALKV_ENABLE_VLOG: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, true);
 
+/// Whether to enable versioned index (default: false, only applies when versioning is enabled)
+pub(super) static SURREALKV_VERSIONED_INDEX: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_SURREALKV_VERSIONED_INDEX", bool, false);
+
 /// The block size in bytes (default: 64 KiB)
 pub(super) static SURREALKV_BLOCK_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_SURREALKV_BLOCK_SIZE", usize, 64 * 1024);
