@@ -35,7 +35,7 @@
 //!    country:canada]`.
 //!    - `depth` becomes 1.
 //!    - `clean_iteration(next)` leaves an array (not a dead end).
-//!    - `is_final(next)` is false, `next != current`, so we do not return.
+//!    - Not final, not a cycle, and contains valid RecordIds, so we do not return.
 //!    - `current = next` → `current` is now the countries array.
 //!
 //! 3. **Iteration 2:** `next = evaluate_physical_path(current, path)` → e.g. `[state:california,
@@ -56,6 +56,8 @@
 //! `depth > min_depth`, otherwise the final value from the dead end.
 
 use std::sync::Arc;
+
+use surrealdb_types::ToSql;
 
 use super::common::is_recursion_target;
 use crate::cnf::IDIOM_RECURSION_LIMIT;
@@ -91,10 +93,8 @@ pub(crate) async fn evaluate_recurse_default(
 		let next = clean_iteration(next);
 
 		// Check termination conditions.
-		// Non-RecordId values are treated as terminal -- recursion is
-		// intended purely for record graph traversal.
-		if is_final(&next) || !is_recursion_target(&next) || next == current {
-			// Reached a dead end, non-RecordId value, or cycle.
+		if is_final(&next) || next == current {
+			// Reached a dead end or cycle.
 			// Use `depth > min_depth` (not `>=`) because the current iteration
 			// produced a dead end, so we've only completed (depth - 1) successful
 			// traversals.
@@ -103,6 +103,15 @@ pub(crate) async fn evaluate_recurse_default(
 			} else {
 				Ok(get_final(&next))
 			};
+		}
+
+		// Non-RecordId values during recursion are an error --
+		// recursion is intended purely for record graph traversal.
+		if !is_recursion_target(&next) {
+			return Err(crate::err::Error::InvalidRecursionTarget {
+				value: next.to_sql(),
+			}
+			.into());
 		}
 
 		current = next;

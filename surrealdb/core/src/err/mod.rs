@@ -1081,6 +1081,12 @@ pub(crate) enum Error {
 	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
+	/// Encountered a non-record-id value during recursive graph traversal
+	#[error("Expected a record ID during recursive graph traversal, but found `{value}`")]
+	InvalidRecursionTarget {
+		value: String,
+	},
+
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),

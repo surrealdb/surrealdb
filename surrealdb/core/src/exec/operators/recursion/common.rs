@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt, stream};
+use surrealdb_types::ToSql;
 
 use crate::exec::parts::is_final;
 use crate::exec::{BoxFut, ExecOperator, ExecutionContext, FlowResult};
@@ -74,20 +75,40 @@ pub(crate) async fn eval_buffered_all<'a>(
 /// non-array values, appends the value if it is a valid target and not
 /// final. Only one level of array is traversed; nested arrays are treated
 /// as single values.
-pub(crate) fn collect_discovery_targets(v: Value, out: &mut Vec<Value>) {
+///
+/// Returns an error if a non-final, non-RecordId value is encountered,
+/// since recursion is only valid for record graph traversal.
+pub(crate) fn collect_discovery_targets(
+	v: Value,
+	out: &mut Vec<Value>,
+) -> crate::exec::FlowResult<()> {
 	match v {
 		Value::Array(arr) => {
 			for inner in arr.0 {
-				if !is_final(&inner) && is_recursion_target(&inner) {
-					out.push(inner);
+				if is_final(&inner) {
+					continue;
 				}
+				if !is_recursion_target(&inner) {
+					return Err(crate::err::Error::InvalidRecursionTarget {
+						value: inner.to_sql(),
+					}
+					.into());
+				}
+				out.push(inner);
 			}
 		}
-		v if !is_final(&v) && is_recursion_target(&v) => {
+		v if is_final(&v) => {}
+		v if is_recursion_target(&v) => {
 			out.push(v);
 		}
-		_ => {}
+		v => {
+			return Err(crate::err::Error::InvalidRecursionTarget {
+				value: v.to_sql(),
+			}
+			.into());
+		}
 	}
+	Ok(())
 }
 
 /// Discover recursion targets via the body operator for a single input value.
@@ -105,7 +126,7 @@ pub(crate) fn discover_body_targets<'a>(
 		while let Some(batch_result) = body_stream.next().await {
 			let batch = batch_result?;
 			for v in batch.values {
-				collect_discovery_targets(v, &mut discovered);
+				collect_discovery_targets(v, &mut discovered)?;
 			}
 		}
 		Ok(discovered)

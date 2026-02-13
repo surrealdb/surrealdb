@@ -73,6 +73,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use surrealdb_types::ToSql;
+
 use super::common::{self, discover_body_targets, eval_buffered_all, is_recursion_target};
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
@@ -134,10 +136,29 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		if let Some(ref sink) = rec_ctx.discovery_sink {
 			let values_to_write: Vec<Value> = match value {
 				Value::Array(arr) => {
-					arr.iter().filter(|v| !is_final(v) && is_recursion_target(v)).cloned().collect()
+					let mut targets = Vec::new();
+					for v in arr.iter() {
+						if is_final(v) {
+							continue;
+						}
+						if !is_recursion_target(v) {
+							return Err(crate::err::Error::InvalidRecursionTarget {
+								value: v.to_sql(),
+							}
+							.into());
+						}
+						targets.push(v.clone());
+					}
+					targets
 				}
-				v if !is_final(v) && is_recursion_target(v) => vec![v.clone()],
-				_ => vec![],
+				v if is_final(v) => vec![],
+				v if is_recursion_target(v) => vec![v.clone()],
+				v => {
+					return Err(crate::err::Error::InvalidRecursionTarget {
+						value: v.to_sql(),
+					}
+					.into());
+				}
 			};
 			if !values_to_write.is_empty() {
 				let mut guard = sink.lock().map_err(|_| {

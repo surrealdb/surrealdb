@@ -54,6 +54,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use surrealdb_types::ToSql;
+
 use super::common::{eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
 use crate::exec::parts::recurse::value_hash;
@@ -107,10 +109,18 @@ pub(crate) async fn evaluate_recurse_collect(
 			};
 
 			for v in values {
-				// Non-RecordId values are treated as terminal --
-				// recursion is intended purely for record graph traversal.
-				if is_final(&v) || !is_recursion_target(&v) {
+				// Dead ends (None, Null, empty arrays) silently terminate this branch.
+				if is_final(&v) {
 					continue;
+				}
+
+				// Non-RecordId values during recursion are an error --
+				// recursion is intended purely for record graph traversal.
+				if !is_recursion_target(&v) {
+					return Err(crate::err::Error::InvalidRecursionTarget {
+						value: v.to_sql(),
+					}
+					.into());
 				}
 
 				let hash = value_hash(&v);

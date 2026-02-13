@@ -59,6 +59,8 @@
 
 use std::sync::Arc;
 
+use surrealdb_types::ToSql;
+
 use super::common::{eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
 use crate::exec::parts::{evaluate_physical_path, is_final};
@@ -117,21 +119,36 @@ pub(crate) async fn evaluate_recurse_path(
 			};
 
 			// Single pass: extend paths for valid recursion targets, detect dead ends.
-			// Non-RecordId values are treated as terminal -- recursion is
-			// intended purely for record graph traversal.
 			// On the last valid value we move current_path instead of cloning
 			// to save one allocation per branch point.
-			let mut non_final =
-				values.into_iter().filter(|v| !is_final(v) && is_recursion_target(v)).peekable();
+			let mut valid_targets = Vec::new();
+			for v in values {
+				// Dead ends (None, Null, empty arrays) silently terminate this branch.
+				if is_final(&v) {
+					continue;
+				}
 
-			if non_final.peek().is_none() {
-				// All values were final -- dead end
+				// Non-RecordId values during recursion are an error --
+				// recursion is intended purely for record graph traversal.
+				if !is_recursion_target(&v) {
+					return Err(crate::err::Error::InvalidRecursionTarget {
+						value: v.to_sql(),
+					}
+					.into());
+				}
+
+				valid_targets.push(v);
+			}
+
+			if valid_targets.is_empty() {
+				// All values were dead ends
 				if depth >= min_depth && !current_path.is_empty() {
 					completed_paths.push(Value::Array(current_path.into()));
 				}
 			} else {
-				while let Some(v) = non_final.next() {
-					if non_final.peek().is_some() {
+				let mut iter = valid_targets.into_iter().peekable();
+				while let Some(v) = iter.next() {
+					if iter.peek().is_some() {
 						// More successors to come -- clone the path prefix
 						let mut new_path = current_path.clone();
 						new_path.push(v);
