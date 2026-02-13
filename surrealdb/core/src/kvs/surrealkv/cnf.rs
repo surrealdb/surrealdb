@@ -3,9 +3,9 @@ use std::sync::LazyLock;
 
 use sysinfo::System;
 
-/// Whether to enable value log separation (default: true)
+/// Whether to enable value log separation (default: false)
 pub(super) static SURREALKV_ENABLE_VLOG: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, true);
+	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, false);
 
 /// Whether to enable versioned index (default: false, only applies when versioning is enabled)
 pub(super) static SURREALKV_VERSIONED_INDEX: LazyLock<bool> =
