@@ -19,7 +19,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::{Context, FrozenContext};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::collect_stream;
+use crate::exec::plan_or_compute::{block_required_context, collect_stream};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
@@ -69,9 +69,8 @@ impl ExecOperator for SequencePlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Conservative: require database context since we don't know
-		// what the inner expressions need without analyzing them
-		ContextLevel::Database
+		// Derive the required context from the block's expressions
+		block_required_context(&self.block)
 	}
 
 	fn access_mode(&self) -> AccessMode {

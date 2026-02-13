@@ -15,7 +15,7 @@ use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
-use crate::expr::ExplainFormat;
+use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
 
 /// EXPLAIN operator - formats an execution plan as text.
@@ -138,8 +138,18 @@ impl ExecOperator for AnalyzePlan {
 			// Drain all batches from the inner plan so metrics are populated
 			let mut total_rows: u64 = 0;
 			while let Some(batch_result) = inner_stream.next().await {
-				let batch = batch_result?;
-				total_rows += batch.values.len() as u64;
+				match batch_result {
+					Ok(batch) => {
+						total_rows += batch.values.len() as u64;
+					}
+					// Flow control signals mean the inner plan stopped early.
+					// Stop draining and format the metrics we've collected so far.
+					Err(ControlFlow::Break | ControlFlow::Return(_)) => break,
+					// Continue means skip this iteration, keep draining.
+					Err(ControlFlow::Continue) => continue,
+					// Only actual errors should propagate.
+					Err(e @ ControlFlow::Err(_)) => Err(e)?,
+				}
 			}
 
 			// Now format the plan with metrics

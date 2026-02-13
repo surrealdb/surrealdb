@@ -11,7 +11,7 @@ use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::evaluate_expr;
+use crate::exec::plan_or_compute::{evaluate_expr, expr_required_context};
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
@@ -70,9 +70,16 @@ impl ExecOperator for IfElsePlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Conservative: require database context since we don't know
-		// what the inner expressions need without analyzing them
-		ContextLevel::Database
+		// Derive the required context from condition and body expressions
+		let branches_ctx = self
+			.branches
+			.iter()
+			.flat_map(|(cond, body)| [expr_required_context(cond), expr_required_context(body)])
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let else_ctx =
+			self.else_body.as_ref().map(expr_required_context).unwrap_or(ContextLevel::Root);
+		branches_ctx.max(else_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {

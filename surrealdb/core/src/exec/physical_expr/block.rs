@@ -23,6 +23,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::plan_or_compute::block_required_context;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
@@ -98,9 +99,8 @@ impl PhysicalExpr for BlockPhysicalExpr {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Blocks can contain anything and are planned dynamically,
-		// so we conservatively require database context
-		crate::exec::ContextLevel::Database
+		// Derive the required context from the block's expressions
+		block_required_context(&self.block)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {

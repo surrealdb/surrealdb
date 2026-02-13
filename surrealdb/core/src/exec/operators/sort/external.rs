@@ -87,7 +87,14 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine order-by expression contexts with child operator context
+		let order_ctx = self
+			.order_by
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		order_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {

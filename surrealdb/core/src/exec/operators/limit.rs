@@ -78,8 +78,14 @@ impl ExecOperator for Limit {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Inherit child requirements
-		self.input.required_context()
+		// Combine limit/offset expression contexts with child operator context
+		let exprs_ctx = [self.limit.as_ref(), self.offset.as_ref()]
+			.into_iter()
+			.flatten()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		exprs_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {

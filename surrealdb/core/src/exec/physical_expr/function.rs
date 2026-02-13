@@ -234,8 +234,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// User-defined functions are stored in the database
-		crate::exec::ContextLevel::Database
+		// User-defined functions are stored in the database, and arguments
+		// may have their own context requirements
+		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
@@ -449,8 +450,9 @@ impl PhysicalExpr for ModelFunctionExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// ML models are stored in the database
-		crate::exec::ContextLevel::Database
+		// ML models are stored in the database, and arguments
+		// may have their own context requirements
+		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
 	}
 
 	#[cfg(feature = "ml")]
@@ -675,8 +677,9 @@ impl PhysicalExpr for SurrealismModuleExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Module functions may require database context
-		crate::exec::ContextLevel::Database
+		// Module functions require database context, and arguments
+		// may have their own context requirements
+		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
 	}
 
 	#[cfg(feature = "surrealism")]
@@ -832,8 +835,9 @@ impl PhysicalExpr for SiloModuleExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Silo package functions may require database context
-		crate::exec::ContextLevel::Database
+		// Silo package functions require database context, and arguments
+		// may have their own context requirements
+		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
 	}
 
 	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
