@@ -380,13 +380,12 @@ fn test_public_error_surreal_value_roundtrip() {
 }
 
 #[test]
-fn test_error_kind_unknown_deserializes_to_internal() {
-	// Unknown wire kind strings deserialize to Internal (forward compatibility).
+fn test_error_kind_unknown_fails_deserialization() {
+	// Unknown wire kind strings cause deserialization to fail; server should send only known kinds.
 	let mut obj = Object::new();
 	obj.insert("kind", "future_kind");
 	obj.insert("message", "Message");
 	let value = Value::Object(obj);
-	let restored = Error::from_value(value).unwrap();
-	assert_eq!(restored.kind, ErrorKind::Internal);
-	assert_eq!(restored.message, "Message");
+	let result = Error::from_value(value);
+	assert!(result.is_err());
 }

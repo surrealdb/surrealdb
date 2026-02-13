@@ -13,9 +13,9 @@ use crate::{Kind, Object, SurrealValue, ToSql, Value};
 ///
 /// Maps the full set of internal/database errors into a smaller set of
 /// categories. Serializes as a snake_case string on the wire (e.g. `"validation"`).
-/// Unknown kinds on the wire are deserialised as [`Internal`](ErrorKind::Internal).
-/// The enum is non-exhaustive so new variants can be added later.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+/// The enum is non-exhaustive so new variants can be added later. The server
+/// should map any unmappable error to [`Internal`](ErrorKind::Internal) before sending.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ErrorKind {
@@ -39,34 +39,6 @@ pub enum ErrorKind {
 	AlreadyExists,
 	/// Internal or unexpected error (server or client).
 	Internal,
-}
-
-impl ErrorKind {
-	fn from_wire(s: &str) -> Self {
-		match s {
-			"validation" => ErrorKind::Validation,
-			"method" => ErrorKind::Method,
-			"configuration" => ErrorKind::Configuration,
-			"auth" => ErrorKind::Auth,
-			"thrown" => ErrorKind::Thrown,
-			"query" => ErrorKind::Query,
-			"serialization" => ErrorKind::Serialization,
-			"not_found" => ErrorKind::NotFound,
-			"already_exists" => ErrorKind::AlreadyExists,
-			"internal" => ErrorKind::Internal,
-			_ => ErrorKind::Internal,
-		}
-	}
-}
-
-impl<'de> Deserialize<'de> for ErrorKind {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let s = String::deserialize(deserializer)?;
-		Ok(ErrorKind::from_wire(&s))
-	}
 }
 
 impl fmt::Display for ErrorKind {
