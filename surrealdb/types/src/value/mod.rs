@@ -731,6 +731,12 @@ impl FromIterator<Value> for Value {
 	}
 }
 
+impl From<Object> for Value {
+	fn from(o: Object) -> Self {
+		Value::Object(o)
+	}
+}
+
 impl ToSql for Value {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {

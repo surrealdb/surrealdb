@@ -113,7 +113,7 @@ fn json_rpc_code(kind: &ErrorKind) -> i64 {
 	}
 }
 
-/// Public error type for SurrealDB APIs.
+/// Public error type for SurrealDB APIs
 ///
 /// Designed to be returned from public APIs (including over the wire). It is
 /// wire-friendly and non-lossy: serialization preserves `kind`, `message`,
@@ -125,25 +125,25 @@ pub struct Error {
 	pub kind: ErrorKind,
 	/// Human-readable error message.
 	pub message: String,
-	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
-	/// removed in the next major release. Only used when serialising to the wire.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub(crate) code: Option<i64>,
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub details: Option<Object>,
+	pub details: Option<Value>,
 	/// The underlying cause of this error, if any. Semantically: "this error was caused by that
 	/// one".
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub cause: Option<Box<Error>>,
+	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
+	/// removed in the next major release. Only used when serialising to the wire.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) code: Option<i64>,
 }
 
 impl Error {
 	/// Creates a new error with the given `kind` and `message`.
-	pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+	pub fn new(kind: ErrorKind, message: String) -> Self {
 		Self {
 			kind,
-			message: message.into(),
+			message,
 			code: None,
 			details: None,
 			cause: None,
@@ -160,8 +160,8 @@ impl Error {
 
 	/// Adds optional structured details to this error.
 	#[must_use]
-	pub fn with_details(mut self, details: Object) -> Self {
-		self.details = Some(details);
+	pub fn with_details(mut self, details: impl Into<Value>) -> Self {
+		self.details = Some(details.into());
 		self
 	}
 
@@ -192,7 +192,7 @@ impl Error {
 			return None;
 		}
 		let details = self.details.as_ref()?;
-		Some(AuthError::from_details(details))
+		AuthError::from_details(details)
 	}
 }
 
@@ -200,45 +200,48 @@ impl Error {
 // Structured error details (wire format in Error.details)
 // -----------------------------------------------------------------------------
 
-/// Structured details for [`ErrorKind::Auth`] errors.
+/// Auth failure reason for [`ErrorKind::Auth`] errors.
 ///
-/// Serialized as an object in `Error.details` (e.g. `{ "token_expired": true }`) so clients can
+/// Serialized as an object in `Error.details` (e.g. `{ "session_expired": true }`) so clients can
 /// detect auth failure reasons without parsing the message string.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct AuthError {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AuthError {
 	/// The token used for authentication has expired.
-	pub token_expired: bool,
+	TokenExpired,
 	/// The session has expired.
-	pub session_expired: bool,
+	SessionExpired,
 }
 
 impl AuthError {
-	/// Build details object for use with `Error::with_details`.
-	/// Fields with default values are omitted from the serialized object.
-	pub fn into_details(self) -> Object {
+	/// Build details value for use with `Error::with_details`.
+	pub fn into_details(self) -> Value {
 		let mut o = Object::new();
-		if self.token_expired {
-			o.insert("token_expired", true);
-		}
-		if self.session_expired {
-			o.insert("session_expired", true);
-		}
-		o
+		match self {
+			AuthError::TokenExpired => o.insert("token_expired", true),
+			AuthError::SessionExpired => o.insert("session_expired", true),
+		};
+		Value::Object(o)
 	}
 
-	/// Parse from `Error.details`; missing or invalid fields default to `false`.
-	pub fn from_details(details: &Object) -> Self {
-		let token_expired = details
+	/// Parse from `Error.details`; returns `None` if not an object or no recognised key.
+	pub fn from_details(details: &Value) -> Option<Self> {
+		let Value::Object(o) = details else {
+			return None;
+		};
+		let token_expired = o
 			.get("token_expired")
 			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
 			.unwrap_or(false);
-		let session_expired = details
+		let session_expired = o
 			.get("session_expired")
 			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
 			.unwrap_or(false);
-		Self {
-			token_expired,
-			session_expired,
+		if token_expired {
+			Some(AuthError::TokenExpired)
+		} else if session_expired {
+			Some(AuthError::SessionExpired)
+		} else {
+			None
 		}
 	}
 }
@@ -310,7 +313,7 @@ impl SurrealValue for Error {
 		let code = obj
 			.remove("code")
 			.and_then(|v| <i64 as SurrealValue>::from_value(v).ok());
-		let details = obj.remove("details").map(Object::from_value).transpose()?;
+		let details = obj.remove("details");
 		let cause = obj.remove("cause").map(Error::from_value).transpose()?.map(Box::new);
 		Ok(Self {
 			kind,

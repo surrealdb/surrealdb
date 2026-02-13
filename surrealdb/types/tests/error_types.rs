@@ -290,7 +290,7 @@ fn test_error_message_quality() {
 
 #[test]
 fn test_public_error_new() {
-	let err = Error::new(ErrorKind::NotFound, "The table 'users' does not exist");
+	let err = Error::new(ErrorKind::NotFound, "The table 'users' does not exist".to_string());
 
 	assert_eq!(err.kind, ErrorKind::NotFound);
 	assert_eq!(err.message, "The table 'users' does not exist");
@@ -303,20 +303,28 @@ fn test_public_error_new() {
 fn test_public_error_with_details() {
 	let mut details = Object::new();
 	details.insert("name", "users");
-	let err =
-		Error::new(ErrorKind::NotFound, "The table 'users' does not exist").with_details(details);
+	let err = Error::new(
+		ErrorKind::NotFound,
+		"The table 'users' does not exist".to_string(),
+	)
+	.with_details(details);
 
 	assert_eq!(err.kind, ErrorKind::NotFound);
 	assert!(err.details.is_some());
 	let d = err.details.as_ref().unwrap();
-	assert!(d.contains_key("name"));
-	assert_eq!(d.get("name").and_then(|v| v.as_string()).unwrap(), "users");
+	let Value::Object(o) = d else { panic!("expected object details") };
+	assert!(o.contains_key("name"));
+	assert_eq!(o.get("name").and_then(|v| v.as_string()).unwrap(), "users");
 }
 
 #[test]
 fn test_public_error_with_cause() {
-	let root = Error::new(ErrorKind::Internal, "connection refused");
-	let top = Error::new(ErrorKind::Query, "Failed to execute query").with_cause(root);
+	let root = Error::new(ErrorKind::Internal, "connection refused".to_string());
+	let top = Error::new(
+		ErrorKind::Query,
+		"Failed to execute query".to_string(),
+	)
+	.with_cause(root);
 
 	assert_eq!(top.kind, ErrorKind::Query);
 	assert!(top.cause().is_some());
@@ -328,9 +336,9 @@ fn test_public_error_with_cause() {
 
 #[test]
 fn test_public_error_chain() {
-	let root = Error::new(ErrorKind::Internal, "root");
-	let mid = Error::new(ErrorKind::Validation, "mid").with_cause(root);
-	let top = Error::new(ErrorKind::Method, "top").with_cause(mid);
+	let root = Error::new(ErrorKind::Internal, "root".to_string());
+	let mid = Error::new(ErrorKind::Validation, "mid".to_string()).with_cause(root);
+	let top = Error::new(ErrorKind::Method, "top".to_string()).with_cause(mid);
 
 	let chain: Vec<_> = top.chain().collect();
 	assert_eq!(chain.len(), 3);
@@ -341,11 +349,11 @@ fn test_public_error_chain() {
 
 #[test]
 fn test_public_error_display() {
-	let err = Error::new(ErrorKind::Thrown, "Something went wrong");
+	let err = Error::new(ErrorKind::Thrown, "Something went wrong".to_string());
 	assert!(err.to_string().contains("Something went wrong"));
 
-	let with_cause = Error::new(ErrorKind::Validation, "outer")
-		.with_cause(Error::new(ErrorKind::Internal, "inner"));
+	let with_cause = Error::new(ErrorKind::Validation, "outer".to_string())
+		.with_cause(Error::new(ErrorKind::Internal, "inner".to_string()));
 	let display = with_cause.to_string();
 	assert!(display.contains("outer"));
 	assert!(display.contains("inner"));
@@ -353,8 +361,8 @@ fn test_public_error_display() {
 
 #[test]
 fn test_public_error_std_error_source() {
-	let inner = Error::new(ErrorKind::Internal, "inner");
-	let outer = Error::new(ErrorKind::Query, "outer").with_cause(inner);
+	let inner = Error::new(ErrorKind::Internal, "inner".to_string());
+	let outer = Error::new(ErrorKind::Query, "outer".to_string()).with_cause(inner);
 
 	let source = std::error::Error::source(&outer).unwrap();
 	assert_eq!(source.to_string(), "inner");
@@ -362,13 +370,13 @@ fn test_public_error_std_error_source() {
 
 #[test]
 fn test_public_error_surreal_value_roundtrip() {
-	let err = Error::new(ErrorKind::NotFound, "Table 'users' does not exist")
+	let err = Error::new(ErrorKind::NotFound, "Table 'users' does not exist".to_string())
 		.with_details({
 			let mut o = Object::new();
 			o.insert("name", "users");
-			o
+			Value::Object(o)
 		})
-		.with_cause(Error::new(ErrorKind::Internal, "io error"));
+		.with_cause(Error::new(ErrorKind::Internal, "io error".to_string()));
 
 	let value = err.clone().into_value();
 	let restored = Error::from_value(value).unwrap();

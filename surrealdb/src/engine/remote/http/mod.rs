@@ -737,7 +737,7 @@ async fn router(
 						} = &token
 						{
 							// If the error is due to token expiration, attempt automatic refresh
-							if error.auth_details().is_some_and(|a| a.token_expired) {
+							if error.auth_details().is_some_and(|a| matches!(a, surrealdb_types::AuthError::TokenExpired)) {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(
 									token,
