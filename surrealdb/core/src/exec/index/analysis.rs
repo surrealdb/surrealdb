@@ -161,10 +161,12 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			// Try to match conditions to index columns in order
+			// Try to match conditions to index columns in order.
+			// The prefix collects leading equality conditions; once a
+			// non-equality (range) condition is seen we record it and
+			// stop -- columns after a range cannot be used.
 			let mut prefix_values = Vec::new();
 			let mut range_condition: Option<(BinaryOperator, Value)> = None;
-			let all_equality = true;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -176,13 +178,13 @@ impl<'a> IndexAnalyzer<'a> {
 						let is_equality =
 							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
 
-						if all_equality && is_equality {
-							// Add to prefix
+						if range_condition.is_none() && is_equality {
+							// Still in the equality prefix -- add to prefix
 							prefix_values.push(cond.value.clone());
-						} else if all_equality {
-							// First non-equality - becomes range condition
+						} else if range_condition.is_none() {
+							// First non-equality -- becomes range condition
 							range_condition = Some((cond.op.clone(), cond.value.clone()));
-							// Stop - can't use columns after a range
+							// Stop -- can't use columns after a range
 							break;
 						} else {
 							// Already have a range condition, stop
@@ -190,7 +192,7 @@ impl<'a> IndexAnalyzer<'a> {
 						}
 					}
 					None => {
-						// No condition for this column - stop looking
+						// No condition for this column -- stop looking
 						break;
 					}
 				}

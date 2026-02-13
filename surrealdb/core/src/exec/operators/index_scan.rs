@@ -253,43 +253,53 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Range scan (unique or non-unique — same loop shape)
-				(BTreeAccess::Range { from, to }, unique) => {
-					if unique {
-						let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
-							.context("Failed to create iterator")?;
-						loop {
-							let rids = iter.next_batch(&txn).await
-								.context("Failed to iterate index")?;
-							if rids.is_empty() { break; }
-							for rid in rids {
-								if let Some(value) = fetch_and_filter_record(
-									&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-								).await? {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
+				// Range scan (unique or non-unique).
+				//
+				// Both branches share the same batch-fetch-yield loop; they
+				// differ only in iterator construction.  We keep them as two
+				// explicit `loop` blocks rather than abstracting over the
+				// iterator type because `async_stream` closures cannot
+				// easily hold trait objects or generics.
+				(BTreeAccess::Range { from, to }, true) => {
+					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+						.context("Failed to create iterator")?;
+					loop {
+						let rids = iter.next_batch(&txn).await
+							.context("Failed to iterate index")?;
+						if rids.is_empty() { break; }
+						for rid in rids {
+							if let Some(value) = fetch_and_filter_record(
+								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
+							).await? {
+								batch.push(value);
+								if batch.len() >= BATCH_SIZE {
+									yield ValueBatch { values: std::mem::take(&mut batch) };
+									batch.reserve(BATCH_SIZE);
 								}
 							}
 						}
-					} else {
-						let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
-							.context("Failed to create iterator")?;
-						loop {
-							let rids = iter.next_batch(&txn).await
-								.context("Failed to iterate index")?;
-							if rids.is_empty() { break; }
-							for rid in rids {
-								if let Some(value) = fetch_and_filter_record(
-									&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-								).await? {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
+					}
+
+					if !batch.is_empty() {
+						yield ValueBatch { values: batch };
+					}
+				}
+
+				(BTreeAccess::Range { from, to }, false) => {
+					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+						.context("Failed to create iterator")?;
+					loop {
+						let rids = iter.next_batch(&txn).await
+							.context("Failed to iterate index")?;
+						if rids.is_empty() { break; }
+						for rid in rids {
+							if let Some(value) = fetch_and_filter_record(
+								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
+							).await? {
+								batch.push(value);
+								if batch.len() >= BATCH_SIZE {
+									yield ValueBatch { values: std::mem::take(&mut batch) };
+									batch.reserve(BATCH_SIZE);
 								}
 							}
 						}

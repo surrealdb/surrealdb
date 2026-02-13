@@ -231,11 +231,11 @@ impl ExecOperator for KnnTopK {
 
 /// Extract a numeric vector from a record value at the given idiom path.
 ///
-/// Returns `None` if the field is missing, None/Null, or not a numeric array.
+/// Returns `None` if the field is missing, None/Null, not an array,
+/// or contains non-numeric elements.
 fn extract_vector(value: &Value, field: &Idiom) -> Option<Vec<Number>> {
-	let field_value = value.pick(field);
-	match field_value {
-		Value::Array(arr) => {
+	match value.pick(field) {
+		Value::Array(arr) if !arr.is_empty() => {
 			let mut nums = Vec::with_capacity(arr.len());
 			for v in arr.iter() {
 				match v {
@@ -245,7 +245,6 @@ fn extract_vector(value: &Value, field: &Idiom) -> Option<Vec<Number>> {
 			}
 			Some(nums)
 		}
-		Value::None | Value::Null => None,
 		_ => None,
 	}
 }

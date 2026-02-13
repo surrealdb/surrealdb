@@ -227,7 +227,7 @@ impl<'ctx> Planner<'ctx> {
 		)?;
 
 		// Wrap source with KnnTopK if brute-force KNN was detected
-		let source = if let Some((knn_params, _residual)) = brute_force_knn {
+		let source = if let Some(knn_params) = brute_force_knn {
 			use crate::exec::operators::KnnTopK;
 			let topk: Arc<dyn ExecOperator> = Arc::new(KnnTopK::new(
 				source,

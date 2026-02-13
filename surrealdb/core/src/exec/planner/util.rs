@@ -83,28 +83,6 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // Predicate / Validation Helpers
 // ============================================================================
 
-/// Check if an expression contains KNN (vector search) operators.
-#[allow(dead_code)]
-pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
-				return true;
-			}
-			contains_knn_operator(left) || contains_knn_operator(right)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => contains_knn_operator(inner),
-		_ => false,
-	}
-}
-
 /// Parameters extracted from a brute-force KNN expression.
 pub(super) struct BruteForceKnnParams {
 	/// The idiom path to the vector field.
@@ -121,10 +99,8 @@ pub(super) struct BruteForceKnnParams {
 ///
 /// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
 /// found at the top level of AND-connected conditions.
-/// Also returns the residual condition (with the KNN predicate removed).
-pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<(BruteForceKnnParams, Option<Cond>)> {
-	extract_bruteforce_knn_from_expr(&cond.0)
-		.map(|(params, residual)| (params, residual.map(|e| Cond(e))))
+pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams> {
+	extract_bruteforce_knn_from_expr(&cond.0).map(|(params, _residual)| params)
 }
 
 /// Strip any KNN operator from a WHERE clause, returning the residual condition.

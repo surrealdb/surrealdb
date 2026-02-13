@@ -128,21 +128,26 @@ impl ExecOperator for KnnScan {
 			let root = ctx.root();
 			let frozen_ctx = &root.ctx;
 
-			// Resolve table permissions
-			let select_permission = if check_perms {
-				let table_def = txn
-					.get_tb_by_name(&ns.name, &db.name, &table_name)
-					.await
-					.context("Failed to get table")?;
+			// Look up the table definition (needed for both permissions and table_id)
+			let table_def = txn
+				.get_tb_by_name(&ns.name, &db.name, &table_name)
+				.await
+				.context("Failed to get table")?;
 
-				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx())
-						.context("Failed to convert permission")?
-				} else {
+			let table_def = match table_def {
+				Some(def) => def,
+				None => {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
 						name: table_name.clone(),
-					})))?
+					})))?;
+					unreachable!()
 				}
+			};
+
+			// Resolve table permissions
+			let select_permission = if check_perms {
+				convert_permission_to_physical(&table_def.permissions.select, ctx.ctx())
+					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
 			};
@@ -155,7 +160,7 @@ impl ExecOperator for KnnScan {
 			// Get the HNSW parameters from the index definition
 			let index_def = index_ref.definition();
 			let hnsw_params = match &index_def.index {
-				Index::Hnsw(params) => params.clone(),
+				Index::Hnsw(params) => params,
 				_ => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
 						"Index '{}' is not an HNSW index",
@@ -164,18 +169,6 @@ impl ExecOperator for KnnScan {
 					unreachable!()
 				}
 			};
-
-			// Look up the table definition to get the table_id
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
-				.await
-				.context("Failed to get table definition")?;
-
-			let table_def = table_def.ok_or_else(|| {
-				ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-					name: table_name.clone(),
-				}))
-			})?;
 
 			// Obtain the shared HNSW index
 			let hnsw_index = frozen_ctx
@@ -186,7 +179,7 @@ impl ExecOperator for KnnScan {
 					frozen_ctx,
 					table_def.table_id,
 					index_def,
-					&hnsw_params,
+					hnsw_params,
 				)
 				.await
 				.context("Failed to get HNSW index")?;
