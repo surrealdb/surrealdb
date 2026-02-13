@@ -11,7 +11,7 @@ use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
-use crate::exec::operators::{FullTextScan, IndexScan};
+use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
@@ -600,12 +600,12 @@ async fn resolve_table_scan_stream(
 	};
 
 	match access_path {
-		// B-tree index scan (single-column only)
+		// B-tree index scan (single-column and compound)
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) if index_ref.cols.len() == 1 => {
+		}) => {
 			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
@@ -622,7 +622,19 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Fall back to table KV scan (NOINDEX, compound indexes, KNN, etc.)
+		// KNN vector search via HNSW index
+		Some(AccessPath::KnnSearch {
+			index_ref,
+			vector,
+			k,
+			ef,
+		}) => {
+			let knn_op = KnnScan::new(index_ref, vector, k, ef, cfg.table_name);
+			let stream = knn_op.execute(ctx)?;
+			Ok((stream, 0))
+		}
+
+		// Fall back to table KV scan (NOINDEX, etc.)
 		_ => {
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;

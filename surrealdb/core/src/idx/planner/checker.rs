@@ -25,7 +25,7 @@ pub enum HnswConditionChecker<'a> {
 }
 
 impl<'a> HnswConditionChecker<'a> {
-	pub(in crate::idx) fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self::Hnsw(HnswChecker {})
 	}
 

@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound};
 use crate::catalog::{Index, IndexDefinition};
-use crate::expr::operator::MatchesOperator;
+use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
 use crate::idx::planner::ScanDirection;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
@@ -260,8 +260,8 @@ impl<'a> IndexAnalyzer<'a> {
 						self.try_match_fulltext(left, mo, right, candidates);
 					}
 					// KNN operator for vector search
-					BinaryOperator::NearestNeighbor(_) => {
-						self.try_match_knn(left, right, candidates);
+					BinaryOperator::NearestNeighbor(nn) => {
+						self.try_match_knn(left, right, nn, candidates);
 					}
 					_ => {
 						// Check if this is an indexable comparison
@@ -459,20 +459,42 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Try to match a KNN expression to an HNSW index.
-	fn try_match_knn(&self, left: &Expr, right: &Expr, candidates: &mut Vec<IndexCandidate>) {
+	fn try_match_knn(
+		&self,
+		left: &Expr,
+		right: &Expr,
+		nn: &NearestNeighbor,
+		candidates: &mut Vec<IndexCandidate>,
+	) {
+		// Only HNSW-backed (Approximate) KNN uses index scan
+		let (k, ef) = match nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
+			// K (brute-force) and KTree don't use index analysis
+			_ => return,
+		};
+
 		// Extract idiom from left side
 		let idiom = match left {
 			Expr::Idiom(idiom) => idiom,
 			_ => return,
 		};
 
-		// Validate right side is a numeric vector
-		match right {
+		// Extract numeric vector from right side
+		let vector = match right {
 			Expr::Literal(lit) => {
 				if let Some(Value::Array(arr)) = literal_to_value(lit) {
-					if !arr.iter().all(|v| matches!(v, Value::Number(_))) {
+					let nums: Vec<Number> = arr
+						.iter()
+						.filter_map(|v| match v {
+							Value::Number(n) => Some(*n),
+							_ => None,
+						})
+						.collect();
+					if nums.len() != arr.len() {
+						// Not all elements are numbers
 						return;
 					}
+					nums
 				} else {
 					return;
 				}
@@ -497,7 +519,11 @@ impl<'a> IndexAnalyzer<'a> {
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
-					access: BTreeAccess::Knn,
+					access: BTreeAccess::Knn {
+						vector: vector.clone(),
+						k,
+						ef,
+					},
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -615,7 +641,9 @@ impl IndexCandidate {
 				// when the query uses MATCHES
 				score += 800;
 			}
-			BTreeAccess::Knn => {
+			BTreeAccess::Knn {
+				..
+			} => {
 				// KNN search is specialized and should be preferred
 				// when the query uses nearest neighbor operators
 				score += 800;
@@ -640,6 +668,16 @@ impl IndexCandidate {
 				index_ref: self.index_ref.clone(),
 				query: query.clone(),
 				operator: operator.clone(),
+			},
+			BTreeAccess::Knn {
+				vector,
+				k,
+				ef,
+			} => AccessPath::KnnSearch {
+				index_ref: self.index_ref.clone(),
+				vector: vector.clone(),
+				k: *k,
+				ef: *ef,
 			},
 			_ => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),

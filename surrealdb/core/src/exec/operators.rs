@@ -13,6 +13,8 @@ mod ifelse;
 mod index_count_scan;
 mod index_scan;
 mod info;
+mod knn_scan;
+mod knn_topk;
 mod let_plan;
 mod limit;
 mod project;
@@ -46,6 +48,8 @@ pub use index_scan::IndexScan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
+pub use knn_scan::KnnScan;
+pub use knn_topk::KnnTopK;
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use project::{FieldSelection, Project, Projection, SelectProject};

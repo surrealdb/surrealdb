@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use super::common::{BATCH_SIZE, fetch_and_filter_record};
@@ -122,7 +123,9 @@ impl ExecOperator for IndexScan {
 			BTreeAccess::FullText {
 				..
 			}
-			| BTreeAccess::Knn => {
+			| BTreeAccess::Knn {
+				..
+			} => {
 				unreachable!("IndexScan does not support FullText or KNN access")
 			}
 		};
@@ -297,26 +300,37 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Compound index access
+				// Compound index access (streaming)
 				(BTreeAccess::Compound { prefix, range }, _) => {
 					let (beg, end) = compute_compound_key_range(
 						ns_id, db_id, ix, prefix, range.as_ref(),
 					)?;
 
-					let res = txn.scan(beg..end, u32::MAX, 0, None).await
-						.context("Failed to scan index")?;
+					let kv_stream = txn.stream_keys_vals(
+						beg..end,
+						None,  // no version
+						None,  // no limit
+						0,     // no skip
+						crate::idx::planner::ScanDirection::Forward,
+					);
+					futures::pin_mut!(kv_stream);
 
-					for (_, val) in res {
-						let rid: RecordId = revision::from_slice(&val)
-							.context("Failed to decode record id")?;
+					while let Some(kv_batch_result) = kv_stream.next().await {
+						let kv_batch = kv_batch_result
+							.context("Failed to stream compound index keys")?;
 
-						if let Some(value) = fetch_and_filter_record(
-							&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-						).await? {
-							batch.push(value);
-							if batch.len() >= BATCH_SIZE {
-								yield ValueBatch { values: std::mem::take(&mut batch) };
-								batch.reserve(BATCH_SIZE);
+						for (_, val) in kv_batch {
+							let rid: RecordId = revision::from_slice(&val)
+								.context("Failed to decode record id")?;
+
+							if let Some(value) = fetch_and_filter_record(
+								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
+							).await? {
+								batch.push(value);
+								if batch.len() >= BATCH_SIZE {
+									yield ValueBatch { values: std::mem::take(&mut batch) };
+									batch.reserve(BATCH_SIZE);
+								}
 							}
 						}
 					}
@@ -327,7 +341,7 @@ impl ExecOperator for IndexScan {
 				}
 
 				// FullText and KNN should use dedicated operators
-				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn, _) => {
+				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn { .. }, _) => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
 						"IndexScan does not support FullText or KNN access - use dedicated operators"
 					)))?

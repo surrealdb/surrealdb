@@ -3,10 +3,13 @@
 //! These functions have no dependency on `Planner` or `FrozenContext` and perform
 //! static conversions, validation, or predicate checks.
 
+use crate::catalog::Distance;
 use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
-use crate::expr::{BinaryOperator, Cond, Expr, Literal};
+use crate::expr::operator::NearestNeighbor;
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
+use crate::val::Number;
 
 // ============================================================================
 // Literal / Value Conversion
@@ -81,6 +84,7 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // ============================================================================
 
 /// Check if an expression contains KNN (vector search) operators.
+#[allow(dead_code)]
 pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
 	match expr {
 		Expr::Binary {
@@ -98,6 +102,171 @@ pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
 			..
 		} => contains_knn_operator(inner),
 		_ => false,
+	}
+}
+
+/// Parameters extracted from a brute-force KNN expression.
+pub(super) struct BruteForceKnnParams {
+	/// The idiom path to the vector field.
+	pub field: Idiom,
+	/// The query vector.
+	pub vector: Vec<Number>,
+	/// Number of nearest neighbors.
+	pub k: u32,
+	/// Distance metric.
+	pub distance: Distance,
+}
+
+/// Extract brute-force KNN parameters from a WHERE clause.
+///
+/// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
+/// found at the top level of AND-connected conditions.
+/// Also returns the residual condition (with the KNN predicate removed).
+pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<(BruteForceKnnParams, Option<Cond>)> {
+	extract_bruteforce_knn_from_expr(&cond.0)
+		.map(|(params, residual)| (params, residual.map(|e| Cond(e))))
+}
+
+/// Strip any KNN operator from a WHERE clause, returning the residual condition.
+///
+/// Both `NearestNeighbor::Approximate` (HNSW) and `NearestNeighbor::K` (brute-force)
+/// KNN operators cannot be evaluated as boolean predicates. They are handled by
+/// dedicated scan operators (`KnnScan`, `KnnTopK`) and must be removed from the
+/// filter predicate to avoid evaluation errors.
+pub(super) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
+	strip_knn_from_expr(&cond.0).map(Cond)
+}
+
+/// Recursively strip KNN operator expressions from an expression tree.
+///
+/// Returns the expression with KNN operators removed, or `None` if the entire
+/// expression was a KNN operator (nothing left).
+fn strip_knn_from_expr(expr: &Expr) -> Option<Expr> {
+	match expr {
+		// Any NearestNeighbor operator -- strip it entirely
+		Expr::Binary {
+			op: BinaryOperator::NearestNeighbor(_),
+			..
+		} => None,
+		// AND: strip from either side, keeping the other
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => {
+			let stripped_left = strip_knn_from_expr(left);
+			let stripped_right = strip_knn_from_expr(right);
+			match (stripped_left, stripped_right) {
+				(Some(l), Some(r)) => Some(Expr::Binary {
+					left: Box::new(l),
+					op: BinaryOperator::And,
+					right: Box::new(r),
+				}),
+				(Some(l), None) => Some(l),
+				(None, Some(r)) => Some(r),
+				(None, None) => None,
+			}
+		}
+		// No KNN found at this level -- keep unchanged
+		_ => Some(expr.clone()),
+	}
+}
+
+/// Recursively extract brute-force KNN from an expression tree.
+///
+/// Returns `(params, residual_expr)` where `residual_expr` is the remaining
+/// condition after removing the KNN predicate.
+fn extract_bruteforce_knn_from_expr(expr: &Expr) -> Option<(BruteForceKnnParams, Option<Expr>)> {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} => {
+			let NearestNeighbor::K(k, dist) = &**nn else {
+				return None;
+			};
+
+			// Extract idiom from left side
+			let idiom = match left.as_ref() {
+				Expr::Idiom(idiom) => idiom.clone(),
+				_ => return None,
+			};
+
+			// Extract numeric vector from right side
+			let vector = extract_literal_vector(right)?;
+
+			Some((
+				BruteForceKnnParams {
+					field: idiom,
+					vector,
+					k: *k,
+					distance: dist.clone(),
+				},
+				None, // No residual -- the entire expression was the KNN predicate
+			))
+		}
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => {
+			// Try the left side first
+			if let Some((params, residual_left)) = extract_bruteforce_knn_from_expr(left) {
+				let residual = match residual_left {
+					Some(rl) => Some(Expr::Binary {
+						left: Box::new(rl),
+						op: BinaryOperator::And,
+						right: right.clone(),
+					}),
+					None => Some(right.as_ref().clone()),
+				};
+				return Some((params, residual));
+			}
+			// Try the right side
+			if let Some((params, residual_right)) = extract_bruteforce_knn_from_expr(right) {
+				let residual = match residual_right {
+					Some(rr) => Some(Expr::Binary {
+						left: left.clone(),
+						op: BinaryOperator::And,
+						right: Box::new(rr),
+					}),
+					None => Some(left.as_ref().clone()),
+				};
+				return Some((params, residual));
+			}
+			None
+		}
+		_ => None,
+	}
+}
+
+/// Extract a `Vec<Number>` from a literal array expression.
+fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
+	match expr {
+		Expr::Literal(lit) => {
+			if let Literal::Array(arr) = lit {
+				let mut nums = Vec::with_capacity(arr.len());
+				for elem in arr.iter() {
+					match elem {
+						Expr::Literal(Literal::Integer(i)) => {
+							nums.push(Number::Int(*i));
+						}
+						Expr::Literal(Literal::Float(f)) => {
+							nums.push(Number::Float(*f));
+						}
+						Expr::Literal(Literal::Decimal(d)) => {
+							nums.push(Number::Decimal(*d));
+						}
+						_ => return None,
+					}
+				}
+				Some(nums)
+			} else {
+				None
+			}
+		}
+		_ => None,
 	}
 }
 
