@@ -20,11 +20,12 @@ on:
         description: 'crud-bench git revision (commit, tag, or branch)'
         required: false
         type: string
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+  # pull_request trigger disabled temporarily to be able to run manual benchmarks
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
