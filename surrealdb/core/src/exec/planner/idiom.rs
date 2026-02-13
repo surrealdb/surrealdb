@@ -483,7 +483,7 @@ fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecO
 	let embedded: Vec<_> =
 		path.iter().flat_map(|p| p.embedded_operators()).map(|(_, op)| Arc::clone(op)).collect();
 	if embedded.len() == 1 {
-		Some(embedded.into_iter().next().unwrap())
+		Some(embedded.into_iter().next().expect("embedded operator should be present"))
 	} else {
 		None
 	}

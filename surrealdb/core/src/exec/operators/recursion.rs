@@ -6,7 +6,21 @@
 //! and repeatedly evaluates the body path until depth bounds, dead ends, or
 //! cycles are reached.
 //!
-//! In `EXPLAIN` output, this appears as:
+//! ## Stack safety
+//!
+//! The four iterative strategies (Default, Collect, Path, Shortest) are fully
+//! loop-based and use no stack recursion. They are safe at any depth.
+//!
+//! The RepeatRecurse (`@`) tree-building strategy requires true recursion
+//! because the `@` marker is embedded arbitrarily deep inside Destructure
+//! fields. Converting it to a loop would require rewriting the entire
+//! PhysicalExpr evaluation into a continuation-passing style. The recursive
+//! calls use `Box::pin` to allocate each async state machine on the heap,
+//! keeping per-level stack usage minimal. Depth is bounded by `max_depth`
+//! (capped at the system `IDIOM_RECURSION_LIMIT`, default 256).
+//!
+//! ## EXPLAIN output
+//!
 //! ```text
 //! Recurse [ctx: Db] [depth: 3, instruction: default]
 //! └────> GraphEdgeScan [ctx: Db] [direction: ->, tables: person, output: TargetId]
@@ -18,10 +32,10 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream;
 
-use super::super::parts::recurse::value_hash;
 use crate::cnf::IDIOM_RECURSION_LIMIT;
-use crate::exec::parts::recurse::PhysicalRecurseInstruction;
+use crate::exec::parts::recurse::{PhysicalRecurseInstruction, value_hash};
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
 use crate::exec::{
@@ -198,11 +212,11 @@ impl ExecOperator for RecursionOp {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// Clone context and owned data into the stream generator
+		// Clone context and owned data into the async block.
 		let ctx = ctx.clone();
 		let value = ctx.current_value().cloned().unwrap_or(Value::None);
 
-		// Get the system recursion limit
+		// Resolve the effective max depth once.
 		let system_limit = *IDIOM_RECURSION_LIMIT as u32;
 		let max_depth = self.max_depth.unwrap_or(system_limit).min(system_limit);
 
@@ -214,8 +228,9 @@ impl ExecOperator for RecursionOp {
 		let has_repeat_recurse = self.has_repeat_recurse;
 		let metrics = Arc::clone(&self.metrics);
 
-		let stream = async_stream::try_stream! {
-			// Create EvalContext inside the stream where the cloned ctx lives
+		// This operator always yields exactly one batch, so use
+		// stream::once instead of a generator to avoid state-machine overhead.
+		let fut = async move {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 			let result = if has_repeat_recurse {
@@ -266,7 +281,9 @@ impl ExecOperator for RecursionOp {
 						)
 						.await?
 					}
-					PhysicalRecurseInstruction::Shortest { target } => {
+					PhysicalRecurseInstruction::Shortest {
+						target,
+					} => {
 						let target_value = target.evaluate(eval_ctx.with_value(&value)).await?;
 						evaluate_recurse_shortest(
 							&value,
@@ -282,17 +299,17 @@ impl ExecOperator for RecursionOp {
 				}
 			};
 
-			yield ValueBatch {
+			Ok(ValueBatch {
 				values: vec![result],
-			};
+			})
 		};
 
-		Ok(monitor_stream(Box::pin(stream), "Recurse", &metrics))
+		Ok(monitor_stream(Box::pin(stream::once(fut)), "Recurse", &metrics))
 	}
 }
 
 // ============================================================================
-// Recursion evaluation functions (moved from parts/recurse.rs)
+// RepeatRecurse evaluation functions
 // ============================================================================
 
 /// Evaluate a recursion that contains RepeatRecurse markers.
@@ -317,9 +334,11 @@ pub(crate) fn evaluate_recurse_with_plan<'a>(
 			return Ok(value.clone());
 		}
 
-		// Check if the value is final (dead end)
+		// Check if the value is a dead end
 		if is_final(value) {
-			return Ok(clean_iteration(get_final(value)));
+			// get_final already returns the correct terminal value
+			// ([] for arrays, Null for Null, None for everything else).
+			return Ok(get_final(value));
 		}
 
 		// Evaluate the path once on the current value.
@@ -376,15 +395,12 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 				}
 
 				// Apply clean_iteration: filter out dead-end values (None, Null,
-				// all-None arrays) and flatten.  This matches the old compute
-				// path's `clean_iteration` call inside the Destructure plan.
+				// all-None arrays) and flatten.
 				let result = clean_iteration(Value::Array(results.into()));
 
 				// Path elimination: when ALL recursive results are dead ends
 				// (cleaned result is final) and we haven't reached min_depth,
 				// signal elimination so the parent can prune this branch.
-				// Uses strict less-than (`<`) to match the old compute path's
-				// check: `rec.iterated < rec.min`.
 				if is_final(&result) && next_depth < rec_ctx.min_depth {
 					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
 				}
@@ -396,8 +412,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 				let elem_ctx = ctx.with_recursion_ctx(next_ctx);
 				let result = evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await?;
 
-				// Path elimination for single-value dead ends (e.g. a field
-				// that resolves to None because the record doesn't have it).
+				// Path elimination for single-value dead ends
 				if is_final(&result) && next_depth < rec_ctx.min_depth {
 					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
 				}
@@ -408,10 +423,16 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 	})
 }
 
+// ============================================================================
+// Iterative recursion strategies (loop-based, no stack recursion)
+// ============================================================================
+
 /// Default recursion: keep following the path until bounds or dead end.
 ///
 /// Returns the final value after traversing the path up to max_depth times,
 /// or None if min_depth is not reached before termination.
+///
+/// Fully iterative -- uses a while loop with no recursive calls.
 async fn evaluate_recurse_default(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
@@ -425,7 +446,6 @@ async fn evaluate_recurse_default(
 	let mut depth = 0u32;
 
 	while depth < max_depth {
-		// Evaluate the path on the current value
 		let next = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
 
 		depth += 1;
@@ -442,8 +462,6 @@ async fn evaluate_recurse_default(
 			return if depth > min_depth {
 				Ok(current)
 			} else {
-				// Use get_final to preserve the value's type:
-				// Array → [], Null → Null, _ → None
 				Ok(get_final(&next))
 			};
 		}
@@ -451,11 +469,7 @@ async fn evaluate_recurse_default(
 		current = next;
 	}
 
-	// If the user did NOT specify an explicit max bound, and we exhausted
-	// the system recursion limit, that means the recursion was unbounded
-	// and never resolved → error.  When the user DID specify max (e.g.
-	// `{..256}`), reaching that depth is a normal successful termination,
-	// matching the old compute path's `if let Some(max) = rec.max` branch.
+	// Exhausted depth limit without resolving
 	if !user_specified_max && depth >= system_limit {
 		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
 			limit: system_limit,
@@ -463,7 +477,6 @@ async fn evaluate_recurse_default(
 		.into());
 	}
 
-	// Reached max depth
 	if depth >= min_depth {
 		Ok(current)
 	} else {
@@ -475,6 +488,8 @@ async fn evaluate_recurse_default(
 ///
 /// Uses breadth-first search to collect all reachable nodes, respecting
 /// depth bounds and avoiding cycles via hash-based deduplication.
+///
+/// Fully iterative -- frontier-based BFS loop.
 async fn evaluate_recurse_collect(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
@@ -487,7 +502,6 @@ async fn evaluate_recurse_collect(
 	let mut seen: HashSet<u64> = HashSet::new();
 	let mut frontier = vec![start.clone()];
 
-	// Include starting node if inclusive
 	if inclusive {
 		collected.push(start.clone());
 		seen.insert(value_hash(start));
@@ -501,9 +515,10 @@ async fn evaluate_recurse_collect(
 		for value in frontier {
 			let result = evaluate_physical_path(&value, path, ctx.with_value(&value)).await?;
 
-			// Process result (may be single value or array)
+			// Destructure directly into the inner Vec to avoid
+			// iterator + collect overhead.
 			let values = match result {
-				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::Array(arr) => arr.0,
 				Value::None | Value::Null => continue,
 				other => vec![other],
 			};
@@ -515,10 +530,8 @@ async fn evaluate_recurse_collect(
 
 				let hash = value_hash(&v);
 				if seen.insert(hash) {
-					// Only collect nodes discovered at or beyond
-					// min_depth. Nodes below the threshold still
-					// need to be traversed (they are intermediaries)
-					// but should not appear in the output.
+					// Only collect nodes discovered at or beyond min_depth.
+					// Nodes below the threshold are traversed but not emitted.
 					if depth + 1 >= min_depth {
 						collected.push(v.clone());
 					}
@@ -538,6 +551,8 @@ async fn evaluate_recurse_collect(
 ///
 /// Tracks all possible paths through the graph, returning each complete
 /// path as an array. Paths terminate at dead ends or max depth.
+///
+/// Fully iterative -- BFS loop over active paths.
 async fn evaluate_recurse_path(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
@@ -558,15 +573,15 @@ async fn evaluate_recurse_path(
 	while depth < max_depth && !active_paths.is_empty() {
 		let mut next_paths = Vec::new();
 
-		for current_path in active_paths {
+		for mut current_path in active_paths {
 			let current_value = current_path.last().unwrap_or(start);
 			let result =
 				evaluate_physical_path(current_value, path, ctx.with_value(current_value)).await?;
 
+			// Destructure directly into the inner Vec.
 			let values = match result {
-				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::Array(arr) => arr.0,
 				Value::None | Value::Null => {
-					// Dead end - path is complete if min depth reached
 					if depth >= min_depth && !current_path.is_empty() {
 						completed_paths.push(Value::Array(current_path.into()));
 					}
@@ -575,20 +590,29 @@ async fn evaluate_recurse_path(
 				other => vec![other],
 			};
 
-			if values.is_empty() || values.iter().all(is_final) {
-				// Dead end
+			// Single pass: extend paths for non-final values, detect dead ends.
+			// On the last non-final value we move current_path instead of cloning
+			// to save one allocation per branch point.
+			let mut non_final = values.into_iter().filter(|v| !is_final(v)).peekable();
+
+			if non_final.peek().is_none() {
+				// All values were final -- dead end
 				if depth >= min_depth && !current_path.is_empty() {
 					completed_paths.push(Value::Array(current_path.into()));
 				}
 			} else {
-				// Extend path with each new value
-				for v in values {
-					if is_final(&v) {
-						continue;
+				while let Some(v) = non_final.next() {
+					if non_final.peek().is_some() {
+						// More successors to come -- clone the path prefix
+						let mut new_path = current_path.clone();
+						new_path.push(v);
+						next_paths.push(new_path);
+					} else {
+						// Last successor -- move the path prefix (saves a clone)
+						current_path.push(v);
+						next_paths.push(current_path);
+						break;
 					}
-					let mut new_path = current_path.clone();
-					new_path.push(v);
-					next_paths.push(new_path);
 				}
 			}
 		}
@@ -611,6 +635,8 @@ async fn evaluate_recurse_path(
 ///
 /// Returns the first (shortest) path found to the target, or None if the
 /// target is not reachable within max_depth.
+///
+/// Fully iterative -- level-based BFS loop.
 async fn evaluate_recurse_shortest(
 	start: &Value,
 	target: &Value,
@@ -622,7 +648,6 @@ async fn evaluate_recurse_shortest(
 ) -> FlowResult<Value> {
 	let mut seen: HashSet<u64> = HashSet::new();
 
-	// BFS with path tracking
 	let initial_path = if inclusive {
 		vec![start.clone()]
 	} else {
@@ -642,8 +667,9 @@ async fn evaluate_recurse_shortest(
 
 			let result = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
 
+			// Destructure directly into the inner Vec.
 			let values = match result {
-				Value::Array(arr) => arr.into_iter().collect::<Vec<_>>(),
+				Value::Array(arr) => arr.0,
 				Value::None | Value::Null => continue,
 				other => vec![other],
 			};
