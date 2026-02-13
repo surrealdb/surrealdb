@@ -1,4 +1,6 @@
-use std::{any::Any, hint::unreachable_unchecked, time::Duration};
+use std::any::Any;
+use std::hint::unreachable_unchecked;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
@@ -10,8 +12,8 @@ pub const MAX_TIMESTAMP_BYTES: usize = 32;
 /// Should not be created manually but retrieved from the KV store.
 pub trait TimeStampImpl: Any + Send + Sync {
 	fn earliest(&self) -> BoxTimeStamp;
-	/// Create a timestamp from a versionstamp, can return `None` if the versionstamp is out of range from
-	/// the timestamp
+	/// Create a timestamp from a versionstamp, can return `None` if the versionstamp is out of
+	/// range from the timestamp
 	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp>;
 
 	/// Create a timestamp from a duration, can return `None` if the datetime is out of range from
