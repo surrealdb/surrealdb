@@ -364,10 +364,12 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 				v if !is_final(v) && is_recursion_target(v) => vec![v.clone()],
 				_ => vec![],
 			};
-			if !values_to_write.is_empty() {
-				let mut guard = sink.lock().expect("discovery sink lock poisoned");
-				guard.extend(values_to_write);
-			}
+		if !values_to_write.is_empty() {
+			let mut guard = sink.lock().map_err(|_| {
+				ControlFlow::Err(anyhow::anyhow!("recursion discovery sink mutex poisoned"))
+			})?;
+			guard.extend(values_to_write);
+		}
 			// Return a placeholder -- the discovery phase discards results.
 			return Ok(value.clone());
 		}
@@ -544,10 +546,14 @@ async fn evaluate_recurse_iterative(
 				}
 			}
 
-			// Extract discovered values from the sink.
-			// We use lock+take instead of Arc::try_unwrap because the cloned
-			// RecursionCtx instances may still hold Arc references to the sink.
-			raw_discovered = std::mem::take(&mut *sink.lock().expect("sink lock poisoned"));
+		// Extract discovered values from the sink.
+		// We use lock+take instead of Arc::try_unwrap because the cloned
+		// RecursionCtx instances may still hold Arc references to the sink.
+		raw_discovered = std::mem::take(
+			&mut *sink.lock().map_err(|_| {
+				ControlFlow::Err(anyhow::anyhow!("recursion discovery sink mutex poisoned"))
+			})?,
+		);
 		}
 
 		// Per-level deduplication.
@@ -895,7 +901,9 @@ async fn evaluate_recurse_shortest(
 		let level_size = queue.len();
 
 		for _ in 0..level_size {
-			let (current, current_path) = queue.pop_front().expect("queue checked non-empty");
+			let Some((current, current_path)) = queue.pop_front() else {
+				break;
+			};
 
 			let result = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
 
