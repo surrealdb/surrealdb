@@ -196,10 +196,10 @@ impl IndexRangeIterator {
 		let mut records = Vec::with_capacity(res.len());
 		for (key, val) in res {
 			// Skip begin key if exclusive and this is the first batch
-			if let Some(ref exclusive_beg) = check_exclusive_beg {
-				if key == *exclusive_beg {
-					continue;
-				}
+			if let Some(ref exclusive_beg) = check_exclusive_beg
+				&& key == *exclusive_beg
+			{
+				continue;
 			}
 
 			let rid: RecordId = revision::from_slice(&val)?;

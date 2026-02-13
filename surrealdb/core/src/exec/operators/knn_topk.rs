@@ -192,11 +192,11 @@ impl ExecOperator for KnnTopK {
 
 					if heap.len() >= k {
 						// Heap is full -- only insert if closer than the farthest
-						if let Some(worst) = heap.peek() {
-							if entry.distance < worst.0.distance {
-								heap.push(std::cmp::Reverse(entry));
-								heap.pop();
-							}
+						if let Some(worst) = heap.peek()
+							&& entry.distance < worst.0.distance
+						{
+							heap.push(std::cmp::Reverse(entry));
+							heap.pop();
 						}
 					} else {
 						heap.push(std::cmp::Reverse(entry));
