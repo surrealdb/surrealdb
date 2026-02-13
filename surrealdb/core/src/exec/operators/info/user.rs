@@ -75,11 +75,14 @@ impl ExecOperator for UserInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.context_level_for_base()
+		// Combine the base-level context with the user expression's context
+		self.user.required_context().max(self.context_level_for_base())
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the user expression could
+		// theoretically contain a mutation subquery.
+		self.user.access_mode()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

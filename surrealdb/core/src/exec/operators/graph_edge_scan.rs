@@ -122,7 +122,8 @@ impl ExecOperator for GraphEdgeScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// GraphEdgeScan needs database context, combined with expression contexts
+		self.input.required_context().max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {

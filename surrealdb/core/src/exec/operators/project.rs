@@ -154,12 +154,20 @@ impl ExecOperator for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// When include_all is true, we may need to dereference RecordIds,
-		// which requires database access
+		// Combine field expression contexts with child operator context.
+		// When include_all is true, we additionally need database access
+		// to dereference RecordIds.
+		let fields_ctx = self
+			.fields
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let base = self.input.required_context().max(fields_ctx);
 		if self.include_all {
-			ContextLevel::Database.max(self.input.required_context())
+			base.max(ContextLevel::Database)
 		} else {
-			self.input.required_context()
+			base
 		}
 	}
 

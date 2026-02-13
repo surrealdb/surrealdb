@@ -23,8 +23,8 @@ impl PhysicalExpr for ScalarSubquery {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Subqueries execute against the database
-		crate::exec::ContextLevel::Database
+		// Delegate to the subquery plan's context requirements
+		self.plan.required_context()
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {

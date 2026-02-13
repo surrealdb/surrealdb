@@ -69,15 +69,14 @@ impl ExecOperator for Compute {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Compute needs Database for expression evaluation, but also
-		// inherits child requirements (take the maximum)
+		// Combine field expression contexts with child operator context
 		let expr_ctx = self
 			.fields
 			.iter()
 			.map(|(_, expr)| expr.required_context())
 			.max()
 			.unwrap_or(ContextLevel::Root);
-		ContextLevel::Database.max(self.input.required_context()).max(expr_ctx)
+		self.input.required_context().max(expr_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {

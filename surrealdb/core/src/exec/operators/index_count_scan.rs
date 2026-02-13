@@ -105,7 +105,11 @@ impl ExecOperator for IndexCountScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// IndexCountScan needs database context, combined with expression contexts
+		self.source
+			.required_context()
+			.max(self.predicate.required_context())
+			.max(ContextLevel::Database)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

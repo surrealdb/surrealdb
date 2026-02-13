@@ -49,9 +49,8 @@ impl ExecOperator for Filter {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Filter needs Database for expression evaluation, but also
-		// inherits child requirements (take the maximum)
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine predicate expression context with child operator context
+		self.predicate.required_context().max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {

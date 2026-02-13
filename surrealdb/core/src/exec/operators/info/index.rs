@@ -66,11 +66,14 @@ impl ExecOperator for IndexInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Index info needs database context, combined with expression contexts
+		self.index.required_context().max(self.table.required_context()).max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the index/table expressions
+		// could theoretically contain mutation subqueries.
+		self.index.access_mode().combine(self.table.access_mode())
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
