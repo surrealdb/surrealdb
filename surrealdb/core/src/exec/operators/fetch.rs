@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use crate::catalog::providers::TableProvider;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	ValueBatch, ValueBatchStream, monitor_stream,
@@ -229,33 +230,33 @@ async fn fetch_value_if_record(
 }
 
 /// Fetch a single record by its ID.
+///
+/// Uses the transaction record cache so repeated fetches of the same record
+/// within a transaction only hit the datastore once.
 pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	// Get the database context
 	let db_ctx = ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
-
-	// Read the record from the datastore
 	let txn = db_ctx.txn();
-	let key = crate::key::record::new(
-		db_ctx.ns_ctx.ns.namespace_id,
-		db_ctx.db.database_id,
-		&rid.table,
-		&rid.key,
-	);
 
-	match txn.get(&key, None).await {
-		Ok(Some(record)) => {
-			// Extract the Value from the Record
-			let mut val = record.data.as_ref().clone();
-			// Inject the record ID
-			val.def(rid);
-			Ok(val)
-		}
-		Ok(None) => Ok(Value::None),
-		Err(e) => Err(crate::expr::ControlFlow::Err(e)),
+	let record = txn
+		.get_record(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+			None,
+		)
+		.await
+		.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+
+	let mut val = record.data.as_ref().clone();
+	if val.is_none() {
+		return Ok(Value::None);
 	}
+	val.def(rid);
+	Ok(val)
 }
 
 /// Batch fetch multiple records by their IDs concurrently.
