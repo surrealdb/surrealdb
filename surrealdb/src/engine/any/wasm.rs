@@ -93,7 +93,7 @@ impl conn::Sealed for Any {
 			return Err(Error::Ws("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 				}
 
-				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
+				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);

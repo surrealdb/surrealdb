@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-#![cfg(feature = "kv-surrealkv")]
+#![cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 
 use surrealdb::opt::Config;
 use surrealdb_core::cnf::EXPORT_BATCH_SIZE;

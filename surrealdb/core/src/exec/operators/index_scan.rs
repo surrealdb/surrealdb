@@ -303,7 +303,7 @@ impl ExecOperator for IndexScan {
 						ns_id, db_id, ix, prefix, range.as_ref(),
 					)?;
 
-					let res = txn.scan(beg..end, u32::MAX, None).await
+					let res = txn.scan(beg..end, u32::MAX, 0, None).await
 						.context("Failed to scan index")?;
 
 					for (_, val) in res {

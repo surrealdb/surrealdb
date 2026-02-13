@@ -228,15 +228,13 @@ pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child)
 	.await
 }
 
-pub async fn start_server_with_versioning() -> Result<(TempDir, String, Child), Box<dyn Error>> {
-	let dir = tempfile::tempdir().unwrap();
-	let (addr, server) = start_server(StartServerArguments {
-		path: Some(format!("surrealkv+versioned:{}", dir.path().display())),
+pub async fn start_server_with_versioning() -> Result<(String, Child), Box<dyn Error>> {
+	start_server(StartServerArguments {
+		path: Some("memory?versioned=true".to_string()),
 		auth: false,
 		..Default::default()
 	})
-	.await?;
-	Ok((dir, addr, server))
+	.await
 }
 
 pub async fn start_server(

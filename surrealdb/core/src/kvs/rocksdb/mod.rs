@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 
 use super::Direction;
 use super::api::ScanLimit;
+use super::config::{RocksDbConfig, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
@@ -68,7 +69,7 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, config: RocksDbConfig) -> Result<Datastore> {
 		// Configure custom options
 		let mut opts = Options::default();
 		// Ensure we use fdatasync
@@ -157,8 +158,6 @@ impl Datastore {
 		// Improve concurrency from write batch mutex
 		info!(target: TARGET, "Allow adaptive write thread yielding: true");
 		opts.set_enable_write_thread_adaptive_yield(true);
-		// Log if writes should be synced
-		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -205,10 +204,15 @@ impl Datastore {
 		let memory_manager = Arc::new(MemoryManager::configure(&mut opts)?);
 		// Pre-configure the disk space manager
 		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
-		// Pre-configure the background flusher
-		let should_create_background_flusher = BackgroundFlusher::configure(&mut opts)?;
-		// Pre-configure the commit coordinator
-		let should_create_commit_coordinator = CommitCoordinator::configure(&mut opts)?;
+		// Pre-configure WAL options based on the resolved sync mode
+		match config.sync_mode {
+			// Pre-configure the background flusher
+			SyncMode::Interval(_) => BackgroundFlusher::configure(&mut opts, &config),
+			// Pre-configure the commit coordinator
+			SyncMode::Every => CommitCoordinator::configure(&mut opts, &config),
+			// No configuration needed
+			SyncMode::Never => {}
+		};
 		// Create the disk space manager if enabled
 		let disk_space_manager = if should_create_disk_space_manager {
 			Some(Arc::new(DiskSpaceManager::new(&mut opts)?))
@@ -217,18 +221,27 @@ impl Datastore {
 		};
 		// Open the database
 		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-		// Create the background flusher if enabled
-		let background_flusher = if should_create_background_flusher {
-			Some(Arc::new(BackgroundFlusher::new(db.clone())?))
-		} else {
-			None
-		};
 		// Create the commit coordinator if enabled
-		let commit_coordinator = if should_create_commit_coordinator {
+		let commit_coordinator = if let SyncMode::Every = config.sync_mode {
 			Some(Arc::new(CommitCoordinator::new(db.clone())?))
 		} else {
 			None
 		};
+		// Create the background flusher if enabled
+		let background_flusher = if let SyncMode::Interval(interval) = config.sync_mode {
+			Some(Arc::new(BackgroundFlusher::new(db.clone(), interval)?))
+		} else {
+			None
+		};
+		// Defer to the operating system buffers for disk sync. This means that the
+		// transaction commits are written to WAL on commit, but are then flushed
+		// to disk by the operating system at an unspecified time. In the event of
+		// a system crash, data may be lost if the operating system has not yet
+		// synced the data to disk.
+		if let SyncMode::Never = config.sync_mode {
+			info!(target: TARGET, "Sync mode: never (handled by the OS");
+			opts.set_manual_wal_flush(false);
+		}
 		// Register the memory manager with the global allocator tracker
 		memory_manager.register_with_allocator_tracker();
 		// Return the datastore
@@ -320,12 +333,10 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		// If the user has enabled synced transaction writes and disabled grouped commit,
-		// we enable per-transaction sync. This means that the transaction commits are written
-		// to WAL on commit, and are then flushed to disk before the transaction is considered
-		// completed. In the event of a system crash, data will not be lost after a transaction
-		// has been confirmed to be committed.
-		wo.set_sync(*cnf::SYNC_DATA && !*cnf::ROCKSDB_GROUPED_COMMIT);
+		// Per-transaction sync is never used. When sync=every is configured, the commit
+		// coordinator handles grouped fsync after parallel transaction commits. When
+		// sync=<interval> or sync=never, no per-transaction fsync is needed either.
+		wo.set_sync(false);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
 		// SAFETY: The transaction lifetime is tied to the database through the db field.
@@ -750,6 +761,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
@@ -780,7 +792,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit, Direction::Forward);
+		let res = consume_keys(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -793,6 +805,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
@@ -823,7 +836,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Consume the iterator
-		let res = consume_keys(&mut iter, limit, Direction::Backward);
+		let res = consume_keys(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -836,6 +849,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -866,7 +880,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek(&rng.start);
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit, Direction::Forward);
+		let res = consume_vals(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -879,6 +893,7 @@ impl Transactable for Transaction {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -909,7 +924,7 @@ impl Transactable for Transaction {
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
 		// Consume the iterator
-		let res = consume_vals(&mut iter, limit, Direction::Backward);
+		let res = consume_vals(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -953,8 +968,20 @@ impl Transactable for Transaction {
 fn consume_keys<D: rocksdb::DBAccess>(
 	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
 	limit: ScanLimit,
+	skip: u32,
 	dir: Direction,
 ) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set
@@ -1026,8 +1053,20 @@ fn consume_keys<D: rocksdb::DBAccess>(
 fn consume_vals<D: rocksdb::DBAccess>(
 	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
 	limit: ScanLimit,
+	skip: u32,
 	dir: Direction,
 ) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
 	match limit {
 		ScanLimit::Count(c) => {
 			// Create the result set

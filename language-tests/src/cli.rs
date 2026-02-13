@@ -37,27 +37,19 @@ pub enum Backend {
 	Memory,
 	RocksDb,
 	SurrealKv,
-	SurrealKvVersioned,
 	TikV,
 }
 
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[
-			Backend::Memory,
-			Backend::RocksDb,
-			Backend::SurrealKv,
-			Backend::SurrealKvVersioned,
-			Backend::TikV,
-		]
+		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
 			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
-			Backend::SurrealKvVersioned => Some(PossibleValue::new("surrealkv+versioned")),
+			Backend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
 		}
 	}
@@ -69,7 +61,6 @@ impl Display for Backend {
 			Self::Memory => f.write_str("mem"),
 			Self::RocksDb => f.write_str("rocksdb"),
 			Self::SurrealKv => f.write_str("surrealkv"),
-			Self::SurrealKvVersioned => f.write_str("surrealkv+versioned"),
 			Self::TikV => f.write_str("tikv"),
 		}
 	}
@@ -89,7 +80,7 @@ impl ValueEnum for UpgradeBackend {
 	fn to_possible_value(&self) -> Option<PossibleValue> {
 		match self {
 			UpgradeBackend::RocksDb => Some(PossibleValue::new("rocksdb")),
-			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			UpgradeBackend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 		}
 	}
 }

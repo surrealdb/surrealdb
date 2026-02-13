@@ -1403,9 +1403,8 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
-	#[cfg(feature = "storage-surrealkv")]
 	async fn version() -> Result<(), Box<dyn std::error::Error>> {
-		let (_dir, addr, _server) = common::start_server_with_versioning().await.unwrap();
+		let (addr, _server) = common::start_server_with_versioning().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
 		let sql_url = &format!("http://{addr}/sql");
 

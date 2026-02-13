@@ -204,10 +204,6 @@ pub enum Error {
 	#[error("Tried to send a value which could not be serialized: {0}")]
 	UnserializableValue(String),
 
-	/// The engine used does not support data versioning
-	#[error("The '{0}' engine does not support data versioning")]
-	VersionsNotSupported(String),
-
 	/// Method not found
 	#[error("Method not found: {0}")]
 	MethodNotFound(String),
@@ -457,10 +453,6 @@ impl From<Error> for DbResultError {
 				DbResultError::InternalError(format!("Invalid response: {}", msg))
 			}
 			Error::UnserializableValue(msg) => DbResultError::SerializationError(msg),
-			Error::VersionsNotSupported(engine) => DbResultError::MethodNotAllowed(format!(
-				"The '{}' engine does not support data versioning",
-				engine
-			)),
 			Error::MethodNotFound(msg) => DbResultError::MethodNotFound(msg),
 			Error::MethodNotAllowed(msg) => DbResultError::MethodNotAllowed(msg),
 			Error::BadLiveQueryConfig(msg) => DbResultError::BadLiveQueryConfig(msg),
