@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, stream};
 
 use crate::exec::parts::is_final;
 use crate::exec::{BoxFut, ExecOperator, ExecutionContext, FlowResult};
@@ -45,10 +45,7 @@ pub(crate) async fn eval_buffered<'a, T: 'a>(
 		}
 		Ok(results)
 	} else {
-		stream::iter(futures)
-			.buffered(RECURSION_CONCURRENCY)
-			.try_collect()
-			.await
+		stream::iter(futures).buffered(RECURSION_CONCURRENCY).try_collect().await
 	}
 }
 
@@ -66,10 +63,7 @@ pub(crate) async fn eval_buffered_all<'a>(
 		}
 		results
 	} else {
-		stream::iter(futures)
-			.buffered(RECURSION_CONCURRENCY)
-			.collect()
-			.await
+		stream::iter(futures).buffered(RECURSION_CONCURRENCY).collect().await
 	}
 }
 

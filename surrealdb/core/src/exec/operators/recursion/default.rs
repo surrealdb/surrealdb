@@ -31,13 +31,15 @@
 //!
 //! 1. **Initial:** `current = planet:earth`, `depth = 0`.
 //!
-//! 2. **Iteration 1:** `next = evaluate_physical_path(current, path)` → e.g. `[country:us, country:canada]`.
+//! 2. **Iteration 1:** `next = evaluate_physical_path(current, path)` → e.g. `[country:us,
+//!    country:canada]`.
 //!    - `depth` becomes 1.
 //!    - `clean_iteration(next)` leaves an array (not a dead end).
 //!    - `is_final(next)` is false, `next != current`, so we do not return.
 //!    - `current = next` → `current` is now the countries array.
 //!
-//! 3. **Iteration 2:** `next = evaluate_physical_path(current, path)` → e.g. `[state:california, state:texas, province:ontario, province:bc]`.
+//! 3. **Iteration 2:** `next = evaluate_physical_path(current, path)` → e.g. `[state:california,
+//!    state:texas, province:ontario, province:bc]`.
 //!    - `depth` becomes 2.
 //!    - Not final, not equal to current; `current = next` (states/provinces).
 //!
@@ -57,9 +59,9 @@ use std::sync::Arc;
 
 use super::common::is_recursion_target;
 use crate::cnf::IDIOM_RECURSION_LIMIT;
+use crate::exec::FlowResult;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::FlowResult;
 use crate::val::Value;
 
 /// Default recursion: keep following the path until bounds or dead end.

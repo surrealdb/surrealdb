@@ -40,29 +40,29 @@
 //!    `next_paths` has 2 paths. `active_paths = next_paths`, `depth = 1`.
 //!
 //! 3. **Iteration 2:** Expand [planet:earth, country:us] from country:us → state:california,
-//!    state:texas; expand [planet:earth, country:canada] → province:ontario, province:bc.
-//!    Each yields two new paths (clone path prefix + one successor, or move for the last).
-//!    So we get 4 paths of length 3. If `depth >= min_depth` and we hit a dead end on some
-//!    branch, that path is pushed to `completed_paths`. `depth = 2`.
+//!    state:texas; expand [planet:earth, country:canada] → province:ontario, province:bc. Each
+//!    yields two new paths (clone path prefix + one successor, or move for the last). So we get 4
+//!    paths of length 3. If `depth >= min_depth` and we hit a dead end on some branch, that path is
+//!    pushed to `completed_paths`. `depth = 2`.
 //!
-//! 4. **Iteration 3:** Expand the 4 paths from their leaf nodes (states/provinces) to cities.
-//!    Each state/province may have 2 cities, so we get many new paths. Paths that reach a
-//!    dead end (city with no contains) are completed and pushed to `completed_paths`.
-//!    `depth = 3`.
+//! 4. **Iteration 3:** Expand the 4 paths from their leaf nodes (states/provinces) to cities. Each
+//!    state/province may have 2 cities, so we get many new paths. Paths that reach a dead end (city
+//!    with no contains) are completed and pushed to `completed_paths`. `depth = 3`.
 //!
-//! 5. **Loop exit:** `depth (3) < max_depth (3)` is false → exit. Any remaining `active_paths`
-//!    that reached max_depth without a dead end are appended to `completed_paths`. Return
+//! 5. **Loop exit:** `depth (3) < max_depth (3)` is false → exit. Any remaining `active_paths` that
+//!    reached max_depth without a dead end are appended to `completed_paths`. Return
 //!    `Value::Array(completed_paths)` — each element is `Value::Array(path)`.
 //!
-//! Result: e.g. `[[planet:earth, country:us, state:california], [planet:earth, country:us, state:texas],
-//! [planet:earth, country:canada, province:ontario], [planet:earth, country:canada, province:bc], ...]`.
+//! Result: e.g. `[[planet:earth, country:us, state:california], [planet:earth, country:us,
+//! state:texas], [planet:earth, country:canada, province:ontario], [planet:earth, country:canada,
+//! province:bc], ...]`.
 
 use std::sync::Arc;
 
 use super::common::{eval_buffered, is_recursion_target};
+use crate::exec::FlowResult;
 use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::FlowResult;
 use crate::val::Value;
 
 /// Path recursion: return all paths as arrays of arrays.

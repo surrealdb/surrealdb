@@ -31,24 +31,23 @@
 //! Internal state: `queue` (FIFO of `(node, path_so_far)`), `seen` (hashes of visited
 //! nodes so we do not re-enqueue the same node), `depth` (current BFS level).
 //!
-//! 1. **Initial:** `queue = [(planet:earth, [planet:earth])]` (if inclusive), `seen = {planet:earth}`,
-//!    `depth = 0`.
+//! 1. **Initial:** `queue = [(planet:earth, [planet:earth])]` (if inclusive), `seen =
+//!    {planet:earth}`, `depth = 0`.
 //!
 //! 2. **Iteration 1:** Process all nodes at this level (`level_size = queue.len()`). Pop
-//!    (planet:earth, path). Evaluate path(planet:earth) → [country:us, country:canada]. For
-//!    each successor: if it equals `target` (city:vancouver), we're not at min_depth yet (1 >= 1
-//!    but we're still at depth 0 before increment), so we only check target when `depth + 1 >= min_depth`.
-//!    Neither country is the target. Add (country:us, [planet:earth, country:us]) and
-//!    (country:canada, [planet:earth, country:canada]) to queue if not in `seen`. Then
-//!    `depth = 1`.
+//!    (planet:earth, path). Evaluate path(planet:earth) → [country:us, country:canada]. For each
+//!    successor: if it equals `target` (city:vancouver), we're not at min_depth yet (1 >= 1 but
+//!    we're still at depth 0 before increment), so we only check target when `depth + 1 >=
+//!    min_depth`. Neither country is the target. Add (country:us, [planet:earth, country:us]) and
+//!    (country:canada, [planet:earth, country:canada]) to queue if not in `seen`. Then `depth = 1`.
 //!
 //! 3. **Iteration 2:** Process level: expand country:us and country:canada to states/provinces.
 //!    None is city:vancouver. Enqueue (state:california, path), (state:texas, path),
 //!    (province:ontario, path), (province:bc, path). `depth = 2`.
 //!
 //! 4. **Iteration 3:** Expand states/provinces to cities. When we expand province:bc we get
-//!    city:vancouver. Check: `depth + 1 (3) >= min_depth (1)` and `v == target` → found.
-//!    Build `final_path = current_path + city:vancouver`, return `Ok(Value::Array(final_path))`
+//!    city:vancouver. Check: `depth + 1 (3) >= min_depth (1)` and `v == target` → found. Build
+//!    `final_path = current_path + city:vancouver`, return `Ok(Value::Array(final_path))`
 //!    immediately.
 //!
 //! Result: e.g. `[planet:earth, country:canada, province:bc, city:vancouver]`. If the target
@@ -59,10 +58,10 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use super::common::{eval_buffered, is_recursion_target};
+use crate::exec::FlowResult;
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::FlowResult;
 use crate::val::Value;
 
 /// Shortest path recursion: find the shortest path to a target node using BFS.

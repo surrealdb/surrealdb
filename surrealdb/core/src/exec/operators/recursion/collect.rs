@@ -31,22 +31,20 @@
 //! Internal state: `collected` (output list), `seen` (hashes of nodes already visited),
 //! `frontier` (nodes to expand at current depth), `depth` (current level).
 //!
-//! 1. **Initial:** `frontier = [planet:earth]`, `collected = []`, `seen = {}`, `depth = 0`.
-//!    If `inclusive`: push start into `collected` and `seen`.
+//! 1. **Initial:** `frontier = [planet:earth]`, `collected = []`, `seen = {}`, `depth = 0`. If
+//!    `inclusive`: push start into `collected` and `seen`.
 //!
-//! 2. **Iteration 1 (depth 0):** For each value in `frontier` (planet:earth), evaluate path
-//!    → e.g. `[country:us, country:canada]`. For each `v`: if `v` not in `seen`, insert hash
-//!    into `seen`; if `depth + 1 >= min_depth` (1 >= 1), push `v` into `collected`; push `v`
-//!    into `next_frontier`. Then `frontier = next_frontier` = [country:us, country:canada],
-//!    `depth = 1`.
+//! 2. **Iteration 1 (depth 0):** For each value in `frontier` (planet:earth), evaluate path → e.g.
+//!    `[country:us, country:canada]`. For each `v`: if `v` not in `seen`, insert hash into `seen`;
+//!    if `depth + 1 >= min_depth` (1 >= 1), push `v` into `collected`; push `v` into
+//!    `next_frontier`. Then `frontier = next_frontier` = [country:us, country:canada], `depth = 1`.
 //!
-//! 3. **Iteration 2 (depth 1):** Expand country:us → states; country:canada → provinces.
-//!    Each new node (state:california, state:texas, province:ontario, province:bc) is
-//!    added to `seen`, to `collected` (2 >= 1), and to `next_frontier`. `frontier` = those
-//!    four, `depth = 2`.
+//! 3. **Iteration 2 (depth 1):** Expand country:us → states; country:canada → provinces. Each new
+//!    node (state:california, state:texas, province:ontario, province:bc) is added to `seen`, to
+//!    `collected` (2 >= 1), and to `next_frontier`. `frontier` = those four, `depth = 2`.
 //!
-//! 4. **Iteration 3 (depth 2):** Expand each state/province to cities. New nodes (cities)
-//!    go into `seen`, `collected` (3 >= 1), and `next_frontier`. `depth = 3`.
+//! 4. **Iteration 3 (depth 2):** Expand each state/province to cities. New nodes (cities) go into
+//!    `seen`, `collected` (3 >= 1), and `next_frontier`. `depth = 3`.
 //!
 //! 5. **Loop exit:** `depth (3) < max_depth (3)` is false → exit. Return `Value::Array(collected)`.
 //!
@@ -57,10 +55,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::common::{eval_buffered, is_recursion_target};
+use crate::exec::FlowResult;
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::FlowResult;
 use crate::val::Value;
 
 /// Collect recursion: gather all unique nodes encountered during BFS traversal.

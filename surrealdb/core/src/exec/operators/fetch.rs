@@ -249,7 +249,7 @@ pub(crate) async fn fetch_record(
 			None,
 		)
 		.await
-		.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+		.map_err(crate::expr::ControlFlow::Err)?;
 
 	let mut val = record.data.as_ref().clone();
 	if val.is_none() {

@@ -33,18 +33,17 @@
 //!
 //! 1. **Initial:** `levels[0] = [planet:earth]`.
 //!
-//! 2. **Depth 0:** For each value in `levels[0]`, evaluate the full path with `@` in
-//!    *discovery* mode: the `@` writes its inputs (the children) into a shared `sink`
-//!    instead of recursing. So path(planet:earth) pushes country:us, country:canada into
-//!    the sink. Deduplicate within level → `next_level = [country:us, country:canada]`.
-//!    `levels = [[planet:earth], [country:us, country:canada]]`.
+//! 2. **Depth 0:** For each value in `levels[0]`, evaluate the full path with `@` in *discovery*
+//!    mode: the `@` writes its inputs (the children) into a shared `sink` instead of recursing. So
+//!    path(planet:earth) pushes country:us, country:canada into the sink. Deduplicate within level
+//!    → `next_level = [country:us, country:canada]`. `levels = [[planet:earth], [country:us,
+//!    country:canada]]`.
 //!
-//! 3. **Depth 1:** Evaluate path for country:us and country:canada; `@` writes states and
-//!    provinces into the sink. `levels` gains a third row: states and provinces.
+//! 3. **Depth 1:** Evaluate path for country:us and country:canada; `@` writes states and provinces
+//!    into the sink. `levels` gains a third row: states and provinces.
 //!
-//! 4. **Depth 2:** Same for states/provinces → cities. Then no new nodes (cities have no
-//!    contains), so `next_level` is empty and we break. We now have `levels[0..=3]` with
-//!    no stack recursion.
+//! 4. **Depth 2:** Same for states/provinces → cities. Then no new nodes (cities have no contains),
+//!    so `next_level` is empty and we break. We now have `levels[0..=3]` with no stack recursion.
 //!
 //! **Phase 2 — Backward Assembly**
 //!
@@ -52,18 +51,20 @@
 //! value (the nested structure for the sub-tree rooted at that value). We iterate depths
 //! from highest to 0.
 //!
-//! 1. **Depth 3 (cities):** At or beyond max_depth we store raw values: `current_cache[hash(city)] = city`.
+//! 1. **Depth 3 (cities):** At or beyond max_depth we store raw values: `current_cache[hash(city)]
+//!    = city`.
 //!
-//! 2. **Depth 2 (states/provinces):** For each state/province, evaluate the path with `@`
-//!    in *assembly* mode: `@` looks up each child in `next_cache` (the cities we just
-//!    stored). We get e.g. `[city:la, city:sf]`. Store `current_cache[hash(state:california)] = [city:la, city:sf]`.
-//!    Then `next_cache = current_cache` for the next (lower) depth.
+//! 2. **Depth 2 (states/provinces):** For each state/province, evaluate the path with `@` in
+//!    *assembly* mode: `@` looks up each child in `next_cache` (the cities we just stored). We get
+//!    e.g. `[city:la, city:sf]`. Store `current_cache[hash(state:california)] = [city:la,
+//!    city:sf]`. Then `next_cache = current_cache` for the next (lower) depth.
 //!
 //! 3. **Depth 1 (countries):** Same: path(country:us) in assembly mode looks up states in
-//!    `next_cache`, gets their assembled arrays. Store country → { places: [state:ca, state:tx] } etc.
+//!    `next_cache`, gets their assembled arrays. Store country → { places: [state:ca, state:tx] }
+//!    etc.
 //!
-//! 4. **Depth 0 (start):** path(planet:earth) in assembly mode looks up countries in
-//!    `next_cache`. We get the full nested tree. Return `next_cache.remove(hash(planet:earth))`.
+//! 4. **Depth 0 (start):** path(planet:earth) in assembly mode looks up countries in `next_cache`.
+//!    We get the full nested tree. Return `next_cache.remove(hash(planet:earth))`.
 //!
 //! Result: a single value that is the nested tree for the start record (e.g. planet:earth
 //! with places: [country:us with places: [...], country:canada with places: [...]], without
@@ -132,11 +133,9 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		// valid recursion targets.
 		if let Some(ref sink) = rec_ctx.discovery_sink {
 			let values_to_write: Vec<Value> = match value {
-				Value::Array(arr) => arr
-					.iter()
-					.filter(|v| !is_final(v) && is_recursion_target(v))
-					.cloned()
-					.collect(),
+				Value::Array(arr) => {
+					arr.iter().filter(|v| !is_final(v) && is_recursion_target(v)).cloned().collect()
+				}
 				v if !is_final(v) && is_recursion_target(v) => vec![v.clone()],
 				_ => vec![],
 			};
