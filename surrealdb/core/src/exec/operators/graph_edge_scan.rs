@@ -10,12 +10,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::common::{BATCH_SIZE, evaluate_bound_key, extract_record_ids, resolve_record_batch};
+use super::common::{
+	BATCH_SIZE, evaluate_bound_key, extract_record_ids_into, resolve_record_batch,
+};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
 use crate::exec::{
-	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
@@ -46,15 +48,21 @@ pub struct EdgeTableSpec {
 	pub range_end: Bound<Arc<dyn PhysicalExpr>>,
 }
 
-/// Scans graph edges for a given source record.
+/// Scans graph edges for records received from a child operator stream.
 ///
-/// This operator takes a source expression (which should evaluate to one or more RecordIds),
-/// a direction (In, Out, or Both), and target edge tables to scan. It produces a stream
-/// of either edge IDs, target IDs, or full edge records depending on the output mode.
+/// This operator implements a nested-loop-join pattern: it reads RecordIds from
+/// its `input` child operator stream, then for each RecordId scans graph edges
+/// in the specified direction and target tables. It produces a stream of either
+/// target IDs or full edge records depending on the output mode.
+///
+/// This forms part of a streaming DAG where the data flows explicitly:
+/// ```text
+/// CurrentValueSource → GraphEdgeScan("knows") → GraphEdgeScan("person")
+/// ```
 #[derive(Debug, Clone)]
 pub struct GraphEdgeScan {
-	/// Source expression that evaluates to RecordId(s)
-	pub(crate) source: Arc<dyn PhysicalExpr>,
+	/// Child operator that provides source RecordId(s)
+	pub(crate) input: Arc<dyn ExecOperator>,
 
 	/// Direction of the edge traversal (In = `<-`, Out = `->`, Both = `<->`)
 	pub(crate) direction: LookupDirection,
@@ -72,13 +80,13 @@ pub struct GraphEdgeScan {
 
 impl GraphEdgeScan {
 	pub(crate) fn new(
-		source: Arc<dyn PhysicalExpr>,
+		input: Arc<dyn ExecOperator>,
 		direction: LookupDirection,
 		edge_tables: Vec<EdgeTableSpec>,
 		output_mode: GraphScanOutput,
 	) -> Self {
 		Self {
-			source,
+			input,
 			direction,
 			edge_tables,
 			output_mode,
@@ -107,7 +115,6 @@ impl ExecOperator for GraphEdgeScan {
 			self.edge_tables.iter().map(|t| t.table.as_str()).collect::<Vec<_>>().join(", ")
 		};
 		vec![
-			("source".to_string(), self.source.to_sql()),
 			("direction".to_string(), dir.to_string()),
 			("tables".to_string(), tables),
 			("output".to_string(), format!("{:?}", self.output_mode)),
@@ -119,16 +126,20 @@ impl ExecOperator for GraphEdgeScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.source.access_mode()
+		self.input.access_mode()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}
 
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		vec![&self.input]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let source_expr = Arc::clone(&self.source);
+		let input_stream = self.input.execute(ctx)?;
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;
@@ -139,15 +150,6 @@ impl ExecOperator for GraphEdgeScan {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
-
-			// Evaluate the source expression to get RecordId(s)
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let source_value = source_expr.evaluate(eval_ctx).await?;
-			let source_rids = extract_record_ids(source_value);
-
-			if source_rids.is_empty() {
-				return;
-			}
 
 			// Determine the directions to scan
 			// Note: For Both, we scan In first then Out to match legacy executor behavior
@@ -162,35 +164,49 @@ impl ExecOperator for GraphEdgeScan {
 				}
 			};
 
+			// Read from the child operator stream and extract RecordIds
+			futures::pin_mut!(input_stream);
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
 
-			// Scan edges for each source record
-			for rid in &source_rids {
-				for dir in &directions {
-					// Compute all key ranges to scan for this rid + direction
-					let ranges = compute_graph_ranges(
-						ns_id, db_id, rid, dir, &edge_tables, &ctx,
-					).await?;
+			while let Some(batch_result) = input_stream.next().await {
+				let batch = batch_result?;
+				let source_rids: Vec<RecordId> = batch.values
+					.into_iter()
+					.flat_map(|v| {
+						let mut rids = Vec::new();
+						extract_record_ids_into(v, &mut rids);
+						rids
+					})
+					.collect();
 
-					for (beg, end) in ranges {
-						let kv_stream = txn.stream_keys(
-							beg..end, None, None, 0, ScanDirection::Forward,
-						);
-						futures::pin_mut!(kv_stream);
+				// Scan edges for each source record
+				for rid in &source_rids {
+					for dir in &directions {
+						// Compute all key ranges to scan for this rid + direction
+						let ranges = compute_graph_ranges(
+							ns_id, db_id, rid, dir, &edge_tables, &ctx,
+						).await?;
 
-						while let Some(result) = kv_stream.next().await {
-							let keys = result.context("Failed to scan graph edge")?;
+						for (beg, end) in ranges {
+							let kv_stream = txn.stream_keys(
+								beg..end, None, None, 0, ScanDirection::Forward,
+							);
+							futures::pin_mut!(kv_stream);
 
-							for key in keys {
-								let target_rid = decode_graph_edge(&key)?;
-								rid_batch.push(target_rid);
+							while let Some(result) = kv_stream.next().await {
+								let keys = result.context("Failed to scan graph edge")?;
 
-								if rid_batch.len() >= BATCH_SIZE {
-									let values = resolve_record_batch(
-										&txn, ns_id, db_id, &rid_batch, fetch_full,
-									).await?;
-									yield ValueBatch { values };
-									rid_batch.clear();
+								for key in keys {
+									let target_rid = decode_graph_edge(&key)?;
+									rid_batch.push(target_rid);
+
+									if rid_batch.len() >= BATCH_SIZE {
+										let values = resolve_record_batch(
+											&txn, ns_id, db_id, &rid_batch, fetch_full,
+										).await?;
+										yield ValueBatch { values };
+										rid_batch.clear();
+									}
 								}
 							}
 						}
@@ -339,17 +355,12 @@ fn decode_graph_edge(key: &[u8]) -> Result<RecordId, ControlFlow> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::val::{RecordIdKey, Value};
+	use crate::exec::operators::CurrentValueSource;
 
 	#[test]
 	fn test_graph_edge_scan_attrs() {
-		use crate::exec::physical_expr::Literal;
-
 		let scan = GraphEdgeScan::new(
-			Arc::new(Literal(Value::RecordId(RecordId {
-				table: "person".into(),
-				key: RecordIdKey::String("alice".to_string()),
-			}))),
+			Arc::new(CurrentValueSource::new()),
 			LookupDirection::Out,
 			vec![
 				EdgeTableSpec {

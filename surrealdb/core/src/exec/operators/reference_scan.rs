@@ -10,11 +10,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::common::{BATCH_SIZE, evaluate_bound_key, extract_record_ids, resolve_record_batch};
+use super::common::{
+	BATCH_SIZE, evaluate_bound_key, extract_record_ids_into, resolve_record_batch,
+};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{
-	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
@@ -31,17 +33,19 @@ pub enum ReferenceScanOutput {
 	FullRecord,
 }
 
-/// Scans record references for a given target record.
+/// Scans record references for records received from a child operator stream.
 ///
-/// This operator finds all records that reference the target record through
-/// a specific field. It implements the `<~` (reference lookup) operator.
+/// This operator implements a nested-loop-join pattern: it reads RecordIds from
+/// its `input` child operator stream, then for each RecordId scans references
+/// to find records that reference it. It implements the `<~` (reference lookup)
+/// operator.
 ///
 /// Example: For `person:alice<~post`, this finds all `post` records that
 /// have a field referencing `person:alice`.
 #[derive(Debug, Clone)]
 pub struct ReferenceScan {
-	/// Source expression that evaluates to the target RecordId(s) being referenced
-	pub(crate) source: Arc<dyn PhysicalExpr>,
+	/// Child operator that provides target RecordId(s) being referenced
+	pub(crate) input: Arc<dyn ExecOperator>,
 
 	/// The table that contains the referencing records (e.g., `post`).
 	/// If None, scans ALL tables that reference the target (wildcard `<~?`).
@@ -68,7 +72,7 @@ pub struct ReferenceScan {
 
 impl ReferenceScan {
 	pub(crate) fn new(
-		source: Arc<dyn PhysicalExpr>,
+		input: Arc<dyn ExecOperator>,
 		referencing_table: Option<TableName>,
 		referencing_field: Option<String>,
 		output_mode: ReferenceScanOutput,
@@ -76,7 +80,7 @@ impl ReferenceScan {
 		range_end: Bound<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
-			source,
+			input,
 			referencing_table,
 			referencing_field,
 			output_mode,
@@ -95,16 +99,13 @@ impl ExecOperator for ReferenceScan {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = vec![
-			("source".to_string(), self.source.to_sql()),
-			(
-				"table".to_string(),
-				self.referencing_table
-					.as_ref()
-					.map(|t| t.as_str().to_string())
-					.unwrap_or_else(|| "?".to_string()),
-			),
-		];
+		let mut attrs = vec![(
+			"table".to_string(),
+			self.referencing_table
+				.as_ref()
+				.map(|t| t.as_str().to_string())
+				.unwrap_or_else(|| "?".to_string()),
+		)];
 		if let Some(field) = &self.referencing_field {
 			attrs.push(("field".to_string(), field.clone()));
 		}
@@ -124,16 +125,20 @@ impl ExecOperator for ReferenceScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.source.access_mode()
+		self.input.access_mode()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}
 
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		vec![&self.input]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let source_expr = Arc::clone(&self.source);
+		let input_stream = self.input.execute(ctx)?;
 		let referencing_table = self.referencing_table.clone();
 		let referencing_field = self.referencing_field.clone();
 		let output_mode = self.output_mode;
@@ -147,48 +152,53 @@ impl ExecOperator for ReferenceScan {
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
 
-			// Evaluate the source expression to get the target RecordId(s)
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let source_value = source_expr.evaluate(eval_ctx).await?;
-			let target_rids = extract_record_ids(source_value);
-
-			if target_rids.is_empty() {
-				return;
-			}
-
+			// Read from the child operator stream and extract RecordIds
+			futures::pin_mut!(input_stream);
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
 
-			// Scan references for each target record
-			for rid in &target_rids {
-				let (beg, end) = compute_ref_key_range(
-					ns_id, db_id, rid,
-					referencing_table.as_ref(),
-					referencing_field.as_deref(),
-					&range_start, &range_end,
-					&ctx,
-				).await?;
+			while let Some(batch_result) = input_stream.next().await {
+				let batch = batch_result?;
+				let target_rids: Vec<RecordId> = batch.values
+					.into_iter()
+					.flat_map(|v| {
+						let mut rids = Vec::new();
+						extract_record_ids_into(v, &mut rids);
+						rids
+					})
+					.collect();
 
-				let kv_stream = txn.stream_keys(beg..end, None, None, 0, ScanDirection::Forward);
-				futures::pin_mut!(kv_stream);
+				// Scan references for each target record
+				for rid in &target_rids {
+					let (beg, end) = compute_ref_key_range(
+						ns_id, db_id, rid,
+						referencing_table.as_ref(),
+						referencing_field.as_deref(),
+						&range_start, &range_end,
+						&ctx,
+					).await?;
 
-				while let Some(result) = kv_stream.next().await {
-					let keys = result.context("Failed to scan reference")?;
+					let kv_stream = txn.stream_keys(beg..end, None, None, 0, ScanDirection::Forward);
+					futures::pin_mut!(kv_stream);
 
-					for key in keys {
-						let decoded = crate::key::r#ref::Ref::decode_key(&key)
-							.context("Failed to decode ref key")?;
+					while let Some(result) = kv_stream.next().await {
+						let keys = result.context("Failed to scan reference")?;
 
-						rid_batch.push(RecordId {
-							table: decoded.ft.into_owned(),
-							key: decoded.fk.into_owned(),
-						});
+						for key in keys {
+							let decoded = crate::key::r#ref::Ref::decode_key(&key)
+								.context("Failed to decode ref key")?;
 
-						if rid_batch.len() >= BATCH_SIZE {
-							let values = resolve_record_batch(
-								&txn, ns_id, db_id, &rid_batch, fetch_full,
-							).await?;
-							yield ValueBatch { values };
-							rid_batch.clear();
+							rid_batch.push(RecordId {
+								table: decoded.ft.into_owned(),
+								key: decoded.fk.into_owned(),
+							});
+
+							if rid_batch.len() >= BATCH_SIZE {
+								let values = resolve_record_batch(
+									&txn, ns_id, db_id, &rid_batch, fetch_full,
+								).await?;
+								yield ValueBatch { values };
+								rid_batch.clear();
+							}
 						}
 					}
 				}
@@ -326,17 +336,12 @@ async fn eval_ref_bound(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::val::{RecordIdKey, Value};
+	use crate::exec::operators::CurrentValueSource;
 
 	#[test]
 	fn test_reference_scan_attrs() {
-		use crate::exec::physical_expr::Literal;
-
 		let scan = ReferenceScan::new(
-			Arc::new(Literal(Value::RecordId(RecordId {
-				table: "person".into(),
-				key: RecordIdKey::String("alice".to_string()),
-			}))),
+			Arc::new(CurrentValueSource::new()),
 			Some("post".into()),
 			Some("author".to_string()),
 			ReferenceScanOutput::RecordId,
