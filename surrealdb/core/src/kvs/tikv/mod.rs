@@ -761,6 +761,11 @@ impl TimeStampImpl for TiKVStampImpl {
 	}
 
 	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
+		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp::from_version(version as u64))))
+
+		/* We really should encode full precision but version stamps aren't actually a u128, they
+		 * only support values in range of 0 to i64::MAX,
+
 		let physical = ((version >> 64) as u64 as i64) ^ i64::MIN;
 		let logical = (version as u64 as i64) ^ i64::MIN;
 		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
@@ -768,6 +773,7 @@ impl TimeStampImpl for TiKVStampImpl {
 			logical,
 			suffix_bits: 0,
 		})))
+		*/
 	}
 
 	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
@@ -819,10 +825,16 @@ pub struct TiKVStamp(tikv::Timestamp);
 
 impl TimeStamp for TiKVStamp {
 	fn as_versionstamp(&self) -> u128 {
+		self.0.version() as u128
+
+		/* We really should encode full precision but version stamps aren't actually a u128, they
+		 * only support values in range of 0 to i64::MAX,
+
 		let p = (self.0.physical ^ i64::MIN) as u64;
 		let l = (self.0.logical ^ i64::MIN) as u64;
 
 		(p as u128) << 64 | l as u128
+		*/
 	}
 
 	fn as_datetime(&self) -> Option<DateTime<Utc>> {
