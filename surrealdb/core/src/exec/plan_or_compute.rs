@@ -289,11 +289,14 @@ fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
 		InfoStatement::Db(_, _) | InfoStatement::Tb(_, _, _) | InfoStatement::Index(_, _, _) => {
 			ContextLevel::Database
 		}
-		InfoStatement::User(_, base, _) => match base {
-			Some(Base::Root) | None => ContextLevel::Root,
-			Some(Base::Ns) => ContextLevel::Namespace,
-			Some(Base::Db) => ContextLevel::Database,
-		},
+		InfoStatement::User(user_expr, base, _) => {
+			let base_ctx = match base {
+				Some(Base::Root) | None => ContextLevel::Root,
+				Some(Base::Ns) => ContextLevel::Namespace,
+				Some(Base::Db) => ContextLevel::Database,
+			};
+			base_ctx.max(expr_required_context(user_expr))
+		}
 	}
 }
 
