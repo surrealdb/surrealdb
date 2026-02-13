@@ -9,7 +9,8 @@ use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryType;
-use surrealdb_core::rpc::{DbResultError, DbResultStats};
+use surrealdb_core::rpc::DbResultStats;
+use surrealdb_types::Error as TypesError;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -235,7 +236,7 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
+	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
@@ -639,8 +640,8 @@ mod tests {
 	}
 
 	fn to_map(
-		vec: Vec<std::result::Result<Value, DbResultError>>,
-	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)> {
+		vec: Vec<std::result::Result<Value, TypesError>>,
+	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)> {
 		vec.into_iter()
 			.map(|result| match result {
 				Ok(result) => {
@@ -674,7 +675,8 @@ mod tests {
 	#[test]
 	fn take_from_an_errored_query() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Err(DbResultError::InternalError(
+			results: to_map(vec![Err(TypesError::new(
+				surrealdb_types::ErrorKind::Internal,
 				"Unimportant error message".to_string(),
 			))]),
 			..IndexedResults::new()
@@ -926,14 +928,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 		];
 		let response = IndexedResults {
 			results: to_map(response),
@@ -950,14 +952,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::new(surrealdb_types::ErrorKind::Internal, "test".to_string())),
 		];
 		let mut response = IndexedResults {
 			results: to_map(response),

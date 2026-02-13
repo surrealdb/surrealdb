@@ -1,71 +1,108 @@
-use thiserror::Error;
+//! RPC layer error constructors using the public wire error type.
+//!
+//! All RPC failures are represented as [`surrealdb_types::Error`]. This module provides
+//! constructor functions for the same cases that were previously [`RpcError`] variants.
+
+use surrealdb_types::{AuthError, Error as TypesError, ErrorKind as TypesErrorKind};
 use uuid::Uuid;
 
 use crate::err;
-use crate::rpc::DbResultError;
 
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum RpcError {
-	#[error("Parse error")]
-	ParseError,
-	#[error("Invalid request")]
-	InvalidRequest,
-	#[error("Method not found")]
-	MethodNotFound,
-	#[error("Method not allowed")]
-	MethodNotAllowed,
-	#[error("Invalid params: {0}")]
-	InvalidParams(String),
-	#[error("There was a problem with the database: {0}")]
-	InternalError(anyhow::Error),
-	#[error("Live Query was made, but is not supported")]
-	LqNotSuported,
-	#[error("RT is enabled for the session, but LQ is not supported by the context")]
-	BadLQConfig,
-	#[error("A GraphQL request was made, but GraphQL is not supported by the context")]
-	BadGQLConfig,
-	#[error("Error: {0}")]
-	Thrown(String),
-	#[error("Could not serialize surreal value: {0}")]
-	Serialize(String),
-	#[error("Could not deserialize surreal value: {0}")]
-	Deserialize(String),
-	#[error("Session not found: {0:?}")]
-	SessionNotFound(Option<Uuid>),
-	#[error("Session already exists: {0}")]
-	SessionExists(Uuid),
+/// Parse error (invalid message format).
+pub fn parse_error() -> TypesError {
+	TypesError::new(TypesErrorKind::Validation, "Parse error")
 }
 
-impl From<anyhow::Error> for RpcError {
-	fn from(e: anyhow::Error) -> Self {
-		use err::Error;
-		// First, try to downcast to our Error type
-		if let Some(err) = e.downcast_ref::<Error>() {
-			match err {
-				// Live query specific error
-				Error::RealtimeDisabled => return RpcError::LqNotSuported,
-				// User-facing errors should be "Thrown" not "Internal"
-				Error::IdMismatch {
-					..
-				} => return RpcError::Thrown(err.to_string()),
-				// Most other database errors are also user-facing
-				_ => return RpcError::Thrown(err.to_string()),
-			}
+/// Invalid request structure.
+pub fn invalid_request() -> TypesError {
+	TypesError::new(TypesErrorKind::Validation, "Invalid request")
+}
+
+/// Method not found.
+pub fn method_not_found() -> TypesError {
+	TypesError::new(TypesErrorKind::Method, "Method not found")
+}
+
+/// Method not allowed.
+pub fn method_not_allowed() -> TypesError {
+	TypesError::new(TypesErrorKind::Method, "Method not allowed")
+}
+
+/// Invalid params with a custom message.
+pub fn invalid_params(msg: impl Into<String>) -> TypesError {
+	TypesError::new(TypesErrorKind::Validation, msg)
+}
+
+/// Internal error (wraps anyhow).
+pub fn internal_error(err: anyhow::Error) -> TypesError {
+	TypesError::new(TypesErrorKind::Internal, err.to_string())
+}
+
+/// Live query not supported.
+pub fn lq_not_supported() -> TypesError {
+	TypesError::new(TypesErrorKind::Configuration, "Live query not supported")
+}
+
+/// Bad live query config.
+pub fn bad_lq_config() -> TypesError {
+	TypesError::new(TypesErrorKind::Configuration, "Bad live query config")
+}
+
+/// Bad GraphQL config.
+pub fn bad_gql_config() -> TypesError {
+	TypesError::new(TypesErrorKind::Configuration, "Bad GraphQL config")
+}
+
+/// User-thrown / database-thrown error.
+pub fn thrown(msg: impl Into<String>) -> TypesError {
+	TypesError::new(TypesErrorKind::Thrown, msg)
+}
+
+/// Serialization error.
+pub fn serialize(msg: impl Into<String>) -> TypesError {
+	TypesError::new(TypesErrorKind::Serialization, msg)
+}
+
+/// Deserialization error.
+pub fn deserialize(msg: impl Into<String>) -> TypesError {
+	TypesError::new(TypesErrorKind::Serialization, msg)
+}
+
+/// Session not found.
+pub fn session_not_found(id: Option<Uuid>) -> TypesError {
+	let message = match id {
+		Some(id) => format!("Session not found: {id:?}"),
+		None => "Default session not found".to_string(),
+	};
+	TypesError::new(TypesErrorKind::NotFound, message)
+}
+
+/// Session already exists.
+pub fn session_exists(id: Uuid) -> TypesError {
+	TypesError::new(TypesErrorKind::AlreadyExists, format!("Session already exists: {id}"))
+}
+
+/// Session has expired (auth detail).
+pub fn session_expired() -> TypesError {
+	TypesError::new(TypesErrorKind::Auth, "The session has expired").with_details(
+		AuthError {
+			session_expired: true,
+			..Default::default()
 		}
-		// For errors that aren't database errors, treat as internal
-		RpcError::InternalError(e)
-	}
+		.into_details(),
+	)
 }
 
-impl From<DbResultError> for RpcError {
-	fn from(e: DbResultError) -> Self {
-		RpcError::InternalError(anyhow::anyhow!(e.to_string()))
+/// Convert an anyhow error to a wire error, downcasting to database errors where possible.
+pub fn types_error_from_anyhow(e: anyhow::Error) -> TypesError {
+	if let Some(err) = e.downcast_ref::<err::Error>() {
+		match err {
+			err::Error::RealtimeDisabled => return lq_not_supported(),
+			err::Error::IdMismatch {
+				..
+			} => return thrown(err.to_string()),
+			_ => return thrown(err.to_string()),
+		}
 	}
-}
-
-impl From<&str> for RpcError {
-	fn from(e: &str) -> Self {
-		RpcError::Thrown(e.to_string())
-	}
+	internal_error(e)
 }

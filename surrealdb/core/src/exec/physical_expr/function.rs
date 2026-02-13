@@ -31,3 +31,4 @@ pub(crate) use module::{SiloModuleExec, SurrealismModuleExec};
 pub(crate) use projection::ProjectionFunctionExec;
 pub(crate) use script::JsFunctionExec;
 pub(crate) use user_defined::UserDefinedFunctionExec;
+

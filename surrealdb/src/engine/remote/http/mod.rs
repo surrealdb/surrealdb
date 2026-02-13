@@ -737,7 +737,7 @@ async fn router(
 						} = &token
 						{
 							// If the error is due to token expiration, attempt automatic refresh
-							if error.to_string().contains("token has expired") {
+							if error.auth_details().is_some_and(|a| a.token_expired) {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(
 									token,

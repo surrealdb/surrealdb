@@ -4,9 +4,8 @@ mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_types::Value;
+use surrealdb_types::{Error as TypesError, ErrorKind as TypesErrorKind, Value};
 
 /* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
  * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.
@@ -211,12 +210,10 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		//
 		let tmp = res.next().unwrap();
 		let err = tmp.unwrap_err();
+		assert_eq!(err.kind, TypesErrorKind::Internal);
 		assert_eq!(
-			err,
-			DbResultError::InternalError(
-				"Reached excessive computation depth due to functions, subqueries, or computed values"
-					.to_string()
-			)
+			err.message,
+			"Reached excessive computation depth due to functions, subqueries, or computed values"
 		);
 		//
 		Ok(())
@@ -225,9 +222,8 @@ fn excessive_cast_chain_depth() -> Result<()> {
 
 async fn run_queries(
 	sql: &str,
-) -> impl ExactSizeIterator<Item = std::result::Result<Value, DbResultError>>
-+ DoubleEndedIterator
-+ 'static {
+) -> impl ExactSizeIterator<Item = std::result::Result<Value, TypesError>> + DoubleEndedIterator + 'static
+{
 	let dbs = new_ds("test", "test").await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None)

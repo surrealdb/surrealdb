@@ -18,7 +18,8 @@ use async_channel::Sender;
 use futures::{Sink, SinkExt};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::token::Token;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError};
+use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::Error as TypesError;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -42,7 +43,7 @@ struct PendingRequest {
 	/// The command to register for replay on success
 	command: Option<Command>,
 	/// The channel to send the result of the request into.
-	response_channel: Sender<Result<Vec<QueryResult>, DbResultError>>,
+	response_channel: Sender<Result<Vec<QueryResult>, TypesError>>,
 }
 
 /// Per-session state for WebSocket connections
@@ -357,7 +358,7 @@ where
 /// Handle a response that has an ID (normal request/response).
 async fn handle_response_with_id<M, S, E>(
 	id: i64,
-	result: Result<DbResult, DbResultError>,
+	result: Result<DbResult, TypesError>,
 	session_id: Uuid,
 	session_state: &Arc<SessionState>,
 	sink: &RwLock<S>,
@@ -408,7 +409,7 @@ where
 			}) = pending.command
 				&& let Token::WithRefresh {
 					..
-				} = &token && error.to_string().contains("token has expired")
+				} = &token && error.auth_details().is_some_and(|a| a.token_expired)
 			{
 				// Attempt automatic refresh
 				let refresh_request = RouterRequest {
@@ -444,7 +445,7 @@ where
 
 /// Handle a live query notification.
 async fn handle_live_notification<M, S, E>(
-	result: Result<DbResult, DbResultError>,
+	result: Result<DbResult, TypesError>,
 	session_id: Uuid,
 	session_state: &Arc<SessionState>,
 	sink: &RwLock<S>,

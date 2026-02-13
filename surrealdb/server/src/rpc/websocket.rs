@@ -14,8 +14,8 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
-use surrealdb_types::{Array, HashMap, Value};
+use surrealdb_core::rpc::{DbResponse, DbResult, Method, RpcProtocol};
+use surrealdb_types::{Array, Error as TypesError, ErrorKind as TypesErrorKind, HashMap, Value};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -361,7 +361,7 @@ impl Websocket {
 							if shutdown.is_cancelled() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::new(TypesErrorKind::Internal, SERVER_SHUTTING_DOWN.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -373,7 +373,7 @@ impl Websocket {
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::new(TypesErrorKind::Internal, SERVER_OVERLOADED.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -432,16 +432,14 @@ impl Websocket {
 		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
-	) -> Result<DbResult, DbResultError> {
+	) -> Result<DbResult, TypesError> {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
+			return Err(TypesError::new(TypesErrorKind::Method, "Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
-			.await
-			.map_err(Into::into)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params).await
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -487,7 +485,7 @@ impl RpcProtocol for Websocket {
 	async fn get_tx(
 		&self,
 		id: Uuid,
-	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
+	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_types::Error> {
 		debug!("WebSocket get_tx called for transaction {id}");
 		self.transactions
 			.get(&id)
@@ -500,7 +498,7 @@ impl RpcProtocol for Websocket {
 					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
 					self.transactions.len()
 				);
-				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
+				surrealdb_core::rpc::invalid_params("Transaction not found")
 			})
 	}
 
@@ -509,7 +507,7 @@ impl RpcProtocol for Websocket {
 		&self,
 		id: Uuid,
 		tx: Arc<surrealdb_core::kvs::Transaction>,
-	) -> Result<(), surrealdb_core::rpc::RpcError> {
+	) -> Result<(), surrealdb_types::Error> {
 		self.transactions.insert(id, tx);
 		Ok(())
 	}
@@ -583,9 +581,13 @@ impl RpcProtocol for Websocket {
 		&self,
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
-	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Create a new transaction
-		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = self
+			.kvs()
+			.transaction(TransactionType::Write, LockType::Optimistic)
+			.await
+			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
 		debug!("WebSocket begin: created transaction {id}");
@@ -605,26 +607,22 @@ impl RpcProtocol for Websocket {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		params: Array,
-	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
 		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Expected transaction UUID".to_string(),
-			));
+			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
 		};
 
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Transaction not found".to_string(),
-			));
+			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
 
 		// Commit the transaction
-		tx.commit().await?;
+		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 
 		// Return success
 		Ok(DbResult::Other(Value::None))
@@ -636,26 +634,22 @@ impl RpcProtocol for Websocket {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		params: Array,
-	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
 		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Expected transaction UUID".to_string(),
-			));
+			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
 		};
 
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Transaction not found".to_string(),
-			));
+			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
 
 		// Cancel the transaction
-		tx.cancel().await?;
+		tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 
 		// Return success
 		Ok(DbResult::Other(Value::None))

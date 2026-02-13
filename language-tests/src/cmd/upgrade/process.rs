@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError};
+use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::{Error as TypesError, ErrorKind as TypesErrorKind};
 use surrealdb_types::Value;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -227,7 +228,7 @@ pub struct SurrealConnection {
 }
 
 impl SurrealConnection {
-	pub async fn request(&mut self, mut object: ProxyObject) -> Result<DbResponse, DbResultError> {
+	pub async fn request(&mut self, mut object: ProxyObject) -> Result<DbResponse, TypesError> {
 		let id = self.id;
 		self.id += 1;
 
@@ -237,30 +238,32 @@ impl SurrealConnection {
 		let value = object.to_value();
 
 		let message = surrealdb_core::rpc::format::flatbuffers::encode(&value)
-			.map_err(|e| DbResultError::SerializationError(e.to_string()))?;
+			.map_err(|e| TypesError::new(TypesErrorKind::Serialization, e.to_string()))?;
 		self.socket.send(Message::Binary(message.into())).await.map_err(|e| {
-			DbResultError::InternalError(format!("Failed to send query message: {}", e))
+			TypesError::new(TypesErrorKind::Internal, format!("Failed to send query message: {}", e))
 		})?;
 
 		loop {
 			let Some(message) = self.socket.next().await else {
-				return Err(DbResultError::InternalError(
+				return Err(TypesError::new(
+					TypesErrorKind::Internal,
 					"Websocket connection closed early".to_string(),
 				));
 			};
 			let message = message.map_err(|e| {
-				DbResultError::InternalError(format!("Surrealdb connection error: {}", e))
+				TypesError::new(TypesErrorKind::Internal, format!("Surrealdb connection error: {}", e))
 			})?;
 
 			let data = match message {
 				Message::Ping(x) => {
 					self.socket.send(Message::Pong(x)).await.map_err(|e| {
-						DbResultError::InternalError(format!("Failed to send pong: {}", e))
+						TypesError::new(TypesErrorKind::Internal, format!("Failed to send pong: {}", e))
 					})?;
 					continue;
 				}
 				Message::Text(_) => {
-					return Err(DbResultError::InternalError(
+					return Err(TypesError::new(
+						TypesErrorKind::Internal,
 						"Received a text message from the database, expecting only binary messages"
 							.to_string(),
 					));
@@ -270,7 +273,8 @@ impl SurrealConnection {
 				// Documentation says we don't get this message.
 				Message::Frame(_) => unreachable!(),
 				Message::Close(_) => {
-					return Err(DbResultError::InternalError(
+					return Err(TypesError::new(
+						TypesErrorKind::Internal,
 						"Websocket connection to database closed early".to_string(),
 					));
 				}
@@ -278,20 +282,20 @@ impl SurrealConnection {
 
 			let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&data)
 				.map_err(|e| {
-					DbResultError::DeserializationError(format!(
-						"Failed to deserialize response: {}",
-						e
-					))
+					TypesError::new(
+						TypesErrorKind::Serialization,
+						format!("Failed to deserialize response: {}", e),
+					)
 				})?;
 
 			if response.result.is_err() {
 				let Err(e) = response.result else {
 					unreachable!()
 				};
-				return Err(DbResultError::InternalError(format!(
-					"Response returned a failure: {}",
-					e.message()
-				)));
+				return Err(TypesError::new(
+					TypesErrorKind::Internal,
+					format!("Response returned a failure: {}", e.message),
+				));
 			}
 
 			if response.id != Some(Value::Number(surrealdb_types::Number::Int(id))) {
@@ -318,14 +322,14 @@ impl SurrealConnection {
 					.into_iter()
 					.map(|x| match x.result {
 						Ok(value) => Ok(Ok(value)),
-						Err(e) => Ok(Err(e.message())),
+						Err(e) => Ok(Err(e.message.clone())),
 					})
 					.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
 
 				Ok(TestTaskResult::Results(results))
 			}
 			Ok(_) => bail!("Got invalid response type"),
-			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message()))),
+			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message.clone()))),
 		}
 	}
 }

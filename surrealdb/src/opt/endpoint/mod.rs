@@ -51,6 +51,11 @@ impl Endpoint {
 	}
 
 	/// Append a query parameter to the endpoint path string.
+	/// Only used when a local engine (e.g. `kv-mem`, `kv-rocksdb`) is enabled.
+	#[cfg_attr(
+		not(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb")),
+		allow(dead_code)
+	)]
 	pub(crate) fn append_query_param(&mut self, key: &str, value: &str) {
 		if self.path.contains('?') {
 			self.path = format!("{}&{key}={value}", self.path);

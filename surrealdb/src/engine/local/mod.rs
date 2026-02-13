@@ -172,12 +172,12 @@ use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
-use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
+use surrealdb_types::{Error as TypesError, ErrorKind as TypesErrorKind};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -555,7 +555,7 @@ async fn kill_live_query(
 	id: Uuid,
 	session: &Session,
 	vars: Variables,
-) -> Result<Vec<QueryResult>, DbResultError> {
+) -> Result<Vec<QueryResult>, TypesError> {
 	let sql = format!("KILL {id}");
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
@@ -585,7 +585,7 @@ async fn router(
 			let signup_data = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
+					.map_err(|e| TypesError::new(TypesErrorKind::Auth, e.to_string()))?
 			};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
@@ -610,7 +610,7 @@ async fn router(
 			let signin_data = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
+					.map_err(|e| TypesError::new(TypesErrorKind::Auth, e.to_string()))?
 			};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {
@@ -649,21 +649,24 @@ async fn router(
 						// Automatic refresh token handling:
 						// If the access token is expired and we have a refresh token,
 						// automatically attempt to refresh and return new tokens.
-						if with_refresh && error.to_string().contains("token has expired") {
-							let result =
-								match token.refresh(kvs, &mut *state.session.write().await).await {
-									Ok(token) => {
-										query_result.finish_with_result(Ok(token.into_value()))
-									}
-									Err(error) => query_result.finish_with_result(Err(
-										DbResultError::InternalError(error.to_string()),
-									)),
-								};
+						if with_refresh && surrealdb_core::iam::is_expired_token_error(&error) {
+							let result = match token
+								.refresh(kvs, &mut *state.session.write().await)
+								.await
+							{
+								Ok(token) => {
+									query_result.finish_with_result(Ok(token.into_value()))
+								}
+								Err(error) => query_result.finish_with_result(Err(
+									TypesError::new(TypesErrorKind::Internal, error.to_string()),
+								)),
+							};
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
 						// return the authentication error
-						query_result.finish_with_result(Err(DbResultError::InternalError(
+						query_result.finish_with_result(Err(TypesError::new(
+							TypesErrorKind::Internal,
 							error.to_string(),
 						)))
 					}
@@ -679,8 +682,10 @@ async fn router(
 			let result = {
 				match token.refresh(kvs, &mut *state.session.write().await).await {
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
-					Err(error) => query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+					Err(error) => query_result.finish_with_result(Err(TypesError::new(
+						TypesErrorKind::Internal,
+						error.to_string(),
+					))),
 				}
 			};
 			Ok(vec![result])
@@ -690,8 +695,10 @@ async fn router(
 			let result = {
 				match iam::clear::clear(&mut *state.session.write().await) {
 					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-					Err(error) => query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+					Err(error) => query_result.finish_with_result(Err(TypesError::new(
+						TypesErrorKind::Internal,
+						error.to_string(),
+					))),
 				}
 			};
 			Ok(vec![result])
@@ -704,8 +711,10 @@ async fn router(
 					state.transactions.insert(id, Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				Err(error) => query_result.finish_with_result(Err(TypesError::new(
+					TypesErrorKind::Internal,
+					error.to_string(),
+				))),
 			};
 			Ok(vec![result])
 		}
@@ -716,8 +725,10 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				Err(error) => query_result.finish_with_result(Err(TypesError::new(
+					TypesErrorKind::Internal,
+					error.to_string(),
+				))),
 			};
 			Ok(vec![result])
 		}
@@ -764,7 +775,10 @@ async fn router(
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
-						DbResultError::InternalError("Transaction not found".to_string()),
+						TypesError::new(
+							TypesErrorKind::NotFound,
+							"Transaction not found".to_string(),
+						),
 					))]);
 				}
 			} else {

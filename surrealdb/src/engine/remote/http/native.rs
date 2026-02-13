@@ -195,8 +195,8 @@ pub(crate) async fn run_router(
 						session_state.replay.push(command);
 					}
 
-					// Convert api::err::Error to DbResultError
-					let db_result = result.map_err(surrealdb_core::rpc::DbResultError::from);
+					// Convert api::err::Error to wire error type
+					let db_result = result.map_err(surrealdb_types::Error::from);
 					route.response.send(db_result).await.ok();
 				});
 			}

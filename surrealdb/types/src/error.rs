@@ -73,7 +73,8 @@ pub struct Error {
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub details: Option<Object>,
-	/// The underlying cause of this error, if any. Semantically: "this error was caused by that one".
+	/// The underlying cause of this error, if any. Semantically: "this error was caused by that
+	/// one".
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub cause: Option<Box<Error>>,
 }
@@ -108,10 +109,68 @@ impl Error {
 		self.cause.as_deref()
 	}
 
-	/// Returns an iterator over the full cause chain (this error, then its cause, then the cause's cause, etc.).
+	/// Returns an iterator over the full cause chain (this error, then its cause, then the cause's
+	/// cause, etc.).
 	pub fn chain(&self) -> Chain<'_> {
 		Chain {
 			current: Some(self),
+		}
+	}
+
+	/// Returns structured auth error details when this error's kind is [`ErrorKind::Auth`] and
+	/// `details` is present. Use this instead of matching on the error message string.
+	pub fn auth_details(&self) -> Option<AuthError> {
+		if self.kind != ErrorKind::Auth {
+			return None;
+		}
+		let details = self.details.as_ref()?;
+		Some(AuthError::from_details(details))
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Structured error details (wire format in Error.details)
+// -----------------------------------------------------------------------------
+
+/// Structured details for [`ErrorKind::Auth`] errors.
+///
+/// Serialized as an object in `Error.details` (e.g. `{ "token_expired": true }`) so clients can
+/// detect auth failure reasons without parsing the message string.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AuthError {
+	/// The token used for authentication has expired.
+	pub token_expired: bool,
+	/// The session has expired.
+	pub session_expired: bool,
+}
+
+impl AuthError {
+	/// Build details object for use with `Error::with_details`.
+	/// Fields with default values are omitted from the serialized object.
+	pub fn into_details(self) -> Object {
+		let mut o = Object::new();
+		if self.token_expired {
+			o.insert("token_expired", true);
+		}
+		if self.session_expired {
+			o.insert("session_expired", true);
+		}
+		o
+	}
+
+	/// Parse from `Error.details`; missing or invalid fields default to `false`.
+	pub fn from_details(details: &Object) -> Self {
+		let token_expired = details
+			.get("token_expired")
+			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
+			.unwrap_or(false);
+		let session_expired = details
+			.get("session_expired")
+			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
+			.unwrap_or(false);
+		Self {
+			token_expired,
+			session_expired,
 		}
 	}
 }

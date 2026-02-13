@@ -303,7 +303,8 @@ fn test_public_error_new() {
 fn test_public_error_with_details() {
 	let mut details = Object::new();
 	details.insert("name", "users");
-	let err = Error::new(ErrorKind::NotFound, "The table 'users' does not exist").with_details(details);
+	let err =
+		Error::new(ErrorKind::NotFound, "The table 'users' does not exist").with_details(details);
 
 	assert_eq!(err.kind, ErrorKind::NotFound);
 	assert!(err.details.is_some());
@@ -343,8 +344,8 @@ fn test_public_error_display() {
 	let err = Error::new(ErrorKind::Thrown, "Something went wrong");
 	assert!(err.to_string().contains("Something went wrong"));
 
-	let with_cause =
-		Error::new(ErrorKind::Validation, "outer").with_cause(Error::new(ErrorKind::Internal, "inner"));
+	let with_cause = Error::new(ErrorKind::Validation, "outer")
+		.with_cause(Error::new(ErrorKind::Internal, "inner"));
 	let display = with_cause.to_string();
 	assert!(display.contains("outer"));
 	assert!(display.contains("inner"));

@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
+use surrealdb_types::{Error as TypesError, Kind, SurrealValue, Value, kind, object};
 
 use crate::expr::TopLevelExpr;
-use crate::rpc::DbResultError;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -62,7 +61,7 @@ impl QueryType {
 #[derive(Debug, Clone)]
 pub struct QueryResult {
 	pub time: Duration,
-	pub result: Result<Value, DbResultError>,
+	pub result: Result<Value, TypesError>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
@@ -71,7 +70,7 @@ pub struct QueryResult {
 impl QueryResult {
 	/// Retrieve the response as a normal result
 	pub fn output(self) -> Result<Value> {
-		self.result.map_err(|err| anyhow::anyhow!(err.to_string()))
+		self.result.map_err(|err| anyhow::anyhow!(err.message))
 	}
 }
 
@@ -107,7 +106,7 @@ impl SurrealValue for QueryResult {
 			time: format!("{:?}", self.time).into_value(),
 			result: match self.result {
 				Ok(v) => v.into_value(),
-				Err(e) => Value::from_string(e.to_string()),
+				Err(e) => SurrealValue::into_value(e),
 			},
 			type: self.query_type.into_value(),
 		})
@@ -139,7 +138,7 @@ impl SurrealValue for QueryResult {
 
 		let result = match status {
 			Status::Ok => Ok(Value::from_value(result)?),
-			Status::Err => Err(DbResultError::from_value(result)?),
+			Status::Err => Err(TypesError::from_value(result)?),
 		};
 
 		Ok(QueryResult {
@@ -152,7 +151,7 @@ impl SurrealValue for QueryResult {
 
 pub struct QueryResultBuilder {
 	start_time: Instant,
-	result: Result<Value, DbResultError>,
+	result: Result<Value, TypesError>,
 	query_type: QueryType,
 }
 
@@ -173,7 +172,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn with_result(mut self, result: Result<Value, DbResultError>) -> Self {
+	pub fn with_result(mut self, result: Result<Value, TypesError>) -> Self {
 		self.result = result;
 		self
 	}
@@ -191,7 +190,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn finish_with_result(self, result: Result<Value, DbResultError>) -> QueryResult {
+	pub fn finish_with_result(self, result: Result<Value, TypesError>) -> QueryResult {
 		QueryResult {
 			time: self.start_time.elapsed(),
 			result,

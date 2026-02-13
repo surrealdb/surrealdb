@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
-use surrealdb_core::rpc::DbResultError;
 use uuid::Uuid;
 
 use crate::err::Error;
@@ -29,7 +28,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, DbResultError>>,
+	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 }
 
 /// Message router
@@ -47,7 +46,10 @@ impl Router {
 		&self,
 		session_id: Uuid,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
+	) -> BoxFuture<
+		'_,
+		Result<Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>>,
+	> {
 		Box::pin(async move {
 			let (sender, receiver) = async_channel::bounded(1);
 			let route = Route {
@@ -68,11 +70,11 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv_value(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
 			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			// The response already uses DbResultError, so we just convert directly
+			// The response uses surrealdb_types::Error; convert to SDK Error
 			let mut results = response.map_err(Error::from)?;
 
 			match results.len() {
@@ -91,7 +93,7 @@ impl Router {
 	/// Receive the response of the `query` method
 	pub(crate) fn recv_results(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
 			let results = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
