@@ -502,7 +502,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 
 	for val in arr.into_vec() {
 		let result = QueryResult::from_value(val)
-			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {}", e)))?;
+			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {e}")))?;
 		if let Err(e) = result.result {
 			return Err(Error::Query(e.to_string()));
 		}
@@ -737,7 +737,9 @@ async fn router(
 						} = &token
 						{
 							// If the error is due to token expiration, attempt automatic refresh
-							if error.auth_details().is_some_and(|a| matches!(a, surrealdb_types::AuthError::TokenExpired)) {
+							if error.auth_details().is_some_and(|a| {
+								matches!(a, surrealdb_types::AuthError::TokenExpired)
+							}) {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(
 									token,

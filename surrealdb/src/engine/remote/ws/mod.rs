@@ -409,7 +409,9 @@ where
 			}) = pending.command
 				&& let Token::WithRefresh {
 					..
-				} = &token && error.auth_details().is_some_and(|a| matches!(a, surrealdb_types::AuthError::TokenExpired))
+				} = &token && error
+				.auth_details()
+				.is_some_and(|a| matches!(a, surrealdb_types::AuthError::TokenExpired))
 			{
 				// Attempt automatic refresh
 				let refresh_request = RouterRequest {

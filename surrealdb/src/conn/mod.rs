@@ -62,7 +62,7 @@ impl Router {
 			self.sender
 				.send(route)
 				.await
-				.map_err(|e| Error::InternalError(format!("Failed to send command: {}", e)))?;
+				.map_err(|e| Error::InternalError(format!("Failed to send command: {e}")))?;
 			Ok(receiver)
 		})
 	}

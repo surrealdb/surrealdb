@@ -285,14 +285,14 @@ impl From<crate::types::anyhow::Error> for Error {
 // Allow conversion from async_channel::RecvError
 impl From<async_channel::RecvError> for Error {
 	fn from(error: async_channel::RecvError) -> Self {
-		Error::InternalError(format!("Channel receive error: {}", error))
+		Error::InternalError(format!("Channel receive error: {error}"))
 	}
 }
 
 // Allow conversion from std::io::Error
 impl From<std::io::Error> for Error {
 	fn from(error: std::io::Error) -> Self {
-		Error::InternalError(format!("I/O error: {}", error))
+		Error::InternalError(format!("I/O error: {error}"))
 	}
 }
 
@@ -321,21 +321,23 @@ impl From<semver::Error> for Error {
 // Convert SDK Error to wire-friendly type (for sending client-side errors on the channel).
 impl From<Error> for surrealdb_types::Error {
 	fn from(e: Error) -> Self {
-		use surrealdb_types::ErrorKind;
-		let (kind, message) = match &e {
-			Error::Query(msg) => (ErrorKind::Query, msg.clone()),
-			Error::Http(msg) => (ErrorKind::Internal, format!("HTTP error: {}", msg)),
-			Error::Ws(msg) => (ErrorKind::Internal, format!("WebSocket error: {}", msg)),
+		match &e {
+			Error::Query(msg) => surrealdb_types::Error::query(msg.clone(), None),
+			Error::Http(msg) => surrealdb_types::Error::internal(format!("HTTP error: {msg}")),
+			Error::Ws(msg) => surrealdb_types::Error::internal(format!("WebSocket error: {msg}")),
 			Error::Scheme(msg) => {
-				(ErrorKind::Configuration, format!("Unsupported scheme: {}", msg))
+				surrealdb_types::Error::configuration(format!("Unsupported scheme: {msg}"), None)
 			}
-			Error::ConnectionUninitialised => {
-				(ErrorKind::Internal, "Connection uninitialised".to_string())
-			}
-			Error::AlreadyConnected => (ErrorKind::Internal, "Already connected".to_string()),
+			Error::ConnectionUninitialised => surrealdb_types::Error::connection(
+				"Connection uninitialised".to_string(),
+				Some(surrealdb_types::ConnectionError::Uninitialised),
+			),
+			Error::AlreadyConnected => surrealdb_types::Error::connection(
+				"Already connected".to_string(),
+				Some(surrealdb_types::ConnectionError::AlreadyConnected),
+			),
 			Error::Database(inner) => return inner.clone(),
-			_ => (ErrorKind::Internal, e.to_string()),
-		};
-		surrealdb_types::Error::new(kind, message)
+			_ => surrealdb_types::Error::internal(e.to_string()),
+		}
 	}
 }

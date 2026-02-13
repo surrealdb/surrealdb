@@ -15,7 +15,7 @@ use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_core::rpc::{DbResponse, DbResult, Method, RpcProtocol};
-use surrealdb_types::{Array, Error as TypesError, ErrorKind as TypesErrorKind, HashMap, Value};
+use surrealdb_types::{Array, Error as TypesError, HashMap, Value};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -361,7 +361,7 @@ impl Websocket {
 							if shutdown.is_cancelled() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::new(TypesErrorKind::Internal, SERVER_SHUTTING_DOWN.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::internal(SERVER_SHUTTING_DOWN.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -373,7 +373,7 @@ impl Websocket {
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::new(TypesErrorKind::Internal, SERVER_OVERLOADED.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), TypesError::internal(SERVER_OVERLOADED.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -436,7 +436,10 @@ impl Websocket {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(TypesError::new(TypesErrorKind::Method, "Method not found".to_string()));
+			return Err(TypesError::method(
+				"Method not found".to_string(),
+				Some(surrealdb_types::MethodError::NotFound),
+			));
 		}
 		// Execute the specified method
 		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params).await

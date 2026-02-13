@@ -70,7 +70,7 @@ pub struct QueryResult {
 impl QueryResult {
 	/// Retrieve the response as a normal result
 	pub fn output(self) -> Result<Value> {
-		self.result.map_err(|err| anyhow::anyhow!(err.message))
+		self.result.map_err(|err| anyhow::anyhow!(err.message().to_string()))
 	}
 }
 

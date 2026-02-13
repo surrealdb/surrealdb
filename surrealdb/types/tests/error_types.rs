@@ -1,6 +1,6 @@
 use surrealdb_types::{
 	ConversionError, Error, ErrorKind, Kind, LengthMismatchError, Number, Object, OutOfRangeError,
-	SurrealValue, TypeError, Value,
+	SurrealValue, TypeError, ValidationError, Value,
 };
 
 #[test]
@@ -290,12 +290,11 @@ fn test_error_message_quality() {
 
 #[test]
 fn test_public_error_new() {
-	let err = Error::new(ErrorKind::NotFound, "The table 'users' does not exist".to_string());
+	let err = Error::not_found("The table 'users' does not exist".to_string(), None);
 
-	assert_eq!(err.kind, ErrorKind::NotFound);
-	assert_eq!(err.message, "The table 'users' does not exist");
-	assert!(err.details.is_none());
-	assert!(err.cause.is_none());
+	assert_eq!(err.kind(), &ErrorKind::NotFound);
+	assert_eq!(err.message(), "The table 'users' does not exist");
+	assert!(err.details().is_none());
 	assert!(err.cause().is_none());
 }
 
@@ -303,57 +302,66 @@ fn test_public_error_new() {
 fn test_public_error_with_details() {
 	let mut details = Object::new();
 	details.insert("name", "users");
-	let err = Error::new(
-		ErrorKind::NotFound,
-		"The table 'users' does not exist".to_string(),
-	)
-	.with_details(details);
+	let err = Error::not_found("The table 'users' does not exist".to_string(), None)
+		.with_details(details);
 
-	assert_eq!(err.kind, ErrorKind::NotFound);
-	assert!(err.details.is_some());
-	let d = err.details.as_ref().unwrap();
-	let Value::Object(o) = d else { panic!("expected object details") };
+	assert_eq!(err.kind(), &ErrorKind::NotFound);
+	assert!(err.details().is_some());
+	let d = err.details().unwrap();
+	let Value::Object(o) = d else {
+		panic!("expected object details")
+	};
 	assert!(o.contains_key("name"));
 	assert_eq!(o.get("name").and_then(|v| v.as_string()).unwrap(), "users");
 }
 
 #[test]
-fn test_public_error_with_cause() {
-	let root = Error::new(ErrorKind::Internal, "connection refused".to_string());
-	let top = Error::new(
-		ErrorKind::Query,
-		"Failed to execute query".to_string(),
-	)
-	.with_cause(root);
+fn test_public_error_validation_details() {
+	let err =
+		Error::validation("Invalid request".to_string(), Some(ValidationError::InvalidRequest));
+	assert_eq!(err.kind(), &ErrorKind::Validation);
+	assert_eq!(err.validation_details(), Some(ValidationError::InvalidRequest));
 
-	assert_eq!(top.kind, ErrorKind::Query);
+	let err_no_details = Error::validation("Parse error".to_string(), None);
+	assert_eq!(err_no_details.validation_details(), None);
+
+	let err_wrong_kind = Error::auth("Auth failed".to_string(), None);
+	assert_eq!(err_wrong_kind.validation_details(), None);
+}
+
+#[test]
+fn test_public_error_with_cause() {
+	let root = Error::internal("connection refused".to_string());
+	let top = Error::query("Failed to execute query".to_string(), None).with_cause(root);
+
+	assert_eq!(top.kind(), &ErrorKind::Query);
 	assert!(top.cause().is_some());
 	let cause = top.cause().unwrap();
-	assert_eq!(cause.kind, ErrorKind::Internal);
-	assert_eq!(cause.message, "connection refused");
+	assert_eq!(cause.kind(), &ErrorKind::Internal);
+	assert_eq!(cause.message(), "connection refused");
 	assert!(cause.cause().is_none());
 }
 
 #[test]
 fn test_public_error_chain() {
-	let root = Error::new(ErrorKind::Internal, "root".to_string());
-	let mid = Error::new(ErrorKind::Validation, "mid".to_string()).with_cause(root);
-	let top = Error::new(ErrorKind::Method, "top".to_string()).with_cause(mid);
+	let root = Error::internal("root".to_string());
+	let mid = Error::validation("mid".to_string(), None).with_cause(root);
+	let top = Error::method("top".to_string(), None).with_cause(mid);
 
 	let chain: Vec<_> = top.chain().collect();
 	assert_eq!(chain.len(), 3);
-	assert_eq!(chain[0].kind, ErrorKind::Method);
-	assert_eq!(chain[1].kind, ErrorKind::Validation);
-	assert_eq!(chain[2].kind, ErrorKind::Internal);
+	assert_eq!(chain[0].kind(), &ErrorKind::Method);
+	assert_eq!(chain[1].kind(), &ErrorKind::Validation);
+	assert_eq!(chain[2].kind(), &ErrorKind::Internal);
 }
 
 #[test]
 fn test_public_error_display() {
-	let err = Error::new(ErrorKind::Thrown, "Something went wrong".to_string());
+	let err = Error::thrown("Something went wrong".to_string());
 	assert!(err.to_string().contains("Something went wrong"));
 
-	let with_cause = Error::new(ErrorKind::Validation, "outer".to_string())
-		.with_cause(Error::new(ErrorKind::Internal, "inner".to_string()));
+	let with_cause = Error::validation("outer".to_string(), None)
+		.with_cause(Error::internal("inner".to_string()));
 	let display = with_cause.to_string();
 	assert!(display.contains("outer"));
 	assert!(display.contains("inner"));
@@ -361,8 +369,8 @@ fn test_public_error_display() {
 
 #[test]
 fn test_public_error_std_error_source() {
-	let inner = Error::new(ErrorKind::Internal, "inner".to_string());
-	let outer = Error::new(ErrorKind::Query, "outer".to_string()).with_cause(inner);
+	let inner = Error::internal("inner".to_string());
+	let outer = Error::query("outer".to_string(), None).with_cause(inner);
 
 	let source = std::error::Error::source(&outer).unwrap();
 	assert_eq!(source.to_string(), "inner");
@@ -370,22 +378,22 @@ fn test_public_error_std_error_source() {
 
 #[test]
 fn test_public_error_surreal_value_roundtrip() {
-	let err = Error::new(ErrorKind::NotFound, "Table 'users' does not exist".to_string())
+	let err = Error::not_found("Table 'users' does not exist".to_string(), None)
 		.with_details({
 			let mut o = Object::new();
 			o.insert("name", "users");
 			Value::Object(o)
 		})
-		.with_cause(Error::new(ErrorKind::Internal, "io error".to_string()));
+		.with_cause(Error::internal("io error".to_string()));
 
 	let value = err.clone().into_value();
 	let restored = Error::from_value(value).unwrap();
 
-	assert_eq!(restored.kind, err.kind);
-	assert_eq!(restored.message, err.message);
-	assert!(restored.details.is_some());
-	assert!(restored.cause.is_some());
-	assert_eq!(restored.cause.as_ref().unwrap().kind, ErrorKind::Internal);
+	assert_eq!(restored.kind(), err.kind());
+	assert_eq!(restored.message(), err.message());
+	assert!(restored.details().is_some());
+	assert!(restored.cause().is_some());
+	assert_eq!(restored.cause().unwrap().kind(), &ErrorKind::Internal);
 }
 
 #[test]

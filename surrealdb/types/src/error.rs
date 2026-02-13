@@ -1,50 +1,32 @@
 use std::fmt;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::{Kind, Object, SurrealValue, ToSql, Value};
+use crate::{Kind, SurrealValue, ToSql, Value};
 
 // -----------------------------------------------------------------------------
 // JSON-RPC 2.0 and SurrealDB-specific error codes (wire backwards compatibility)
 // -----------------------------------------------------------------------------
 
 /// Numeric error codes used on the wire for RPC. Kept for backwards compatibility.
-#[allow(non_snake_case)]
-pub mod code {
-	/// Parse error (invalid message format).
+#[allow(missing_docs)]
+mod code {
 	pub const PARSE_ERROR: i64 = -32700;
-	/// Invalid request structure.
 	pub const INVALID_REQUEST: i64 = -32600;
-	/// Method not found.
 	pub const METHOD_NOT_FOUND: i64 = -32601;
-	/// Method not allowed.
 	pub const METHOD_NOT_ALLOWED: i64 = -32602;
-	/// Invalid params.
 	pub const INVALID_PARAMS: i64 = -32603;
-	/// Live query not supported.
 	pub const LIVE_QUERY_NOT_SUPPORTED: i64 = -32604;
-	/// Bad live query config.
 	pub const BAD_LIVE_QUERY_CONFIG: i64 = -32605;
-	/// Bad GraphQL config.
 	pub const BAD_GRAPHQL_CONFIG: i64 = -32606;
-	/// Internal/server error.
 	pub const INTERNAL_ERROR: i64 = -32000;
-	/// Client-side error.
 	pub const CLIENT_SIDE_ERROR: i64 = -32001;
-	/// Invalid auth.
 	pub const INVALID_AUTH: i64 = -32002;
-	/// Query not executed.
 	pub const QUERY_NOT_EXECUTED: i64 = -32003;
-	/// Query timed out.
 	pub const QUERY_TIMEDOUT: i64 = -32004;
-	/// Query cancelled.
 	pub const QUERY_CANCELLED: i64 = -32005;
-	/// User/database thrown error.
 	pub const THROWN: i64 = -32006;
-	/// Serialization error.
 	pub const SERIALIZATION_ERROR: i64 = -32007;
-	/// Deserialization error.
 	pub const DESERIALIZATION_ERROR: i64 = -32008;
 }
 
@@ -58,8 +40,9 @@ pub mod code {
 /// categories. Serializes as a snake_case string on the wire (e.g. `"validation"`).
 /// The enum is non-exhaustive so new variants can be added later. The server
 /// should map any unmappable error to [`Internal`](ErrorKind::Internal) before sending.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
 #[non_exhaustive]
 pub enum ErrorKind {
 	/// Invalid input: parse error, invalid request or params.
@@ -80,37 +63,10 @@ pub enum ErrorKind {
 	NotFound,
 	/// Resource already exists (e.g. table, record).
 	AlreadyExists,
+	/// Connection error (e.g. uninitialised, already connected). Used in the SDK.
+	Connection,
 	/// Internal or unexpected error (server or client).
 	Internal,
-}
-
-impl fmt::Display for ErrorKind {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			ErrorKind::Validation => f.write_str("validation"),
-			ErrorKind::Method => f.write_str("method"),
-			ErrorKind::Configuration => f.write_str("configuration"),
-			ErrorKind::Auth => f.write_str("auth"),
-			ErrorKind::Thrown => f.write_str("thrown"),
-			ErrorKind::Query => f.write_str("query"),
-			ErrorKind::Serialization => f.write_str("serialization"),
-			ErrorKind::NotFound => f.write_str("not_found"),
-			ErrorKind::AlreadyExists => f.write_str("already_exists"),
-			ErrorKind::Internal => f.write_str("internal"),
-		}
-	}
-}
-
-/// JSON-RPC 2.0 error code for this kind. Injected when serialising for backwards compatibility.
-fn json_rpc_code(kind: &ErrorKind) -> i64 {
-	match kind {
-		ErrorKind::Validation => code::INVALID_PARAMS,
-		ErrorKind::Method => code::METHOD_NOT_ALLOWED,
-		ErrorKind::Configuration | ErrorKind::Auth | ErrorKind::Thrown | ErrorKind::Query
-		| ErrorKind::NotFound | ErrorKind::AlreadyExists => code::INTERNAL_ERROR,
-		ErrorKind::Serialization => code::SERIALIZATION_ERROR,
-		ErrorKind::Internal => code::INTERNAL_ERROR,
-	}
 }
 
 /// Public error type for SurrealDB APIs
@@ -119,32 +75,178 @@ fn json_rpc_code(kind: &ErrorKind) -> i64 {
 /// wire-friendly and non-lossy: serialization preserves `kind`, `message`,
 /// `details`, and the cause chain. Use this type whenever an error crosses
 /// an API boundary (e.g. server response, SDK method return).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
+#[surreal(crate = "crate")]
 pub struct Error {
 	/// Machine-readable error kind.
-	pub kind: ErrorKind,
+	kind: ErrorKind,
 	/// Human-readable error message.
-	pub message: String,
+	message: String,
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub details: Option<Value>,
+	details: Option<Value>,
 	/// The underlying cause of this error, if any. Semantically: "this error was caused by that
 	/// one".
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub cause: Option<Box<Error>>,
+	cause: Option<Box<Error>>,
 	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
 	/// removed in the next major release. Only used when serialising to the wire.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub(crate) code: Option<i64>,
+	code: Option<i64>,
 }
 
 impl Error {
-	/// Creates a new error with the given `kind` and `message`.
-	pub fn new(kind: ErrorKind, message: String) -> Self {
+	/// Validation error (parse error, invalid request or params), with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant (e.g. `Parse` →
+	/// `PARSE_ERROR`).
+	pub fn validation(message: String, details: Option<ValidationError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			ValidationError::Parse => code::PARSE_ERROR,
+			ValidationError::InvalidRequest => code::INVALID_REQUEST,
+			ValidationError::InvalidParams => code::INVALID_PARAMS,
+		});
 		Self {
-			kind,
+			kind: ErrorKind::Validation,
+			message,
+			code,
+			details: details.map(ValidationError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Method error (method not found or not allowed), with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant.
+	pub fn method(message: String, details: Option<MethodError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			MethodError::NotFound => code::METHOD_NOT_FOUND,
+			MethodError::NotAllowed => code::METHOD_NOT_ALLOWED,
+		});
+		Self {
+			kind: ErrorKind::Method,
+			message,
+			code,
+			details: details.map(MethodError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Configuration error (feature or config not supported), with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant.
+	pub fn configuration(message: String, details: Option<ConfigurationError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			ConfigurationError::LiveQueryNotSupported => code::LIVE_QUERY_NOT_SUPPORTED,
+			ConfigurationError::BadLiveQueryConfig => code::BAD_LIVE_QUERY_CONFIG,
+			ConfigurationError::BadGraphqlConfig => code::BAD_GRAPHQL_CONFIG,
+		});
+		Self {
+			kind: ErrorKind::Configuration,
+			message,
+			code,
+			details: details.map(ConfigurationError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Authentication or authorisation error, with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant.
+	pub fn auth(message: String, details: Option<AuthError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			AuthError::TokenExpired => code::INVALID_AUTH,
+			AuthError::SessionExpired => code::INTERNAL_ERROR,
+		});
+		Self {
+			kind: ErrorKind::Auth,
+			message,
+			code,
+			details: details.map(AuthError::into_value),
+			cause: None,
+		}
+	}
+
+	/// User-thrown error (e.g. from THROW in SurrealQL). Sets wire code for RPC.
+	pub fn thrown(message: String) -> Self {
+		Self {
+			kind: ErrorKind::Thrown,
+			message,
+			code: Some(code::THROWN),
+			details: None,
+			cause: None,
+		}
+	}
+
+	/// Query execution error (not executed, timeout, cancelled), with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant.
+	pub fn query(message: String, details: Option<QueryError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			QueryError::NotExecuted => code::QUERY_NOT_EXECUTED,
+			QueryError::Timedout => code::QUERY_TIMEDOUT,
+			QueryError::Cancelled => code::QUERY_CANCELLED,
+		});
+		Self {
+			kind: ErrorKind::Query,
+			message,
+			code,
+			details: details.map(QueryError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Serialisation or deserialisation error, with optional structured details.
+	/// When `details` is provided, the wire code is set from the variant.
+	pub fn serialization(message: String, details: Option<SerializationError>) -> Self {
+		let code = details.as_ref().map(|d| match d {
+			SerializationError::Serialization => code::SERIALIZATION_ERROR,
+			SerializationError::Deserialization => code::DESERIALIZATION_ERROR,
+		});
+		Self {
+			kind: ErrorKind::Serialization,
+			message,
+			code,
+			details: details.map(SerializationError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Resource not found (e.g. table, record, namespace), with optional structured details.
+	pub fn not_found(message: String, details: Option<NotFoundError>) -> Self {
+		Self {
+			kind: ErrorKind::NotFound,
 			message,
 			code: None,
+			details: details.map(NotFoundError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Resource already exists (e.g. table, record), with optional structured details.
+	pub fn already_exists(message: String, details: Option<AlreadyExistsError>) -> Self {
+		Self {
+			kind: ErrorKind::AlreadyExists,
+			message,
+			code: None,
+			details: details.map(AlreadyExistsError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Connection error (e.g. uninitialised, already connected), with optional structured details.
+	/// Used in the SDK for client-side connection state errors.
+	pub fn connection(message: String, details: Option<ConnectionError>) -> Self {
+		Self {
+			kind: ErrorKind::Connection,
+			message,
+			code: Some(code::CLIENT_SIDE_ERROR),
+			details: details.map(ConnectionError::into_value),
+			cause: None,
+		}
+	}
+
+	/// Internal or unexpected error (server or client). Sets wire code for RPC.
+	pub fn internal(message: String) -> Self {
+		Self {
+			kind: ErrorKind::Internal,
+			message,
+			code: Some(code::INTERNAL_ERROR),
 			details: None,
 			cause: None,
 		}
@@ -152,24 +254,36 @@ impl Error {
 
 	/// Sets the wire error code (RPC backwards compatibility). Not part of the public API.
 	#[doc(hidden)]
-	#[must_use]
 	pub fn with_code(mut self, code: i64) -> Self {
 		self.code = Some(code);
 		self
 	}
 
 	/// Adds optional structured details to this error.
-	#[must_use]
-	pub fn with_details(mut self, details: impl Into<Value>) -> Self {
-		self.details = Some(details.into());
+	pub fn with_details(mut self, details: impl SurrealValue) -> Self {
+		self.details = Some(details.into_value());
 		self
 	}
 
 	/// Sets the cause of this error (the error that led to this one).
-	#[must_use]
 	pub fn with_cause(mut self, cause: Error) -> Self {
 		self.cause = Some(Box::new(cause));
 		self
+	}
+
+	/// Returns the machine-readable error kind.
+	pub fn kind(&self) -> &ErrorKind {
+		&self.kind
+	}
+
+	/// Returns the human-readable error message.
+	pub fn message(&self) -> &str {
+		&self.message
+	}
+
+	/// Returns optional structured details, if any.
+	pub fn details(&self) -> Option<&Value> {
+		self.details.as_ref()
 	}
 
 	/// Returns the underlying cause of this error, if any.
@@ -188,11 +302,92 @@ impl Error {
 	/// Returns structured auth error details when this error's kind is [`ErrorKind::Auth`] and
 	/// `details` is present. Use this instead of matching on the error message string.
 	pub fn auth_details(&self) -> Option<AuthError> {
-		if self.kind != ErrorKind::Auth {
+		if self.kind() != &ErrorKind::Auth {
 			return None;
 		}
-		let details = self.details.as_ref()?;
+		let details = self.details()?;
 		AuthError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured validation error details when this error's kind is
+	/// [`ErrorKind::Validation`] and `details` is present. Use this instead of matching on the
+	/// error message string.
+	pub fn validation_details(&self) -> Option<ValidationError> {
+		if self.kind() != &ErrorKind::Validation {
+			return None;
+		}
+		let details = self.details()?;
+		ValidationError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured method error details when this error's kind is [`ErrorKind::Method`] and
+	/// `details` is present.
+	pub fn method_details(&self) -> Option<MethodError> {
+		if self.kind() != &ErrorKind::Method {
+			return None;
+		}
+		let details = self.details()?;
+		MethodError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured configuration error details when this error's kind is
+	/// [`ErrorKind::Configuration`] and `details` is present.
+	pub fn configuration_details(&self) -> Option<ConfigurationError> {
+		if self.kind() != &ErrorKind::Configuration {
+			return None;
+		}
+		let details = self.details()?;
+		ConfigurationError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured serialization error details when this error's kind is
+	/// [`ErrorKind::Serialization`] and `details` is present.
+	pub fn serialization_details(&self) -> Option<SerializationError> {
+		if self.kind() != &ErrorKind::Serialization {
+			return None;
+		}
+		let details = self.details()?;
+		SerializationError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured not-found error details when this error's kind is
+	/// [`ErrorKind::NotFound`] and `details` is present.
+	pub fn not_found_details(&self) -> Option<NotFoundError> {
+		if self.kind() != &ErrorKind::NotFound {
+			return None;
+		}
+		let details = self.details()?;
+		NotFoundError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured query error details when this error's kind is [`ErrorKind::Query`] and
+	/// `details` is present.
+	pub fn query_details(&self) -> Option<QueryError> {
+		if self.kind() != &ErrorKind::Query {
+			return None;
+		}
+		let details = self.details()?;
+		QueryError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured already-exists error details when this error's kind is
+	/// [`ErrorKind::AlreadyExists`] and `details` is present.
+	pub fn already_exists_details(&self) -> Option<AlreadyExistsError> {
+		if self.kind() != &ErrorKind::AlreadyExists {
+			return None;
+		}
+		let details = self.details()?;
+		AlreadyExistsError::from_value(details.clone()).ok()
+	}
+
+	/// Returns structured connection error details when this error's kind is
+	/// [`ErrorKind::Connection`] and `details` is present.
+	pub fn connection_details(&self) -> Option<ConnectionError> {
+		if self.kind() != &ErrorKind::Connection {
+			return None;
+		}
+		let details = self.details()?;
+		ConnectionError::from_value(details.clone()).ok()
 	}
 }
 
@@ -212,6 +407,139 @@ pub enum AuthError {
 	TokenExpired,
 	/// The session has expired.
 	SessionExpired,
+}
+
+/// Validation failure reason for [`ErrorKind::Validation`] errors.
+///
+/// Serialized as a string in `Error.details` (e.g. `"InvalidParams"`) so clients can detect
+/// validation failure reasons without parsing the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum ValidationError {
+	/// Parse error (invalid message or request format).
+	Parse,
+	/// Invalid request structure.
+	InvalidRequest,
+	/// Invalid parameters.
+	InvalidParams,
+}
+
+/// Method failure reason for [`ErrorKind::Method`] errors.
+///
+/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
+/// the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum MethodError {
+	/// Method not found.
+	NotFound,
+	/// Method not allowed.
+	NotAllowed,
+}
+
+/// Configuration failure reason for [`ErrorKind::Configuration`] errors.
+///
+/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
+/// the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum ConfigurationError {
+	/// Live query not supported.
+	LiveQueryNotSupported,
+	/// Bad live query config.
+	BadLiveQueryConfig,
+	/// Bad GraphQL config.
+	BadGraphqlConfig,
+}
+
+/// Serialisation failure reason for [`ErrorKind::Serialization`] errors.
+///
+/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
+/// the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum SerializationError {
+	/// Serialisation error.
+	Serialization,
+	/// Deserialisation error.
+	Deserialization,
+}
+
+/// Not-found reason for [`ErrorKind::NotFound`] errors.
+///
+/// Serialized as a string in `Error.details` (e.g. `"Session"`) so clients can detect
+/// what was not found without parsing the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum NotFoundError {
+	/// Session not found.
+	Session,
+	/// Table not found.
+	Table,
+	/// Record not found.
+	Record,
+	/// Namespace not found.
+	Namespace,
+	/// Database not found.
+	Database,
+	/// Transaction not found.
+	Transaction,
+}
+
+/// Query failure reason for [`ErrorKind::Query`] errors.
+///
+/// Serialized as a string in `Error.details` (e.g. `"Timedout"`) so clients can detect
+/// the reason without parsing the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum QueryError {
+	/// Query was not executed.
+	NotExecuted,
+	/// Query timed out.
+	Timedout,
+	/// Query was cancelled.
+	Cancelled,
+}
+
+/// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.
+///
+/// Serialized as a string in `Error.details` (e.g. `"Session"`) so clients can detect
+/// what already exists without parsing the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum AlreadyExistsError {
+	/// Session already exists.
+	Session,
+	/// Table already exists.
+	Table,
+	/// Record already exists.
+	Record,
+	/// Namespace already exists.
+	Namespace,
+	/// Database already exists.
+	Database,
+}
+
+/// Connection failure reason for [`ErrorKind::Connection`] errors.
+///
+/// Serialized as a string in `Error.details` (e.g. `"Uninitialised"`) so clients can detect
+/// the reason without parsing the message string. Used in the SDK for client-side connection
+/// state errors.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
+pub enum ConnectionError {
+	/// Connection was used before being initialised.
+	Uninitialised,
+	/// Connect was called on an instance that is already connected.
+	AlreadyConnected,
 }
 
 /// Iterator over an error and its cause chain.
@@ -243,53 +571,6 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
 	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
 		self.cause.as_deref().map(|e| e as &(dyn std::error::Error + 'static))
-	}
-}
-
-impl SurrealValue for Error {
-	fn kind_of() -> Kind {
-		Kind::Object
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(obj) if obj.contains_key("kind") && obj.contains_key("message"))
-	}
-
-	fn into_value(self) -> Value {
-		let mut obj = Object::new();
-		let code = self.code.unwrap_or_else(|| json_rpc_code(&self.kind));
-		obj.insert("code", code);
-		let kind_str = serde_json::to_string(&self.kind).expect("ErrorKind serializes to a string");
-		obj.insert("kind", kind_str.trim_matches('"').to_string());
-		obj.insert("message", self.message);
-		if let Some(details) = self.details {
-			obj.insert("details", details);
-		}
-		if let Some(cause) = self.cause {
-			obj.insert("cause", cause.into_value());
-		}
-		Value::Object(obj)
-	}
-
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		let Value::Object(mut obj) = value else {
-			anyhow::bail!("expected object for Error");
-		};
-		let kind_str = obj.remove("kind").context("missing 'kind'")?.into_string()?;
-		let kind = serde_json::from_str(&format!("\"{}\"", kind_str)).context("invalid 'kind'")?;
-		let message = obj.remove("message").context("missing 'message'")?.into_string()?;
-		let code = obj
-			.remove("code")
-			.and_then(|v| <i64 as SurrealValue>::from_value(v).ok());
-		let details = obj.remove("details");
-		let cause = obj.remove("cause").map(Error::from_value).transpose()?.map(Box::new);
-		Ok(Self {
-			kind,
-			message,
-			code,
-			details,
-			cause,
-		})
 	}
 }
 

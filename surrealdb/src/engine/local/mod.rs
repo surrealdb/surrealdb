@@ -177,7 +177,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Error as TypesError, ErrorKind as TypesErrorKind};
+use surrealdb_types::Error as TypesError;
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -585,7 +585,7 @@ async fn router(
 			let signup_data = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::new(TypesErrorKind::Auth, e.to_string()))?
+					.map_err(|e| TypesError::auth(e.to_string(), None))?
 			};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
@@ -610,7 +610,7 @@ async fn router(
 			let signin_data = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::new(TypesErrorKind::Auth, e.to_string()))?
+					.map_err(|e| TypesError::auth(e.to_string(), None))?
 			};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {
@@ -650,25 +650,21 @@ async fn router(
 						// If the access token is expired and we have a refresh token,
 						// automatically attempt to refresh and return new tokens.
 						if with_refresh && surrealdb_core::iam::is_expired_token_error(&error) {
-							let result = match token
-								.refresh(kvs, &mut *state.session.write().await)
-								.await
-							{
-								Ok(token) => {
-									query_result.finish_with_result(Ok(token.into_value()))
-								}
-								Err(error) => query_result.finish_with_result(Err(
-									TypesError::new(TypesErrorKind::Internal, error.to_string()),
-								)),
-							};
+							let result =
+								match token.refresh(kvs, &mut *state.session.write().await).await {
+									Ok(token) => {
+										query_result.finish_with_result(Ok(token.into_value()))
+									}
+									Err(error) => query_result.finish_with_result(Err(
+										TypesError::internal(error.to_string()),
+									)),
+								};
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
 						// return the authentication error
-						query_result.finish_with_result(Err(TypesError::new(
-							TypesErrorKind::Internal,
-							error.to_string(),
-						)))
+						query_result
+							.finish_with_result(Err(TypesError::internal(error.to_string())))
 					}
 				}
 			};
@@ -682,10 +678,8 @@ async fn router(
 			let result = {
 				match token.refresh(kvs, &mut *state.session.write().await).await {
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
-					Err(error) => query_result.finish_with_result(Err(TypesError::new(
-						TypesErrorKind::Internal,
-						error.to_string(),
-					))),
+					Err(error) => query_result
+						.finish_with_result(Err(TypesError::internal(error.to_string()))),
 				}
 			};
 			Ok(vec![result])
@@ -695,10 +689,8 @@ async fn router(
 			let result = {
 				match iam::clear::clear(&mut *state.session.write().await) {
 					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-					Err(error) => query_result.finish_with_result(Err(TypesError::new(
-						TypesErrorKind::Internal,
-						error.to_string(),
-					))),
+					Err(error) => query_result
+						.finish_with_result(Err(TypesError::internal(error.to_string()))),
 				}
 			};
 			Ok(vec![result])
@@ -711,10 +703,9 @@ async fn router(
 					state.transactions.insert(id, Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
-				Err(error) => query_result.finish_with_result(Err(TypesError::new(
-					TypesErrorKind::Internal,
-					error.to_string(),
-				))),
+				Err(error) => {
+					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))
+				}
 			};
 			Ok(vec![result])
 		}
@@ -725,10 +716,9 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-				Err(error) => query_result.finish_with_result(Err(TypesError::new(
-					TypesErrorKind::Internal,
-					error.to_string(),
-				))),
+				Err(error) => {
+					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))
+				}
 			};
 			Ok(vec![result])
 		}
@@ -775,9 +765,9 @@ async fn router(
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
-						TypesError::new(
-							TypesErrorKind::NotFound,
+						TypesError::not_found(
 							"Transaction not found".to_string(),
+							Some(surrealdb_types::NotFoundError::Transaction),
 						),
 					))]);
 				}

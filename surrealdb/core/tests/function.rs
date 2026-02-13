@@ -3884,8 +3884,8 @@ async fn function_outside_database() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	let err = res.remove(0).result.unwrap_err();
-	assert_eq!(err.kind, TypesErrorKind::Validation);
-	assert_eq!(err.message, "Specify a database to use");
+	assert_eq!(err.kind(), &TypesErrorKind::Validation);
+	assert_eq!(err.message(), "Specify a database to use");
 
 	Ok(())
 }
