@@ -6,6 +6,49 @@ use serde::{Deserialize, Serialize};
 use crate::{Kind, Object, SurrealValue, ToSql, Value};
 
 // -----------------------------------------------------------------------------
+// JSON-RPC 2.0 and SurrealDB-specific error codes (wire backwards compatibility)
+// -----------------------------------------------------------------------------
+
+/// Numeric error codes used on the wire for RPC. Kept for backwards compatibility.
+#[allow(non_snake_case)]
+pub mod code {
+	/// Parse error (invalid message format).
+	pub const PARSE_ERROR: i64 = -32700;
+	/// Invalid request structure.
+	pub const INVALID_REQUEST: i64 = -32600;
+	/// Method not found.
+	pub const METHOD_NOT_FOUND: i64 = -32601;
+	/// Method not allowed.
+	pub const METHOD_NOT_ALLOWED: i64 = -32602;
+	/// Invalid params.
+	pub const INVALID_PARAMS: i64 = -32603;
+	/// Live query not supported.
+	pub const LIVE_QUERY_NOT_SUPPORTED: i64 = -32604;
+	/// Bad live query config.
+	pub const BAD_LIVE_QUERY_CONFIG: i64 = -32605;
+	/// Bad GraphQL config.
+	pub const BAD_GRAPHQL_CONFIG: i64 = -32606;
+	/// Internal/server error.
+	pub const INTERNAL_ERROR: i64 = -32000;
+	/// Client-side error.
+	pub const CLIENT_SIDE_ERROR: i64 = -32001;
+	/// Invalid auth.
+	pub const INVALID_AUTH: i64 = -32002;
+	/// Query not executed.
+	pub const QUERY_NOT_EXECUTED: i64 = -32003;
+	/// Query timed out.
+	pub const QUERY_TIMEDOUT: i64 = -32004;
+	/// Query cancelled.
+	pub const QUERY_CANCELLED: i64 = -32005;
+	/// User/database thrown error.
+	pub const THROWN: i64 = -32006;
+	/// Serialization error.
+	pub const SERIALIZATION_ERROR: i64 = -32007;
+	/// Deserialization error.
+	pub const DESERIALIZATION_ERROR: i64 = -32008;
+}
+
+// -----------------------------------------------------------------------------
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
 
@@ -58,6 +101,18 @@ impl fmt::Display for ErrorKind {
 	}
 }
 
+/// JSON-RPC 2.0 error code for this kind. Injected when serialising for backwards compatibility.
+fn json_rpc_code(kind: &ErrorKind) -> i64 {
+	match kind {
+		ErrorKind::Validation => code::INVALID_PARAMS,
+		ErrorKind::Method => code::METHOD_NOT_ALLOWED,
+		ErrorKind::Configuration | ErrorKind::Auth | ErrorKind::Thrown | ErrorKind::Query
+		| ErrorKind::NotFound | ErrorKind::AlreadyExists => code::INTERNAL_ERROR,
+		ErrorKind::Serialization => code::SERIALIZATION_ERROR,
+		ErrorKind::Internal => code::INTERNAL_ERROR,
+	}
+}
+
 /// Public error type for SurrealDB APIs.
 ///
 /// Designed to be returned from public APIs (including over the wire). It is
@@ -70,6 +125,10 @@ pub struct Error {
 	pub kind: ErrorKind,
 	/// Human-readable error message.
 	pub message: String,
+	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
+	/// removed in the next major release. Only used when serialising to the wire.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub(crate) code: Option<i64>,
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub details: Option<Object>,
@@ -85,9 +144,18 @@ impl Error {
 		Self {
 			kind,
 			message: message.into(),
+			code: None,
 			details: None,
 			cause: None,
 		}
+	}
+
+	/// Sets the wire error code (RPC backwards compatibility). Not part of the public API.
+	#[doc(hidden)]
+	#[must_use]
+	pub fn with_code(mut self, code: i64) -> Self {
+		self.code = Some(code);
+		self
 	}
 
 	/// Adds optional structured details to this error.
@@ -218,6 +286,8 @@ impl SurrealValue for Error {
 
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
+		let code = self.code.unwrap_or_else(|| json_rpc_code(&self.kind));
+		obj.insert("code", code);
 		let kind_str = serde_json::to_string(&self.kind).expect("ErrorKind serializes to a string");
 		obj.insert("kind", kind_str.trim_matches('"').to_string());
 		obj.insert("message", self.message);
@@ -237,11 +307,15 @@ impl SurrealValue for Error {
 		let kind_str = obj.remove("kind").context("missing 'kind'")?.into_string()?;
 		let kind = serde_json::from_str(&format!("\"{}\"", kind_str)).context("invalid 'kind'")?;
 		let message = obj.remove("message").context("missing 'message'")?.into_string()?;
+		let code = obj
+			.remove("code")
+			.and_then(|v| <i64 as SurrealValue>::from_value(v).ok());
 		let details = obj.remove("details").map(Object::from_value).transpose()?;
 		let cause = obj.remove("cause").map(Error::from_value).transpose()?.map(Box::new);
 		Ok(Self {
 			kind,
 			message,
+			code,
 			details,
 			cause,
 		})
