@@ -119,6 +119,14 @@ pub struct RootContext {
 	pub auth_enabled: bool,
 	/// Session information for context-aware functions
 	pub(crate) session: Option<Arc<SessionInfo>>,
+	/// Current value for correlated sub-execution (e.g., graph lookups).
+	///
+	/// When an operator chain is executed per-row (e.g., `GraphEdgeScan` sourced
+	/// from the current record), this holds the input value that the
+	/// `CurrentValueSource` operator yields into the stream. This is the
+	/// explicit DAG input binding -- operators read it via `CurrentValueSource`,
+	/// and it is set by `LookupPart` before executing the lookup's operator chain.
+	pub(crate) current_value: Option<Arc<Value>>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -129,6 +137,7 @@ impl std::fmt::Debug for RootContext {
 			.field("auth", &self.auth)
 			.field("auth_enabled", &self.auth_enabled)
 			.field("session", &self.session)
+			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
@@ -383,6 +392,7 @@ impl ExecutionContext {
 				auth: r.auth.clone(),
 				auth_enabled: r.auth_enabled,
 				session: r.session.clone(),
+				current_value: r.current_value.clone(),
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -393,6 +403,7 @@ impl ExecutionContext {
 					auth: n.root.auth.clone(),
 					auth_enabled: n.root.auth_enabled,
 					session: n.root.session.clone(),
+					current_value: n.root.current_value.clone(),
 				},
 				ns: n.ns.clone(),
 			}),
@@ -406,12 +417,37 @@ impl ExecutionContext {
 						auth: d.ns_ctx.root.auth.clone(),
 						auth_enabled: d.ns_ctx.root.auth_enabled,
 						session: d.ns_ctx.root.session.clone(),
+						current_value: d.ns_ctx.root.current_value.clone(),
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
 				db: d.db.clone(),
 			}),
 		}
+	}
+
+	/// Create a new context with the current value set for correlated sub-execution.
+	///
+	/// This is used by `LookupPart` to bind the current row's value (typically a
+	/// RecordId) before executing a graph/reference lookup operator chain.
+	/// The `CurrentValueSource` operator reads this value to seed the chain.
+	pub fn with_current_value(&self, value: Value) -> Self {
+		let mut new = self.clone();
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.current_value = Some(Arc::new(value));
+		new
+	}
+
+	/// Get the current value for correlated sub-execution (if set).
+	///
+	/// Returns the value set by `with_current_value()`. Used by
+	/// `CurrentValueSource` to yield its input into the operator stream.
+	pub fn current_value(&self) -> Option<&Value> {
+		self.root().current_value.as_deref()
 	}
 
 	/// Create a new context with an additional parameter.

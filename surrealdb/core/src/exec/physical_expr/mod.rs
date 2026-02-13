@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
@@ -43,23 +43,30 @@ pub(crate) use subquery::ScalarSubquery;
 
 /// Context for recursive tree-building via RepeatRecurse (@).
 ///
-/// When a recursion path contains RepeatRecurse markers (e.g., in destructure
-/// patterns like `{name, children: ->edge->table.@}`), this context is set by
-/// the recursion evaluator and read by the RepeatRecurse handler to re-invoke
-/// the recursion from the current value.
-#[derive(Clone, Copy)]
-pub struct RecursionCtx<'a> {
-	/// The recursion's inner path (containing Destructure with RepeatRecurse)
-	pub path: &'a [Arc<dyn PhysicalExpr>],
-	/// Maximum recursion depth (None = system limit)
-	pub max_depth: Option<u32>,
+/// Set by `evaluate_recurse_iterative` and read by `evaluate_repeat_recurse`
+/// during the two-phase iterative evaluation:
+///
+/// - **Discovery phase** (`discovery_sink` is `Some`): `@` writes its input values to the sink and
+///   returns immediately, allowing BFS-style level discovery with no stack recursion.
+/// - **Assembly phase** (`assembly_cache` is `Some`): `@` looks up pre-computed results from the
+///   cache instead of recursing, enabling bottom-up tree construction with no stack recursion.
+#[derive(Clone)]
+pub struct RecursionCtx {
 	/// Minimum recursion depth for path elimination.
 	/// When a RepeatRecurse produces only dead-end values at a depth
 	/// below this threshold, the entire sub-tree is eliminated (returns
 	/// `Value::None` so that the parent's `clean_iteration` can filter it).
 	pub min_depth: u32,
-	/// Current recursion depth (incremented at each RepeatRecurse call)
+	/// Current recursion depth (set by the iterative evaluator for each level)
 	pub depth: u32,
+	/// Forward BFS discovery: RepeatRecursePart writes discovered values here.
+	/// When `Some`, `@` writes its input values to this sink and returns
+	/// immediately.
+	pub discovery_sink: Option<Arc<Mutex<Vec<Value>>>>,
+	/// Backward assembly: RepeatRecursePart looks up pre-computed results here.
+	/// Maps `value_hash` -> assembled result for the NEXT depth level.
+	/// When `Some`, `@` does a cache lookup instead of recursing.
+	pub assembly_cache: Option<Arc<HashMap<u64, Value>>>,
 }
 
 /// Evaluation context - what's available during expression evaluation.
@@ -80,8 +87,8 @@ pub struct EvalContext<'a> {
 	pub local_params: Option<&'a HashMap<String, Value>>,
 
 	/// Active recursion context for RepeatRecurse evaluation.
-	/// Set by evaluate_recurse_* when the inner path contains .@ markers.
-	pub recursion_ctx: Option<RecursionCtx<'a>>,
+	/// Set by evaluate_recurse_iterative when the inner path contains .@ markers.
+	pub recursion_ctx: Option<RecursionCtx>,
 
 	/// Original document root for the current row.  Needed by IndexPart to
 	/// evaluate dynamic key expressions (`[field]`, `[$param]`) against the
@@ -106,8 +113,11 @@ impl<'a> EvalContext<'a> {
 	/// For per-row evaluation (projections, filters)
 	pub fn with_value(&self, value: &'a Value) -> Self {
 		Self {
+			exec_ctx: self.exec_ctx,
 			current_value: Some(value),
-			..*self
+			local_params: self.local_params,
+			recursion_ctx: self.recursion_ctx.clone(),
+			document_root: self.document_root,
 		}
 	}
 
@@ -116,17 +126,22 @@ impl<'a> EvalContext<'a> {
 	/// original document for dynamic index expressions).
 	pub fn with_value_and_doc(&self, value: &'a Value) -> Self {
 		Self {
+			exec_ctx: self.exec_ctx,
 			current_value: Some(value),
+			local_params: self.local_params,
+			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: Some(value),
-			..*self
 		}
 	}
 
 	/// Set the recursion context for RepeatRecurse evaluation.
-	pub fn with_recursion_ctx(&self, ctx: RecursionCtx<'a>) -> Self {
+	pub fn with_recursion_ctx(&self, ctx: RecursionCtx) -> Self {
 		Self {
+			exec_ctx: self.exec_ctx,
+			current_value: self.current_value,
+			local_params: self.local_params,
 			recursion_ctx: Some(ctx),
-			..*self
+			document_root: self.document_root,
 		}
 	}
 
@@ -284,9 +299,8 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// The default implementation returns None, indicating this is not a projection function.
 	async fn evaluate_projection(
 		&self,
-		ctx: EvalContext<'_>,
+		_ctx: EvalContext<'_>,
 	) -> FlowResult<Option<Vec<(Idiom, Value)>>> {
-		let _ = ctx; // silence unused warning
 		Ok(None)
 	}
 
@@ -307,6 +321,16 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// `EXPLAIN` / `EXPLAIN ANALYZE` can recursively format them.
 	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
 		vec![]
+	}
+
+	/// Whether this expression is a fused multi-step lookup chain.
+	///
+	/// When consecutive graph/reference lookups are fused into a single
+	/// `LookupPart`, the continuation logic in `evaluate_parts_with_continuation`
+	/// needs to know so it can correctly map per-element over non-lookup arrays
+	/// even when the fused Lookup is the last part in the idiom.
+	fn is_fused_lookup(&self) -> bool {
+		false
 	}
 }
 

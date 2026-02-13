@@ -7,13 +7,14 @@ use std::sync::Arc;
 
 use super::Planner;
 use crate::err::Error;
-use crate::exec::PhysicalExpr;
+use crate::exec::operators::{CurrentValueSource, RecursionOp};
 use crate::exec::parts::{
 	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, FieldPart, FirstPart,
 	FlattenPart, IndexPart, LastPart, LookupDirection, LookupPart, MethodPart, OptionalChainPart,
 	PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
 };
 use crate::exec::physical_expr::IdiomExpr;
+use crate::exec::{ExecOperator, PhysicalExpr};
 use crate::expr::part::{DestructurePart as AstDestructurePart, Part, RecurseInstruction};
 
 // ============================================================================
@@ -62,7 +63,7 @@ impl<'ctx> Planner<'ctx> {
 		parts: Vec<Part>,
 	) -> Result<Vec<Arc<dyn PhysicalExpr>>, Error> {
 		let mut converted = Vec::with_capacity(parts.len());
-		let mut iter = parts.into_iter();
+		let mut iter = parts.into_iter().peekable();
 
 		while let Some(part) = iter.next() {
 			// Handle implicit recursion (Recurse with no inner path absorbs remaining parts)
@@ -122,13 +123,18 @@ impl<'ctx> Planner<'ctx> {
 				let inclusive = is_inclusive_recurse(&instruction);
 				let instr = self.convert_recurse_instruction(instruction)?;
 
-				converted.push(Arc::new(RecursePart {
+				let body_op = extract_body_operator(&path);
+				let op: Arc<dyn ExecOperator> = Arc::new(RecursionOp::new(
+					body_op,
+					path,
 					min_depth,
 					max_depth,
-					path,
-					instruction: instr,
+					instr,
 					inclusive,
 					has_repeat_recurse,
+				));
+				converted.push(Arc::new(RecursePart {
+					op,
 				}) as Arc<dyn PhysicalExpr>);
 
 				// Append suffix parts (parts after @) outside the
@@ -150,6 +156,38 @@ impl<'ctx> Planner<'ctx> {
 					tail,
 				}) as Arc<dyn PhysicalExpr>);
 				break;
+			}
+
+			// Fuse consecutive Lookup parts into a single operator chain.
+			// Instead of creating independent LookupParts each with their own
+			// CurrentValueSource, we thread the output of one lookup as the
+			// input to the next, forming a streaming DAG:
+			//   GraphEdgeScan(->person, GraphEdgeScan(->likes, CurrentValueSource))
+			if let Part::Lookup(first_lookup) = part {
+				let (mut direction, mut extract_id) = lookup_metadata(&first_lookup);
+				let mut chain: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
+				chain = self.plan_lookup_with_input(chain, first_lookup)?;
+
+				// Consume all consecutive Part::Lookup nodes
+				let mut fused = false;
+				while matches!(iter.peek(), Some(Part::Lookup(_))) {
+					let Some(Part::Lookup(next_lookup)) = iter.next() else {
+						unreachable!()
+					};
+					let (d, e) = lookup_metadata(&next_lookup);
+					direction = d;
+					extract_id = e;
+					chain = self.plan_lookup_with_input(chain, next_lookup)?;
+					fused = true;
+				}
+
+				converted.push(Arc::new(LookupPart {
+					direction,
+					plan: chain,
+					extract_id,
+					fused,
+				}));
+				continue;
 			}
 
 			let physical_part = self.convert_part(part)?;
@@ -242,6 +280,7 @@ impl<'ctx> Planner<'ctx> {
 					direction,
 					plan,
 					extract_id,
+					fused: false,
 				}))
 			}
 
@@ -279,13 +318,18 @@ impl<'ctx> Planner<'ctx> {
 				let inclusive = is_inclusive_recurse(&instruction);
 				let instr = self.convert_recurse_instruction(instruction)?;
 
-				Ok(Arc::new(RecursePart {
+				let body_op = extract_body_operator(&path);
+				let op: Arc<dyn ExecOperator> = Arc::new(RecursionOp::new(
+					body_op,
+					path,
 					min_depth,
 					max_depth,
-					path,
-					instruction: instr,
+					instr,
 					inclusive,
 					has_repeat_recurse,
+				));
+				Ok(Arc::new(RecursePart {
+					op,
 				}))
 			}
 
@@ -376,6 +420,22 @@ impl<'ctx> Planner<'ctx> {
 // Free Functions
 // ============================================================================
 
+/// Extract direction and extract_id metadata from a Lookup AST node.
+///
+/// Used by `convert_parts` to compute `LookupPart` metadata when fusing
+/// consecutive lookups. The last lookup's metadata is used for the
+/// resulting `LookupPart`.
+fn lookup_metadata(lookup: &crate::expr::lookup::Lookup) -> (LookupDirection, bool) {
+	let direction = match &lookup.kind {
+		crate::expr::lookup::LookupKind::Graph(dir) => LookupDirection::from(dir),
+		crate::expr::lookup::LookupKind::Reference => LookupDirection::Reference,
+	};
+	let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
+	let needs_full_records = needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
+	let extract_id = needs_full_records && !needs_full_pipeline;
+	(direction, extract_id)
+}
+
 /// Check if a `RecurseInstruction` has the `inclusive` flag set.
 fn is_inclusive_recurse(instruction: &Option<RecurseInstruction>) -> bool {
 	matches!(
@@ -413,6 +473,20 @@ fn insert_auto_flattens(parts: Vec<Arc<dyn PhysicalExpr>>) -> Vec<Arc<dyn Physic
 		}
 	}
 	result
+}
+
+/// Extract operator chain from body parts for EXPLAIN display.
+///
+/// Collects embedded operators from all path parts (LookupParts expose
+/// their fused chains). Returns the chain if exactly one is found.
+fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecOperator>> {
+	let embedded: Vec<_> =
+		path.iter().flat_map(|p| p.embedded_operators()).map(|(_, op)| Arc::clone(op)).collect();
+	if embedded.len() == 1 {
+		Some(embedded.into_iter().next().expect("embedded operator should be present"))
+	} else {
+		None
+	}
 }
 
 /// Check if a slice of AST parts contains a `RepeatRecurse` marker at any nesting level.

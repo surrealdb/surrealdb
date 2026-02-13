@@ -68,7 +68,6 @@ mod util;
 use std::sync::Arc;
 
 // Re-exports for external callers
-pub(crate) use self::source::LOOKUP_SOURCE_PARAM;
 use self::util::literal_to_value;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::FrozenContext;

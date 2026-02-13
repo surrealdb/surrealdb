@@ -3,6 +3,7 @@
 mod cnf;
 mod savepoint;
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -234,6 +235,29 @@ impl Transactable for Transaction {
 		let mut inner = self.inner.write().await;
 		// Get the key
 		let res = inner.tx.get(key).await?;
+		// Return result
+		Ok(res)
+	}
+
+	/// Fetch many keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Batch get the keys
+		let pairs = inner.tx.batch_get(keys.iter().cloned()).await?;
+		// Collect into a map for key-order restoration
+		let map: HashMap<Key, Val> = pairs.map(|kv| (Key::from(kv.0), kv.1)).collect();
+		// Build result preserving original key order
+		let res = keys.into_iter().map(|k| map.get(&k).cloned()).collect();
 		// Return result
 		Ok(res)
 	}
