@@ -8,16 +8,13 @@
 //!
 //! ## Stack safety
 //!
-//! The four iterative strategies (Default, Collect, Path, Shortest) are fully
-//! loop-based and use no stack recursion. They are safe at any depth.
+//! All strategies are fully iterative and use no stack recursion:
 //!
-//! The RepeatRecurse (`@`) tree-building strategy requires true recursion
-//! because the `@` marker is embedded arbitrarily deep inside Destructure
-//! fields. Converting it to a loop would require rewriting the entire
-//! PhysicalExpr evaluation into a continuation-passing style. The recursive
-//! calls use `Box::pin` to allocate each async state machine on the heap,
-//! keeping per-level stack usage minimal. Depth is bounded by `max_depth`
-//! (capped at the system `IDIOM_RECURSION_LIMIT`, default 256).
+//! - **Default, Collect, Path, Shortest**: Loop-based, safe at any depth.
+//! - **RepeatRecurse (`@`) tree-building**: Uses a two-phase iterative approach (forward BFS
+//!   discovery + backward bottom-up assembly). In the discovery phase, `@` writes its inputs to a
+//!   shared sink and returns immediately. In the assembly phase, `@` does a cache lookup for
+//!   pre-computed results. Neither phase uses stack recursion.
 //!
 //! ## EXPLAIN output
 //!
@@ -28,8 +25,8 @@
 //!               └────> CurrentValueSource [ctx: Rt]
 //! ```
 
-use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use futures::stream;
@@ -47,12 +44,12 @@ use crate::val::Value;
 
 /// Sentinel error type used to signal path elimination during recursion.
 ///
-/// When a RepeatRecurse (`@`) finds that all recursive results are dead ends
-/// and the current depth is below `min_depth`, it raises this signal.
-/// The signal propagates through the Destructure (skipping remaining field
-/// evaluation) and is caught by `evaluate_recurse_with_plan`, which returns
-/// `Value::None` -- allowing the parent's `clean_iteration` to filter
-/// the eliminated sub-tree from the results.
+/// When a RepeatRecurse (`@`) in assembly mode finds that all results are
+/// dead ends and the current depth is below `min_depth`, it raises this
+/// signal. The signal propagates through the Destructure (skipping
+/// remaining field evaluation) and is caught by the assembly loop in
+/// `evaluate_recurse_iterative`, which stores `Value::None` -- allowing
+/// the parent level's `clean_iteration` to filter the eliminated sub-tree.
 #[derive(Debug)]
 struct PathEliminationSignal;
 
@@ -234,16 +231,12 @@ impl ExecOperator for RecursionOp {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 			let result = if has_repeat_recurse {
-				let rec_ctx = RecursionCtx {
-					path: &path,
-					max_depth: Some(max_depth),
-					min_depth,
-					depth: 0,
-				};
-				evaluate_recurse_with_plan(
+				evaluate_recurse_iterative(
 					&value,
 					&path,
-					eval_ctx.with_value(&value).with_recursion_ctx(rec_ctx),
+					min_depth,
+					max_depth,
+					eval_ctx.with_value(&value),
 				)
 				.await?
 			} else {
@@ -309,118 +302,259 @@ impl ExecOperator for RecursionOp {
 }
 
 // ============================================================================
-// RepeatRecurse evaluation functions
+// RepeatRecurse evaluation function
 // ============================================================================
-
-/// Evaluate a recursion that contains RepeatRecurse markers.
-///
-/// This performs a single evaluation of the path on the current value.
-/// The actual recursion happens through RepeatRecurse callbacks within
-/// the path evaluation (e.g., inside Destructure aliased fields).
-///
-/// The recursion context is set in EvalContext so that RepeatRecurse
-/// handlers can re-invoke this function with incremented depth.
-pub(crate) fn evaluate_recurse_with_plan<'a>(
-	value: &'a Value,
-	path: &'a [Arc<dyn PhysicalExpr>],
-	ctx: EvalContext<'a>,
-) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-	Box::pin(async move {
-		let rec_ctx = ctx.recursion_ctx.as_ref().expect("recursion context must be set");
-		let max_depth = rec_ctx.max_depth.unwrap_or(256);
-
-		// Check depth limit before evaluating
-		if rec_ctx.depth >= max_depth {
-			return Ok(value.clone());
-		}
-
-		// Check if the value is a dead end
-		if is_final(value) {
-			// get_final already returns the correct terminal value
-			// ([] for arrays, Null for Null, None for everything else).
-			return Ok(get_final(value));
-		}
-
-		// Evaluate the path once on the current value.
-		// RepeatRecurse markers within the path will recursively call back
-		// into evaluate_recurse_with_plan via evaluate_repeat_recurse.
-		//
-		// If a nested RepeatRecurse detects a dead-end sub-tree below
-		// min_depth it raises PathEliminationSignal. Catch it here so
-		// the parent clean_iteration can filter this branch out.
-		match evaluate_physical_path(value, path, ctx.with_value(value)).await {
-			Ok(v) => Ok(v),
-			Err(ControlFlow::Err(ref e)) if e.downcast_ref::<PathEliminationSignal>().is_some() => {
-				Ok(Value::None)
-			}
-			Err(other) => Err(other),
-		}
-	})
-}
 
 /// Handle the RepeatRecurse (@) marker during path evaluation.
 ///
-/// This reads the recursion context from EvalContext and re-invokes
-/// the recursion evaluator on the current value. For Array values,
-/// each element is processed individually to build the recursive tree.
+/// This reads the recursion context from EvalContext and dispatches to one
+/// of two modes set by `evaluate_recurse_iterative`:
+///
+/// 1. **Discovery mode** (`discovery_sink` is `Some`): Write each non-final input value to the
+///    shared sink. Returns the input as-is (the value won't be used -- only the sink contents
+///    matter). No recursion.
+///
+/// 2. **Assembly mode** (`assembly_cache` is `Some`): Look up each element's pre-computed result
+///    from the cache via `value_hash`. Apply `clean_iteration` and path-elimination checks. No
+///    recursion.
+///
+/// Both modes are fully iterative -- no stack recursion occurs.
 pub(crate) fn evaluate_repeat_recurse<'a>(
 	value: &'a Value,
 	ctx: EvalContext<'a>,
 ) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 	Box::pin(async move {
 		let rec_ctx = match &ctx.recursion_ctx {
-			Some(rc) => *rc,
+			Some(rc) => rc.clone(),
 			None => {
 				// RepeatRecurse outside recursion context is an error
 				return Err(crate::err::Error::UnsupportedRepeatRecurse.into());
 			}
 		};
 
-		// Increment depth for the recursive call
-		let next_ctx = RecursionCtx {
-			depth: rec_ctx.depth + 1,
-			..rec_ctx
+		// ── Discovery mode ──────────────────────────────────────────────
+		// Write non-final values to the shared sink, return input as-is.
+		if let Some(ref sink) = rec_ctx.discovery_sink {
+			let values_to_write: Vec<Value> = match value {
+				Value::Array(arr) => arr.iter().filter(|v| !is_final(v)).cloned().collect(),
+				v if !is_final(v) => vec![v.clone()],
+				_ => vec![],
+			};
+			if !values_to_write.is_empty() {
+				let mut guard = sink.lock().expect("discovery sink lock poisoned");
+				guard.extend(values_to_write);
+			}
+			// Return a placeholder -- the discovery phase discards results.
+			return Ok(value.clone());
+		}
+
+		// ── Assembly mode ───────────────────────────────────────────────
+		// Look up pre-computed results from the cache.
+		// The depth check uses `(depth + 1) < min_depth` to match the
+		// semantics where the recursive call would happen at `depth + 1`.
+		if let Some(ref cache) = rec_ctx.assembly_cache {
+			let next_depth = rec_ctx.depth + 1;
+			return match value {
+				Value::Array(arr) => {
+					let mut results = Vec::with_capacity(arr.len());
+					for elem in arr.iter() {
+						if is_final(elem) {
+							continue;
+						}
+						let hash = value_hash(elem);
+						if let Some(cached) = cache.get(&hash) {
+							results.push(cached.clone());
+						}
+						// If not in cache, the value was never discovered
+						// (shouldn't happen), skip it.
+					}
+					let result = clean_iteration(Value::Array(results.into()));
+					if is_final(&result) && next_depth < rec_ctx.min_depth {
+						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+					}
+					Ok(result)
+				}
+				v if !is_final(v) => {
+					let hash = value_hash(v);
+					let result = cache.get(&hash).cloned().unwrap_or(Value::None);
+					if is_final(&result) && next_depth < rec_ctx.min_depth {
+						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+					}
+					Ok(result)
+				}
+				// Final values (None, Null) -- check path elimination.
+				_ => {
+					if next_depth < rec_ctx.min_depth {
+						return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
+					}
+					Ok(Value::None)
+				}
+			};
+		}
+
+		// Neither discovery_sink nor assembly_cache is set -- this should
+		// not happen in normal execution since RecursionOp always uses the
+		// iterative evaluator which sets one of these fields.
+		Err(crate::err::Error::UnsupportedRepeatRecurse.into())
+	})
+}
+
+// ============================================================================
+// Iterative RepeatRecurse evaluation (two-phase BFS, no stack recursion)
+// ============================================================================
+
+/// Iterative evaluation of a RepeatRecurse (`@`) recursion.
+///
+/// Replaces the stack-recursive chain with a two-phase approach:
+///
+/// **Phase 1 -- Forward BFS Discovery:** Walk the graph level by level.
+/// At each depth, evaluate the full path with `@` writing its input values
+/// to a shared sink (discovery mode). This discovers which values exist at
+/// each depth level without any stack recursion.
+///
+/// **Phase 2 -- Backward Assembly:** Process from the deepest level to 0.
+/// At each depth, evaluate the full path with `@` doing a cache lookup for
+/// the next depth's pre-computed results (assembly mode). Since deeper
+/// levels are already resolved, no recursion is needed.
+async fn evaluate_recurse_iterative(
+	start: &Value,
+	path: &[Arc<dyn PhysicalExpr>],
+	min_depth: u32,
+	max_depth: u32,
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	// Early exit: if start is a dead end, return immediately.
+	if is_final(start) {
+		return Ok(get_final(start));
+	}
+
+	// ── Phase 1: Forward BFS Discovery ──────────────────────────────
+	//
+	// Build `levels[d]` = values discovered at depth d.
+	// At each depth, we evaluate the full path with `@` in discovery mode:
+	// it writes its inputs to a shared sink instead of recursing.
+	//
+	// Values are deduplicated WITHIN each level (same value at same depth
+	// is redundant) but NOT across levels. The same value CAN appear at
+	// different depths -- this is required for DAGs where a node is
+	// reachable via multiple paths of different lengths.
+	let mut levels: Vec<Vec<Value>> = vec![vec![start.clone()]];
+
+	for d in 0..(max_depth as usize) {
+		let current_level = &levels[d];
+		if current_level.is_empty() {
+			break;
+		}
+
+		// Create a shared sink for this depth's discoveries.
+		let sink: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+
+		// Build a RecursionCtx in discovery mode.
+		let discovery_ctx = RecursionCtx {
+			min_depth,
+			depth: d as u32,
+			discovery_sink: Some(Arc::clone(&sink)),
+			assembly_cache: None,
 		};
 
-		let next_depth = next_ctx.depth;
-
-		match value {
-			// For arrays, process each element individually and collect results.
-			Value::Array(arr) => {
-				let mut results = Vec::with_capacity(arr.len());
-				for elem in arr.iter() {
-					let elem_ctx = ctx.with_recursion_ctx(next_ctx);
-					let result = evaluate_recurse_with_plan(elem, next_ctx.path, elem_ctx).await?;
-					results.push(result);
-				}
-
-				// Apply clean_iteration: filter out dead-end values (None, Null,
-				// all-None arrays) and flatten.
-				let result = clean_iteration(Value::Array(results.into()));
-
-				// Path elimination: when ALL recursive results are dead ends
-				// (cleaned result is final) and we haven't reached min_depth,
-				// signal elimination so the parent can prune this branch.
-				if is_final(&result) && next_depth < rec_ctx.min_depth {
-					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
-				}
-
-				Ok(result)
+		// Evaluate the path for each value at this depth.
+		// The `@` part will write discovered values to the sink.
+		for val in current_level {
+			if is_final(val) {
+				continue;
 			}
-			// For single values, recurse directly
-			_ => {
-				let elem_ctx = ctx.with_recursion_ctx(next_ctx);
-				let result = evaluate_recurse_with_plan(value, next_ctx.path, elem_ctx).await?;
-
-				// Path elimination for single-value dead ends
-				if is_final(&result) && next_depth < rec_ctx.min_depth {
-					return Err(ControlFlow::Err(anyhow::Error::new(PathEliminationSignal)));
-				}
-
-				Ok(result)
+			let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
+			match evaluate_physical_path(val, path, eval).await {
+				Ok(_) => {}
+				// PathEliminationSignal means dead end at this value -- skip it.
+				Err(ControlFlow::Err(ref e))
+					if e.downcast_ref::<PathEliminationSignal>().is_some() => {}
+				Err(other) => return Err(other),
 			}
 		}
-	})
+
+		// Extract discovered values with per-level deduplication.
+		// We use lock+take instead of Arc::try_unwrap because the cloned
+		// RecursionCtx instances may still hold Arc references to the sink.
+		let discovered = std::mem::take(&mut *sink.lock().expect("sink lock poisoned"));
+
+		let mut seen_level: HashSet<u64> = HashSet::new();
+		let mut next_level = Vec::new();
+		for v in discovered {
+			let hash = value_hash(&v);
+			if seen_level.insert(hash) {
+				next_level.push(v);
+			}
+		}
+
+		if next_level.is_empty() {
+			break;
+		}
+		levels.push(next_level);
+	}
+
+	let num_levels = levels.len();
+
+	// ── Phase 2: Backward Assembly ──────────────────────────────────
+	//
+	// Start from the deepest level and work backward to depth 0.
+	// At each depth, evaluate the full path with `@` in assembly mode:
+	// it looks up the NEXT depth's pre-computed results from a cache.
+	//
+	// At levels >= max_depth, store raw values as base cases (matching
+	// the original recursive behavior where `depth >= max_depth` returns
+	// the value without evaluating the path).
+	let mut next_cache: HashMap<u64, Value> = HashMap::new();
+
+	for d in (0..num_levels).rev() {
+		let mut current_cache: HashMap<u64, Value> = HashMap::new();
+
+		if d as u32 >= max_depth {
+			// Base case: at or beyond max_depth, store raw values.
+			// The `@` marker at this depth would not recurse further.
+			for val in &levels[d] {
+				current_cache.insert(value_hash(val), val.clone());
+			}
+		} else {
+			let cache_arc = Arc::new(next_cache);
+
+			let assembly_ctx = RecursionCtx {
+				min_depth,
+				depth: d as u32,
+				discovery_sink: None,
+				assembly_cache: Some(Arc::clone(&cache_arc)),
+			};
+
+			for val in &levels[d] {
+				// Skip final values (dead ends) -- store terminal directly.
+				if is_final(val) {
+					current_cache.insert(value_hash(val), get_final(val));
+					continue;
+				}
+
+				let eval = ctx.with_value(val).with_recursion_ctx(assembly_ctx.clone());
+				let result = match evaluate_physical_path(val, path, eval).await {
+					Ok(v) => v,
+					// PathEliminationSignal during assembly means the sub-tree
+					// was eliminated. Store Value::None so the parent can filter.
+					Err(ControlFlow::Err(ref e))
+						if e.downcast_ref::<PathEliminationSignal>().is_some() =>
+					{
+						Value::None
+					}
+					Err(other) => return Err(other),
+				};
+
+				current_cache.insert(value_hash(val), result);
+			}
+		}
+
+		next_cache = current_cache;
+	}
+
+	// The depth-0 result for `start` is the final assembled tree.
+	let start_hash = value_hash(start);
+	Ok(next_cache.remove(&start_hash).unwrap_or(Value::None))
 }
 
 // ============================================================================
