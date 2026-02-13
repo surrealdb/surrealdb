@@ -88,7 +88,8 @@ pub async fn export_v3(
 		let users = tx.all_db_users(ns, db).await?;
 		export_section_header("USERS", &mut writer, &mut fmt_buffer).await;
 		for i in users.as_ref() {
-			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await;
+			writer.write_bytes(b";\n").await;
 		}
 
 		writer.write_bytes(b"\n").await;
@@ -98,7 +99,8 @@ pub async fn export_v3(
 		let accesses = tx.all_db_accesses(ns, db).await?;
 		export_section_header("ACCESSES", &mut writer, &mut fmt_buffer).await;
 		for i in accesses.as_ref() {
-			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await;
+			writer.write_bytes(b";\n").await;
 		}
 
 		writer.write_bytes(b"\n").await;
@@ -108,24 +110,30 @@ pub async fn export_v3(
 		let params = tx.all_db_params(ns, db).await?;
 		export_section_header("PARAMS", &mut writer, &mut fmt_buffer).await;
 		for i in params.as_ref() {
-			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await;
+			writer.write_bytes(b";\n").await;
 		}
+		writer.write_bytes(b"\n").await;
 	}
 
 	if cfg.functions {
 		let functions = tx.all_db_functions(ns, db).await?;
 		export_section_header("FUNCTIONS", &mut writer, &mut fmt_buffer).await;
 		for i in functions.as_ref() {
-			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await;
+			writer.write_bytes(b";\n").await;
 		}
+		writer.write_bytes(b"\n").await;
 	}
 
 	if cfg.analyzers {
 		let analyzers = tx.all_db_analyzers(ns, db).await?;
 		export_section_header("ANALYZERS", &mut writer, &mut fmt_buffer).await;
 		for i in analyzers.as_ref() {
-			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await
+			write_visit(issue_buffer, &mut path, &mut fmt_buffer, &mut writer, i).await;
+			writer.write_bytes(b";\n").await;
 		}
+		writer.write_bytes(b"\n").await;
 	}
 
 	if !cfg.tables.is_any() {
@@ -216,7 +224,6 @@ async fn export_table_structure(
 			writer.write_bytes(b";\n").await;
 		}
 	}
-	writer.write_bytes(b";\n").await;
 
 	Ok(())
 }
@@ -306,13 +313,13 @@ async fn export_versioned_data(
 			writer.write_bytes(b"INSERT RELATION ").await;
 			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
 			writer.write_bytes(b" VERSION d").await;
-			write_fmt(fmt_buf, writer, |s| write!(s, "{:?}", ts)).await;
+			write_fmt(fmt_buf, writer, |s| write!(s, "'{:?}'", ts)).await;
 			writer.write_bytes(b";\n").await;
 		} else {
 			writer.write_bytes(b"INSERT ").await;
 			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
 			writer.write_bytes(b" VERSION d").await;
-			write_fmt(fmt_buf, writer, |s| write!(s, "{:?}", ts)).await;
+			write_fmt(fmt_buf, writer, |s| write!(s, "'{:?}'", ts)).await;
 			writer.write_bytes(b";\n").await;
 		}
 
@@ -352,7 +359,9 @@ async fn export_data(
 					writer.write_bytes(b"];\nINSERT RELATION [").await;
 					inserting_relation = Some(true);
 				}
-				Some(true) => {}
+				Some(true) => {
+					writer.write_bytes(b",").await;
+				}
 				None => {
 					writer.write_bytes(b"\nINSERT RELATION [").await;
 					inserting_relation = Some(true);
@@ -363,12 +372,14 @@ async fn export_data(
 			match inserting_relation {
 				Some(true) => {
 					writer.write_bytes(b"];\nINSERT [").await;
-					inserting_relation = Some(true);
+					inserting_relation = Some(false);
 				}
-				Some(false) => {}
+				Some(false) => {
+					writer.write_bytes(b",").await;
+				}
 				None => {
 					writer.write_bytes(b"\nINSERT [").await;
-					inserting_relation = Some(true);
+					inserting_relation = Some(false);
 				}
 			}
 			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
