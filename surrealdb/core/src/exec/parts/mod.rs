@@ -12,11 +12,10 @@ use std::sync::Arc;
 use crate::catalog::providers::TableProvider;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
-use crate::val::{RecordId, Value};
-
 // Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
 // These are shared between the legacy compute path and the streaming execution engine.
 pub(crate) use crate::expr::idiom::recursion::{clean_iteration, get_final, is_final};
+use crate::val::{RecordId, Value};
 
 pub(crate) mod array_ops;
 pub(crate) mod destructure;
@@ -201,4 +200,3 @@ pub(crate) fn evaluate_physical_path<'a>(
 		Ok(current)
 	})
 }
-
