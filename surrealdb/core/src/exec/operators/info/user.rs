@@ -75,7 +75,8 @@ impl ExecOperator for UserInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.context_level_for_base()
+		// Combine the base-level context with the user expression's context
+		self.user.required_context().max(self.context_level_for_base())
 	}
 
 	fn access_mode(&self) -> AccessMode {

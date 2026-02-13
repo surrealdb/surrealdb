@@ -144,7 +144,20 @@ impl ExecOperator for Scan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Scan needs database context for table access, combined with expression contexts
+		let exprs_ctx = [
+			Some(&self.source),
+			self.version.as_ref(),
+			self.predicate.as_ref(),
+			self.limit.as_ref(),
+			self.start.as_ref(),
+		]
+		.into_iter()
+		.flatten()
+		.map(|e| e.required_context())
+		.max()
+		.unwrap_or(ContextLevel::Root);
+		exprs_ctx.max(ContextLevel::Database)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

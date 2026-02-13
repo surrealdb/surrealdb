@@ -69,7 +69,8 @@ impl PhysicalExpr for LookupPart {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Lookups need database context, combined with the child plan's context
+		self.plan.required_context().max(ContextLevel::Database)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {

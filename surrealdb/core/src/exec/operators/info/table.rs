@@ -72,7 +72,10 @@ impl ExecOperator for TableInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Table info needs database context, combined with expression contexts
+		let version_ctx =
+			self.version.as_ref().map(|e| e.required_context()).unwrap_or(ContextLevel::Root);
+		self.table.required_context().max(version_ctx).max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {

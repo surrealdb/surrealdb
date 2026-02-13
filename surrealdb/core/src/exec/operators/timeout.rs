@@ -58,8 +58,10 @@ impl ExecOperator for Timeout {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Timeout inherits its input's context requirements
-		self.input.required_context()
+		// Combine timeout expression context with child operator context
+		let timeout_ctx =
+			self.timeout.as_ref().map(|e| e.required_context()).unwrap_or(ContextLevel::Root);
+		timeout_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {

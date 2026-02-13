@@ -85,7 +85,14 @@ impl ExecOperator for CountScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// CountScan needs database context, combined with expression contexts
+		let exprs_ctx = [Some(&self.source), self.version.as_ref()]
+			.into_iter()
+			.flatten()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		exprs_ctx.max(ContextLevel::Database)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

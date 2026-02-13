@@ -66,7 +66,8 @@ impl ExecOperator for IndexInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Index info needs database context, combined with expression contexts
+		self.index.required_context().max(self.table.required_context()).max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {

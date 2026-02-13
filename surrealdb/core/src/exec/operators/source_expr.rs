@@ -54,9 +54,8 @@ impl ExecOperator for SourceExpr {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Source expressions can run at root level
-		// (they only need parameters, not database access)
-		ContextLevel::Root
+		// Delegate to the wrapped expression's context requirements
+		self.expr.required_context()
 	}
 
 	fn access_mode(&self) -> AccessMode {

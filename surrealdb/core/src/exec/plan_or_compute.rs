@@ -12,10 +12,11 @@ use reblessive::tree::TreeStack;
 
 use crate::ctx::FrozenContext;
 use crate::err::Error;
-use crate::exec::context::ExecutionContext;
+use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{FlowResult, ValueBatchStream};
-use crate::expr::{ControlFlow, ControlFlowExt, Expr};
+use crate::expr::statements::InfoStatement;
+use crate::expr::{Base, Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::Value;
 
 // ============================================================================
@@ -164,4 +165,132 @@ pub(crate) async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<V
 	}
 
 	Ok(results)
+}
+
+// ============================================================================
+// Expression Context Level Analysis
+// ============================================================================
+
+/// Determine the minimum [`ContextLevel`] required to evaluate an [`Expr`].
+///
+/// This is used by deferred-planning operators ([`IfElsePlan`], [`SequencePlan`],
+/// [`ForeachPlan`]) that store raw `Expr` values and plan them at runtime.
+/// The function recursively inspects the expression tree to determine the
+/// minimum context level needed, avoiding overly conservative hardcoded
+/// `ContextLevel::Database` values.
+pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
+	match expr {
+		// Pure values — no context needed
+		Expr::Literal(_)
+		| Expr::Param(_)
+		| Expr::Constant(_)
+		| Expr::Mock(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Closure(_) => ContextLevel::Root,
+
+		// Sleep just does a time delay
+		Expr::Sleep(_) => ContextLevel::Root,
+
+		// Idiom field access evaluates against the current document context,
+		// not the database directly. Any database access it requires (e.g.
+		// record-link traversal) is resolved at the physical-expression level.
+		Expr::Idiom(_) => ContextLevel::Root,
+
+		// Table references are used in FROM clauses which need a database
+		Expr::Table(_) => ContextLevel::Database,
+
+		// Block: max of all contained expressions
+		Expr::Block(block) => block_required_context(block),
+
+		// Unary operators: delegate to inner expression
+		Expr::Prefix {
+			expr,
+			..
+		}
+		| Expr::Postfix {
+			expr,
+			..
+		}
+		| Expr::Throw(expr) => expr_required_context(expr),
+
+		// Binary: max of left and right
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => expr_required_context(left).max(expr_required_context(right)),
+
+		// Function calls may be user-defined (stored in the database), so
+		// conservatively require database context.
+		Expr::FunctionCall(_) => ContextLevel::Database,
+
+		// Return: delegate to inner expression
+		Expr::Return(stmt) => expr_required_context(&stmt.what),
+
+		// IfElse: max of all conditions and branches
+		Expr::IfElse(stmt) => {
+			let branches_ctx = stmt
+				.exprs
+				.iter()
+				.flat_map(|(cond, body)| [expr_required_context(cond), expr_required_context(body)])
+				.max()
+				.unwrap_or(ContextLevel::Root);
+			let else_ctx =
+				stmt.close.as_ref().map(expr_required_context).unwrap_or(ContextLevel::Root);
+			branches_ctx.max(else_ctx)
+		}
+
+		// DML statements need a database
+		Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_) => ContextLevel::Database,
+
+		// DDL statements need a database
+		Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) | Expr::Rebuild(_) => {
+			ContextLevel::Database
+		}
+
+		// Info: depends on the level
+		Expr::Info(info) => info_stmt_required_context(info),
+
+		// Foreach: max of range expression and body block
+		Expr::Foreach(stmt) => {
+			expr_required_context(&stmt.range).max(block_required_context(&stmt.block))
+		}
+
+		// Let: delegate to value expression
+		Expr::Let(stmt) => expr_required_context(&stmt.what),
+
+		// Explain: delegate to inner statement
+		Expr::Explain {
+			statement,
+			..
+		} => expr_required_context(statement),
+	}
+}
+
+/// Determine the minimum [`ContextLevel`] required for a [`Block`].
+pub(crate) fn block_required_context(block: &Block) -> ContextLevel {
+	block.0.iter().map(expr_required_context).max().unwrap_or(ContextLevel::Root)
+}
+
+/// Determine the minimum [`ContextLevel`] required by an [`InfoStatement`].
+fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
+	match info {
+		InfoStatement::Root(_) => ContextLevel::Root,
+		InfoStatement::Ns(_) => ContextLevel::Namespace,
+		InfoStatement::Db(_, _) | InfoStatement::Tb(_, _, _) | InfoStatement::Index(_, _, _) => {
+			ContextLevel::Database
+		}
+		InfoStatement::User(_, base, _) => match base {
+			Some(Base::Root) | None => ContextLevel::Root,
+			Some(Base::Ns) => ContextLevel::Namespace,
+			Some(Base::Db) => ContextLevel::Database,
+		},
+	}
 }

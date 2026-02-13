@@ -52,8 +52,8 @@ impl ExecOperator for ProjectValue {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// ProjectValue needs the same context as its input, plus whatever the expression needs
-		self.input.required_context()
+		// Combine the expression's context with the input's context
+		self.expr.required_context().max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {

@@ -120,7 +120,8 @@ impl ExecOperator for ReferenceScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// ReferenceScan needs database context, combined with expression contexts
+		self.source.required_context().max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {
