@@ -55,16 +55,19 @@ pub struct Transaction {
 	index_caches: IndexTreeCaches,
 	/// Does this supports reverse scan
 	has_reverse_scan: bool,
+	/// The transaction is writeable
+	writeable: bool,
 	/// For each index, track the pending append batch for cleanup on cancel.
 	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, writeable: bool, tx: Transactor) -> Transaction {
 		Transaction {
 			local,
 			has_reverse_scan: tx.supports_reverse_scan(),
+			writeable,
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
@@ -101,6 +104,10 @@ impl Transaction {
 	/// Check if the transaction supports reverse scan
 	pub fn has_reverse_scan(&self) -> bool {
 		self.has_reverse_scan
+	}
+
+	pub fn writeable(&self) -> bool {
+		self.writeable
 	}
 
 	/// Check if the transaction is finished.

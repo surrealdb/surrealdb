@@ -420,17 +420,28 @@ async fn diagnose_ns_db(
 	// TODO: No versioning at the moment,
 	// Possibly add?
 	for t in tx.all_tb(ns, db, None).await?.iter() {
-		{
-			let mut pass = MigratorPass::new(issues, export, path, PassState::default());
-			let _ = pass.visit_define_table(t);
-			for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
-				let _ = pass.visit_define_field(f);
-			}
-		}
-
 		let len = path.len();
 		path.push(Value::from("table"));
 		path.push(Value::from(t.name.0.as_str()));
+
+		{
+			let mut pass = MigratorPass::new(issues, export, path, PassState::default());
+			let _ = pass.visit_define_table(t);
+		}
+
+		{
+			for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
+				with_path(path, [Value::from("field"), f.name.to_string().into()], |path| {
+					let mut pass = MigratorPass::new(
+						issues,
+						export,
+						path,
+						PassState::default().with_breaking_storage(),
+					);
+					let _ = pass.visit_define_field(f);
+				})
+			}
+		}
 
 		{
 			let events = tx.all_tb_events(ns, db, &t.name).await?;
@@ -536,9 +547,6 @@ async fn diagnose_ns_db(
 						},
 					);
 					let _ = pass.visit_value(&v);
-					for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
-						let _ = pass.visit_define_field(f);
-					}
 				}
 
 				if idx == last {

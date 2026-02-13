@@ -16,6 +16,7 @@ pub mod hd;
 pub mod he;
 pub mod hi;
 pub mod hl;
+pub mod hn;
 pub mod hs;
 pub mod hv;
 pub mod ib;

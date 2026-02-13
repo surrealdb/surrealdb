@@ -18,7 +18,7 @@ defaults:
     shell: bash
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.88.0
   BRANCH_NAME: "${{ github.head_ref || github.ref_name }}"
 
 #

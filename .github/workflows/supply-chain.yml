@@ -49,7 +49,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: 1.88.0
 
 jobs:
   cargo-deny:
@@ -66,7 +66,13 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-deny
-        run: cargo install --debug --locked cargo-deny@0.18.9
+        run: |
+          CARGO_DENY_VERSION=0.19.0
+          CARGO_DENY_TRIPLE=x86_64-unknown-linux-musl
+          mkdir -p "$HOME/.cargo/bin"
+          curl -sL "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-${CARGO_DENY_TRIPLE}.tar.gz" | tar xz -C /tmp
+          mv "/tmp/cargo-deny-${CARGO_DENY_VERSION}-${CARGO_DENY_TRIPLE}/cargo-deny" "$HOME/.cargo/bin/"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Check dependencies for known issues
         run: cargo deny check

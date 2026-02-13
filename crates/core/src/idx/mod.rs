@@ -25,6 +25,7 @@ use crate::key::index::hd::Hd;
 use crate::key::index::he::He;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
+use crate::key::index::hn::HnswNode;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::vm::Vm;
@@ -34,6 +35,7 @@ use crate::sql::{Id, Thing};
 use revision::Revisioned;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::ops::Range;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
@@ -227,6 +229,38 @@ impl IndexKeyBase {
 			chunk,
 		)
 		.encode()
+	}
+
+	fn new_hl_layer_range(&self, layer: u16) -> Result<Range<Vec<u8>>, Error> {
+		Hl::new_layer_range(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			layer,
+		)
+	}
+
+	fn new_hn_key(&self, layer: u16, node: ElementId) -> Result<Key, Error> {
+		HnswNode::new(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			layer,
+			node,
+		)
+		.encode()
+	}
+
+	fn new_hn_layer_range(&self, layer: u16) -> Result<Range<Vec<u8>>, Error> {
+		HnswNode::new_layer_range(
+			self.inner.ns.as_str(),
+			self.inner.db.as_str(),
+			self.inner.tb.as_str(),
+			self.inner.ix.as_str(),
+			layer,
+		)
 	}
 
 	fn new_hv_key(&self, vec: Arc<SerializedVector>) -> Result<Key, Error> {

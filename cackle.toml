@@ -277,6 +277,10 @@ build.allow_apis = ["process"]
 allow_unsafe = true
 allow_apis = ["fs"]
 
+[pkg.serde_core]
+build.allow_apis = ["fs", "process"]
+allow_unsafe = true
+
 [pkg.proc-macro2]
 build.allow_apis = ["process"]
 allow_unsafe = true

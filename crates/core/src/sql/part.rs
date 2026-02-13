@@ -223,7 +223,11 @@ impl fmt::Display for Part {
 				write!(f, "}}")?;
 
 				if let Some(nest) = nest {
-					write!(f, "({nest})")?;
+					f.write_str("(")?;
+					for p in nest.0.iter() {
+						p.fmt(f)?;
+					}
+					f.write_str(")")?;
 				}
 
 				Ok(())

@@ -459,7 +459,7 @@ fn idiom_from_expr<'a>(
 		let Some(Field::Single {
 			expr,
 			alias,
-		}) = fields.0.first()
+		}) = fields.0.first_mut()
 		else {
 			return Ok(Idiom::from("a"));
 		};
@@ -491,20 +491,18 @@ fn idiom_from_expr<'a>(
 
 				Ok(res)
 			}
-			x => {
-				let s = x.to_string();
-				if let Ok(s) = crate::syn::value_with_capabilities(&s, &Capabilities::all()) {
-					Ok(s.to_idiom())
-				} else {
-					Ok(x.to_idiom())
-				}
+			_ => {
+				let new_alias = basic_idiom(u)?;
+				*alias = Some(new_alias.clone());
+				Ok(new_alias)
 			}
 		}
 	} else {
+		let idx = u.choose_index(fields.0.len())?;
 		let Field::Single {
 			expr,
 			alias,
-		} = u.choose(&fields.0)?
+		} = &mut fields.0[idx]
 		else {
 			return basic_idiom(u);
 		};
@@ -536,13 +534,10 @@ fn idiom_from_expr<'a>(
 
 				Ok(res)
 			}
-			x => {
-				let s = x.to_string();
-				if let Ok(s) = crate::syn::value_with_capabilities(&s, &Capabilities::all()) {
-					Ok(s.to_idiom())
-				} else {
-					Ok(x.to_idiom())
-				}
+			_ => {
+				let new_alias = basic_idiom(u)?;
+				*alias = Some(new_alias.clone());
+				Ok(new_alias)
 			}
 		}
 	}
