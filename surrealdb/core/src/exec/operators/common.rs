@@ -36,14 +36,16 @@ pub(crate) fn value_to_record_id_key(val: Value) -> RecordIdKey {
 /// Extract [`RecordId`]s from a [`Value`] into an existing vec.
 ///
 /// Handles single `RecordId` values, arrays of `RecordId`s, and Objects
-/// by extracting the `id` field, matching SurrealQL semantics where
-/// graph traversal on an object uses its `id`.
+/// by extracting the `id` field. The extracted `id` is recursively
+/// processed, so objects whose `id` is an array of `RecordId`s (or a
+/// nested object with its own `id`) are fully traversed, matching
+/// SurrealQL semantics where graph traversal on an object uses its `id`.
 pub(crate) fn extract_record_ids_into(val: Value, rids: &mut Vec<RecordId>) {
 	match val {
 		Value::RecordId(rid) => rids.push(rid),
 		Value::Object(mut obj) => {
-			if let Some(Value::RecordId(rid)) = obj.remove("id") {
-				rids.push(rid);
+			if let Some(id_val) = obj.remove("id") {
+				extract_record_ids_into(id_val, rids);
 			}
 		}
 		Value::Array(arr) => {

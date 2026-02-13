@@ -125,7 +125,8 @@ impl ToSql for RecursePart {
 						f.push_str(max);
 					}
 				} else {
-					f.push_str("..");
+					// Single value: exact depth (e.g., "3" → ".{3}" meaning min=3, max=3).
+					// Do NOT prefix with ".." -- that would produce ".{..3}" meaning min=1, max=3.
 					f.push_str(v);
 				}
 			}

@@ -3,10 +3,6 @@
 //! This is a leaf operator in the DAG that reads the `current_value` from the
 //! `ExecutionContext` and yields it as a single-element batch. It serves as the
 //! explicit input binding for correlated sub-execution (e.g., graph lookups).
-//!
-//! In the execution plan tree, `CurrentValueSource` replaces the old
-//! `$__lookup_source__` parameter approach, making the data flow visible
-//! and explicit in `EXPLAIN` output.
 
 use std::sync::Arc;
 
