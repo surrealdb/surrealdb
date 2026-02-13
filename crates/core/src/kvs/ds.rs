@@ -188,6 +188,7 @@ impl TransactionFactory {
 		};
 		Ok(Transaction::new(
 			local,
+			write,
 			Transactor {
 				inner,
 				stash: super::stash::Stash::default(),

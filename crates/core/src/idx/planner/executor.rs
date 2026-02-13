@@ -207,7 +207,7 @@ impl InnerQueryExecutor {
 								let hnsw =
 									ctx.get_index_stores().get_index_hnsw(ctx, opt, ixr, p).await?;
 								// Ensure the local HNSW index is up to date with the KVS
-								hnsw.write().await.check_state(&ctx.tx()).await?;
+								hnsw.write().await.check_state(ctx).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
 									stk,
