@@ -484,7 +484,7 @@ mod tests {
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
-	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
+	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, KnnResultDoc};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
@@ -706,27 +706,27 @@ mod tests {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
 				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
-				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
-					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
+				if knn == 1 && res.0.len() == 1 && res.0[0].1 > 0.0 {
+					let docs: Vec<KnnResultDoc> = res.0.iter().map(|(d, _)| d.clone()).collect();
 					if collection.is_unique() {
 						assert!(
-							docs.contains(doc_id),
+							docs.contains(&KnnResultDoc::DocId(*doc_id)),
 							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 							obj,
 							knn,
 							doc_id,
-							res.docs
+							res.0
 						);
 					}
 				}
 				let expected_len = collection.len().min(knn);
 				assert_eq!(
 					expected_len,
-					res.docs.len(),
+					res.0.len(),
 					"Wrong knn count - Expected: {} - Got: {} - - Docs: {:?} - Collection: {}",
 					expected_len,
-					res.docs.len(),
-					res.docs,
+					res.0.len(),
+					res.0,
 					collection.len(),
 				)
 			}
@@ -983,11 +983,11 @@ mod tests {
 							let hnsw_res =
 								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							tx.cancel().await.unwrap();
-							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
+							assert_eq!(hnsw_res.0.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = brute_force_res.recall(&hnsw_res);
 							if rec == 1.0 {
-								assert_eq!(brute_force_res.docs, hnsw_res.docs);
+								assert_eq!(brute_force_res.0, hnsw_res.0);
 							}
 							total_recall += rec;
 						}
@@ -1067,13 +1067,21 @@ mod tests {
 	impl KnnResult {
 		fn recall(&self, res: &KnnResult) -> f64 {
 			let mut bits = RoaringTreemap::new();
-			for &(doc_id, _) in &self.docs {
-				bits.insert(doc_id);
+			for (doc, _) in &self.0 {
+				if let KnnResultDoc::DocId(doc_id) = doc {
+					bits.insert(*doc_id);
+				} else {
+					panic!("Invalid KnnResultDoc: {doc:?}")
+				}
 			}
 			let mut found = 0;
-			for &(doc_id, _) in &res.docs {
-				if bits.contains(doc_id) {
-					found += 1;
+			for (doc, _) in &res.0 {
+				if let KnnResultDoc::DocId(doc_id) = doc {
+					if bits.contains(*doc_id) {
+						found += 1;
+					}
+				} else {
+					panic!("Invalid KnnResultDoc: {doc:?}")
 				}
 			}
 			found as f64 / bits.len() as f64

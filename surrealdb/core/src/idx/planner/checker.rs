@@ -15,7 +15,7 @@ use crate::expr::{Cond, FlowResultExt as _};
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::knn::Ids64;
+use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultDoc};
 use crate::kvs::Transaction;
 use crate::val::RecordId;
 
@@ -72,7 +72,7 @@ impl<'a> HnswConditionChecker<'a> {
 		&mut self,
 		tx: &Transaction,
 		docs: &HnswDocs,
-		res: VecDeque<(DocId, f64)>,
+		res: KnnResult,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		match self {
 			Self::Hnsw(c) => c.convert_result(tx, docs, res).await,
@@ -81,20 +81,24 @@ impl<'a> HnswConditionChecker<'a> {
 	}
 }
 
-struct CheckerCacheEntry {
-	record: Option<(Arc<RecordId>, Arc<Record>)>,
-	truthy: bool,
+enum CheckerCacheEntry {
+	Truthy(Arc<RecordId>, Arc<Record>),
+	NonTruthy,
 }
 
 impl CheckerCacheEntry {
+	fn is_truthy(&self) -> bool {
+		matches!(self, Self::Truthy(..))
+	}
+
 	fn convert_result(
-		res: VecDeque<(DocId, f64)>,
-		cache: &mut HashMap<DocId, CheckerCacheEntry>,
+		res: KnnResult,
+		cache: &mut HashMap<KnnResultDoc, CheckerCacheEntry>,
 	) -> VecDeque<KnnIteratorResult> {
-		let mut result = VecDeque::with_capacity(res.len());
-		for (doc_id, dist) in res {
-			if let Some(e) = cache.remove(&doc_id)
-				&& e.truthy && let Some((rid, value)) = e.record
+		let mut result = VecDeque::with_capacity(res.0.len());
+		for (doc, dist) in res.0 {
+			if let Some(e) = cache.remove(&doc)
+				&& let CheckerCacheEntry::Truthy(rid, value) = e
 			{
 				result.push_back((rid, dist, Some(value)))
 			}
@@ -106,40 +110,33 @@ impl CheckerCacheEntry {
 		stk: &mut Stk,
 		db: &DatabaseDefinition,
 		ctx: &FrozenContext,
+		tx: &Transaction,
 		opt: &Options,
-		rid: Option<RecordId>,
+		rid: Option<Arc<RecordId>>,
 		cond: &Cond,
 	) -> Result<Self> {
 		if let Some(rid) = rid {
-			let rid = Arc::new(rid);
-			let txn = ctx.tx();
 			let val =
-				txn.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
+				tx.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
 			if !val.data.as_ref().is_nullish() {
-				let (record, truthy) = {
-					let cursor_doc = CursorDoc {
-						rid: Some(rid.clone()),
-						ir: None,
-						doc: val.into(),
-						fields_computed: false,
-					};
-					let truthy = stk
-						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
-						.await
-						.catch_return()?
-						.is_truthy();
-					(cursor_doc.doc.into_read_only(), truthy)
+				let cursor_doc = CursorDoc {
+					rid: Some(rid.clone()),
+					ir: None,
+					doc: val.into(),
+					fields_computed: false,
 				};
-				return Ok(CheckerCacheEntry {
-					record: Some((rid, record)),
-					truthy,
-				});
+				if stk
+					.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
+					let record = cursor_doc.doc.into_read_only();
+					return Ok(CheckerCacheEntry::Truthy(rid, record));
+				}
 			}
 		}
-		Ok(CheckerCacheEntry {
-			record: None,
-			truthy: false,
-		})
+		Ok(CheckerCacheEntry::NonTruthy)
 	}
 }
 
@@ -150,15 +147,21 @@ impl HnswChecker {
 		&self,
 		tx: &Transaction,
 		docs: &HnswDocs,
-		res: VecDeque<(DocId, f64)>,
+		res: KnnResult,
 	) -> Result<VecDeque<KnnIteratorResult>> {
-		if res.is_empty() {
+		if res.0.is_empty() {
 			return Ok(VecDeque::from([]));
 		}
-		let mut result = VecDeque::with_capacity(res.len());
-		for (doc_id, dist) in res {
-			if let Some(rid) = docs.get_thing(tx, doc_id).await? {
-				result.push_back((rid.clone().into(), dist, None));
+		let mut result = VecDeque::with_capacity(res.0.len());
+		for (doc, dist) in res.0 {
+			let rid = match doc {
+				KnnResultDoc::DocId(doc_id) => {
+					docs.get_thing(tx, doc_id).await?.map(|r| Arc::new(r))
+				}
+				KnnResultDoc::RecordId(rid) => Some(rid),
+			};
+			if let Some(rid) = rid {
+				result.push_back((rid, dist, None));
 			}
 		}
 		Ok(result)
@@ -169,11 +172,11 @@ pub struct HnswCondChecker<'a> {
 	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	cond: Arc<Cond>,
-	cache: HashMap<DocId, CheckerCacheEntry>,
+	cache: HashMap<KnnResultDoc, CheckerCacheEntry>,
 }
 
 impl HnswCondChecker<'_> {
-	fn convert_result(&mut self, res: VecDeque<(DocId, f64)>) -> VecDeque<KnnIteratorResult> {
+	fn convert_result(&mut self, res: KnnResult) -> VecDeque<KnnIteratorResult> {
 		CheckerCacheEntry::convert_result(res, &mut self.cache)
 	}
 
@@ -185,34 +188,61 @@ impl HnswCondChecker<'_> {
 		docs: &HnswDocs,
 		doc_ids: Ids64,
 	) -> Result<bool> {
-		let mut res = false;
 		for doc_id in doc_ids.iter() {
-			if match self.cache.entry(doc_id) {
-				Entry::Occupied(e) => e.get().truthy,
+			match self.cache.entry(KnnResultDoc::DocId(doc_id)) {
+				Entry::Occupied(e) => {
+					if e.get().is_truthy() {
+						return Ok(true);
+					}
+				}
 				Entry::Vacant(e) => {
-					let rid = docs.get_thing(tx, doc_id).await?;
+					let rid = docs.get_thing(tx, doc_id).await?.map(Arc::new);
 					let ent = CheckerCacheEntry::build(
 						stk,
 						db,
 						self.ctx,
+						tx,
 						self.opt,
 						rid,
 						self.cond.as_ref(),
 					)
 					.await?;
-					let truthy = ent.truthy;
-					e.insert(ent);
-					truthy
+					if e.insert(ent).is_truthy() {
+						return Ok(true);
+					}
 				}
-			} {
-				res = true;
 			}
 		}
-		Ok(res)
+		Ok(false)
+	}
+
+	async fn check_truthy(
+		&mut self,
+		stk: &mut Stk,
+		db: &DatabaseDefinition,
+		tx: &Transaction,
+		rid: Arc<RecordId>,
+	) -> Result<bool> {
+		match self.cache.entry(KnnResultDoc::RecordId(rid.clone())) {
+			Entry::Occupied(e) => Ok(e.get().is_truthy()),
+			Entry::Vacant(e) => {
+				let ent = CheckerCacheEntry::build(
+					stk,
+					db,
+					self.ctx,
+					tx,
+					self.opt,
+					Some(rid),
+					self.cond.as_ref(),
+				)
+				.await?;
+				Ok(e.insert(ent).is_truthy())
+			}
+		}
 	}
 
 	fn expire(&mut self, doc_id: DocId) {
-		self.cache.remove(&doc_id);
+		self.cache.remove(&KnnResultDoc::DocId(doc_id));
 	}
 
 	fn expires(&mut self, doc_ids: Ids64) {

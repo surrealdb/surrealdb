@@ -183,12 +183,12 @@ impl HnswIndex {
 	}
 
 	// Ensure the layers are up-to-date
-	pub async fn check_state(&mut self, ctx: &Context) -> Result<()> {
+	pub(crate) async fn check_state(&mut self, ctx: &Context) -> Result<()> {
 		self.hnsw.check_state(ctx).await
 	}
 
 	#[expect(clippy::too_many_arguments)]
-	pub async fn knn_search(
+	pub(crate) async fn knn_search(
 		&self,
 		db: &DatabaseDefinition,
 		tx: &Transaction,
@@ -204,7 +204,7 @@ impl HnswIndex {
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
 		let result = self.search(db, tx, stk, &search, &mut chk).await?;
-		let res = chk.convert_result(tx, &self.docs, result.docs).await?;
+		let res = chk.convert_result(tx, &self.docs, result).await?;
 		Ok(res)
 	}
 
@@ -216,7 +216,7 @@ impl HnswIndex {
 		search: &HnswSearch,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult> {
-		// Do the search
+		// Do the HNSW search
 		let neighbors = match chk {
 			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(tx, search).await?,
 			HnswConditionChecker::HnswCondition(_) => {
@@ -225,6 +225,7 @@ impl HnswIndex {
 					.await?
 			}
 		};
+		// Collect the pending vectors
 		self.build_result(tx, neighbors, search.k, chk).await
 	}
 
