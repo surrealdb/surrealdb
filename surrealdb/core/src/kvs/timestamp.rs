@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::hint::unreachable_unchecked;
 use std::time::Duration;
 
@@ -30,6 +30,9 @@ pub trait TimeStamp: Any + Send + Sync {
 	fn as_versionstamp(&self) -> u128;
 
 	/// Returns the datetime that the timestamp belongs to.
+	///
+	/// Converting to a datetime is a lossy operation, if the timestamp had a logical or
+	/// distributed component that information will be lost.
 	fn as_datetime(&self) -> Option<DateTime<Utc>>;
 
 	/// Subtract a duration from the timestamp returning a duration that much in the past from this
@@ -43,13 +46,16 @@ pub trait TimeStamp: Any + Send + Sync {
 pub struct BoxTimeStamp(Box<dyn TimeStamp>);
 
 impl BoxTimeStamp {
+	/// Create a new boxed timestamp.
 	pub fn new<T: TimeStamp>(t: T) -> Self {
 		BoxTimeStamp(Box::new(t))
 	}
 
+	/// Downcast the boxed timestamp into it's underlying type, if present.
 	pub fn downcast<T: TimeStamp>(self) -> std::result::Result<Box<T>, Self> {
-		if (&self.0 as &dyn Any).is::<T>() {
+		if ((&*self.0) as &dyn Any).type_id() == TypeId::of::<T>() {
 			let Ok(x) = (self.0 as Box<dyn Any>).downcast::<T>() else {
+				// Save because the validity of the downcast is checked above.
 				unsafe { unreachable_unchecked() }
 			};
 			Ok(x)
@@ -58,18 +64,26 @@ impl BoxTimeStamp {
 		}
 	}
 
+	/// Returns the version stamp for the timestamp.
 	pub fn as_versionstamp(&self) -> u128 {
 		self.0.as_versionstamp()
 	}
 
+	/// Returns the datetime that the timestamp belongs to.
+	///
+	/// Converting to a datetime is a lossy operation, if the timestamp had a logical or
+	/// distributed component that information will be lost.
 	pub fn as_datetime(&self) -> Option<DateTime<Utc>> {
 		self.0.as_datetime()
 	}
 
+	/// Subtract a duration from the timestamp returning a duration that much in the past from this
+	/// timestamp. Can return none if the new time is outside of the range of the timestamp.
 	pub fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
 		self.0.sub_checked(duration)
 	}
 
+	/// Encode the timestamp into key-encoded bytes.
 	pub fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
 		self.0.encode(bytes)
 	}
@@ -169,14 +183,15 @@ impl TimeStampImpl for HlcTimeStampImpl {
 			return None;
 		}
 
-		Some(BoxTimeStamp::new(HlcTimeStamp(milis as u64)))
+		Some(BoxTimeStamp::new(HlcTimeStamp((milis as u64) << 16)))
 	}
 
 	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
 		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
 			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
 		})?;
-		Ok(BoxTimeStamp::new(HlcTimeStamp(u64::from_be_bytes(bytes))))
+		dbg!(bytes);
+		Ok(BoxTimeStamp::new(HlcTimeStamp(dbg!(u64::from_be_bytes(bytes)))))
 	}
 }
 
@@ -258,9 +273,10 @@ impl TimeStamp for HlcTimeStamp {
 	}
 
 	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
-		let ts_bytes = self.0.to_be_bytes();
+		dbg!(self.0);
+		let ts_bytes = dbg!(self.0.to_be_bytes());
 		bytes[..8].copy_from_slice(&ts_bytes);
-		&bytes[..8]
+		dbg!(&bytes[..8])
 	}
 }
 
@@ -361,13 +377,11 @@ mod tests {
 		let from_bytes = ts_impl.decode(bytes).unwrap();
 		let version = from_bytes.as_versionstamp();
 		let from_version = ts_impl.create_from_versionstamp(version).unwrap();
-		let datetime = from_version.as_datetime().unwrap();
-		let from_datetime = ts_impl.create_from_datetime(datetime).unwrap();
 
 		let Ok(original) = original.downcast::<HlcTimeStamp>() else {
 			panic!()
 		};
-		let Ok(from_datetime) = from_datetime.downcast::<HlcTimeStamp>() else {
+		let Ok(from_datetime) = from_version.downcast::<HlcTimeStamp>() else {
 			panic!()
 		};
 
@@ -406,7 +420,7 @@ mod tests {
 			1000u64 << 16,           // 1 second with counter 0
 			(1000u64 << 16) | 1,     // 1 second with counter 1
 			(1000u64 << 16) | 65535, // 1 second with max counter
-			(u64::MAX >> 16) << 16,  // max milliseconds with counter 0
+			!0xFFFF,                 // max milliseconds with counter 0
 		];
 
 		for value in test_cases {

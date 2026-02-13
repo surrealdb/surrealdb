@@ -761,8 +761,8 @@ impl TimeStampImpl for TiKVStampImpl {
 	}
 
 	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
-		let physical = ((version >> 64) as i64) ^ i64::MIN;
-		let logical = (version as i64) ^ i64::MIN;
+		let physical = ((version >> 64) as u64 as i64) ^ i64::MIN;
+		let logical = (version as u64 as i64) ^ i64::MIN;
 		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
 			physical,
 			logical,
@@ -819,7 +819,10 @@ pub struct TiKVStamp(tikv::Timestamp);
 
 impl TimeStamp for TiKVStamp {
 	fn as_versionstamp(&self) -> u128 {
-		(self.0.physical as u128) << 64 | self.0.logical as u128
+		let p = (self.0.physical ^ i64::MIN) as u64;
+		let l = (self.0.logical ^ i64::MIN) as u64;
+
+		(p as u128) << 64 | l as u128
 	}
 
 	fn as_datetime(&self) -> Option<DateTime<Utc>> {
