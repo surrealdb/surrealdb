@@ -404,14 +404,20 @@ impl Transaction {
 	/// This function fetches the full range of keys, in a single request to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>
 	where
 		K: KVKey + Debug,
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
 		let limit = limit.into();
-		Ok(self.tr.keys(beg..end, limit, version).await.map_err(Error::from)?)
+		Ok(self.tr.keys(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
@@ -423,6 +429,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -431,7 +438,7 @@ impl Transaction {
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
 		let limit = limit.into();
-		Ok(self.tr.keysr(beg..end, limit, version).await.map_err(Error::from)?)
+		Ok(self.tr.keysr(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -443,6 +450,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -451,7 +459,7 @@ impl Transaction {
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
 		let limit = limit.into();
-		Ok(self.tr.scan(beg..end, limit, version).await.map_err(Error::from)?)
+		Ok(self.tr.scan(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -459,6 +467,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -467,7 +476,7 @@ impl Transaction {
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
 		let limit = limit.into();
-		Ok(self.tr.scanr(beg..end, limit, version).await.map_err(Error::from)?)
+		Ok(self.tr.scanr(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -542,6 +551,7 @@ impl Transaction {
 		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: ScanDirection,
 	) -> impl Stream<Item = Result<Vec<Key>>> + '_ {
 		self.tr
@@ -549,6 +559,7 @@ impl Transaction {
 				rng,
 				version,
 				limit,
+				skip,
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
@@ -570,6 +581,7 @@ impl Transaction {
 		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: ScanDirection,
 	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_ {
 		self.tr
@@ -577,6 +589,7 @@ impl Transaction {
 				rng,
 				version,
 				limit,
+				skip,
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,

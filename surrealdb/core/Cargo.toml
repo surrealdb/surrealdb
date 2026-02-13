@@ -104,6 +104,7 @@ ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
+async-stream.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ], optional = true }
@@ -127,7 +128,6 @@ hex.workspace = true
 humantime.workspace = true
 ipnet.workspace = true
 md-5.workspace = true
-nanoid.workspace = true
 ndarray.workspace = true
 ndarray-stats.workspace = true
 num_cpus.workspace = true

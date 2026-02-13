@@ -380,8 +380,11 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_memory() {
+		// Create a new memory configuration
+		let config = crate::kvs::config::MemoryConfig::default();
 		// Create a new in-memory datastore
-		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		// Run the concurrency test with the in-memory datastore
 		task_lease_concurrency(flavor).await;
 	}
@@ -399,10 +402,38 @@ mod tests {
 	async fn task_lease_concurrency_rocksdb() {
 		// Create a temporary directory for the RocksDB datastore
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+		// Create a new RocksDB configuration
+		let config = crate::kvs::config::RocksDbConfig::default();
 		// Create a new RocksDB datastore in the temporary directory
-		let flavor =
-			crate::kvs::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB).unwrap();
+		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config)
+			.await
+			.map(DatastoreFlavor::RocksDB)
+			.unwrap();
 		// Run the concurrency test with the RocksDB datastore
+		task_lease_concurrency(flavor).await;
+	}
+
+	/// Tests the task lease concurrency mechanism using a RocksDB datastore.
+	///
+	/// This test creates a temporary RocksDB datastore and runs the task lease
+	/// concurrency test to verify that the lease mechanism works correctly in
+	/// a multi-threaded environment with a persistent storage backend.
+	///
+	/// The test is only compiled and run when the "kv-rocksdb" feature is
+	/// enabled.
+	#[cfg(feature = "kv-surrealkv")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn task_lease_concurrency_surrealkv() {
+		// Create a temporary directory for the RocksDB datastore
+		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+		// Create a new SurrealKV configuration
+		let config = crate::kvs::config::SurrealKvConfig::default();
+		// Create a new SurrealKV datastore
+		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config)
+			.await
+			.map(DatastoreFlavor::SurrealKV)
+			.unwrap();
+		// Run the concurrency test with the SurrealKV datastore
 		task_lease_concurrency(flavor).await;
 	}
 
@@ -427,8 +458,11 @@ mod tests {
 	async fn test_lease_renewal_behavior() {
 		// Create a fake clock for deterministic testing
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+		// Create a new memory configuration
+		let config = crate::kvs::config::MemoryConfig::default();
 		// Create an in-memory datastore
-		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory

@@ -45,7 +45,7 @@ DEFINE FIELD children ON TABLE tree TYPE array<record<tree>> DEFAULT [];
 
 DEFINE FUNCTION OVERWRITE fn::build_tree_path($node: record) {
     // Get the children for this node
-	let $temp = (SELECT * FROM ONLY tree WHERE children CONTAINS $node LIMIT 1);
+    LET $temp = (SELECT * FROM ONLY tree WHERE children CONTAINS $node LIMIT 1);
     // Return the path or keep recursing
     RETURN IF $node = tree:root THEN
         "/";

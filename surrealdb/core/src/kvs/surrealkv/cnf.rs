@@ -3,12 +3,13 @@ use std::sync::LazyLock;
 
 use sysinfo::System;
 
-/// Should we sync writes to disk before acknowledgement
-pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
-
 /// Whether to enable value log separation (default: true)
 pub(super) static SURREALKV_ENABLE_VLOG: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, true);
+
+/// Whether to enable versioned index (default: false, only applies when versioning is enabled)
+pub(super) static SURREALKV_VERSIONED_INDEX: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_SURREALKV_VERSIONED_INDEX", bool, false);
 
 /// The block size in bytes (default: 64 KiB)
 pub(super) static SURREALKV_BLOCK_SIZE: LazyLock<usize> =

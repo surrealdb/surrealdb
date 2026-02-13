@@ -6,10 +6,10 @@ reason = "Test GROUP BY with wildcard (*) projection to verify which fields appe
 value = "'OK'"
 
 [[test.results]]
-error = "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
+error = "Invalid query: Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
 
 [[test.results]]
-error = "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
+error = "Invalid query: Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
 
 */
 

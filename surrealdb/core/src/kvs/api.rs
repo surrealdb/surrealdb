@@ -134,6 +134,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>;
 
@@ -145,6 +146,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>;
 
@@ -156,6 +158,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -167,6 +170,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		&self,
 		rng: Range<Key>,
 		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -382,7 +386,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.keys(rng, ScanLimit::Count(batch), version).await?;
+		let res = self.keys(rng, ScanLimit::Count(batch), 0, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<Key>::new(None, res))
@@ -425,7 +429,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.scan(rng, ScanLimit::Count(batch), version).await?;
+		let res = self.scan(rng, ScanLimit::Count(batch), 0, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<(Key, Val)>::new(None, res))

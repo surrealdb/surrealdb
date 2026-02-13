@@ -183,7 +183,10 @@ impl ToSql for CoverStmts<'_> {
 			| sql::Expr::Info(_)
 			| sql::Expr::Foreach(_)
 			| sql::Expr::Let(_)
-			| sql::Expr::Sleep(_) => {
+			| sql::Expr::Sleep(_)
+			| sql::Expr::Explain {
+				..
+			} => {
 				f.push('(');
 				self.0.fmt_sql(f, fmt);
 				f.push(')')

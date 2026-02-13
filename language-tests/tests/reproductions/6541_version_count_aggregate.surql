@@ -1,6 +1,7 @@
 /**
 [env]
-backend = ["surrealkv+versioned"]
+backend = ["mem", "surrealkv"]
+versioned = true
 timeout = 5000
 
 [test]
@@ -38,13 +39,13 @@ value = "[{ count: 4 }]"
 value = "[{ count: 0 }]"
 
 [[test.results]]
-value = "[{ count: 7 }]"
+error = "Invalid query: VERSION clause cannot be used with a subquery source. Place the VERSION clause inside the subquery instead."
 
 [[test.results]]
 value = "[{ count: 4 }]"
 
 [[test.results]]
-value = "[{ count: 4 }]"
+error = "Invalid query: VERSION clause cannot be used with a subquery source. Place the VERSION clause inside the subquery instead."
 */
 
 -- Reproduction test for issue #6541: VERSION clause with aggregate functions
@@ -91,11 +92,11 @@ SELECT count() FROM something GROUP ALL VERSION $ts;
 -- Query 5: VERSION with GROUP ALL should count at the specified version
 SELECT count() FROM something GROUP ALL VERSION "1970-01-01T00:00:00Z";
 
--- Query 6: VERSION with GROUP ALL and no VERSION in subquery should use the latest version
+-- Query 6: VERSION on outer query with a subquery source should error
 SELECT count() FROM (SELECT * FROM something) GROUP ALL VERSION $ts;
 
 -- Query 7: VERSION in subquery should be used to retrieve the records
 SELECT count() FROM (SELECT * FROM something VERSION $ts) GROUP ALL;
 
--- Query 8: VERSION in subquery should be used instead of VERSION from outer statement
+-- Query 8: VERSION on outer query with a subquery source should error, even if the subquery has its own VERSION
 SELECT count() FROM (SELECT * FROM something VERSION $ts) GROUP ALL VERSION "1970-01-01T00:00:00Z";

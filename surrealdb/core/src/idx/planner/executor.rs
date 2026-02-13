@@ -234,7 +234,7 @@ impl InnerQueryExecutor {
 									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
-								hi.write().await.check_state(&ctx.tx()).await?;
+								hi.write().await.check_state(ctx).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
 									&doc_ctx.db,

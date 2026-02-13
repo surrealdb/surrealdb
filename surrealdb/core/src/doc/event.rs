@@ -311,7 +311,7 @@ impl AsyncEventRecord {
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
 			let (beg, end) = EventQueue::range();
 			// Read a bounded batch without holding a write transaction.
-			let res = catch!(tx, tx.scan(beg..end, *NORMAL_FETCH_SIZE, None).await);
+			let res = catch!(tx, tx.scan(beg..end, *NORMAL_FETCH_SIZE, 0, None).await);
 			tx.cancel().await?;
 			res
 		};

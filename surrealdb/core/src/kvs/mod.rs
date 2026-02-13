@@ -14,6 +14,7 @@
 //!   database
 //! - `mem`: in-memory database
 
+pub mod config;
 pub mod export;
 
 mod api;

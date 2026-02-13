@@ -31,7 +31,7 @@ the tests. By default, tests run using the in-memory storage engine (`mem` or `m
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
-- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
@@ -383,7 +383,6 @@ The value should be an array of strings with valid backend identifiers:
 - `"mem"`: In-memory storage engine
 - `"rocksdb"`: RocksDB embedded storage engine
 - `"surrealkv"`: SurrealKV file-based storage engine
-- `"surrealkv+versioned"`: SurrealKV file-based storage engine with versioned history support
 - `"tikv"`: TiKV distributed storage engine
 
 **Behavior:**
@@ -423,6 +422,32 @@ example, the `ALTER TABLE COMPACT` statement behaves differently on different
 backends: it succeeds on RocksDB but returns an error on the memory backend.
 
 Defaults to `[]` (runs on all backends)
+
+#### `[env.versioned]`
+
+Specifies whether the test requires MVCC versioning to be enabled on the datastore.
+When set to `true`, the datastore is created with versioning support, enabling
+temporal queries using the `VERSION` clause.
+
+Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
+shared datastore pool) since they require different datastore configuration.
+
+**Examples:**
+
+```toml
+# Test that requires versioning on memory and SurrealKV backends
+[env]
+backend = ["mem", "surrealkv"]
+versioned = true
+```
+
+```toml
+# Test with versioning on all backends that support it
+[env]
+versioned = true
+```
+
+Defaults to `false`
 
 #### `[env.timeout]`
 
@@ -530,3 +555,35 @@ http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
 This field is not supported for upgrade tests.
+
+#### `[env.new-planner-strategy]`
+
+Controls the strategy for the new streaming planner/executor. This determines
+how read-only statements (SELECT, INFO, etc.) are executed and whether the new
+planner is required or optional.
+
+Valid values:
+- `"best-effort-ro"` (default): Try the new planner for read-only statements. If
+  the planner returns `Unimplemented`, silently fall back to the legacy compute
+  executor. This is the production default.
+- `"all-ro"`: Require the new planner for all read-only statements. If the new
+  planner cannot handle a non-DDL/DML statement, the test fails with an error
+  instead of silently falling back. DDL/DML statements (CREATE, UPDATE, DELETE,
+  DEFINE, etc.) always fall back regardless of this setting.
+- `"compute-only"`: Skip the new planner entirely and always use the legacy
+  compute executor for all statements.
+
+**Examples:**
+```toml
+# Require that all SELECTs use the new executor (test will fail if fallback occurs)
+[env]
+new-planner-strategy = "all-ro"
+```
+
+```toml
+# Force legacy compute path for all statements
+[env]
+new-planner-strategy = "compute-only"
+```
+
+Defaults to `"best-effort-ro"` (current production behavior).
