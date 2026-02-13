@@ -284,9 +284,8 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// The default implementation returns None, indicating this is not a projection function.
 	async fn evaluate_projection(
 		&self,
-		ctx: EvalContext<'_>,
+		_ctx: EvalContext<'_>,
 	) -> FlowResult<Option<Vec<(Idiom, Value)>>> {
-		let _ = ctx; // silence unused warning
 		Ok(None)
 	}
 
@@ -307,6 +306,16 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// `EXPLAIN` / `EXPLAIN ANALYZE` can recursively format them.
 	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
 		vec![]
+	}
+
+	/// Whether this expression is a fused multi-step lookup chain.
+	///
+	/// When consecutive graph/reference lookups are fused into a single
+	/// `LookupPart`, the continuation logic in `evaluate_parts_with_continuation`
+	/// needs to know so it can correctly map per-element over non-lookup arrays
+	/// even when the fused Lookup is the last part in the idiom.
+	fn is_fused_lookup(&self) -> bool {
+		false
 	}
 }
 

@@ -225,7 +225,7 @@ pub(crate) async fn evaluate_parts_with_continuation(
 		// results are NOT flattened, preserving per-element nesting.
 		if matches!(&value, Value::Array(_))
 			&& part.name() == "Lookup"
-			&& i + 1 < parts.len()
+			&& (i + 1 < parts.len() || part.is_fused_lookup())
 			&& !matches!(prev_part_name, "Lookup" | "Flatten")
 		{
 			let arr = match value {

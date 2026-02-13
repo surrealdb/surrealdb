@@ -59,6 +59,11 @@ pub struct LookupPart {
 	/// but no explicit SELECT clause is present, so the final result should be
 	/// RecordIds rather than full objects.
 	pub extract_id: bool,
+
+	/// Whether this LookupPart contains a fused chain of multiple consecutive lookups.
+	/// When true, the continuation logic in `evaluate_parts_with_continuation` maps
+	/// per-element over non-lookup arrays even when this is the last part in the idiom.
+	pub fused: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -110,6 +115,10 @@ impl PhysicalExpr for LookupPart {
 
 	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
 		vec![("lookup", &self.plan)]
+	}
+
+	fn is_fused_lookup(&self) -> bool {
+		self.fused
 	}
 }
 

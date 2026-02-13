@@ -137,6 +137,21 @@ impl<'ctx> Planner<'ctx> {
 	/// yields the appropriate RecordId into the stream.
 	pub(crate) fn plan_lookup(
 		&self,
+		lookup: crate::expr::lookup::Lookup,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		let input: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
+		self.plan_lookup_with_input(input, lookup)
+	}
+
+	/// Plan a Lookup operation with a specific input operator.
+	///
+	/// This is the core of lookup planning. When fusing consecutive lookups
+	/// into a single operator chain, the planner passes the output of one
+	/// lookup as the `input` to the next, instead of always creating a fresh
+	/// `CurrentValueSource`.
+	pub(crate) fn plan_lookup_with_input(
+		&self,
+		input: Arc<dyn ExecOperator>,
 		crate::expr::lookup::Lookup {
 			kind,
 			expr,
@@ -150,9 +165,6 @@ impl<'ctx> Planner<'ctx> {
 			alias: _,
 		}: crate::expr::lookup::Lookup,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
-		// The leaf of the operator chain: reads current_value from ExecutionContext
-		let input: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
-
 		let needs_full_pipeline = expr.is_some() || group.is_some();
 		let needs_full_records = needs_full_pipeline || cond.is_some() || split.is_some();
 		let output_mode = if needs_full_records {
