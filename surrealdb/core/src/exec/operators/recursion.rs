@@ -46,18 +46,23 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::{StreamExt, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::parts::recurse::{PhysicalRecurseInstruction, value_hash};
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, BoxFut, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
+
+/// Maximum number of concurrent path evaluations per depth level.
+/// Limits parallelism to avoid overwhelming the KV layer while still
+/// allowing progress when individual evaluations block on I/O.
+const RECURSION_CONCURRENCY: usize = 16;
 
 /// Sentinel error type used to signal path elimination during recursion.
 ///
@@ -485,38 +490,21 @@ async fn evaluate_recurse_iterative(
 			break;
 		}
 
-		let mut raw_discovered: Vec<Value> = Vec::new();
-
-		if let Some(body_op) = body {
+		let raw_discovered: Vec<Value> = if let Some(body_op) = body {
 			// ── Fast path: use the body operator to discover targets ──
 			// Execute the fused lookup chain directly. This only performs
 			// the graph scan / record-link resolution without evaluating
 			// destructure fields that are irrelevant for discovery.
-			for val in current_level {
-				if is_final(val) || !is_recursion_target(val) {
-					continue;
-				}
-				let body_ctx = exec_ctx.with_current_value(val.clone());
-				let mut stream = body_op.execute(&body_ctx)?;
-				while let Some(batch_result) = stream.next().await {
-					let batch = batch_result?;
-					for v in batch.values {
-						match v {
-							Value::Array(arr) => {
-								for inner in arr.0 {
-									if !is_final(&inner) && is_recursion_target(&inner) {
-										raw_discovered.push(inner);
-									}
-								}
-							}
-							v if !is_final(&v) && is_recursion_target(&v) => {
-								raw_discovered.push(v);
-							}
-							_ => {}
-						}
-					}
-				}
-			}
+			let futs: Vec<_> = current_level
+				.iter()
+				.filter(|val| !is_final(val) && is_recursion_target(val))
+				.map(|val| {
+					let body_ctx = exec_ctx.with_current_value(val.clone());
+					discover_body_targets(body_op, body_ctx)
+				})
+				.collect();
+			let all_discovered = eval_buffered(futs).await?;
+			all_discovered.into_iter().flatten().collect()
 		} else {
 			// ── Fallback: full-path evaluation with discovery sink ──
 			// Create a shared sink for this depth's discoveries.
@@ -531,15 +519,21 @@ async fn evaluate_recurse_iterative(
 			};
 
 			// Evaluate the path for each value at this depth.
-			// The `@` part will write discovered values to the sink.
-			for val in current_level {
-				if is_final(val) {
-					continue;
-				}
-				let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
-				match evaluate_physical_path(val, path, eval).await {
+			// The `@` part will write discovered values to the shared sink.
+			let futures: Vec<_> = current_level
+				.iter()
+				.filter(|val| !is_final(val))
+				.map(|val| {
+					let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
+					evaluate_physical_path(val, path, eval)
+				})
+				.collect();
+			let eval_results = eval_buffered_all(futures).await;
+
+			// Check for hard errors (PathEliminationSignal is OK).
+			for result in eval_results {
+				match result {
 					Ok(_) => {}
-					// PathEliminationSignal means dead end at this value -- skip it.
 					Err(ControlFlow::Err(ref e))
 						if e.downcast_ref::<PathEliminationSignal>().is_some() => {}
 					Err(other) => return Err(other),
@@ -549,10 +543,10 @@ async fn evaluate_recurse_iterative(
 			// Extract discovered values from the sink.
 			// We use lock+take instead of Arc::try_unwrap because the cloned
 			// RecursionCtx instances may still hold Arc references to the sink.
-			raw_discovered = std::mem::take(&mut *sink.lock().map_err(|_| {
+			std::mem::take(&mut *sink.lock().map_err(|_| {
 				ControlFlow::Err(anyhow::anyhow!("recursion discovery sink mutex poisoned"))
-			})?);
-		}
+			})?)
+		};
 
 		// Per-level deduplication.
 		let mut seen_level: HashSet<u64> = HashSet::new();
@@ -602,15 +596,34 @@ async fn evaluate_recurse_iterative(
 				assembly_cache: Some(Arc::clone(&cache_arc)),
 			};
 
-			for val in &levels[d] {
-				// Skip final values (dead ends) -- store terminal directly.
-				if is_final(val) {
-					current_cache.insert(value_hash(val), get_final(val));
-					continue;
-				}
+			// Handle final values directly (no I/O needed).
+			// Collect non-final values for concurrent evaluation.
+			let eval_values: Vec<&Value> = levels[d]
+				.iter()
+				.filter(|val| {
+					if is_final(val) {
+						current_cache.insert(value_hash(val), get_final(val));
+						false
+					} else {
+						true
+					}
+				})
+				.collect();
 
-				let eval = ctx.with_value(val).with_recursion_ctx(assembly_ctx.clone());
-				let result = match evaluate_physical_path(val, path, eval).await {
+			// Evaluate non-final values concurrently (bounded).
+			// Uses `buffered` (ordered) so results align with `eval_values` for zip.
+			let futures: Vec<_> = eval_values
+				.iter()
+				.map(|val| {
+					let eval = ctx.with_value(val).with_recursion_ctx(assembly_ctx.clone());
+					evaluate_physical_path(val, path, eval)
+				})
+				.collect();
+			let eval_results = eval_buffered_all(futures).await;
+
+			// Process results: PathEliminationSignal -> Value::None, others propagate.
+			for (val, result) in eval_values.iter().zip(eval_results) {
+				let result = match result {
 					Ok(v) => v,
 					// PathEliminationSignal during assembly means the sub-tree
 					// was eliminated. Store Value::None so the parent can filter.
@@ -621,7 +634,6 @@ async fn evaluate_recurse_iterative(
 					}
 					Err(other) => return Err(other),
 				};
-
 				current_cache.insert(value_hash(val), result);
 			}
 		}
@@ -650,6 +662,90 @@ fn is_recursion_target(value: &Value) -> bool {
 		Value::Array(arr) => arr.iter().any(is_recursion_target),
 		_ => false,
 	}
+}
+
+// ============================================================================
+// Concurrent evaluation helpers
+// ============================================================================
+
+/// Evaluate a batch of futures with bounded concurrency.
+///
+/// When fewer than 2 futures are provided, runs them sequentially to avoid
+/// stream combinator overhead. Otherwise, uses `buffered(RECURSION_CONCURRENCY)`
+/// to poll up to N futures concurrently -- when one blocks on I/O, others
+/// make progress.
+///
+/// Short-circuits on the first error via `try_collect`.
+async fn eval_buffered<'a, T: 'a>(futures: Vec<BoxFut<'a, FlowResult<T>>>) -> FlowResult<Vec<T>> {
+	if futures.len() < 2 {
+		let mut results = Vec::with_capacity(futures.len());
+		for fut in futures {
+			results.push(fut.await?);
+		}
+		Ok(results)
+	} else {
+		stream::iter(futures).buffered(RECURSION_CONCURRENCY).try_collect().await
+	}
+}
+
+/// Like [`eval_buffered`], but collects all results without short-circuiting.
+///
+/// Used when callers need to inspect each result individually (e.g. to
+/// handle [`PathEliminationSignal`] errors as non-fatal).
+async fn eval_buffered_all<'a>(
+	futures: Vec<BoxFut<'a, FlowResult<Value>>>,
+) -> Vec<FlowResult<Value>> {
+	if futures.len() < 2 {
+		let mut results = Vec::with_capacity(futures.len());
+		for fut in futures {
+			results.push(fut.await);
+		}
+		results
+	} else {
+		stream::iter(futures).buffered(RECURSION_CONCURRENCY).collect().await
+	}
+}
+
+/// Extract valid recursion target values from a single batch result value.
+///
+/// Flattens arrays and filters to only `RecordId` values (and arrays
+/// containing them) that are valid for continued graph traversal.
+fn collect_discovery_targets(v: Value, out: &mut Vec<Value>) {
+	match v {
+		Value::Array(arr) => {
+			for inner in arr.0 {
+				if !is_final(&inner) && is_recursion_target(&inner) {
+					out.push(inner);
+				}
+			}
+		}
+		v if !is_final(&v) && is_recursion_target(&v) => {
+			out.push(v);
+		}
+		_ => {}
+	}
+}
+
+/// Discover recursion targets via the body operator for a single input value.
+///
+/// Executes the fused lookup chain and collects all valid `RecordId` targets
+/// from the resulting stream. Returns a boxed future for use with
+/// [`eval_buffered`].
+fn discover_body_targets<'a>(
+	body_op: &'a Arc<dyn ExecOperator>,
+	body_ctx: ExecutionContext,
+) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+	Box::pin(async move {
+		let mut discovered = Vec::new();
+		let mut body_stream = body_op.execute(&body_ctx)?;
+		while let Some(batch_result) = body_stream.next().await {
+			let batch = batch_result?;
+			for v in batch.values {
+				collect_discovery_targets(v, &mut discovered);
+			}
+		}
+		Ok(discovered)
+	})
 }
 
 // ============================================================================
@@ -743,9 +839,15 @@ async fn evaluate_recurse_collect(
 	while depth < max_depth && !frontier.is_empty() {
 		let mut next_frontier = Vec::new();
 
-		for value in frontier {
-			let result = evaluate_physical_path(&value, path, ctx.with_value(&value)).await?;
+		// Phase 1: Evaluate all frontier values concurrently (bounded).
+		let futures: Vec<_> = frontier
+			.iter()
+			.map(|value| evaluate_physical_path(value, path, ctx.with_value(value)))
+			.collect();
+		let eval_results = eval_buffered(futures).await?;
 
+		// Phase 2: Aggregate results sequentially (fast, no I/O).
+		for result in eval_results {
 			// Destructure directly into the inner Vec to avoid
 			// iterator + collect overhead.
 			let values = match result {
@@ -806,11 +908,19 @@ async fn evaluate_recurse_path(
 	while depth < max_depth && !active_paths.is_empty() {
 		let mut next_paths = Vec::new();
 
-		for mut current_path in active_paths {
-			let current_value = current_path.last().unwrap_or(start);
-			let result =
-				evaluate_physical_path(current_value, path, ctx.with_value(current_value)).await?;
+		// Phase 1: Evaluate all active path tips concurrently (bounded).
+		// Uses `buffered` (ordered) so results align with `active_paths` for zip.
+		let futures: Vec<_> = active_paths
+			.iter()
+			.map(|current_path| {
+				let current_value = current_path.last().unwrap_or(start);
+				evaluate_physical_path(current_value, path, ctx.with_value(current_value))
+			})
+			.collect();
+		let eval_results = eval_buffered(futures).await?;
 
+		// Phase 2: Pair results with path prefixes and aggregate sequentially.
+		for (mut current_path, result) in active_paths.into_iter().zip(eval_results) {
 			// Destructure directly into the inner Vec.
 			let values = match result {
 				Value::Array(arr) => arr.0,
@@ -896,15 +1006,19 @@ async fn evaluate_recurse_shortest(
 	let mut depth = 0u32;
 
 	while depth < max_depth && !queue.is_empty() {
-		let level_size = queue.len();
+		// Drain this depth level from the queue into a vec.
+		let level: Vec<(Value, Vec<Value>)> = queue.drain(..).collect();
 
-		for _ in 0..level_size {
-			let Some((current, current_path)) = queue.pop_front() else {
-				break;
-			};
+		// Phase 1: Evaluate all level values concurrently (bounded).
+		// Uses `buffered` (ordered) so results align with `level` for zip.
+		let futures: Vec<_> = level
+			.iter()
+			.map(|(current, _)| evaluate_physical_path(current, path, ctx.with_value(current)))
+			.collect();
+		let eval_results = eval_buffered(futures).await?;
 
-			let result = evaluate_physical_path(&current, path, ctx.with_value(&current)).await?;
-
+		// Phase 2: Process results sequentially (target check, dedup, enqueue).
+		for ((_, current_path), result) in level.into_iter().zip(eval_results) {
 			// Destructure directly into the inner Vec.
 			let values = match result {
 				Value::Array(arr) => arr.0,
@@ -921,7 +1035,7 @@ async fn evaluate_recurse_shortest(
 
 				// Check if we found the target (only if min_depth reached)
 				if depth + 1 >= min_depth && &v == target {
-					let mut final_path = current_path.clone();
+					let mut final_path = current_path;
 					final_path.push(v);
 					return Ok(Value::Array(final_path.into()));
 				}
