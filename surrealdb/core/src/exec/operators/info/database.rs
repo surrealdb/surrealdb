@@ -79,7 +79,9 @@ impl ExecOperator for DatabaseInfoPlan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the version expression
+		// could theoretically contain a mutation subquery.
+		self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

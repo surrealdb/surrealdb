@@ -79,7 +79,11 @@ impl ExecOperator for TableInfoPlan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the table/version expressions
+		// could theoretically contain mutation subqueries.
+		let version_mode =
+			self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly);
+		self.table.access_mode().combine(version_mode)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

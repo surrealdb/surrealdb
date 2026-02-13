@@ -182,9 +182,11 @@ impl ExecOperator for Scan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but the source expression or predicate could contain a subquery
-		// containing a mutation.
+		// Scan is read-only, but expressions could contain subqueries with mutations.
 		let mut mode = self.source.access_mode();
+		if let Some(ref version) = self.version {
+			mode = mode.combine(version.access_mode());
+		}
 		if let Some(ref pred) = self.predicate {
 			mode = mode.combine(pred.access_mode());
 		}

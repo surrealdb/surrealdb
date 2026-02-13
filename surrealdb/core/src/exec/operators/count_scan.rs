@@ -108,9 +108,11 @@ impl ExecOperator for CountScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// CountScan is read-only, but delegate to the source expression
-		// in case it contains a subquery with mutations.
-		self.source.access_mode()
+		// CountScan is read-only, but delegate to expressions
+		// in case they contain subqueries with mutations.
+		let version_mode =
+			self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly);
+		self.source.access_mode().combine(version_mode)
 	}
 
 	#[instrument(name = "CountScan::execute", level = "trace", skip_all)]

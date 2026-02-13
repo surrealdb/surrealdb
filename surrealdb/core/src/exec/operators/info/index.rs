@@ -71,7 +71,9 @@ impl ExecOperator for IndexInfoPlan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the index/table expressions
+		// could theoretically contain mutation subqueries.
+		self.index.access_mode().combine(self.table.access_mode())
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

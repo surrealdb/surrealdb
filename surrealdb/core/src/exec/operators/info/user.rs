@@ -80,7 +80,9 @@ impl ExecOperator for UserInfoPlan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the user expression could
+		// theoretically contain a mutation subquery.
+		self.user.access_mode()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
