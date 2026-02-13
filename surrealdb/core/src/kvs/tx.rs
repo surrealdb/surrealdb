@@ -280,7 +280,13 @@ impl Transaction {
 
 		// Phase 2: batch fetch uncached keys
 		if uncached_rids.is_empty() {
-			return Ok(out.into_iter().map(|o| o.unwrap()).collect());
+			return out
+				.into_iter()
+				.map(|o| {
+					o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into()))
+				})
+				.collect::<Result<Vec<_>, _>>()
+				.map_err(Into::into);
 		}
 
 		let keys: Vec<crate::key::record::RecordKey<'_>> = uncached_rids
@@ -306,7 +312,10 @@ impl Transaction {
 			out[i] = Some(record);
 		}
 
-		Ok(out.into_iter().map(|o| o.unwrap()).collect())
+		out.into_iter()
+			.map(|o| o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into())))
+			.collect::<Result<Vec<_>, _>>()
+			.map_err(Into::into)
 	}
 
 	/// Delete a key from the datastore.
