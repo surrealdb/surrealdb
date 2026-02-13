@@ -129,7 +129,7 @@ impl RecursionOp {
 	/// Format the depth range for EXPLAIN attrs.
 	fn depth_display(&self) -> String {
 		match (self.min_depth, self.max_depth) {
-			(1, Some(max)) if max == 1 => "1".to_string(),
+			(1, Some(1)) => "1".to_string(),
 			(min, Some(max)) if min == max => format!("{}", min),
 			(1, Some(max)) => format!("1..{}", max),
 			(1, None) => "1..".to_string(),
