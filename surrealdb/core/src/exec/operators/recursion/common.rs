@@ -75,8 +75,11 @@ pub(crate) async fn eval_buffered_all<'a>(
 
 /// Extract valid recursion target values from a single batch result value.
 ///
-/// Flattens arrays and filters to only `RecordId` values (and arrays
-/// containing them) that are valid for continued graph traversal.
+/// For array values, iterates elements and appends those that are valid
+/// recursion targets (see [`is_recursion_target`]) and not final. For
+/// non-array values, appends the value if it is a valid target and not
+/// final. Only one level of array is traversed; nested arrays are treated
+/// as single values.
 pub(crate) fn collect_discovery_targets(v: Value, out: &mut Vec<Value>) {
 	match v {
 		Value::Array(arr) => {
