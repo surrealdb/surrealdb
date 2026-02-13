@@ -80,6 +80,10 @@ impl ExecOperator for IndexInfoPlan {
 		Some(self.metrics.as_ref())
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("index", &self.index), ("table", &self.table)]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let index = self.index.clone();
 		let table = self.table.clone();

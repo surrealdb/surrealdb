@@ -90,6 +90,14 @@ impl ExecOperator for TableInfoPlan {
 		Some(self.metrics.as_ref())
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut exprs = vec![("table", &self.table)];
+		if let Some(ref v) = self.version {
+			exprs.push(("version", v));
+		}
+		exprs
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let table = self.table.clone();
 		let structured = self.structured;

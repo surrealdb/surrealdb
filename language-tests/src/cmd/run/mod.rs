@@ -442,11 +442,27 @@ async fn run_test_with_dbs(
 			));
 		};
 
-		if let Err(e) = dbs.execute(source, &import_session, None).await {
-			return Ok(TestTaskResult::Import(
-				import.to_string(),
-				format!("Failed to run import: `{e}`"),
-			));
+		match dbs.execute(source, &import_session, None).await {
+			Err(e) => {
+				return Ok(TestTaskResult::Import(
+					import.to_string(),
+					format!("Failed to run import: `{e}`"),
+				));
+			}
+			Ok(results) => {
+				// Check if any import result contains an error.
+				// Without this, errors within transaction blocks (e.g. constraint
+				// violations, write conflicts) are silently ignored, causing
+				// subsequent test queries to see empty data.
+				for result in &results {
+					if let Err(ref e) = result.result {
+						return Ok(TestTaskResult::Import(
+							import.to_string(),
+							format!("Import produced an error: `{e}`"),
+						));
+					}
+				}
+			}
 		}
 	}
 

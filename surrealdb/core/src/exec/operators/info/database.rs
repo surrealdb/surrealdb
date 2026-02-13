@@ -88,6 +88,14 @@ impl ExecOperator for DatabaseInfoPlan {
 		Some(self.metrics.as_ref())
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		if let Some(ref v) = self.version {
+			vec![("version", v)]
+		} else {
+			vec![]
+		}
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let structured = self.structured;
 		let version = self.version.clone();

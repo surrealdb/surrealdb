@@ -69,6 +69,10 @@ impl ExecOperator for ProjectValue {
 		vec![&self.input]
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("expr", &self.expr)]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let expr = self.expr.clone();

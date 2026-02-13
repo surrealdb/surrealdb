@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
-use crate::val::{RecordId, Value};
+use crate::val::Value;
 
 /// Direction for lookup operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +59,11 @@ pub struct LookupPart {
 	/// but no explicit SELECT clause is present, so the final result should be
 	/// RecordIds rather than full objects.
 	pub extract_id: bool,
+
+	/// Whether this LookupPart contains a fused chain of multiple consecutive lookups.
+	/// When true, the continuation logic in `evaluate_parts_with_continuation` maps
+	/// per-element over non-lookup arrays even when this is the last part in the idiom.
+	pub fused: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -112,6 +117,10 @@ impl PhysicalExpr for LookupPart {
 	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
 		vec![("lookup", &self.plan)]
 	}
+
+	fn is_fused_lookup(&self) -> bool {
+		self.fused
+	}
 }
 
 impl ToSql for LookupPart {
@@ -132,23 +141,12 @@ async fn evaluate_lookup(
 	ctx: EvalContext<'_>,
 ) -> anyhow::Result<Value> {
 	match value {
-		Value::RecordId(rid) => {
-			// Perform graph edge scan for this RecordId
-			evaluate_lookup_for_rid(rid, lookup, ctx).await
-		}
-		Value::Object(obj) => {
-			// When lookup is on an Object, extract the `id` field and evaluate on that
-			// This matches SurrealDB semantics: `->edge` on an object uses its `id`
-			match obj.get("id") {
-				Some(Value::RecordId(rid)) => {
-					Box::pin(evaluate_lookup(&Value::RecordId(rid.clone()), lookup, ctx)).await
-				}
-				Some(other) => {
-					// If `id` is not a RecordId, try to evaluate on it anyway
-					Box::pin(evaluate_lookup(other, lookup, ctx)).await
-				}
-				None => Ok(Value::None),
-			}
+		Value::RecordId(_) | Value::Object(_) => {
+			// Execute the lookup plan with this value as the current_value.
+			// The CurrentValueSource operator at the leaf of the plan will
+			// yield this value, and GraphEdgeScan/ReferenceScan will extract
+			// RecordIds from it (including extracting `id` from Objects).
+			evaluate_lookup_for_value(value, lookup, ctx).await
 		}
 		Value::Array(arr) => {
 			// Apply lookup to each element and flatten results
@@ -169,17 +167,18 @@ async fn evaluate_lookup(
 	}
 }
 
-/// Perform graph/reference lookup for a specific RecordId by executing the pre-planned operator
-/// tree.
-async fn evaluate_lookup_for_rid(
-	rid: &RecordId,
+/// Perform graph/reference lookup for a specific value by executing the pre-planned operator tree.
+///
+/// Sets `current_value` on the `ExecutionContext` so that the `CurrentValueSource`
+/// operator at the leaf of the plan yields this value into the stream.
+async fn evaluate_lookup_for_value(
+	value: &Value,
 	lookup: &LookupPart,
 	ctx: EvalContext<'_>,
 ) -> anyhow::Result<Value> {
-	use crate::exec::planner::LOOKUP_SOURCE_PARAM;
-
-	// Create a new execution context with the source RecordId bound to the special parameter.
-	let bound_ctx = ctx.exec_ctx.with_param(LOOKUP_SOURCE_PARAM, Value::RecordId(rid.clone()));
+	// Create a new execution context with the current value set.
+	// The CurrentValueSource operator reads this to seed the operator chain.
+	let bound_ctx = ctx.exec_ctx.with_current_value(value.clone());
 
 	// Execute the lookup plan
 	let stream = lookup.plan.execute(&bound_ctx).map_err(|e| match e {

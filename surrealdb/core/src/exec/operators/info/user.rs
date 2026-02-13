@@ -89,6 +89,10 @@ impl ExecOperator for UserInfoPlan {
 		Some(self.metrics.as_ref())
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("user", &self.user)]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let user = self.user.clone();
 		let base = self.base;

@@ -217,6 +217,7 @@ impl Executor {
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
 			session: self.extract_session_info(),
+			current_value: None,
 		};
 
 		// Check what level of context we need
