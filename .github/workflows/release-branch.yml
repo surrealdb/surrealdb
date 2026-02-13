@@ -1,0 +1,79 @@
+# Initialise a new release
+#
+# Creates a release branch from an existing version tag (e.g. for patch releases).
+# The branch exists only until the release is done; it is deleted after the release.
+# See doc/RELEASING.md § Patch Release Workflow.
+#
+# Example: tag v3.0.0 → branch releases/3.x (or custom branch name if provided).
+
+name: Initialise a new release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Git tag to create the branch from (e.g. v3.0.0)"
+      branch:
+        required: false
+        type: string
+        description: "Branch name (default: releases/X.x from tag major version, e.g. releases/3.x)"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+jobs:
+  create-release-branch:
+    name: Initialise a new release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (fetch tags)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - name: Validate tag and resolve branch name
+        id: vars
+        run: |
+          TAG="${{ inputs.tag }}"
+          # Ensure tag has a leading v for consistency
+          if [[ "$TAG" != v* ]]; then
+            echo "Error: Tag must start with 'v' (e.g. v3.0.0)"
+            exit 1
+          fi
+          if ! git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Error: Tag ${TAG} not found. Fetch tags and try again."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+          BRANCH="${{ inputs.branch }}"
+          if [[ -z "$BRANCH" ]]; then
+            # Derive releases/X.x from tag (major version only)
+            if [[ "$TAG" =~ ^v([0-9]+) ]]; then
+              BRANCH="releases/${BASH_REMATCH[1]}.x"
+            else
+              echo "Error: Could not derive branch from tag ${TAG}. Use format vX.Y.Z or set 'branch' explicitly."
+              exit 1
+            fi
+          fi
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "Creating branch ${BRANCH} from tag ${TAG}"
+
+      - name: Create and push branch
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          BRANCH="${{ steps.vars.outputs.branch }}"
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            echo "Error: Branch ${BRANCH} already exists on origin. Delete it first or choose another name."
+            exit 1
+          fi
+          git checkout -b "${BRANCH}" "${TAG}"
+          git push origin "${BRANCH}"
+          echo "Pushed branch ${BRANCH} from ${TAG}"

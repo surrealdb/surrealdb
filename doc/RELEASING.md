@@ -130,11 +130,11 @@ Versioned releases come in several flavors:
 ```
 releases/vX.Y.Z            # Created during version bump, deleted after release
 chore/bump-main-to-vX.Y.Z  # Created for main version PR
-backport/<issue>-to-X.Y    # Created for backporting individual fixes (one per fix)
-                           # Example: backport/56-to-3.0, backport/57-to-3.0
+backport/<issue>-to-X.x    # Created for backporting individual fixes (one per fix)
+                           # Example: backport/56-to-3.x, backport/57-to-3.x
 ```
 
-For patch releases, create a branch from the previous version's tag when needed (e.g. `git checkout -b releases/3.0 v3.0.0`). Use that branch for backports and as the release git-ref; it can be deleted after the patch release.
+For patch releases, create a branch from the previous version's tag when needed: use the **Initialise a new release** workflow (Actions → Initialise a new release) with the tag (e.g. `v3.0.0`), or run `git checkout -b releases/3.x v3.0.0` and push. Use that branch for backports and as the release git-ref; it is deleted after the patch release.
 
 ### Branch Lifecycle
 
@@ -145,8 +145,8 @@ For patch releases, create a branch from the previous version's tag when needed 
 
 2. **For patch releases (X.Y.Z where Z > 0)**:
 	- All fixes must land on `main` first
-	- When preparing a patch, create a branch from the previous tag (e.g. `git checkout -b releases/3.0 v3.0.0`)
-	- For each fix to backport, create individual backport PR (e.g., `backport/56-to-3.0`)
+	- When preparing a patch, create a branch from the previous tag (e.g. `git checkout -b releases/3.x v3.0.0`)
+	- For each fix to backport, create individual backport PR (e.g., `backport/56-to-3.x`)
 	- Cherry-pick specific fix from main to backport branch
 	- Review and merge backport PR into your patch branch
 	- After all backport PRs are merged, run the release workflow with that branch as git-ref
@@ -174,7 +174,7 @@ This workflow ensures:
 
 ### Individual Backport PRs
 
-**Each fix gets its own backport PR** (e.g., `backport/56-to-3.0`).
+**Each fix gets its own backport PR** (e.g., `backport/56-to-3.x`).
 
 Benefits:
 - Independent code review for each backport
@@ -190,26 +190,29 @@ Benefits:
 PR #56: "Fix memory leak in query parser" → merged to main
 
 # 2. Create patch branch from previous release tag (when preparing 3.0.1)
+# Option A: Use the "Initialise a new release" workflow (Actions → Initialise a new release)
+#   - Input: tag = v3.0.0 (branch name defaults to releases/3.x)
+# Option B: Manual git commands
 git fetch --tags
-git checkout -b releases/3.0 v3.0.0
-git push origin releases/3.0
+git checkout -b releases/3.x v3.0.0
+git push origin releases/3.x
 
 # 3. Create individual backport PR
-git checkout releases/3.0
-git checkout -b backport/56-to-3.0
+git checkout releases/3.x
+git checkout -b backport/56-to-3.x
 git cherry-pick abc123  # commit from main
-git push origin backport/56-to-3.0
-gh pr create --base releases/3.0 --head backport/56-to-3.0
+git push origin backport/56-to-3.x
+gh pr create --base releases/3.x --head backport/56-to-3.x
 
 # 4. Review and merge backport PR
 # (CI runs, code review happens)
-Backport PR merged → releases/3.0 now has the fix
+Backport PR merged → releases/3.x now has the fix
 
 # 5. Repeat for each fix needed in 3.0.1
 
 # 6. When ready, run release workflow
-# Git ref: releases/3.0, Release version: 3.0.1
-# After release, temporary branch releases/v3.0.1 is deleted
+# Git ref: releases/3.x, Release version: 3.0.1
+# After release, patch branch releases/3.x can be deleted; temporary branch releases/v3.0.1 is deleted
 ```
 
 ## Version Management
@@ -361,8 +364,8 @@ After successful dry-run:
 1. **Create patch branch from previous tag** (if not already created):
 	```bash
 	git fetch --tags
-	git checkout -b releases/3.0 v3.0.0
-	git push origin releases/3.0
+	git checkout -b releases/3.x v3.0.0
+	git push origin releases/3.x
 	```
 
 2. **Ensure fixes are merged to main**:
@@ -374,21 +377,21 @@ After successful dry-run:
 3. **Backport each fix individually** (one PR per fix):
 	```bash
 	# For fix #56
-	git checkout releases/3.0
-	git pull origin releases/3.0
+	git checkout releases/3.x
+	git pull origin releases/3.x
 
 	# Create a backport branch for this specific fix
-	git checkout -b backport/56-to-3.0
+	git checkout -b backport/56-to-3.x
 
 	# Cherry-pick the specific fix from main
 	git cherry-pick <commit-hash-from-main>
 
 	# Push the backport branch
-	git push origin backport/56-to-3.0
+	git push origin backport/56-to-3.x
 
-	# Create PR targeting releases/3.0
-	gh pr create --base releases/3.0 --head backport/56-to-3.0 \
-		--title "Backport #56 to releases/3.0" \
+	# Create PR targeting releases/3.x
+	gh pr create --base releases/3.x --head backport/56-to-3.x \
+		--title "Backport #56 to releases/3.x" \
 		--body "Backports fix #56 from main for 3.0.1 release.
 
 	Original PR: #56
@@ -404,7 +407,7 @@ After successful dry-run:
 6. **Dry-Run**:
 	```
 	Release type: versioned
-	Git ref: releases/3.0  ← Branch created from tag v3.0.0
+	Git ref: releases/3.x  ← Branch created from tag v3.0.0
 	Release version: 3.0.1
 	Update main: ✗  ← Don't update main for patches
 	Publish: ✗
@@ -413,7 +416,7 @@ After successful dry-run:
 7. **Publish**:
 	```
 	Release type: versioned
-	Git ref: releases/3.0
+	Git ref: releases/3.x
 	Release version: 3.0.1
 	Update main: ✗
 	Latest: ✓  ← If this is now the latest stable
@@ -481,39 +484,39 @@ After successful dry-run:
 # Initial state: main = 3.1.0-alpha, v3.0.0 tag exists
 
 # Create patch branch from tag (when preparing 3.0.1)
-git checkout -b releases/3.0 v3.0.0
-git push origin releases/3.0
+git checkout -b releases/3.x v3.0.0
+git push origin releases/3.x
 
 # Fix #56 lands on main first
 → PR #56 merged to main
 
 # Backport fix #56 individually
-git checkout releases/3.0
-git checkout -b backport/56-to-3.0
+git checkout releases/3.x
+git checkout -b backport/56-to-3.x
 git cherry-pick <commit-from-main>
-git push origin backport/56-to-3.0
-# Create PR against releases/3.0, review, and merge
+git push origin backport/56-to-3.x
+# Create PR against releases/3.x, review, and merge
 
 # Fix #57 lands on main
 → PR #57 merged to main
 
 # Backport fix #57 individually
-git checkout releases/3.0
-git checkout -b backport/57-to-3.0
+git checkout releases/3.x
+git checkout -b backport/57-to-3.x
 git cherry-pick <commit-from-main>
 # Create PR, review, merge
 
 # After all needed backports are merged
-→ Release 3.0.1 (from releases/3.0, no main update)
+→ Release 3.0.1 (from releases/3.x, no main update)
 → Main stays: 3.1.0-alpha (already has fixes)
 
-# More fixes for 3.0.2 (same branch releases/3.0, or create new from v3.0.1)
+# More fixes for 3.0.2 (same branch releases/3.x, or create new from v3.0.1)
 → Fix #60 lands on main
-→ Backport #60 to releases/3.0 (one PR)
+→ Backport #60 to releases/3.x (one PR)
 → Fix #61 lands on main
-→ Backport #61 to releases/3.0 (one PR)
+→ Backport #61 to releases/3.x (one PR)
 
-→ Release 3.0.2 (from releases/3.0, no main update)
+→ Release 3.0.2 (from releases/3.x, no main update)
 → Main stays: 3.1.0-alpha
 ```
 
@@ -521,11 +524,11 @@ git cherry-pick <commit-from-main>
 
 ```bash
 # Main: 3.1.0-alpha
-# Create branches from tags when needed: releases/3.0 from v3.0.0, releases/2.1 from v2.1.4
+# Create branches from tags when needed: releases/3.x from v3.0.0, releases/2.x from v2.1.4
 
 # Can release patches for older versions simultaneously:
-→ Release 2.1.5 (from releases/2.1, branch created from v2.1.4)
-→ Release 3.0.2 (from releases/3.0, branch created from v3.0.0)
+→ Release 2.1.5 (from releases/2.x, branch created from v2.1.4)
+→ Release 3.0.2 (from releases/3.x, branch created from v3.0.0)
 → Release 3.1.0-beta.1 (from main)
 
 # All independent, no conflicts
