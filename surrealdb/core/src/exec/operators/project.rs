@@ -179,6 +179,10 @@ impl ExecOperator for Project {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.fields.iter().map(|f| ("field", &f.expr)).collect()
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;

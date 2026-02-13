@@ -12,6 +12,9 @@ use std::sync::Arc;
 use crate::catalog::providers::TableProvider;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
+// Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
+// These are shared between the legacy compute path and the streaming execution engine.
+pub(crate) use crate::expr::idiom::recursion::{clean_iteration, get_final, is_final};
 use crate::val::{RecordId, Value};
 
 pub(crate) mod array_ops;
@@ -196,36 +199,4 @@ pub(crate) fn evaluate_physical_path<'a>(
 		}
 		Ok(current)
 	})
-}
-
-/// Check if a value is "final" (terminates recursion).
-///
-/// A value is final if it's None, Null, or an empty/all-none array.
-pub(crate) fn is_final(value: &Value) -> bool {
-	match value {
-		Value::None | Value::Null => true,
-		Value::Array(arr) => {
-			arr.is_empty() || arr.iter().all(|v| matches!(v, Value::None | Value::Null))
-		}
-		_ => false,
-	}
-}
-
-/// Get the final value for a dead-end in recursion.
-pub(crate) fn get_final(value: &Value) -> Value {
-	match value {
-		Value::Array(_) => Value::Array(crate::val::Array(vec![])),
-		Value::Null => Value::Null,
-		_ => Value::None,
-	}
-}
-
-/// Clean iteration result by filtering out final values from arrays.
-pub(crate) fn clean_iteration(value: Value) -> Value {
-	if let Value::Array(arr) = value {
-		let filtered: Vec<Value> = arr.into_iter().filter(|v| !is_final(v)).collect();
-		Value::Array(filtered.into()).flatten()
-	} else {
-		value
-	}
 }

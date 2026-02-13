@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator};
 use crate::val::Value;
 
 // ============================================================================
@@ -112,6 +112,17 @@ impl PhysicalExpr for IdiomExpr {
 			parts_mode
 		}
 	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		let mut ops = Vec::new();
+		if let Some(ref start) = self.start_expr {
+			ops.extend(start.embedded_operators());
+		}
+		for part in &self.parts {
+			ops.extend(part.embedded_operators());
+		}
+		ops
+	}
 }
 
 impl ToSql for IdiomExpr {
@@ -214,7 +225,7 @@ pub(crate) async fn evaluate_parts_with_continuation(
 		// results are NOT flattened, preserving per-element nesting.
 		if matches!(&value, Value::Array(_))
 			&& part.name() == "Lookup"
-			&& i + 1 < parts.len()
+			&& (i + 1 < parts.len() || part.is_fused_lookup())
 			&& !matches!(prev_part_name, "Lookup" | "Flatten")
 		{
 			let arr = match value {

@@ -59,6 +59,10 @@ impl ExecOperator for ExprPlan {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("expr", &self.expr)]
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let expr = self.expr.clone();
 		let ctx = ctx.clone();
