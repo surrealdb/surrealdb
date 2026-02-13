@@ -6,6 +6,22 @@
 //! and repeatedly evaluates the body path until depth bounds, dead ends, or
 //! cycles are reached.
 //!
+//! ## RecordId enforcement
+//!
+//! Recursion is intended purely for RecordId graph traversal. The
+//! `is_recursion_target` helper enforces this: only `RecordId` values (and
+//! arrays containing them) are valid recursion targets. All other types
+//! (String, Number, Object, Uuid, etc.) are treated as terminal and stop
+//! recursion at that branch.
+//!
+//! ## Body-operator optimization
+//!
+//! When a `body` operator is available (the fused lookup chain extracted for
+//! EXPLAIN display), the RepeatRecurse discovery phase executes it directly
+//! to discover target RecordIds. This avoids fetching full documents for
+//! non-recursive destructure fields (e.g., `name` in
+//! `{ name, knows: ->knows->person.@ }`), eliminating redundant I/O.
+//!
 //! ## Stack safety
 //!
 //! All strategies are fully iterative and use no stack recursion:
@@ -13,8 +29,9 @@
 //! - **Default, Collect, Path, Shortest**: Loop-based, safe at any depth.
 //! - **RepeatRecurse (`@`) tree-building**: Uses a two-phase iterative approach (forward BFS
 //!   discovery + backward bottom-up assembly). In the discovery phase, `@` writes its inputs to a
-//!   shared sink and returns immediately. In the assembly phase, `@` does a cache lookup for
-//!   pre-computed results. Neither phase uses stack recursion.
+//!   shared sink and returns immediately (or the body operator is executed directly when
+//!   available). In the assembly phase, `@` does a cache lookup for pre-computed results. Neither
+//!   phase uses stack recursion.
 //!
 //! ## EXPLAIN output
 //!
@@ -29,7 +46,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use futures::stream;
+use futures::{StreamExt, stream};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::parts::recurse::{PhysicalRecurseInstruction, value_hash};
@@ -218,6 +235,7 @@ impl ExecOperator for RecursionOp {
 		let max_depth = self.max_depth.unwrap_or(system_limit).min(system_limit);
 
 		let path = self.path.clone();
+		let body = self.body.clone();
 		let min_depth = self.min_depth;
 		let user_specified_max = self.max_depth.is_some();
 		let inclusive = self.inclusive;
@@ -236,6 +254,8 @@ impl ExecOperator for RecursionOp {
 					&path,
 					min_depth,
 					max_depth,
+					&body,
+					&ctx,
 					eval_ctx.with_value(&value),
 				)
 				.await?
@@ -333,11 +353,15 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		};
 
 		// ── Discovery mode ──────────────────────────────────────────────
-		// Write non-final values to the shared sink, return input as-is.
+		// Write non-final, valid recursion targets to the shared sink,
+		// return input as-is. Only RecordIds (and arrays of them) are
+		// valid recursion targets.
 		if let Some(ref sink) = rec_ctx.discovery_sink {
 			let values_to_write: Vec<Value> = match value {
-				Value::Array(arr) => arr.iter().filter(|v| !is_final(v)).cloned().collect(),
-				v if !is_final(v) => vec![v.clone()],
+				Value::Array(arr) => {
+					arr.iter().filter(|v| !is_final(v) && is_recursion_target(v)).cloned().collect()
+				}
+				v if !is_final(v) && is_recursion_target(v) => vec![v.clone()],
 				_ => vec![],
 			};
 			if !values_to_write.is_empty() {
@@ -408,9 +432,13 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 /// Replaces the stack-recursive chain with a two-phase approach:
 ///
 /// **Phase 1 -- Forward BFS Discovery:** Walk the graph level by level.
-/// At each depth, evaluate the full path with `@` writing its input values
-/// to a shared sink (discovery mode). This discovers which values exist at
-/// each depth level without any stack recursion.
+/// When a `body` operator is available (the fused lookup chain), it is
+/// executed directly to discover target RecordIds -- this avoids fetching
+/// documents for non-recursive destructure fields (e.g. `name`), which
+/// would otherwise happen when evaluating the full path.
+/// When `body` is `None` (record-link patterns without graph edges), falls
+/// back to the original approach: evaluate the full path with `@` writing
+/// its input values to a shared sink (discovery mode).
 ///
 /// **Phase 2 -- Backward Assembly:** Process from the deepest level to 0.
 /// At each depth, evaluate the full path with `@` doing a cache lookup for
@@ -421,6 +449,8 @@ async fn evaluate_recurse_iterative(
 	path: &[Arc<dyn PhysicalExpr>],
 	min_depth: u32,
 	max_depth: u32,
+	body: &Option<Arc<dyn ExecOperator>>,
+	exec_ctx: &ExecutionContext,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
 	// Early exit: if start is a dead end, return immediately.
@@ -431,8 +461,15 @@ async fn evaluate_recurse_iterative(
 	// ── Phase 1: Forward BFS Discovery ──────────────────────────────
 	//
 	// Build `levels[d]` = values discovered at depth d.
-	// At each depth, we evaluate the full path with `@` in discovery mode:
-	// it writes its inputs to a shared sink instead of recursing.
+	//
+	// When a body operator is available, we execute it directly for each
+	// value -- this produces the target RecordIds without evaluating the
+	// full destructure path. This eliminates record fetches for non-
+	// recursive fields (e.g. `name` in `{ name, knows: ->knows->person.@ }`).
+	//
+	// When no body operator is available, we fall back to evaluating the
+	// full path with `@` in discovery mode: it writes its inputs to a
+	// shared sink instead of recursing.
 	//
 	// Values are deduplicated WITHIN each level (same value at same depth
 	// is redundant) but NOT across levels. The same value CAN appear at
@@ -446,41 +483,77 @@ async fn evaluate_recurse_iterative(
 			break;
 		}
 
-		// Create a shared sink for this depth's discoveries.
-		let sink: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+		let mut raw_discovered: Vec<Value> = Vec::new();
 
-		// Build a RecursionCtx in discovery mode.
-		let discovery_ctx = RecursionCtx {
-			min_depth,
-			depth: d as u32,
-			discovery_sink: Some(Arc::clone(&sink)),
-			assembly_cache: None,
-		};
+		if let Some(body_op) = body {
+			// ── Fast path: use the body operator to discover targets ──
+			// Execute the fused lookup chain directly. This only performs
+			// the graph scan / record-link resolution without evaluating
+			// destructure fields that are irrelevant for discovery.
+			for val in current_level {
+				if is_final(val) || !is_recursion_target(val) {
+					continue;
+				}
+				let body_ctx = exec_ctx.with_current_value(val.clone());
+				let mut stream = body_op.execute(&body_ctx)?;
+				while let Some(batch_result) = stream.next().await {
+					let batch = batch_result?;
+					for v in batch.values {
+						match v {
+							Value::Array(arr) => {
+								for inner in arr.0 {
+									if !is_final(&inner) && is_recursion_target(&inner) {
+										raw_discovered.push(inner);
+									}
+								}
+							}
+							v if !is_final(&v) && is_recursion_target(&v) => {
+								raw_discovered.push(v);
+							}
+							_ => {}
+						}
+					}
+				}
+			}
+		} else {
+			// ── Fallback: full-path evaluation with discovery sink ──
+			// Create a shared sink for this depth's discoveries.
+			let sink: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
 
-		// Evaluate the path for each value at this depth.
-		// The `@` part will write discovered values to the sink.
-		for val in current_level {
-			if is_final(val) {
-				continue;
+			// Build a RecursionCtx in discovery mode.
+			let discovery_ctx = RecursionCtx {
+				min_depth,
+				depth: d as u32,
+				discovery_sink: Some(Arc::clone(&sink)),
+				assembly_cache: None,
+			};
+
+			// Evaluate the path for each value at this depth.
+			// The `@` part will write discovered values to the sink.
+			for val in current_level {
+				if is_final(val) {
+					continue;
+				}
+				let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
+				match evaluate_physical_path(val, path, eval).await {
+					Ok(_) => {}
+					// PathEliminationSignal means dead end at this value -- skip it.
+					Err(ControlFlow::Err(ref e))
+						if e.downcast_ref::<PathEliminationSignal>().is_some() => {}
+					Err(other) => return Err(other),
+				}
 			}
-			let eval = ctx.with_value(val).with_recursion_ctx(discovery_ctx.clone());
-			match evaluate_physical_path(val, path, eval).await {
-				Ok(_) => {}
-				// PathEliminationSignal means dead end at this value -- skip it.
-				Err(ControlFlow::Err(ref e))
-					if e.downcast_ref::<PathEliminationSignal>().is_some() => {}
-				Err(other) => return Err(other),
-			}
+
+			// Extract discovered values from the sink.
+			// We use lock+take instead of Arc::try_unwrap because the cloned
+			// RecursionCtx instances may still hold Arc references to the sink.
+			raw_discovered = std::mem::take(&mut *sink.lock().expect("sink lock poisoned"));
 		}
 
-		// Extract discovered values with per-level deduplication.
-		// We use lock+take instead of Arc::try_unwrap because the cloned
-		// RecursionCtx instances may still hold Arc references to the sink.
-		let discovered = std::mem::take(&mut *sink.lock().expect("sink lock poisoned"));
-
+		// Per-level deduplication.
 		let mut seen_level: HashSet<u64> = HashSet::new();
 		let mut next_level = Vec::new();
-		for v in discovered {
+		for v in raw_discovered {
 			let hash = value_hash(&v);
 			if seen_level.insert(hash) {
 				next_level.push(v);
@@ -558,6 +631,24 @@ async fn evaluate_recurse_iterative(
 }
 
 // ============================================================================
+// RecordId enforcement
+// ============================================================================
+
+/// Check if a value is a valid recursion target.
+///
+/// Recursion is intended purely for RecordId traversal. Only `RecordId`
+/// values and arrays containing at least one `RecordId` are valid targets.
+/// All other types (String, Number, Object, Uuid, etc.) are treated as
+/// terminal and stop recursion at that branch.
+fn is_recursion_target(value: &Value) -> bool {
+	match value {
+		Value::RecordId(_) => true,
+		Value::Array(arr) => arr.iter().any(is_recursion_target),
+		_ => false,
+	}
+}
+
+// ============================================================================
 // Iterative recursion strategies (loop-based, no stack recursion)
 // ============================================================================
 
@@ -587,9 +678,11 @@ async fn evaluate_recurse_default(
 		// Clean up dead ends from array results
 		let next = clean_iteration(next);
 
-		// Check termination conditions
-		if is_final(&next) || next == current {
-			// Reached a dead end or cycle.
+		// Check termination conditions.
+		// Non-RecordId values are treated as terminal -- recursion is
+		// intended purely for record graph traversal.
+		if is_final(&next) || !is_recursion_target(&next) || next == current {
+			// Reached a dead end, non-RecordId value, or cycle.
 			// Use `depth > min_depth` (not `>=`) because the current iteration
 			// produced a dead end, so we've only completed (depth - 1) successful
 			// traversals.
@@ -658,7 +751,9 @@ async fn evaluate_recurse_collect(
 			};
 
 			for v in values {
-				if is_final(&v) {
+				// Non-RecordId values are treated as terminal --
+				// recursion is intended purely for record graph traversal.
+				if is_final(&v) || !is_recursion_target(&v) {
 					continue;
 				}
 
@@ -724,10 +819,13 @@ async fn evaluate_recurse_path(
 				other => vec![other],
 			};
 
-			// Single pass: extend paths for non-final values, detect dead ends.
-			// On the last non-final value we move current_path instead of cloning
+			// Single pass: extend paths for valid recursion targets, detect dead ends.
+			// Non-RecordId values are treated as terminal -- recursion is
+			// intended purely for record graph traversal.
+			// On the last valid value we move current_path instead of cloning
 			// to save one allocation per branch point.
-			let mut non_final = values.into_iter().filter(|v| !is_final(v)).peekable();
+			let mut non_final =
+				values.into_iter().filter(|v| !is_final(v) && is_recursion_target(v)).peekable();
 
 			if non_final.peek().is_none() {
 				// All values were final -- dead end
@@ -809,7 +907,9 @@ async fn evaluate_recurse_shortest(
 			};
 
 			for v in values {
-				if is_final(&v) {
+				// Non-RecordId values are treated as terminal --
+				// recursion is intended purely for record graph traversal.
+				if is_final(&v) || !is_recursion_target(&v) {
 					continue;
 				}
 
