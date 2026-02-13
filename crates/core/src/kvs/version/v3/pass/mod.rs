@@ -107,6 +107,7 @@ pub struct PassState {
 	pub breaking_closures: bool,
 	pub non_expression_idiom: bool,
 	pub mock_allowed: bool,
+	pub skip_relation_field: bool,
 	pub _tmp: (),
 }
 
@@ -1285,7 +1286,7 @@ impl Visitor for MigratorPass<'_> {
 				self.w.write_str(" ALWAYS ")?
 			}
 
-			self.visit_value(v)?;
+			self.with_state(|p| p.with_breaking_storage(), |this| this.visit_value(v))?;
 		}
 
 		if d.readonly {
@@ -2255,11 +2256,20 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_object(&mut self, obj: &Object) -> Result<(), Self::Error> {
 		self.w.write_str("{")?;
 		for (idx, (k, v)) in obj.0.iter().enumerate() {
+			if self.state.skip_relation_field && k == "__" {
+				continue;
+			}
 			if idx != 0 {
 				self.w.write_str(",")?;
 			}
 			write!(self.w, "{}:", EscapeKey(k.as_str()))?;
-			self.visit_value(v)?;
+			self.with_state(
+				|p| PassState {
+					skip_relation_field: false,
+					..p
+				},
+				|this| this.visit_value(v),
+			)?;
 		}
 		self.w.write_str("}")?;
 		Ok(())
