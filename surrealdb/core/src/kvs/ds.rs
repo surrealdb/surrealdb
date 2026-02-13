@@ -1622,7 +1622,7 @@ impl Datastore {
 				TypesErrorKind::Auth,
 				"The session has expired".to_string(),
 			)
-			.with_details(AuthError::SessionExpired.into_details()));
+			.with_details(AuthError::SessionExpired));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1640,11 +1640,11 @@ impl Datastore {
 		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
 			Some(Error::ExpiredSession) => {
 				TypesError::new(TypesErrorKind::Auth, "The session has expired".to_string())
-					.with_details(AuthError::SessionExpired.into_details())
+					.with_details(AuthError::SessionExpired)
 			}
 			Some(Error::ExpiredToken) => {
 				TypesError::new(TypesErrorKind::Auth, "The token has expired".to_string())
-					.with_details(AuthError::TokenExpired.into_details())
+					.with_details(AuthError::TokenExpired)
 			}
 			_ => TypesError::new(TypesErrorKind::Internal, e.to_string()),
 		})?;
@@ -1670,11 +1670,11 @@ impl Datastore {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					TypesError::new(TypesErrorKind::Auth, "The session has expired".to_string())
-						.with_details(AuthError::SessionExpired.into_details())
+						.with_details(AuthError::SessionExpired)
 				}
 				Some(Error::ExpiredToken) => {
 					TypesError::new(TypesErrorKind::Auth, "The token has expired".to_string())
-						.with_details(AuthError::TokenExpired.into_details())
+						.with_details(AuthError::TokenExpired)
 				}
 				_ => TypesError::new(TypesErrorKind::Internal, e.to_string()),
 			}
@@ -1813,7 +1813,7 @@ impl Datastore {
 				TypesErrorKind::Auth,
 				"The session has expired".to_string(),
 			)
-			.with_details(AuthError::SessionExpired.into_details()));
+			.with_details(AuthError::SessionExpired));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1832,11 +1832,11 @@ impl Datastore {
 		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
 			Some(Error::ExpiredSession) => {
 				TypesError::new(TypesErrorKind::Auth, "The session has expired".to_string())
-					.with_details(AuthError::SessionExpired.into_details())
+					.with_details(AuthError::SessionExpired)
 			}
 			Some(Error::ExpiredToken) => {
 				TypesError::new(TypesErrorKind::Auth, "The token has expired".to_string())
-					.with_details(AuthError::TokenExpired.into_details())
+					.with_details(AuthError::TokenExpired)
 			}
 			Some(Error::InvalidAuth) => {
 				TypesError::new(TypesErrorKind::Auth, "Authentication failed".to_string())
@@ -1910,11 +1910,11 @@ impl Datastore {
 		ctx.attach_session(sess).map_err(|e| match e {
 			Error::ExpiredSession => {
 				TypesError::new(TypesErrorKind::Auth, "The session has expired".to_string())
-					.with_details(AuthError::SessionExpired.into_details())
+					.with_details(AuthError::SessionExpired)
 			}
 			Error::ExpiredToken => {
 				TypesError::new(TypesErrorKind::Auth, "The token has expired".to_string())
-					.with_details(AuthError::TokenExpired.into_details())
+					.with_details(AuthError::TokenExpired)
 			}
 			Error::InvalidAuth => {
 				TypesError::new(TypesErrorKind::Auth, "Authentication failed".to_string())
@@ -1947,11 +1947,11 @@ impl Datastore {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					TypesError::new(TypesErrorKind::Auth, "The session has expired".to_string())
-						.with_details(AuthError::SessionExpired.into_details())
+						.with_details(AuthError::SessionExpired)
 				}
 				Some(Error::ExpiredToken) => {
 					TypesError::new(TypesErrorKind::Auth, "The token has expired".to_string())
-						.with_details(AuthError::TokenExpired.into_details())
+						.with_details(AuthError::TokenExpired)
 				}
 				Some(Error::InvalidAuth) => {
 					TypesError::new(TypesErrorKind::Auth, "Authentication failed".to_string())

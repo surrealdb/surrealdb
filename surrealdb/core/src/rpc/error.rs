@@ -104,7 +104,7 @@ pub fn session_expired() -> TypesError {
 		"The session has expired".to_string(),
 	)
 	.with_code(code::INTERNAL_ERROR)
-	.with_details(AuthError::SessionExpired.into_details())
+	.with_details(AuthError::SessionExpired)
 }
 
 /// Convert an anyhow error to a wire error, downcasting to database errors where possible.

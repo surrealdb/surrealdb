@@ -192,7 +192,7 @@ impl Error {
 			return None;
 		}
 		let details = self.details.as_ref()?;
-		AuthError::from_details(details)
+		AuthError::from_value(details.clone()).ok()
 	}
 }
 
@@ -202,48 +202,16 @@ impl Error {
 
 /// Auth failure reason for [`ErrorKind::Auth`] errors.
 ///
-/// Serialized as an object in `Error.details` (e.g. `{ "session_expired": true }`) so clients can
-/// detect auth failure reasons without parsing the message string.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Serialized as a string in `Error.details` (e.g. `"SessionExpired"`) so clients can detect
+/// auth failure reasons without parsing the message string.
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+#[surreal(untagged)]
 pub enum AuthError {
 	/// The token used for authentication has expired.
 	TokenExpired,
 	/// The session has expired.
 	SessionExpired,
-}
-
-impl AuthError {
-	/// Build details value for use with `Error::with_details`.
-	pub fn into_details(self) -> Value {
-		let mut o = Object::new();
-		match self {
-			AuthError::TokenExpired => o.insert("token_expired", true),
-			AuthError::SessionExpired => o.insert("session_expired", true),
-		};
-		Value::Object(o)
-	}
-
-	/// Parse from `Error.details`; returns `None` if not an object or no recognised key.
-	pub fn from_details(details: &Value) -> Option<Self> {
-		let Value::Object(o) = details else {
-			return None;
-		};
-		let token_expired = o
-			.get("token_expired")
-			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
-			.unwrap_or(false);
-		let session_expired = o
-			.get("session_expired")
-			.and_then(|v| <bool as SurrealValue>::from_value(v.clone()).ok())
-			.unwrap_or(false);
-		if token_expired {
-			Some(AuthError::TokenExpired)
-		} else if session_expired {
-			Some(AuthError::SessionExpired)
-		} else {
-			None
-		}
-	}
 }
 
 /// Iterator over an error and its cause chain.
