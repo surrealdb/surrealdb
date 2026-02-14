@@ -101,6 +101,12 @@ pub enum AccessPath {
 		/// HNSW search expansion factor
 		ef: u32,
 	},
+
+	/// Union of multiple index scans for OR conditions.
+	///
+	/// Each sub-path handles one branch of the OR; results are
+	/// deduplicated by record ID at execution time.
+	Union(Vec<AccessPath>),
 }
 
 /// How to access an index.

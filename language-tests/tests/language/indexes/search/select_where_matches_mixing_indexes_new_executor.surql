@@ -22,7 +22,7 @@ value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
 └────> Scan [ctx: Db] [source: person, predicate: name @@ 'Tobie' OR securityNumber == '123456'] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+         actual: [access_method: MultiIndexUnion, indexes: idxPersonName, idxSecurityNumber]
 
 Total rows: 1"'''
 

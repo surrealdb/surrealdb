@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound};
+use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::order::Ordering;
@@ -69,6 +69,73 @@ impl<'a> IndexAnalyzer<'a> {
 		self.deduplicate_candidates(&mut candidates);
 
 		candidates
+	}
+
+	/// Try to build a multi-index union access path for OR conditions.
+	///
+	/// For `A OR B OR C`, each branch is analyzed independently. If EVERY branch
+	/// has at least one index candidate, the best candidate from each is combined
+	/// into an `AccessPath::Union`. If any branch lacks an index candidate, the
+	/// union cannot be used and `None` is returned (the caller should fall back
+	/// to a table scan).
+	pub fn try_or_union(
+		&self,
+		cond: Option<&Cond>,
+		direction: ScanDirection,
+	) -> Option<AccessPath> {
+		let cond = cond?;
+
+		// Check for WITH NOINDEX
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return None;
+		}
+
+		// Flatten OR branches from the condition tree
+		let mut branches = Vec::new();
+		Self::flatten_or(&cond.0, &mut branches);
+
+		// Need at least 2 branches for a union to make sense
+		if branches.len() < 2 {
+			return None;
+		}
+
+		// Analyze each branch independently
+		let mut branch_paths = Vec::with_capacity(branches.len());
+		for branch_expr in branches {
+			let branch_cond = Cond(branch_expr.clone());
+			let candidates = self.analyze(Some(&branch_cond), None);
+			if candidates.is_empty() {
+				// This branch has no index — cannot use union
+				return None;
+			}
+			let path = select_access_path(candidates, self.with_hints, direction);
+			if matches!(path, AccessPath::TableScan) {
+				// WITH hints rejected all candidates for this branch
+				return None;
+			}
+			branch_paths.push(path);
+		}
+
+		Some(AccessPath::Union(branch_paths))
+	}
+
+	/// Flatten nested OR expressions into a list of branches.
+	///
+	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
+	fn flatten_or<'b>(expr: &'b Expr, branches: &mut Vec<&'b Expr>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Or,
+				right,
+			} => {
+				Self::flatten_or(left, branches);
+				Self::flatten_or(right, branches);
+			}
+			_ => {
+				branches.push(expr);
+			}
+		}
 	}
 
 	/// Collect all simple conditions from an AND tree.

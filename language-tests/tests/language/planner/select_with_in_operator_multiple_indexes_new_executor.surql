@@ -25,9 +25,9 @@ Total rows: 1''''
 value = "[{ id: notes:3, kind: 1, pubkey: 123, published: 2023 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> Scan [ctx: Db] [source: notes, predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+value = ''''Project [ctx: Db] {rows: 4, batches: 2}
+└────> Scan [ctx: Db] [source: notes, predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
+         actual: [access_method: MultiIndexUnion, indexes: index_note_published, index_note_published]
 
 Total rows: 4''''
 
@@ -35,9 +35,9 @@ Total rows: 4''''
 value = "[{ id: notes:1, kind: 1, pubkey: 123, published: 2021 }, { id: notes:3, kind: 1, pubkey: 123, published: 2023 }, { id: notes:4, kind: 2, pubkey: 123, published: 2024 }, { id: notes:5, kind: 1, pubkey: 123, published: 2025 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> Scan [ctx: Db] [source: notes, predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+value = ''''Project [ctx: Db] {rows: 4, batches: 2}
+└────> Scan [ctx: Db] [source: notes, predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
+         actual: [access_method: MultiIndexUnion, indexes: index_note_published, index_note_published]
 
 Total rows: 4''''
 

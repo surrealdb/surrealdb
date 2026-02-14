@@ -625,7 +625,12 @@ async fn resolve_table_scan_stream(
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
-		Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
+		if candidates.is_empty() {
+			// No single-index candidates -- try multi-index union for OR conditions
+			analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction)
+		} else {
+			Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
+		}
 	};
 
 	match access_path {
@@ -680,6 +685,61 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
+		// Multi-index union for OR conditions
+		Some(AccessPath::Union(paths)) => {
+			// Record which indexes are being used
+			let index_names: Vec<String> = paths
+				.iter()
+				.filter_map(|p| match p {
+					AccessPath::BTreeScan {
+						index_ref, ..
+					} => Some(index_ref.name.clone()),
+					AccessPath::FullTextSearch {
+						index_ref, ..
+					} => Some(index_ref.name.clone()),
+					AccessPath::KnnSearch {
+						index_ref, ..
+					} => Some(index_ref.name.clone()),
+					_ => None,
+				})
+				.collect();
+			record_runtime_attrs(runtime_attrs, |a| {
+				a.push(("access_method".into(), "MultiIndexUnion".into()));
+				a.push(("indexes".into(), index_names.join(", ")));
+			});
+
+			// Create a stream for each sub-path, then chain and deduplicate
+			let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(paths.len());
+			for path in paths {
+				let sub_stream = create_index_stream(ctx, &path, &cfg)?;
+				sub_streams.push(sub_stream);
+			}
+
+			// Chain all sub-streams sequentially and deduplicate by record ID
+			let merged: ValueBatchStream = Box::pin(async_stream::try_stream! {
+				let mut seen = std::collections::HashSet::new();
+				for mut sub_stream in sub_streams {
+					while let Some(batch_result) = sub_stream.next().await {
+						let batch = batch_result?;
+						let deduped: Vec<Value> = batch.values.into_iter()
+							.filter(|v| {
+								if let Value::Object(obj) = v {
+									if let Some(Value::RecordId(rid)) = obj.get("id") {
+										return seen.insert(rid.clone());
+									}
+								}
+								true // non-object values pass through
+							})
+							.collect();
+						if !deduped.is_empty() {
+							yield ValueBatch { values: deduped };
+						}
+					}
+				}
+			});
+			Ok((merged, 0))
+		}
+
 		// Fall back to table KV scan (NOINDEX, etc.)
 		_ => {
 			record_runtime_attrs(runtime_attrs, |a| {
@@ -698,6 +758,57 @@ async fn resolve_table_scan_stream(
 				cfg.pre_skip,
 			);
 			Ok((stream, cfg.pre_skip))
+		}
+	}
+}
+
+/// Create an index scan stream for a single access path.
+///
+/// Used by the multi-index union handler to create individual streams
+/// for each branch of an OR condition.
+fn create_index_stream(
+	ctx: &ExecutionContext,
+	path: &AccessPath,
+	cfg: &TableScanConfig,
+) -> Result<ValueBatchStream, ControlFlow> {
+	match path {
+		AccessPath::BTreeScan {
+			index_ref,
+			access,
+			direction,
+		} => {
+			let operator =
+				IndexScan::new(index_ref.clone(), access.clone(), *direction, cfg.table_name.clone());
+			operator.execute(ctx)
+		}
+		AccessPath::FullTextSearch {
+			index_ref,
+			query,
+			operator,
+		} => {
+			let ft_op = FullTextScan::new(
+				index_ref.clone(),
+				query.clone(),
+				operator.clone(),
+				cfg.table_name.clone(),
+			);
+			ft_op.execute(ctx)
+		}
+		AccessPath::KnnSearch {
+			index_ref,
+			vector,
+			k,
+			ef,
+		} => {
+			let knn_op =
+				KnnScan::new(index_ref.clone(), vector.clone(), *k, *ef, cfg.table_name.clone());
+			knn_op.execute(ctx)
+		}
+		AccessPath::TableScan | AccessPath::Union(_) => {
+			// These should not appear as sub-paths in a union
+			Err(ControlFlow::Err(anyhow::anyhow!(
+				"Unexpected access path in multi-index union"
+			)))
 		}
 	}
 }
