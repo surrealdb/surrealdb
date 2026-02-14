@@ -15,10 +15,9 @@ use crate::engine;
 use crate::engine::any::Any;
 #[cfg(feature = "protocol-http")]
 use crate::engine::remote::http;
-use crate::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{Result, SessionClone, Surreal, conn};
+use crate::{Error, Result, SessionClone, Surreal, conn};
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
 	#[allow(
@@ -60,7 +59,10 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					return Err(Error::configuration("Unsupported scheme: memory".to_string(), None));
+					return Err(Error::configuration(
+						"Unsupported scheme: memory".to_string(),
+						None,
+					));
 				}
 
 				EndpointKind::RocksDb => {
@@ -201,7 +203,9 @@ impl conn::Sealed for Any {
 					None,
 				));
 				}
-				EndpointKind::Unsupported(v) => return Err(Error::configuration(format!("Unsupported scheme: {v}"), None)),
+				EndpointKind::Unsupported(v) => {
+					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
+				}
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));

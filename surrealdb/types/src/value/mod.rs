@@ -570,8 +570,8 @@ impl Value {
 
 	/// Converts this value to the specified type
 	///
-	/// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
-	pub fn into_t<T: SurrealValue>(self) -> anyhow::Result<T> {
+	/// Returns `Ok(T)` if the conversion is successful, `Err(Error)` otherwise.
+	pub fn into_t<T: SurrealValue>(self) -> Result<T, crate::Error> {
 		T::from_value(self)
 	}
 

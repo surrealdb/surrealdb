@@ -1,8 +1,7 @@
 use http::{HeaderMap, HeaderValue, StatusCode};
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{ErrorKind, SurrealValue};
 
 use crate::api::X_SURREAL_REQUEST_ID;
-use crate::api::err::ApiError;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicObject, PublicValue};
 use crate::val::{Value, convert_value_to_public_value};
@@ -18,15 +17,29 @@ pub struct ApiResponse {
 	pub request_id: String,
 }
 
-impl ApiResponse {
-	/// Builds an API response from an error, exposing status and message for known API errors.
-	pub(crate) fn from_error(e: anyhow::Error, request_id: String) -> Self {
-		let (status, body) = if let Some(api_error) = e.downcast_ref::<ApiError>() {
-			(api_error.status_code(), api_error.to_string())
-		} else {
-			(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-		};
+/// Maps public error kind to HTTP status code for API responses.
+fn status_code_for_error_kind(kind: &ErrorKind) -> StatusCode {
+	match kind {
+		ErrorKind::Validation => StatusCode::BAD_REQUEST,
+		ErrorKind::NotFound => StatusCode::NOT_FOUND,
+		ErrorKind::Auth => StatusCode::UNAUTHORIZED,
+		ErrorKind::NotAllowed => StatusCode::FORBIDDEN,
+		ErrorKind::Configuration
+		| ErrorKind::Thrown
+		| ErrorKind::Query
+		| ErrorKind::Serialization
+		| ErrorKind::AlreadyExists
+		| ErrorKind::Connection
+		| ErrorKind::Internal
+		| _ => StatusCode::INTERNAL_SERVER_ERROR,
+	}
+}
 
+impl ApiResponse {
+	/// Builds an API response from an error, exposing status and message from the error kind.
+	pub(crate) fn from_error(e: surrealdb_types::Error, request_id: String) -> Self {
+		let status = status_code_for_error_kind(e.kind());
+		let body = e.message().to_string();
 		Self {
 			status,
 			body: PublicValue::String(body),
@@ -36,24 +49,19 @@ impl ApiResponse {
 	}
 
 	/// Builds an API response from an error in a security-sensitive context (e.g. initial
-	/// middleware). Known API errors (validation, not found, etc.) are converted with correct
-	/// status and message. Internal/unknown errors are masked as 500 with no body to avoid leaking
-	/// implementation details.
-	pub(crate) fn from_error_secure(e: anyhow::Error, request_id: String) -> Self {
-		if let Some(api_error) = e.downcast_ref::<ApiError>() {
-			Self {
-				status: api_error.status_code(),
-				body: PublicValue::String(api_error.to_string()),
-				request_id,
-				..Default::default()
-			}
-		} else {
-			Self {
-				status: StatusCode::INTERNAL_SERVER_ERROR,
-				body: PublicValue::None,
-				request_id,
-				..Default::default()
-			}
+	/// middleware). Status and message are derived from the error kind. Internal/unknown errors
+	/// are masked as 500 with no body to avoid leaking implementation details.
+	pub(crate) fn from_error_secure(e: surrealdb_types::Error, request_id: String) -> Self {
+		let status = status_code_for_error_kind(e.kind());
+		let body = match status {
+			StatusCode::INTERNAL_SERVER_ERROR => PublicValue::None,
+			_ => PublicValue::String(e.message().to_string()),
+		};
+		Self {
+			status,
+			body,
+			request_id,
+			..Default::default()
 		}
 	}
 
@@ -70,10 +78,12 @@ impl ApiResponse {
 }
 
 impl TryFrom<Value> for ApiResponse {
-	type Error = anyhow::Error;
+	type Error = surrealdb_types::Error;
 
 	fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
-		convert_value_to_public_value(value)?.into_t()
+		convert_value_to_public_value(value)
+			.map_err(|e| surrealdb_types::Error::internal(e.to_string()))?
+			.into_t()
 	}
 }
 

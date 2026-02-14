@@ -125,7 +125,7 @@ impl Router {
 				}
 				v => R::from_value(v),
 			};
-			Ok(result?)
+			result.map_err(|e| crate::Error::internal(e.to_string()))
 		})
 	}
 
@@ -147,13 +147,21 @@ impl Router {
 					0 => Ok(None),
 					// Single-element array: extract and return the element
 					// This happens when operating on a record ID
-					1 => Ok(Some(R::from_value(
-						array.into_iter().next().expect("array has exactly one element"),
-					)?)),
+					1 => Ok(Some(
+						R::from_value(
+							array.into_iter().next().expect("array has exactly one element"),
+						)
+						.map_err(|e| crate::Error::internal(e.to_string()))?,
+					)),
 					// Multiple elements should not happen for operations expecting Option<T>
-					_ => Ok(Some(R::from_value(Value::Array(array))?)),
+					_ => Ok(Some(
+						R::from_value(Value::Array(array))
+							.map_err(|e| crate::Error::internal(e.to_string()))?,
+					)),
 				},
-				value => Ok(Some(R::from_value(value)?)),
+				value => Ok(Some(
+					R::from_value(value).map_err(|e| crate::Error::internal(e.to_string()))?,
+				)),
 			}
 		})
 	}
@@ -175,7 +183,9 @@ impl Router {
 					.into_iter()
 					.map(|v| R::from_value(v).map_err(|e| crate::Error::internal(e.to_string())))
 					.collect::<Result<Vec<R>>>(),
-				value => Ok(vec![R::from_value(value)?]),
+				value => Ok(vec![
+					R::from_value(value).map_err(|e| crate::Error::internal(e.to_string()))?,
+				]),
 			}
 		})
 	}

@@ -20,8 +20,7 @@ mod local;
 use url::Url;
 
 use super::Config;
-use crate::Error;
-use crate::{Connection, Result};
+use crate::{Connection, Error, Result};
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
@@ -45,10 +44,9 @@ impl Endpoint {
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => Err(Error::configuration(
-				format!("Unsupported scheme: {s}"),
-				None,
-			)),
+			EndpointKind::Unsupported(s) => {
+				Err(Error::configuration(format!("Unsupported scheme: {s}"), None))
+			}
 			kind => Ok(kind),
 		}
 	}

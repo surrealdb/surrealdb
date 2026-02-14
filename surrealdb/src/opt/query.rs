@@ -6,11 +6,10 @@ use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
 
-use crate::Error;
 use crate::method::live::Stream;
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value};
-use crate::{IndexedResults as QueryResponse, Result};
+use crate::{Error, IndexedResults as QueryResponse, Result};
 
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryResult<Response>: query_result::Sealed<Response>
@@ -78,18 +77,21 @@ where
 					let value = mem::take(value);
 					match value {
 						Value::None => Ok(None),
-						v => Ok(Some(T::from_value(v)?)),
+						v => {
+							Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?))
+						}
 					}
 				}
 				_ => Err(Error::internal(
-					"Tried to take only a single result from a query that contains multiple".to_string(),
+					"Tried to take only a single result from a query that contains multiple"
+						.to_string(),
 				)),
 			},
 			value => {
 				let value = mem::take(value);
 				match value {
 					Value::None => Ok(None),
-					v => Ok(Some(T::from_value(v)?)),
+					v => Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?)),
 				}
 			}
 		};
@@ -166,7 +168,8 @@ where
 				[value] => value,
 				_ => {
 					return Err(Error::internal(
-						"Tried to take only a single result from a query that contains multiple".to_string(),
+						"Tried to take only a single result from a query that contains multiple"
+							.to_string(),
 					));
 				}
 			},
@@ -185,7 +188,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				Ok(Some(T::from_value(value)?))
+				Ok(Some(T::from_value(value).map_err(|e| Error::internal(e.to_string()))?))
 			}
 			_ => Ok(None),
 		}
@@ -212,7 +215,9 @@ where
 			}
 		};
 
-		vec.into_iter().map(|v| T::from_value(v).map_err(Into::into)).collect::<Result<Vec<T>>>()
+		vec.into_iter()
+			.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+			.collect::<Result<Vec<T>>>()
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
@@ -241,14 +246,16 @@ where
 						}
 						responses
 							.into_iter()
-							.map(|v| T::from_value(v).map_err(Into::into))
+							.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
 							.collect::<Result<Vec<T>>>()
 					}
 					val => {
 						if let Value::Object(object) = val
 							&& let Some(value) = object.remove(key)
 						{
-							return Ok(vec![T::from_value(value)?]);
+							return Ok(vec![
+								T::from_value(value).map_err(|e| Error::internal(e.to_string()))?,
+							]);
 						}
 						Ok(vec![])
 					}
@@ -331,7 +338,9 @@ impl query_stream::Sealed<Value> for usize {
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::internal(format!("Query statement {} is not a live query", self))),
+				true => {
+					Err(Error::internal(format!("Query statement {} is not a live query", self)))
+				}
 				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(stream)))
@@ -362,7 +371,8 @@ impl query_stream::Sealed<Value> for () {
 							),
 							None => {
 								return Err(Error::internal(
-									"Tried to take a query response that has already been taken".to_string(),
+									"Tried to take a query response that has already been taken"
+										.to_string(),
 								));
 							}
 						}
@@ -400,7 +410,9 @@ where
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::internal(format!("Query statement {} is not a live query", self))),
+				true => {
+					Err(Error::internal(format!("Query statement {} is not a live query", self)))
+				}
 				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(Stream {
@@ -439,7 +451,8 @@ where
 							),
 							None => {
 								return Err(Error::internal(
-									"Tried to take a query response that has already been taken".to_string(),
+									"Tried to take a query response that has already been taken"
+										.to_string(),
 								));
 							}
 						}

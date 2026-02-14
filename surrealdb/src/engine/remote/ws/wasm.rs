@@ -18,11 +18,10 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 type MessageStream = SplitStream<WebSocketStream>;
 type MessageSink = SplitSink<WebSocketStream, Message>;

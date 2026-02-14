@@ -544,7 +544,9 @@ where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer).await.map(|_| ()).map_err(|error| crate::Error::internal(format!("Failed to read `{}`: {}", path.display(), error)))
+	io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
+		crate::Error::internal(format!("Failed to read `{}`: {}", path.display(), error))
+	})
 }
 
 async fn kill_live_query(
@@ -785,7 +787,10 @@ async fn router(
 		}
 		| Command::ImportFile {
 			..
-		} => Err(crate::Error::internal("The protocol or storage engine does not support backups on this architecture".to_string())),
+		} => Err(crate::Error::internal(
+			"The protocol or storage engine does not support backups on this architecture"
+				.to_string(),
+		)),
 
 		#[cfg(any(target_family = "wasm", not(feature = "ml")))]
 		Command::ExportMl {
@@ -796,7 +801,10 @@ async fn router(
 		}
 		| Command::ImportMl {
 			..
-		} => Err(crate::Error::internal("The protocol or storage engine does not support backups on this architecture".to_string())),
+		} => Err(crate::Error::internal(
+			"The protocol or storage engine does not support backups on this architecture"
+				.to_string(),
+		)),
 
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {

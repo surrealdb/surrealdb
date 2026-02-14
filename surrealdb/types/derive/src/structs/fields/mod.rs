@@ -270,7 +270,8 @@ impl Fields {
 		let kind_ty = crate_path.kind();
 		let conversion_error_ty = crate_path.conversion_error();
 		let type_error_ty = crate_path.type_error();
-		let anyhow_macro = crate_path.anyhow_macro();
+		let error_expected_content =
+			crate_path.error_internal(quote!("Expected content key".to_string()));
 		match self {
 			Fields::Named(fields) => {
 				let map_retrievals = fields.map_retrievals(name, crate_path);
@@ -441,7 +442,7 @@ impl Fields {
 								if let Some(value) = map.remove(#content) {
 									#retrieve_value
 								} else {
-									return Err(#anyhow_macro!("Expected content key"))
+									return Err(#error_expected_content)
 								}
 							}
 						}}),

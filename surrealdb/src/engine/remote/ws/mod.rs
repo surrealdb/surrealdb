@@ -24,13 +24,11 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::conn::{Command, RequestData, Route};
-use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::Error;
-use crate::engine::session_error_to_error;
+use crate::engine::{SessionError, session_error_to_error};
 use crate::opt::IntoEndpoint;
 use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};
-use crate::{Connect, Surreal};
+use crate::{Connect, Error, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -232,7 +230,13 @@ where
 	// Serialize the request
 	let Some(router_request) = command.clone().into_router_request(Some(id), Some(session_id))
 	else {
-		response.send(Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()))).await.ok();
+		response
+			.send(Err(Error::internal(
+				"The protocol or storage engine does not support backups on this architecture"
+					.to_string(),
+			)))
+			.await
+			.ok();
 		return HandleResult::Ok;
 	};
 
@@ -243,7 +247,11 @@ where
 		&& let Some(binary) = message.as_binary()
 		&& binary.len() > max_size
 	{
-		if response.send(Err(Error::internal(format!("The message is too long: {}", binary.len())))).await.is_err() {
+		if response
+			.send(Err(Error::internal(format!("The message is too long: {}", binary.len()))))
+			.await
+			.is_err()
+		{
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
@@ -308,7 +316,9 @@ where
 
 	match DbResponse::from_bytes(binary) {
 		Ok(response) => handle_db_response::<M, S, E>(response, sessions, sink).await,
-		Err(error) => handle_parse_error(Error::internal(error.to_string()), binary, sessions).await,
+		Err(error) => {
+			handle_parse_error(Error::internal(error.to_string()), binary, sessions).await
+		}
 	}
 }
 

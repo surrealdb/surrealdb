@@ -15,12 +15,11 @@ use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use crate::conn::Command;
-use crate::Error;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
-use crate::{Connection, Result, Surreal, opt};
+use crate::{Connection, Error, Result, Surreal, opt};
 
 /// A query future
 #[derive(Debug)]
@@ -127,7 +126,9 @@ where
 						indexed_results.results.insert(index, (stats, result.result));
 					}
 					QueryType::Live => {
-						let live_query_id = result.result?.into_uuid()?;
+						let value = result.result?;
+						let live_query_id =
+							value.into_uuid().map_err(|e| Error::internal(e.to_string()))?;
 						let live_stream = crate::method::live::register(
 							router,
 							live_query_id.into(),

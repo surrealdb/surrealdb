@@ -3,10 +3,9 @@ use std::net::SocketAddr;
 use url::Url;
 
 use crate::engine::remote::ws::{Client, Ws, Wss};
-use crate::Error;
 use crate::opt::endpoint::into_endpoint;
 use crate::opt::{Config, IntoEndpoint};
-use crate::{Endpoint, Result};
+use crate::{Endpoint, Error, Result};
 
 macro_rules! endpoints {
 	($($name:ty),*) => {

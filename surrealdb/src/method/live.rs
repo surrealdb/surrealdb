@@ -14,14 +14,13 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::conn::{Command, Router};
 use crate::engine::any::Any;
-use crate::Error;
 use crate::method::{BoxFuture, Live, OnceLockExt, Select};
 use crate::notification::Notification;
 use crate::opt::Resource;
 use crate::types::{
 	Action, Notification as CoreNotification, RecordId, SurrealValue, Value, Variables,
 };
-use crate::{Connection, ExtraFeatures, Result, Surreal};
+use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
 where
@@ -35,7 +34,10 @@ where
 	Box::pin(async move {
 		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
-			return Err(Error::internal("The protocol or storage engine does not support live queries on this architecture".to_string()));
+			return Err(Error::internal(
+				"The protocol or storage engine does not support live queries on this architecture"
+					.to_string(),
+			));
 		}
 
 		let what_resource = resource?;
@@ -56,8 +58,12 @@ where
 				variables.insert("_record_id".to_string(), Value::RecordId(record));
 				"LIVE SELECT * FROM $_table WHERE id = $_record_id".to_string()
 			}
-			Resource::Object(_) => return Err(Error::internal("Live queries on objects not supported".to_string())),
-			Resource::Array(_) => return Err(Error::internal("Live queries on arrays not supported".to_string())),
+			Resource::Object(_) => {
+				return Err(Error::internal("Live queries on objects not supported".to_string()));
+			}
+			Resource::Array(_) => {
+				return Err(Error::internal("Live queries on arrays not supported".to_string()));
+			}
 			Resource::Range(query_range) => {
 				// For live queries with ranges, we can't use the range in FROM clause
 				// We need to use the table and add WHERE conditions
@@ -137,9 +143,9 @@ where
 			Value::Array(mut arr) if arr.len() == 1 => match arr.pop() {
 				Some(Value::Uuid(id)) => *id,
 				_ => {
-return Err(Error::internal(
-					"successful live query didn't return a uuid".to_string(),
-				));
+					return Err(Error::internal(
+						"successful live query didn't return a uuid".to_string(),
+					));
 				}
 			},
 			other => {
@@ -366,7 +372,7 @@ where
 				data,
 				action,
 			})),
-			Err(error) => Some(Err(error.into())),
+			Err(error) => Some(Err(Error::internal(error.to_string()))),
 		},
 	}
 }

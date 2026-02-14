@@ -7,10 +7,9 @@ use crate::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::engine;
 use crate::engine::any::Any;
-use crate::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
@@ -169,7 +168,9 @@ impl conn::Sealed for Any {
 				));
 				}
 
-				EndpointKind::Unsupported(v) => return Err(Error::configuration(format!("Unsupported scheme: {v}"), None)),
+				EndpointKind::Unsupported(v) => {
+					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
+				}
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));

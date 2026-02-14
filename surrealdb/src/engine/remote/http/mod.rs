@@ -80,15 +80,13 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Command, RequestData};
-use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::Error;
-use crate::engine::session_error_to_error;
+use crate::engine::{SessionError, session_error_to_error};
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};
 use crate::types::{HashMap, SurrealValue, Value};
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Error, Result, Surreal};
 
 const RPC_PATH: &str = "rpc";
 
@@ -457,11 +455,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
-			return Err(Error::internal(format!(
-				"Failed to open `{}`: {}",
-				path.display(),
-				error
-			)));
+			return Err(Error::internal(format!("Failed to open `{}`: {}", path.display(), error)));
 		}
 	};
 
@@ -489,7 +483,9 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 
 	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
-		.map_err(|e| crate::Error::internal(format!("The server returned an unexpected response: {e}")))?;
+		.map_err(|e| {
+			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
+		})?;
 
 	// Convert Value::Array to Vec<QueryResult>
 	let Value::Array(arr) = value else {
@@ -534,7 +530,11 @@ async fn send_request(
 	let req_value = req.into_value();
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
-		.map_err(|e| crate::Error::internal(format!("Tried to send a value which could not be serialized: {e}")))?;
+		.map_err(|e| {
+			crate::Error::internal(format!(
+				"Tried to send a value which could not be serialized: {e}"
+			))
+		})?;
 
 	// Include auth header so the server can authenticate the request and maintain
 	// session state. This is essential for token-based auth flows where the server
@@ -545,7 +545,9 @@ async fn send_request(
 
 	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
-		.map_err(|e| crate::Error::internal(format!("The server returned an unexpected response: {e}")))?;
+		.map_err(|e| {
+			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
+		})?;
 
 	match response.result? {
 		DbResult::Query(results) => Ok(results),
@@ -627,8 +629,9 @@ async fn router(
 			{
 				match obj.get("namespace") {
 					Some(Value::String(ns)) => {
-						let header_value = HeaderValue::try_from(ns.as_str())
-							.map_err(|_| Error::internal(format!("Invalid namespace name: {ns:?}")))?;
+						let header_value = HeaderValue::try_from(ns.as_str()).map_err(|_| {
+							Error::internal(format!("Invalid namespace name: {ns:?}"))
+						})?;
 						headers.insert(&NS, header_value);
 					}
 					_ => {
@@ -637,8 +640,9 @@ async fn router(
 				}
 				match obj.get("database") {
 					Some(Value::String(db)) => {
-						let header_value = HeaderValue::try_from(db.as_str())
-							.map_err(|_| Error::internal(format!("Invalid database name: {db:?}")))?;
+						let header_value = HeaderValue::try_from(db.as_str()).map_err(|_| {
+							Error::internal(format!("Invalid database name: {db:?}"))
+						})?;
 						headers.insert(&DB, header_value);
 					}
 					_ => {
@@ -671,9 +675,7 @@ async fn router(
 				Some(result) => result.clone().result?,
 				None => {
 					error!("received invalid result from server");
-					return Err(Error::internal(
-						"Received invalid result from server".to_string(),
-					));
+					return Err(Error::internal("Received invalid result from server".to_string()));
 				}
 			};
 
@@ -689,7 +691,8 @@ async fn router(
 				}
 				Err(err) => {
 					debug!("Error converting Value to Credentials: {err}");
-					let token = Token::from_value(value)?;
+					let token =
+						Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?;
 					*auth = Some(Auth::Bearer {
 						token: token.access,
 					});
@@ -719,7 +722,9 @@ async fn router(
 					Ok(result) => {
 						let value = token.into_value();
 						*session_state.auth.write().await = Some(Auth::Bearer {
-							token: Token::from_value(value.clone())?.access,
+							token: Token::from_value(value.clone())
+								.map_err(|e| Error::internal(e.to_string()))?
+								.access,
 						});
 						*result = value;
 					}
@@ -748,7 +753,9 @@ async fn router(
 								.await?;
 								// Update the stored authentication with the new access token
 								*session_state.auth.write().await = Some(Auth::Bearer {
-									token: Token::from_value(value)?.access,
+									token: Token::from_value(value)
+										.map_err(|e| Error::internal(e.to_string()))?
+										.access,
 								});
 								// Use the refresh results (which include the new token)
 								results = refresh_results;
@@ -772,7 +779,7 @@ async fn router(
 			)
 			.await?;
 			*session_state.auth.write().await = Some(Auth::Bearer {
-				token: Token::from_value(value)?.access,
+				token: Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?.access,
 			});
 			Ok(results)
 		}
@@ -844,7 +851,10 @@ async fn router(
 			..
 		} => {
 			// TODO: Better error message here, some backups are supported
-			Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()))
+			Err(Error::internal(
+				"The protocol or storage engine does not support backups on this architecture"
+					.to_string(),
+			))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -857,16 +867,16 @@ async fn router(
 			let config_value: Value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.body(
-					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::internal(format!("failed to serialize Value: {}", e)))?,
-				)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/json")
-				.header(ACCEPT, "application/octet-stream");
+			let request =
+				client
+					.post(req_path)
+					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+						Error::internal(format!("failed to serialize Value: {}", e))
+					})?)
+					.headers(headers.clone())
+					.auth(&auth)
+					.header(CONTENT_TYPE, "application/json")
+					.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -879,16 +889,16 @@ async fn router(
 			let config_value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.body(
-					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::internal(format!("failed to serialize Value: {}", e)))?,
-				)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/json")
-				.header(ACCEPT, "application/octet-stream");
+			let request =
+				client
+					.post(req_path)
+					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+						Error::internal(format!("failed to serialize Value: {}", e))
+					})?)
+					.headers(headers.clone())
+					.auth(&auth)
+					.header(CONTENT_TYPE, "application/json")
+					.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -957,7 +967,10 @@ async fn router(
 		}
 		Command::SubscribeLive {
 			..
-		} => Err(Error::internal("The protocol or storage engine does not support live queries on this architecture".to_string())),
+		} => Err(Error::internal(
+			"The protocol or storage engine does not support live queries on this architecture"
+				.to_string(),
+		)),
 		Command::Query {
 			txn,
 			query,

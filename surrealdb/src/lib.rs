@@ -66,10 +66,10 @@ use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
 use async_channel::{Receiver, Sender};
-#[doc(inline)]
-pub use surrealdb_types::Error as Error;
 use method::BoxFuture;
 use semver::{Version, VersionReq};
+#[doc(inline)]
+pub use surrealdb_types::Error;
 use tokio::sync::watch;
 use uuid::Uuid;
 

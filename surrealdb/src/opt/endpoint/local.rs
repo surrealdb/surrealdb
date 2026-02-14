@@ -3,9 +3,8 @@ use std::time::Duration;
 
 use surrealdb_core::kvs::config::{AolMode, SnapshotMode, format_duration};
 
-use crate::Connect;
 use crate::engine::local::Db;
-use crate::Error;
+use crate::{Connect, Error};
 
 impl<R> Connect<Db, R> {
 	/// Enable MVCC versioning on the datastore.

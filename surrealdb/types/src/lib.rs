@@ -14,8 +14,6 @@ pub(crate) mod utils;
 mod value;
 mod variables;
 
-#[doc(hidden)]
-pub use anyhow;
 pub use error::*;
 pub use flatbuffers::*;
 pub use hashmap::HashMap;

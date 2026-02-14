@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::engine::IntervalStream;
 use crate::Error;
+use crate::engine::IntervalStream;
 
 #[cfg(not(target_family = "wasm"))]
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;

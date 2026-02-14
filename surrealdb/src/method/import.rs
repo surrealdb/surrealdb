@@ -57,7 +57,10 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()));
+				return Err(Error::internal(
+					"The protocol or storage engine does not support backups on this architecture"
+						.to_string(),
+				));
 			}
 
 			if self.is_ml {

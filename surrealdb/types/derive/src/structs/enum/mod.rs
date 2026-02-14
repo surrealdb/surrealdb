@@ -54,7 +54,8 @@ impl Enum {
 		crate_path: &CratePath,
 	) -> TokenStream2 {
 		let value_ty = crate_path.value();
-		let anyhow_macro = crate_path.anyhow_macro();
+		let error_no_variants_matched = crate_path
+			.error_internal(quote! { format!("Failed to decode {}, no variants matched", #name) });
 
 		let mut with_map = WithMap::new();
 
@@ -110,7 +111,7 @@ impl Enum {
 				#match_value
 			};
 
-			Err(#anyhow_macro!("Failed to decode {}, no variants matched", #name))
+			Err(#error_no_variants_matched)
 		}
 	}
 

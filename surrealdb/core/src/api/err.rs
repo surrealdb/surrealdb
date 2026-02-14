@@ -126,4 +126,34 @@ impl ApiError {
 			Self::NotFound => StatusCode::NOT_FOUND,
 		}
 	}
+
+	/// Convert to the public API error type for use in API responses.
+	pub fn into_types_error(self) -> surrealdb_types::Error {
+		let msg = self.to_string();
+		match &self {
+			Self::NotFound => surrealdb_types::Error::not_found(msg, None),
+			Self::PermissionDenied => surrealdb_types::Error::not_allowed(msg, None),
+			Self::MiddlewareRequestParseFailure {
+				..
+			}
+			| Self::FinalActionRequestParseFailure
+			| Self::InvalidRequestBody
+			| Self::BodyDecodeFailure
+			| Self::InvalidFormat
+			| Self::MissingFormat
+			| Self::InvalidStatusCode(_)
+			| Self::InvalidHeaderName(_)
+			| Self::InvalidHeaderValue {
+				..
+			}
+			| Self::HeaderInjectionAttempt(_)
+			| Self::MissingContentType
+			| Self::InvalidContentType(_)
+			| Self::InvalidRequestBodyType {
+				..
+			}
+			| Self::RequestBodyNotBinary => surrealdb_types::Error::validation(msg, None),
+			_ => surrealdb_types::Error::internal(msg),
+		}
+	}
 }

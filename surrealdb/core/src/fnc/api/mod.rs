@@ -95,7 +95,7 @@ pub async fn invoke(
 			process_api_request_with_stack(stk, ctx, opt, api, req).await?.into()
 		} else {
 			trace!(request_id = %request_id, path = %path, "No API definition found for path");
-			ApiResponse::from_error(ApiError::NotFound.into(), request_id).into()
+			ApiResponse::from_error(ApiError::NotFound.into_types_error(), request_id).into()
 		};
 
 	let Value::Object(ref mut obj) = value else {

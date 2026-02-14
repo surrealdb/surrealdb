@@ -1,7 +1,6 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Error as TypesError, Kind, SurrealValue, Value, kind, object};
@@ -69,8 +68,8 @@ pub struct QueryResult {
 
 impl QueryResult {
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value> {
-		self.result.map_err(|err| anyhow::anyhow!(err.message().to_string()))
+	pub fn output(self) -> Result<Value, TypesError> {
+		self.result
 	}
 }
 
@@ -112,19 +111,19 @@ impl SurrealValue for QueryResult {
 		})
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, TypesError> {
 		// Assert required fields
 		let Value::Object(mut map) = value else {
-			anyhow::bail!("Expected object for QueryResult");
+			return Err(TypesError::internal("Expected object for QueryResult".to_string()));
 		};
 		let Some(status) = map.remove("status") else {
-			anyhow::bail!("Expected status for QueryResult");
+			return Err(TypesError::internal("Expected status for QueryResult".to_string()));
 		};
 		let Some(time) = map.remove("time") else {
-			anyhow::bail!("Expected time for QueryResult");
+			return Err(TypesError::internal("Expected time for QueryResult".to_string()));
 		};
 		let Some(result) = map.remove("result") else {
-			anyhow::bail!("Expected result for QueryResult");
+			return Err(TypesError::internal("Expected result for QueryResult".to_string()));
 		};
 
 		// Grab status, query type and time
@@ -132,7 +131,10 @@ impl SurrealValue for QueryResult {
 		let query_type =
 			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
 
-		let time = humantime::parse_duration(&time.into_string()?)?;
+		let time = humantime::parse_duration(
+			&time.into_string().map_err(|e| TypesError::internal(e.to_string()))?,
+		)
+		.map_err(|e| TypesError::internal(e.to_string()))?;
 
 		// Grab result based on status
 

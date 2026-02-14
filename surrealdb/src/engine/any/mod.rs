@@ -161,9 +161,8 @@ use std::marker::PhantomData;
 
 use url::Url;
 
-use crate::Error;
 use crate::opt::{Config, Endpoint, path_to_string};
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Error, Result, Surreal};
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint: into_endpoint::Sealed {}
@@ -209,15 +208,17 @@ impl into_endpoint::Sealed for &str {
 				let query = &url["mem://?".len()..];
 				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
 			}
-			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
-				(Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?, String::new())
-			}
+			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => (
+				Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
+				String::new(),
+			),
 
 			_ => {
 				let (scheme, path) = split_url(self);
 				let protocol = format!("{scheme}://");
 				(
-					Url::parse(&protocol).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
+					Url::parse(&protocol)
+						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
 					path_to_string(&protocol, path),
 				)
 			}

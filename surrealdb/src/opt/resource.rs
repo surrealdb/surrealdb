@@ -1,11 +1,10 @@
 use std::ops::{self, Bound};
 
-use crate::Result;
-use crate::Error;
 use crate::types::{
 	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Table, ToSql,
 	Value, Variables,
 };
+use crate::{Error, Result};
 
 /// A table range.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,10 +47,18 @@ impl Resource {
 				table,
 				range,
 			})),
-			Resource::RecordId(_) => Err(Error::internal("Tried to add a range to an record-id resource".to_string())),
-			Resource::Object(_) => Err(Error::internal("Tried to add a range to an object resource".to_string())),
-			Resource::Array(_) => Err(Error::internal("Tried to add a range to an array resource".to_string())),
-			Resource::Range(_) => Err(Error::internal("Tried to add a range to a resource which was already a range".to_string())),
+			Resource::RecordId(_) => {
+				Err(Error::internal("Tried to add a range to an record-id resource".to_string()))
+			}
+			Resource::Object(_) => {
+				Err(Error::internal("Tried to add a range to an object resource".to_string()))
+			}
+			Resource::Array(_) => {
+				Err(Error::internal("Tried to add a range to an array resource".to_string()))
+			}
+			Resource::Range(_) => Err(Error::internal(
+				"Tried to add a range to a resource which was already a range".to_string(),
+			)),
 		}
 	}
 
@@ -130,8 +137,8 @@ impl SurrealValue for Resource {
 		}
 	}
 
-	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
-		Err(crate::types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
+	fn from_value(value: Value) -> Result<Self> {
+		Err(crate::Error::internal(format!("Invalid resource: {}", value.to_sql())))
 	}
 }
 

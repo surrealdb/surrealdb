@@ -168,7 +168,10 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()));
+				return Err(Error::internal(
+					"The protocol or storage engine does not support backups on this architecture"
+						.to_string(),
+				));
 			}
 
 			if let Some(config) = self.ml_config {
@@ -208,7 +211,10 @@ where
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				tracing::warn!("Backups are not supported");
-				return Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()));
+				return Err(Error::internal(
+					"The protocol or storage engine does not support backups on this architecture"
+						.to_string(),
+				));
 			}
 			let (tx, rx) = crate::channel::bounded(1);
 			let rx = Box::pin(rx);

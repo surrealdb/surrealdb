@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Error as TypesError, kind, object};
 use uuid::Uuid;
@@ -81,30 +80,36 @@ impl SurrealValue for DbResult {
 		}
 	}
 
-	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
+	fn from_value(value: PublicValue) -> Result<Self, TypesError> {
 		match value {
 			PublicValue::Array(arr) => {
 				let results = arr
 					.into_inner()
 					.into_iter()
 					.map(QueryResult::from_value)
-					.collect::<anyhow::Result<Vec<_>>>()?;
+					.collect::<Result<Vec<_>, TypesError>>()?;
 				Ok(DbResult::Query(results))
 			}
 			PublicValue::Object(obj) => {
 				// Check if this is a Live result
 				if obj.get("id").is_some() && obj.get("action").is_some() {
 					let mut obj = obj.into_inner();
-					let id = obj.remove("id").context("Missing id")?;
-					let action = obj.remove("action").context("Missing action")?;
+					let id = obj
+						.remove("id")
+						.ok_or_else(|| TypesError::internal("Missing id".to_string()))?;
+					let action = obj
+						.remove("action")
+						.ok_or_else(|| TypesError::internal("Missing action".to_string()))?;
 					let record = obj.remove("record").unwrap_or(PublicValue::None);
 					let result = obj.remove("result").unwrap_or(PublicValue::None);
 
 					let PublicValue::Uuid(uuid) = id else {
-						anyhow::bail!("Expected UUID for id field");
+						return Err(TypesError::internal("Expected UUID for id field".to_string()));
 					};
 					let PublicValue::String(action_str) = action else {
-						anyhow::bail!("Expected string for action field");
+						return Err(TypesError::internal(
+							"Expected string for action field".to_string(),
+						));
 					};
 
 					let session = match obj.remove(SESSION_ID) {
@@ -117,7 +122,12 @@ impl SurrealValue for DbResult {
 						"CREATE" => crate::types::PublicAction::Create,
 						"UPDATE" => crate::types::PublicAction::Update,
 						"DELETE" => crate::types::PublicAction::Delete,
-						_ => anyhow::bail!("Invalid action: {}", action_str),
+						_ => {
+							return Err(TypesError::internal(format!(
+								"Invalid action: {}",
+								action_str
+							)));
+						}
 					};
 
 					Ok(DbResult::Live(PublicNotification::new(
@@ -174,8 +184,9 @@ impl DbResponse {
 		}
 	}
 
-	pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-		let value = crate::rpc::format::flatbuffers::decode(bytes)?;
+	pub fn from_bytes(bytes: &[u8]) -> Result<Self, TypesError> {
+		let value = crate::rpc::format::flatbuffers::decode(bytes)
+			.map_err(|e| TypesError::internal(e.to_string()))?;
 		Self::from_value(value)
 	}
 }
@@ -205,9 +216,9 @@ impl SurrealValue for DbResponse {
 		PublicValue::Object(PublicObject::from(value))
 	}
 
-	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
+	fn from_value(value: PublicValue) -> Result<Self, TypesError> {
 		let PublicValue::Object(mut obj) = value else {
-			anyhow::bail!("Expected object for DbResponse");
+			return Err(TypesError::internal("Expected object for DbResponse".to_string()));
 		};
 
 		let session_id = SurrealValue::from_value(obj.remove(SESSION_ID).unwrap_or_default())?;
@@ -219,7 +230,9 @@ impl SurrealValue for DbResponse {
 		} else if let Some(error) = obj.remove("error") {
 			Err(TypesError::from_value(error)?)
 		} else {
-			anyhow::bail!("DbResponse must have either 'result' or 'error' field");
+			return Err(TypesError::internal(
+				"DbResponse must have either 'result' or 'error' field".to_string(),
+			));
 		};
 
 		Ok(DbResponse {

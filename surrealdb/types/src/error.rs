@@ -615,12 +615,6 @@ impl std::error::Error for Error {
 	}
 }
 
-impl From<anyhow::Error> for Error {
-	fn from(e: anyhow::Error) -> Self {
-		Error::internal(e.to_string())
-	}
-}
-
 // -----------------------------------------------------------------------------
 // Type conversion errors (internal to the types layer)
 // -----------------------------------------------------------------------------
@@ -771,20 +765,38 @@ impl std::error::Error for ConversionError {}
 impl std::error::Error for OutOfRangeError {}
 impl std::error::Error for LengthMismatchError {}
 
-// Note: anyhow::Error automatically implements From for all types that implement std::error::Error,
-// so we don't need manual From implementations here.
+impl From<ConversionError> for Error {
+	fn from(e: ConversionError) -> Self {
+		Error::internal(e.to_string())
+	}
+}
+
+impl From<OutOfRangeError> for Error {
+	fn from(e: OutOfRangeError) -> Self {
+		Error::internal(e.to_string())
+	}
+}
+
+impl From<LengthMismatchError> for Error {
+	fn from(e: LengthMismatchError) -> Self {
+		Error::internal(e.to_string())
+	}
+}
+
+impl From<TypeError> for Error {
+	fn from(e: TypeError) -> Self {
+		Error::internal(e.to_string())
+	}
+}
 
 /// Helper function to create a conversion error
-pub fn conversion_error(expected: Kind, value: impl Into<Value>) -> anyhow::Error {
+pub fn conversion_error(expected: Kind, value: impl Into<Value>) -> Error {
 	let value = value.into();
 	ConversionError::from_value(expected, &value).into()
 }
 
 /// Helper function to create an out of range error
-pub fn out_of_range_error(
-	value: impl fmt::Display,
-	target_type: impl Into<String>,
-) -> anyhow::Error {
+pub fn out_of_range_error(value: impl fmt::Display, target_type: impl Into<String>) -> Error {
 	OutOfRangeError::new(value, target_type).into()
 }
 
@@ -793,13 +805,13 @@ pub fn length_mismatch_error(
 	expected: usize,
 	actual: usize,
 	target_type: impl Into<String>,
-) -> anyhow::Error {
+) -> Error {
 	LengthMismatchError::new(expected, actual, target_type).into()
 }
 
 /// Helper function to create a conversion error for union types (Either)
 /// where the value doesn't match any of the possible types
-pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> anyhow::Error {
+pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> Error {
 	let value = value.into();
 	ConversionError::from_value(expected, &value)
 		.with_context("Value does not match any variant in union type")

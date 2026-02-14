@@ -106,10 +106,8 @@ pub fn session_expired() -> TypesError {
 
 /// Convert an anyhow error to a wire error, downcasting to database errors where possible.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
-	let message = error.to_string();
 	error
 		.downcast::<err::Error>()
-		.ok()
 		.map(into_types_error)
-		.unwrap_or_else(|| TypesError::internal(message))
+		.unwrap_or_else(|error| TypesError::internal(error.to_string()))
 }

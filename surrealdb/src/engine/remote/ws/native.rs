@@ -24,13 +24,12 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::Error;
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{ExtraFeatures, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, SessionClone, SessionId, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -88,8 +87,9 @@ pub(crate) async fn connect(
 	#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_variables))]
 	maybe_connector: Option<Connector>,
 ) -> crate::Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-	let mut request =
-		(&endpoint.url).into_client_request().map_err(|err| Error::internal(format!("Invalid URL: {}", err)))?;
+	let mut request = (&endpoint.url)
+		.into_client_request()
+		.map_err(|err| Error::internal(format!("Invalid URL: {}", err)))?;
 
 	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
@@ -120,10 +120,7 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, crate::Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address
-				.url
-				.join(PATH)
-				.map_err(|e| Error::internal(e.to_string()))?;
+			address.url = address.url.join(PATH).map_err(|e| Error::internal(e.to_string()))?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			let maybe_connector = address.config.tls_config.clone().map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]

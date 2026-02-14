@@ -235,19 +235,16 @@ fn test_nested_conversion_error() {
 }
 
 #[test]
-fn test_error_converts_to_anyhow() {
-	// Ensure our errors work with anyhow
+fn test_conversion_errors_implement_std_error() {
+	// Ensure our conversion errors implement std::error::Error and have non-empty display
 	let conv_err = ConversionError::new(Kind::String, Kind::Int);
-	let anyhow_err: anyhow::Error = conv_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!conv_err.to_string().is_empty());
 
 	let range_err = OutOfRangeError::new(300, "i8");
-	let anyhow_err: anyhow::Error = range_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!range_err.to_string().is_empty());
 
 	let len_err = LengthMismatchError::new(3, 2, "tuple");
-	let anyhow_err: anyhow::Error = len_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!len_err.to_string().is_empty());
 }
 
 #[test]
