@@ -18,6 +18,7 @@ use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
 };
+use crate::exec::planner::util::strip_knn_from_condition;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -482,8 +483,18 @@ async fn resolve_table_scan_stream(
 			k,
 			ef,
 		}) => {
-			let knn_op =
-				KnnScan::new(index_ref, vector, k, ef, cfg.table_name, cfg.knn_context.clone());
+			// Strip KNN operators from the condition to get the residual
+			// (non-KNN predicates) for HNSW pushdown.
+			let residual_cond = cfg.cond.as_ref().and_then(strip_knn_from_condition);
+			let knn_op = KnnScan::new(
+				index_ref,
+				vector,
+				k,
+				ef,
+				cfg.table_name,
+				cfg.knn_context.clone(),
+				residual_cond,
+			);
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -580,6 +591,9 @@ fn create_index_stream(
 			k,
 			ef,
 		} => {
+			// Strip KNN operators from the condition to get the residual
+			// (non-KNN predicates) for HNSW pushdown.
+			let residual_cond = cfg.cond.as_ref().and_then(strip_knn_from_condition);
 			let knn_op = KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),
@@ -587,6 +601,7 @@ fn create_index_stream(
 				*ef,
 				cfg.table_name.clone(),
 				cfg.knn_context.clone(),
+				residual_cond,
 			);
 			knn_op.execute(ctx)
 		}

@@ -91,6 +91,10 @@ pub struct KnnTopK {
 	pub(crate) distance: Distance,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
+	/// Populated after computing top-K results so that downstream projection
+	/// evaluation can look up per-record distances.
+	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 impl KnnTopK {
@@ -109,7 +113,17 @@ impl KnnTopK {
 			k,
 			distance,
 			metrics: Arc::new(OperatorMetrics::new()),
+			knn_context: None,
 		}
+	}
+
+	/// Set the KNN context for distance propagation.
+	pub(crate) fn with_knn_context(
+		mut self,
+		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
+	) -> Self {
+		self.knn_context = knn_context;
+		self
 	}
 }
 
@@ -152,6 +166,7 @@ impl ExecOperator for KnnTopK {
 		let k = self.k;
 		let distance = self.distance.clone();
 		let cancellation = ctx.cancellation().clone();
+		let knn_context = self.knn_context.clone();
 
 		let result_stream = futures::stream::once(async move {
 			let mut heap: BinaryHeap<std::cmp::Reverse<DistanceEntry>> =
@@ -206,11 +221,26 @@ impl ExecOperator for KnnTopK {
 
 			// Extract results ordered by distance (nearest first).
 			// Pop yields farthest-first, so reverse after collecting.
-			let mut sorted: Vec<Value> = Vec::with_capacity(heap.len());
+			let mut entries: Vec<DistanceEntry> = Vec::with_capacity(heap.len());
 			while let Some(std::cmp::Reverse(entry)) = heap.pop() {
-				sorted.push(entry.value);
+				entries.push(entry);
 			}
-			sorted.reverse();
+			entries.reverse();
+
+			// Populate KNN distance context (if present) before yielding
+			// records. This makes distances available to
+			// vector::distance::knn() during downstream projection evaluation.
+			if let Some(ref knn_ctx) = knn_context {
+				for entry in &entries {
+					if let Value::Object(ref obj) = entry.value
+						&& let Some(Value::RecordId(rid)) = obj.get("id")
+					{
+						knn_ctx.insert(rid.clone(), entry.distance);
+					}
+				}
+			}
+
+			let sorted: Vec<Value> = entries.into_iter().map(|e| e.value).collect();
 
 			Ok(ValueBatch {
 				values: sorted,

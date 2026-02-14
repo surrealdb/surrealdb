@@ -29,11 +29,7 @@ impl<'a> HnswConditionChecker<'a> {
 		Self::Hnsw(HnswChecker {})
 	}
 
-	pub(in crate::idx) fn new_cond(
-		ctx: &'a FrozenContext,
-		opt: &'a Options,
-		cond: Arc<Cond>,
-	) -> Self {
+	pub(crate) fn new_cond(ctx: &'a FrozenContext, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		Self::HnswCondition(HnswCondChecker {
 			ctx,
 			opt,

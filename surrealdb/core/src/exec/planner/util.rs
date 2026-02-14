@@ -231,7 +231,7 @@ pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 /// (consumed by `KnnScan` via HNSW index) are stripped. `KTree` is left in place --
 /// the caller should verify the residual contains no remaining KNN operators and
 /// return an error if it does.
-pub(super) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
+pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 	strip_knn_from_expr(&cond.0).map(Cond)
 }
 

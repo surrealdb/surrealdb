@@ -22,7 +22,7 @@ use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
 	ValueBatch, ValueBatchStream, monitor_stream,
 };
-use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::val::Number;
@@ -47,6 +47,11 @@ pub struct KnnScan {
 	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
+	/// Residual WHERE condition (non-KNN predicates) to push down into HNSW
+	/// search. When present, the HNSW search will only consider candidates
+	/// that satisfy this condition, preventing non-matching rows from
+	/// consuming top-K slots.
+	pub(crate) residual_cond: Option<Cond>,
 }
 
 impl KnnScan {
@@ -57,6 +62,7 @@ impl KnnScan {
 		ef: u32,
 		table_name: crate::val::TableName,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
+		residual_cond: Option<Cond>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -66,6 +72,7 @@ impl KnnScan {
 			table_name,
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context,
+			residual_cond,
 		}
 	}
 }
@@ -114,6 +121,7 @@ impl ExecOperator for KnnScan {
 		let ef = self.ef;
 		let table_name = self.table_name.clone();
 		let knn_context = self.knn_context.clone();
+		let residual_cond = self.residual_cond.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -191,8 +199,17 @@ impl ExecOperator for KnnScan {
 				.await
 				.context("Failed to check HNSW index state")?;
 
-			// Build condition checker (no WHERE pushdown -- downstream Filter handles it)
-			let cond_checker = HnswConditionChecker::new();
+			// Build condition checker. When there are residual (non-KNN) predicates
+			// in the WHERE clause, push them into the HNSW search so that rows
+			// not satisfying the condition do not consume top-K slots.
+			let opt = ctx.options();
+			let cond_checker = match (&residual_cond, opt) {
+				(Some(cond), Some(opt)) => {
+					let frozen = &root.ctx;
+					HnswConditionChecker::new_cond(frozen, opt, Arc::new(cond.clone()))
+				}
+				_ => HnswConditionChecker::new(),
+			};
 
 			// Execute the KNN search using a TreeStack for recursion safety
 			let knn_results = {

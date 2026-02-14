@@ -1058,7 +1058,16 @@ impl<'ctx> Planner<'ctx> {
 		// KNN wrapping
 		let had_bruteforce_knn = brute_force_knn.is_some();
 		let source = if let Some(kp) = brute_force_knn {
-			let input = if !source_is_single_scan {
+			// Residual predicates (non-KNN WHERE conditions) must be applied
+			// BEFORE ranking by distance. Otherwise rows that don't satisfy
+			// the WHERE clause can consume top-K slots and push out valid rows.
+			//
+			// TableScan and DynamicScan already have the predicate pushed in
+			// via scan_predicate. Concrete operators (IndexScan, FullTextScan)
+			// do not, so we add an explicit Filter for those.
+			let predicate_in_source =
+				source_is_single_scan && matches!(source.name(), "TableScan" | "DynamicScan");
+			let input = if !predicate_in_source {
 				if let Some(ref c) = cond_for_filter {
 					let pred = pp.physical_expr(c.0.clone()).await?;
 					Arc::new(Filter::new(source, pred)) as Arc<dyn ExecOperator>
@@ -1068,8 +1077,11 @@ impl<'ctx> Planner<'ctx> {
 			} else {
 				source
 			};
-			Arc::new(KnnTopK::new(input, kp.field, kp.vector, kp.k as usize, kp.distance))
-				as Arc<dyn ExecOperator>
+			let knn_ctx = planning_ctx.get_knn_context().cloned();
+			Arc::new(
+				KnnTopK::new(input, kp.field, kp.vector, kp.k as usize, kp.distance)
+					.with_knn_context(knn_ctx),
+			) as Arc<dyn ExecOperator>
 		} else {
 			source
 		};
@@ -1226,10 +1238,19 @@ impl<'ctx> Planner<'ctx> {
 						k,
 						ef,
 					} => {
-						return Ok(
-							Arc::new(KnnScan::new(index_ref, vector, k, ef, table, knn_ctx))
-								as Arc<dyn ExecOperator>,
-						);
+						// Strip KNN operators from the condition to get the residual
+						// (non-KNN predicates). These are pushed into the HNSW search
+						// so that non-matching rows don't consume top-K slots.
+						let residual_cond = cond.and_then(strip_knn_from_condition);
+						return Ok(Arc::new(KnnScan::new(
+							index_ref,
+							vector,
+							k,
+							ef,
+							table,
+							knn_ctx,
+							residual_cond,
+						)) as Arc<dyn ExecOperator>);
 					}
 					AccessPath::TableScan => {
 						return Ok(Arc::new(TableScan::new(
