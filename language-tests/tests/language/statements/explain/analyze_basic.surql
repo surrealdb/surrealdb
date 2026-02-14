@@ -6,13 +6,25 @@ reason = "Test EXPLAIN ANALYZE with basic SELECT queries - executes and shows me
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: item, predicate: score > 15] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: item, predicate: score > 15] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2''''
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 3''''
+value = ''''ProjectValue [ctx: Db] [expr: name] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 3''''
 */
 
 -- Setup test data

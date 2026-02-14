@@ -6,16 +6,32 @@ reason = "Test EXPLAIN with index-backed queries: standard index, unique index, 
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idx_email_uniq, access: Equality('a@test.com'), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: idx_email_uniq, access: Equality('a@test.com'), direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active'] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['EU', 'active']), direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active'] {rows: 2, batches: 1}
+         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['EU', 'active']), direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: region = 'NA'] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['NA']), direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: region = 'NA'] {rows: 2, batches: 1}
+         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['NA']), direction: Forward]
+
+Total rows: 2"'''
 */
 
 -- Setup schema and data
