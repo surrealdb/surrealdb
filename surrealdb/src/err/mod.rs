@@ -336,7 +336,7 @@ impl From<Error> for surrealdb_types::Error {
 				"Already connected".to_string(),
 				Some(surrealdb_types::ConnectionError::AlreadyConnected),
 			),
-			Error::Database(inner) => return inner.clone(),
+			Error::Database(inner) => inner.clone(),
 			_ => surrealdb_types::Error::internal(e.to_string()),
 		}
 	}
