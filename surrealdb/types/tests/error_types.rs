@@ -403,3 +403,15 @@ fn test_error_kind_unknown_fails_deserialization() {
 	let result = Error::from_value(value);
 	assert!(result.is_err());
 }
+
+#[test]
+fn test_error_deserialize_without_kind_defaults_to_internal() {
+	// Backwards compatibility: wire format without "kind" (e.g. older clients) defaults to Internal
+	// when deserialising via SurrealValue::from_value (#[surreal(default)]).
+	let mut obj = Object::new();
+	obj.insert("message", "Something went wrong");
+	let value = Value::Object(obj);
+	let err = Error::from_value(value).unwrap();
+	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.message(), "Something went wrong");
+}

@@ -35,12 +35,6 @@ fn default_code() -> i64 {
 	code::INTERNAL_ERROR
 }
 
-/// Default error kind when not present (e.g. for deserialization of older wire format without
-/// `kind`).
-fn default_kind() -> ErrorKind {
-	ErrorKind::Internal
-}
-
 // -----------------------------------------------------------------------------
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
@@ -51,7 +45,7 @@ fn default_kind() -> ErrorKind {
 /// categories. Serializes as a snake_case string on the wire (e.g. `"validation"`).
 /// The enum is non-exhaustive so new variants can be added later. The server
 /// should map any unmappable error to [`Internal`](ErrorKind::Internal) before sending.
-#[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
 #[surreal(crate = "crate")]
 #[surreal(untagged)]
 #[non_exhaustive]
@@ -77,6 +71,7 @@ pub enum ErrorKind {
 	/// Connection error (e.g. uninitialised, already connected). Used in the SDK.
 	Connection,
 	/// Internal or unexpected error (server or client).
+	#[default]
 	Internal,
 }
 
@@ -86,6 +81,9 @@ pub enum ErrorKind {
 /// wire-friendly and non-lossy: serialization preserves `kind`, `message`,
 /// `details`, and the cause chain. Use this type whenever an error crosses
 /// an API boundary (e.g. server response, SDK method return).
+///
+/// When deserialising via [`SurrealValue::from_value`], missing fields (e.g. `kind` from older
+/// clients) are filled from [`Default`]; use `#[surreal(default)]` for backwards compatibility.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
 #[surreal(crate = "crate")]
 pub struct Error {
@@ -96,7 +94,7 @@ pub struct Error {
 	code: i64,
 	/// Machine-readable error kind. Defaults to [`Internal`](ErrorKind::Internal) when not
 	/// present (e.g. when deserialising errors from older clients that did not send `kind`).
-	#[serde(default = "default_kind")]
+	#[serde(default)]
 	kind: ErrorKind,
 	/// Human-readable error message.
 	message: String,
