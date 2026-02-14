@@ -47,7 +47,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -66,7 +66,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -85,7 +85,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -102,7 +102,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -121,7 +121,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -152,14 +152,17 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
-						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
+						endpoint.url = endpoint
+							.url
+							.join(engine::remote::ws::PATH)
+							.map_err(crate::std_error_to_types_error)?;
 						spawn_local(engine::remote::ws::wasm::run_router(
 							endpoint,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]

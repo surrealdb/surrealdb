@@ -6841,6 +6841,7 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0-beta"
 dependencies = [
+ "anyhow",
  "async-channel",
  "boxcar",
  "chrono",

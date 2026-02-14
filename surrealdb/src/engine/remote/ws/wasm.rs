@@ -65,7 +65,7 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address.url.join(PATH)?;
+			address.url = address.url.join(PATH).map_err(crate::std_error_to_types_error)?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -78,7 +78,7 @@ impl conn::Sealed for super::Client {
 
 			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
-			conn_rx.recv().await??;
+			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);

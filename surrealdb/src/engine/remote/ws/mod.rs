@@ -274,7 +274,7 @@ where
 		}
 		Err(error) => {
 			let err = Error::internal(format!("WebSocket error: {:?}", error));
-			if response.send(Err(err.into())).await.is_err() {
+			if response.send(Err(err)).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -647,7 +647,7 @@ async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState
 		for request in state.pending_requests.values() {
 			let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
 			let err = crate::Error::internal(format!("{error}"));
-			request.response_channel.send(Err(err.into())).await.ok();
+			request.response_channel.send(Err(err)).await.ok();
 			request.response_channel.close();
 		}
 		state.pending_requests.clear();

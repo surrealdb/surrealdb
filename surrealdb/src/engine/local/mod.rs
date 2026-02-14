@@ -479,8 +479,13 @@ async fn export_file(
 	config: Option<DbExportConfig>,
 ) -> Result<(), crate::Error> {
 	let res = match config {
-		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
-		None => kvs.export(sess, chn).await?.await,
+		Some(config) => {
+			kvs.export_with_config(sess, chn, config)
+				.await
+				.map_err(crate::std_error_to_types_error)?
+				.await
+		}
+		None => kvs.export(sess, chn).await.map_err(crate::std_error_to_types_error)?.await,
 	};
 
 	if let Err(error) = res {
@@ -726,7 +731,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.cancel().await?;
+				tx.cancel().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -735,7 +740,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.commit().await?;
+				tx.commit().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -997,10 +1002,7 @@ async fn router(
 				match ready!(future.poll(ctx)) {
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
-					Err(e) => {
-						let error = TypesError::internal(e.to_string());
-						Poll::Ready(Some(Err(error)))
-					}
+					Err(e) => Poll::Ready(Some(Err(anyhow::anyhow!("{}", e)))),
 				}
 			});
 
@@ -1011,7 +1013,7 @@ async fn router(
 					stream,
 				)
 				.await
-				.map_err(|e| crate::Error::internal(e.to_string()))?;
+				.map_err(crate::std_error_to_types_error)?;
 
 			for response in responses {
 				response.result?;
@@ -1036,13 +1038,15 @@ async fn router(
 			};
 
 			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(&*state.session.read().await)?;
+			let (nsv, dbv) = check_ns_db(&*state.session.read().await)
+				.map_err(crate::std_error_to_types_error)?;
 			// Check the permissions level
 			kvs.check(
 				&*state.session.read().await,
 				Action::Edit,
 				ResourceKind::Model.on_db(&nsv, &dbv),
-			)?;
+			)
+			.map_err(crate::std_error_to_types_error)?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
@@ -1073,7 +1077,8 @@ async fn router(
 				&file.header.description.to_string(),
 				data,
 			)
-			.await?;
+			.await
+			.map_err(crate::std_error_to_types_error)?;
 
 			Ok(vec![query_result.finish()])
 		}

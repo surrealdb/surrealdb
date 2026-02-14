@@ -36,7 +36,7 @@ where
 					},
 				)
 				.await?;
-			Ok(Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?)
+			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
 		})
 	}
 }
@@ -114,7 +114,7 @@ where
 					},
 				)
 				.await?;
-			Ok(Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?)
+			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
 		})
 	}
 }

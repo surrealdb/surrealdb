@@ -73,7 +73,7 @@ pub(crate) async fn create_client(
 
 		// Try health check with this address
 		let req = client
-			.get(base_url.join("health")?)
+			.get(base_url.join("health").map_err(crate::std_error_to_types_error)?)
 			.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
 
 		match super::health(req).await {
@@ -167,12 +167,12 @@ pub(crate) async fn run_router(
 				let session_state = match state.sessions.get(&session_id) {
 					Some(Ok(state)) => state,
 					Some(Err(error)) => {
-						route.response.send(Err(error)).await.ok();
+						route.response.send(Err(session_error_to_error(error))).await.ok();
 						continue;
 					}
 					None => {
 						let error = session_error_to_error(SessionError::NotFound(session_id));
-						route.response.send(Err(error.into())).await.ok();
+						route.response.send(Err(error)).await.ok();
 						continue;
 					}
 				};
@@ -196,7 +196,7 @@ pub(crate) async fn run_router(
 					}
 
 					// Convert api::err::Error to wire error type
-					let db_result = result.map_err(surrealdb_types::Error::from);
+					let db_result = result;
 					route.response.send(db_result).await.ok();
 				});
 			}

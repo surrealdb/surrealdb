@@ -55,7 +55,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -76,7 +76,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -97,7 +97,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -117,7 +117,7 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]

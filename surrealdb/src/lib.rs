@@ -386,6 +386,10 @@ impl OnceLockExt for OnceLock<Router> {
 	}
 }
 
+fn std_error_to_types_error(error: impl std::fmt::Display) -> Error {
+	Error::internal(error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

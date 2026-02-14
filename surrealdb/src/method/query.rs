@@ -414,7 +414,7 @@ impl IndexedResults {
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				errors.insert(key, error.into());
+				errors.insert(key, error);
 			}
 		}
 		errors
@@ -446,7 +446,7 @@ impl IndexedResults {
 		if let Some(key) = first_error
 			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
 		{
-			return Err(error.into());
+			return Err(error);
 		}
 		Ok(self)
 	}
@@ -574,7 +574,7 @@ impl WithStats<IndexedResults> {
 				let stats = Stats {
 					execution_time: db_stats.execution_time,
 				};
-				errors.insert(key, (stats, error.into()));
+				errors.insert(key, (stats, error));
 			}
 		}
 		errors

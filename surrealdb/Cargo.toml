@@ -60,7 +60,8 @@ targets = []
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 
-# Other crates
+# Other crates (anyhow used for import stream compat with core's execute_import)
+anyhow.workspace = true
 boxcar.workspace = true
 async-channel.workspace = true
 chrono = { workspace = true, features = ["serde"] }

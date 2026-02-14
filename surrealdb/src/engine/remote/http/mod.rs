@@ -80,8 +80,8 @@ use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Command, RequestData};
+use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::engine::{SessionError, session_error_to_error};
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};
@@ -409,8 +409,10 @@ type BackupSender = async_channel::Sender<Result<Vec<u8>>>;
 async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let mut response = request
 		.send()
-		.await?
-		.error_for_status()?
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?
 		.bytes_stream()
 		.map_err(futures::io::Error::other)
 		.into_async_read()
@@ -419,18 +421,26 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
 			Ok(path) => path,
 			Err(error) => {
-				return Err(Error::internal(format!("Failed to open `{path}`: {error}")));
+				return Err(Error::internal(format!(
+					"Failed to open `{}`: {error}",
+					path.display()
+				)));
 			}
 		};
 	if let Err(error) = io::copy(&mut response, &mut file).await {
-		return Err(Error::internal(format!("Failed to read `{path}`: {error}")));
+		return Err(Error::internal(format!("Failed to read `{}`: {error}", path.display())));
 	}
 
 	Ok(())
 }
 
 async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()> {
-	let response = request.send().await?.error_for_status()?;
+	let response = request
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
 
 	let future = async move {
 		let mut response = response.bytes_stream();
@@ -459,11 +469,15 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	};
 
-	let res =
-		request.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS).body(file).send().await?;
+	let res = request
+		.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+		.body(file)
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?;
 
 	if res.error_for_status_ref().is_err() {
-		let res = res.text().await?;
+		let res = res.text().await.map_err(crate::std_error_to_types_error)?;
 
 		match res.parse::<serde_json::Value>() {
 			Ok(body) => {
@@ -479,7 +493,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	}
 
-	let bytes = res.bytes().await?;
+	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
 	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
@@ -495,16 +509,19 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	for val in arr.into_vec() {
 		let result = QueryResult::from_value(val)
 			.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
-		if let Err(e) = result.result {
-			return Err(e);
-		}
+		result.result?;
 	}
 
 	Ok(())
 }
 
 pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
-	request.send().await?.error_for_status()?;
+	request
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
 	Ok(())
 }
 
@@ -540,8 +557,13 @@ async fn send_request(
 	// session state. This is essential for token-based auth flows where the server
 	// extracts namespace/database from JWT claims during authenticate().
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
-	let response = http_req.send().await?.error_for_status()?;
-	let bytes = response.bytes().await?;
+	let response = http_req
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
+	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
 	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
@@ -862,7 +884,7 @@ async fn router(
 			path,
 			config,
 		} => {
-			let req_path = base_url.join("export")?;
+			let req_path = base_url.join("export").map_err(crate::std_error_to_types_error)?;
 			let config = config.unwrap_or_default();
 			let config_value: Value = config.into_value();
 			let headers = session_state.headers.read().await;
@@ -884,7 +906,7 @@ async fn router(
 			bytes,
 			config,
 		} => {
-			let req_path = base_url.join("export")?;
+			let req_path = base_url.join("export").map_err(crate::std_error_to_types_error)?;
 			let config = config.unwrap_or_default();
 			let config_value = config.into_value();
 			let headers = session_state.headers.read().await;
@@ -907,8 +929,15 @@ async fn router(
 			path,
 			config,
 		} => {
-			let req_path =
-				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("export")
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.name)
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.version)
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -923,8 +952,15 @@ async fn router(
 			bytes,
 			config,
 		} => {
-			let req_path =
-				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("export")
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.name)
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.version)
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -939,7 +975,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let req_path = base_url.join("import")?;
+			let req_path = base_url.join("import").map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -954,7 +990,11 @@ async fn router(
 		Command::ImportMl {
 			path,
 		} => {
-			let req_path = base_url.join("ml")?.join("import")?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("import")
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client

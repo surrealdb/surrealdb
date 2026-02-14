@@ -99,13 +99,12 @@ impl Router {
 		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let results = receiver.recv().await.map_err(|_| {
+			receiver.recv().await.map_err(|_| {
 				crate::Error::connection(
 					"Connection uninitialised".to_string(),
 					Some(crate::types::ConnectionError::Uninitialised),
 				)
-			})?;
-			results
+			})?
 		})
 	}
 

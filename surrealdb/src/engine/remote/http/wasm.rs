@@ -12,7 +12,7 @@ use crate::conn::{Route, Router};
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
+use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
@@ -34,7 +34,7 @@ impl conn::Sealed for Client {
 
 			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
-			conn_rx.recv().await??;
+			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -54,8 +54,8 @@ impl conn::Sealed for Client {
 async fn create_client(base_url: &url::Url) -> Result<reqwest::Client> {
 	let headers = super::default_headers();
 	let builder = ClientBuilder::new().default_headers(headers);
-	let client = builder.build()?;
-	let health = base_url.join("health")?;
+	let client = builder.build().map_err(crate::std_error_to_types_error)?;
+	let health = base_url.join("health").map_err(crate::std_error_to_types_error)?;
 	super::health(client.get(health)).await?;
 	Ok(client)
 }
@@ -111,12 +111,12 @@ pub(crate) async fn run_router(
 				let session_state = match state.sessions.get(&session_id) {
 					Some(Ok(state)) => state,
 					Some(Err(error)) => {
-						route.response.send(Err(error)).await.ok();
+						route.response.send(Err(session_error_to_error(error))).await.ok();
 						continue;
 					}
 					None => {
 						let error = session_error_to_error(SessionError::NotFound(session_id));
-						route.response.send(Err(error.into())).await.ok();
+						route.response.send(Err(error)).await.ok();
 						continue;
 					}
 				};
@@ -144,7 +144,7 @@ pub(crate) async fn run_router(
 							route.response.send(Ok(value)).await.ok();
 						}
 						Err(error) => {
-							route.response.send(Err(error.into())).await.ok();
+							route.response.send(Err(error)).await.ok();
 						}
 					}
 				});
