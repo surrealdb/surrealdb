@@ -301,13 +301,6 @@ impl Error {
 		}
 	}
 
-	/// Sets the wire error code (RPC backwards compatibility). Not part of the public API.
-	#[doc(hidden)]
-	pub fn with_code(mut self, code: i64) -> Self {
-		self.code = code;
-		self
-	}
-
 	/// Adds optional structured details to this error.
 	pub fn with_details(mut self, details: impl SurrealValue) -> Self {
 		self.details = Some(details.into_value());
@@ -636,7 +629,7 @@ impl fmt::Display for Error {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.message)?;
 		if let Some(cause) = &self.cause {
-			write!(f, ": {}", cause)?;
+			write!(f, ": {}", cause.message)?;
 		}
 		Ok(())
 	}
