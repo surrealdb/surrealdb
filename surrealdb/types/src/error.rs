@@ -153,6 +153,15 @@ impl Error {
 		let code = details.as_ref().map(|d| match d {
 			AuthError::TokenExpired => code::INVALID_AUTH,
 			AuthError::SessionExpired => code::INTERNAL_ERROR,
+			AuthError::InvalidAuth
+			| AuthError::UnexpectedAuth
+			| AuthError::MissingUserOrPass
+			| AuthError::NoSigninTarget
+			| AuthError::InvalidPass
+			| AuthError::TokenMakingFailed
+			| AuthError::InvalidRole(_)
+			| AuthError::NotAllowed { .. }
+			| AuthError::InvalidSignup => code::INVALID_AUTH,
 		});
 		Self {
 			kind: ErrorKind::Auth,
@@ -407,6 +416,31 @@ pub enum AuthError {
 	TokenExpired,
 	/// The session has expired.
 	SessionExpired,
+	/// Authentication failed (invalid credentials or similar).
+	InvalidAuth,
+	/// Unexpected error while performing authentication.
+	UnexpectedAuth,
+	/// Username or password was not provided.
+	MissingUserOrPass,
+	/// No signin target (SC, DB, NS, or KV) specified.
+	NoSigninTarget,
+	/// The password did not verify.
+	InvalidPass,
+	/// Failed to create the authentication token.
+	TokenMakingFailed,
+	/// Signup failed.
+	InvalidSignup,
+	/// Invalid role (IAM). Carries the role name.
+	InvalidRole(String),
+	/// Not enough permissions to perform the action (IAM). Carries actor, action, resource.
+	NotAllowed {
+		/// Actor that attempted the action.
+		actor: String,
+		/// Action that was attempted.
+		action: String,
+		/// Resource the action was attempted on.
+		resource: String,
+	},
 }
 
 /// Validation failure reason for [`ErrorKind::Validation`] errors.

@@ -9,6 +9,7 @@ use surrealdb_types::{
 };
 
 use crate::err::Error;
+use crate::iam::Error as IamErrorKind;
 
 /// Converts a core database error to the public wire-friendly error type.
 ///
@@ -28,22 +29,52 @@ pub fn to_types_error(e: &Error) -> TypesError {
 			"The token has expired".to_string(),
 			Some(AuthError::TokenExpired),
 		),
-		InvalidAuth => TypesError::auth("Authentication failed".to_string(), None),
-		UnexpectedAuth => {
-			TypesError::auth("Unexpected authentication error".to_string(), None)
-		}
-		MissingUserOrPass => {
-			TypesError::auth("Missing username or password".to_string(), None)
-		}
-		NoSigninTarget => {
-			TypesError::auth("No signin target specified".to_string(), None)
-		}
-		InvalidPass => TypesError::auth("Invalid password".to_string(), None),
-		TokenMakingFailed => {
-			TypesError::auth("Failed to create authentication token".to_string(), None)
-		}
-		IamError(iam_err) => TypesError::auth(format!("IAM error: {iam_err}"), None),
-		InvalidSignup => TypesError::auth("Signup failed".to_string(), None),
+		InvalidAuth => TypesError::auth(
+			"Authentication failed".to_string(),
+			Some(AuthError::InvalidAuth),
+		),
+		UnexpectedAuth => TypesError::auth(
+			"Unexpected authentication error".to_string(),
+			Some(AuthError::UnexpectedAuth),
+		),
+		MissingUserOrPass => TypesError::auth(
+			"Missing username or password".to_string(),
+			Some(AuthError::MissingUserOrPass),
+		),
+		NoSigninTarget => TypesError::auth(
+			"No signin target specified".to_string(),
+			Some(AuthError::NoSigninTarget),
+		),
+		InvalidPass => TypesError::auth(
+			"Invalid password".to_string(),
+			Some(AuthError::InvalidPass),
+		),
+		TokenMakingFailed => TypesError::auth(
+			"Failed to create authentication token".to_string(),
+			Some(AuthError::TokenMakingFailed),
+		),
+		IamError(iam_err) => match iam_err {
+			IamErrorKind::InvalidRole(role) => TypesError::auth(
+				format!("Invalid role '{role}'"),
+				Some(AuthError::InvalidRole(role.clone())),
+			),
+			IamErrorKind::NotAllowed {
+				actor,
+				action,
+				resource,
+			} => TypesError::auth(
+				"Not enough permissions to perform this action".to_string(),
+				Some(AuthError::NotAllowed {
+					actor: actor.clone(),
+					action: action.clone(),
+					resource: resource.clone(),
+				}),
+			),
+		},
+		InvalidSignup => TypesError::auth(
+			"Signup failed".to_string(),
+			Some(AuthError::InvalidSignup),
+		),
 
 		// Validation
 		NsEmpty => TypesError::validation("No namespace specified".to_string(), None),
