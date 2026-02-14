@@ -800,10 +800,26 @@ struct SimpleCondition {
 }
 
 /// Check if an idiom matches an index column.
+///
+/// Idioms containing `Part::All` (flattened field paths like `marks.*.mark`)
+/// are excluded because the Scan predicate filter cannot correctly evaluate
+/// comparison operators on flattened paths — `[40] = 40` evaluates to false.
+/// Users should use CONTAINS/INSIDE operators for array-aware queries.
 fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
-	// Simple equality check for now
-	// TODO: Handle array field matching (Part::All)
-	expr_idiom == index_col
+	use crate::expr::Part;
+
+	if expr_idiom != index_col {
+		return false;
+	}
+
+	// Skip flattened field paths — comparison predicates don't evaluate
+	// correctly on array-valued paths (e.g., marks.*.mark = 40 becomes
+	// [40] = 40 which is false).
+	if index_col.0.iter().any(|p| matches!(p, Part::All)) {
+		return false;
+	}
+
+	true
 }
 
 // literal_to_value and expr_to_value are imported from crate::exec::planner::util
