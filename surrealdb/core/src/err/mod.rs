@@ -27,6 +27,9 @@ use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 
+mod to_types;
+pub(crate) use to_types::to_types_error;
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]

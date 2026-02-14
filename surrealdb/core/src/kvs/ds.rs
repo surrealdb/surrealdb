@@ -13,7 +13,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
-use surrealdb_types::{AuthError, Error as TypesError, QueryError, SurrealValue, object};
+use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -1631,44 +1631,29 @@ impl Datastore {
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => TypesError::auth(
-				"The session has expired".to_string(),
-				Some(AuthError::SessionExpired),
-			),
-			Some(Error::ExpiredToken) => {
-				TypesError::auth("The token has expired".to_string(), Some(AuthError::TokenExpired))
-			}
-			_ => TypesError::internal(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast_ref::<Error>()
+				.map(crate::err::to_types_error)
+				.unwrap_or_else(|| TypesError::internal(e.to_string()))
 		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => TypesError::validation("Invalid query variables".to_string(), None),
-				_ => TypesError::internal(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into())
+				.map_err(|e| crate::err::to_types_error(&e))?;
 		}
 
 		// Set the transaction in the context
 		ctx.set_transaction(tx);
 
 		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => TypesError::auth(
-					"The session has expired".to_string(),
-					Some(AuthError::SessionExpired),
-				),
-				Some(Error::ExpiredToken) => TypesError::auth(
-					"The token has expired".to_string(),
-					Some(AuthError::TokenExpired),
-				),
-				_ => TypesError::internal(e.to_string()),
-			}
-		})
+		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into())
+			.await
+			.map_err(|e| {
+				e.downcast_ref::<Error>()
+					.map(crate::err::to_types_error)
+					.unwrap_or_else(|| TypesError::internal(e.to_string()))
+			})
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -1815,247 +1800,27 @@ impl Datastore {
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => TypesError::auth(
-				"The session has expired".to_string(),
-				Some(AuthError::SessionExpired),
-			),
-			Some(Error::ExpiredToken) => {
-				TypesError::auth("The token has expired".to_string(), Some(AuthError::TokenExpired))
-			}
-			Some(Error::InvalidAuth) => TypesError::auth("Authentication failed".to_string(), None),
-			Some(Error::UnexpectedAuth) => {
-				TypesError::auth("Unexpected authentication error".to_string(), None)
-			}
-			Some(Error::MissingUserOrPass) => {
-				TypesError::auth("Missing username or password".to_string(), None)
-			}
-			Some(Error::InvalidPass) => TypesError::auth("Invalid password".to_string(), None),
-			Some(Error::NoSigninTarget) => {
-				TypesError::auth("No signin target specified".to_string(), None)
-			}
-			Some(Error::TokenMakingFailed) => {
-				TypesError::auth("Failed to create authentication token".to_string(), None)
-			}
-			Some(Error::IamError(iam_err)) => {
-				TypesError::auth(format!("IAM error: {iam_err}"), None)
-			}
-			Some(Error::Kvs(kvs_err)) => {
-				TypesError::internal(format!("Key-value store error: {kvs_err}"))
-			}
-			Some(Error::InvalidQuery(_)) => {
-				TypesError::validation("Invalid query syntax".to_string(), None)
-			}
-			Some(Error::Internal(msg)) => TypesError::internal(msg.clone()),
-			Some(Error::Unimplemented(msg)) => {
-				TypesError::internal(format!("Unimplemented: {msg}"))
-			}
-			Some(Error::Io(e)) => TypesError::internal(format!("I/O error: {e}")),
-			Some(Error::Http(msg)) => TypesError::internal(format!("HTTP error: {msg}")),
-			Some(Error::Channel(msg)) => TypesError::internal(format!("Channel error: {msg}")),
-			Some(Error::QueryTimedout(msg)) => {
-				TypesError::query(format!("{msg}"), Some(QueryError::Timedout))
-			}
-			Some(Error::QueryCancelled) => TypesError::query(
-				"The query was not executed due to a cancelled transaction".to_string(),
-				Some(QueryError::Cancelled),
-			),
-			Some(Error::QueryNotExecuted {
-				message,
-			}) => TypesError::query(
-				format!("{message} - plan: {plan:?}"),
-				Some(QueryError::NotExecuted),
-			),
-			Some(Error::ScriptingNotAllowed) => {
-				TypesError::method("Scripting functions are not allowed".to_string(), None)
-			}
-			Some(Error::FunctionNotAllowed(func)) => {
-				TypesError::method(format!("Function '{}' is not allowed", func), None)
-			}
-			Some(Error::NetTargetNotAllowed(target)) => {
-				TypesError::method(format!("Network target '{}' is not allowed", target), None)
-			}
-			Some(Error::Thrown(msg)) => TypesError::thrown(msg.clone()),
-			_ => TypesError::internal(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast_ref::<Error>()
+				.map(crate::err::to_types_error)
+				.unwrap_or_else(|| TypesError::internal(e.to_string()))
 		})?;
 
 		// Start an execution context
-		ctx.attach_session(sess).map_err(|e| match e {
-			Error::ExpiredSession => TypesError::auth(
-				"The session has expired".to_string(),
-				Some(AuthError::SessionExpired),
-			),
-			Error::ExpiredToken => {
-				TypesError::auth("The token has expired".to_string(), Some(AuthError::TokenExpired))
-			}
-			Error::InvalidAuth => TypesError::auth("Authentication failed".to_string(), None),
-			Error::UnexpectedAuth => {
-				TypesError::auth("Unexpected authentication error".to_string(), None)
-			}
-			Error::IamError(iam_err) => TypesError::auth(format!("IAM error: {iam_err}"), None),
-			_ => TypesError::internal(e.to_string()),
-		})?;
+		ctx.attach_session(sess)
+			.map_err(|e| crate::err::to_types_error(&e))?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => TypesError::validation("Invalid query variables".to_string(), None),
-				Error::Internal(msg) => TypesError::internal(msg),
-				_ => TypesError::internal(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into())
+				.map_err(|e| crate::err::to_types_error(&e))?;
 		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => TypesError::auth(
-					"The session has expired".to_string(),
-					Some(AuthError::SessionExpired),
-				),
-				Some(Error::ExpiredToken) => TypesError::auth(
-					"The token has expired".to_string(),
-					Some(AuthError::TokenExpired),
-				),
-				Some(Error::InvalidAuth) => {
-					TypesError::auth("Authentication failed".to_string(), None)
-				}
-				Some(Error::UnexpectedAuth) => {
-					TypesError::auth("Unexpected authentication error".to_string(), None)
-				}
-				Some(Error::MissingUserOrPass) => {
-					TypesError::auth("Missing username or password".to_string(), None)
-				}
-				Some(Error::InvalidPass) => TypesError::auth("Invalid password".to_string(), None),
-				Some(Error::NoSigninTarget) => {
-					TypesError::auth("No signin target specified".to_string(), None)
-				}
-				Some(Error::TokenMakingFailed) => {
-					TypesError::auth("Failed to create authentication token".to_string(), None)
-				}
-				Some(Error::IamError(iam_err)) => {
-					TypesError::auth(format!("IAM error: {iam_err}"), None)
-				}
-				Some(Error::Kvs(kvs_err)) => {
-					TypesError::internal(format!("Key-value store error: {kvs_err}"))
-				}
-				Some(Error::NsEmpty) => {
-					TypesError::validation("No namespace specified".to_string(), None)
-				}
-				Some(Error::DbEmpty) => {
-					TypesError::validation("No database specified".to_string(), None)
-				}
-				Some(Error::InvalidQuery(_)) => {
-					TypesError::validation("Invalid query syntax".to_string(), None)
-				}
-				Some(Error::InvalidContent {
-					..
-				}) => TypesError::validation("Invalid content clause".to_string(), None),
-				Some(Error::InvalidMerge {
-					..
-				}) => TypesError::validation("Invalid merge clause".to_string(), None),
-				Some(Error::InvalidPatch(_)) => {
-					TypesError::validation("Invalid patch operation".to_string(), None)
-				}
-				Some(Error::Internal(msg)) => TypesError::internal(msg.clone()),
-				Some(Error::Unimplemented(msg)) => {
-					TypesError::internal(format!("Unimplemented: {}", msg))
-				}
-				Some(Error::Io(e)) => TypesError::internal(format!("I/O error: {}", e)),
-				Some(Error::Http(msg)) => TypesError::internal(format!("HTTP error: {}", msg)),
-				Some(Error::Channel(msg)) => {
-					TypesError::internal(format!("Channel error: {}", msg))
-				}
-				Some(Error::QueryTimedout(timeout)) => {
-					TypesError::query(format!("Timed out: {timeout}"), Some(QueryError::Timedout))
-				}
-				Some(Error::QueryCancelled) => TypesError::query(
-					"The query was not executed due to a cancelled transaction".to_string(),
-					Some(QueryError::Cancelled),
-				),
-				Some(Error::QueryNotExecuted {
-					message,
-				}) => TypesError::query(message.clone(), Some(QueryError::NotExecuted)),
-				Some(Error::ScriptingNotAllowed) => {
-					TypesError::method("Scripting functions are not allowed".to_string(), None)
-				}
-				Some(Error::FunctionNotAllowed(func)) => {
-					TypesError::method(format!("Function '{}' is not allowed", func), None)
-				}
-				Some(Error::NetTargetNotAllowed(target)) => {
-					TypesError::method(format!("Network target '{}' is not allowed", target), None)
-				}
-				Some(Error::Thrown(msg)) => TypesError::thrown(msg.clone()),
-				Some(Error::Coerce(_)) => {
-					TypesError::validation("Type coercion error".to_string(), None)
-				}
-				Some(Error::Cast(_)) => {
-					TypesError::validation("Type casting error".to_string(), None)
-				}
-				Some(Error::TryAdd(_, _))
-				| Some(Error::TrySub(_, _))
-				| Some(Error::TryMul(_, _))
-				| Some(Error::TryDiv(_, _))
-				| Some(Error::TryRem(_, _))
-				| Some(Error::TryPow(_, _))
-				| Some(Error::TryNeg(_)) => {
-					TypesError::validation("Arithmetic operation error".to_string(), None)
-				}
-				Some(Error::TryFrom(_, _)) => {
-					TypesError::validation("Type conversion error".to_string(), None)
-				}
-				Some(Error::Unencodable) => {
-					TypesError::serialization("Value cannot be serialized".to_string(), None)
-				}
-				Some(Error::Storekey(_)) => {
-					TypesError::serialization("Key decoding error".to_string(), None)
-				}
-				Some(Error::Revision(_)) => {
-					TypesError::serialization("Versioned data error".to_string(), None)
-				}
-				Some(Error::CorruptedIndex(_)) => {
-					TypesError::internal("Index corruption detected".to_string())
-				}
-				Some(Error::NoIndexFoundForMatch {
-					..
-				}) => TypesError::internal("No suitable index found".to_string()),
-				Some(Error::AnalyzerError(msg)) => {
-					TypesError::internal(format!("Analyzer error: {msg}"))
-				}
-				Some(Error::HighlightError(msg)) => {
-					TypesError::internal(format!("Highlight error: {msg}"))
-				}
-				Some(Error::FstError(_)) => TypesError::internal("FST error".to_string()),
-				Some(Error::Utf8Error(_)) => {
-					TypesError::serialization("UTF-8 decoding error".to_string(), None)
-				}
-				Some(Error::ObsError(_)) => TypesError::internal("Object store error".to_string()),
-				Some(Error::DuplicatedMatchRef {
-					..
-				}) => TypesError::validation("Duplicated match reference".to_string(), None),
-				Some(Error::TimestampOverflow(msg)) => {
-					TypesError::internal(format!("Timestamp overflow: {msg}"))
-				}
-				Some(Error::NoRecordFound) => TypesError::internal("No record found".to_string()),
-				Some(Error::InvalidSignup) => TypesError::auth("Signup failed".to_string(), None),
-				Some(Error::ClAlreadyExists {
-					..
-				}) => TypesError::internal("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
-					..
-				}) => TypesError::internal("API already exists".to_string()),
-				Some(Error::AzAlreadyExists {
-					..
-				}) => TypesError::internal("Analyzer already exists".to_string()),
-				Some(Error::BuAlreadyExists {
-					..
-				}) => TypesError::internal("Bucket already exists".to_string()),
-				Some(Error::DbAlreadyExists {
-					..
-				}) => TypesError::internal("Database already exists".to_string()),
-				_ => TypesError::internal(e.to_string()),
-			}
+			e.downcast_ref::<Error>()
+				.map(crate::err::to_types_error)
+				.unwrap_or_else(|| TypesError::internal(e.to_string()))
 		})
 	}
 
