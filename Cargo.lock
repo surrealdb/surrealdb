@@ -6874,7 +6874,6 @@ dependencies = [
  "surrealdb-types",
  "temp-dir",
  "test-log",
- "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-tungstenite",

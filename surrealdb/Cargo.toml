@@ -71,7 +71,6 @@ path-clean.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
 url.workspace = true
