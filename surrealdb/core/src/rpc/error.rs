@@ -11,6 +11,7 @@ use surrealdb_types::{
 use uuid::Uuid;
 
 use crate::err;
+use crate::err::into_types_error;
 
 /// Parse error (invalid message format).
 pub fn parse_error() -> TypesError {
@@ -104,15 +105,11 @@ pub fn session_expired() -> TypesError {
 }
 
 /// Convert an anyhow error to a wire error, downcasting to database errors where possible.
-pub fn types_error_from_anyhow(e: anyhow::Error) -> TypesError {
-	if let Some(err) = e.downcast_ref::<err::Error>() {
-		match err {
-			err::Error::RealtimeDisabled => return lq_not_supported(),
-			err::Error::IdMismatch {
-				..
-			} => return thrown(err.to_string()),
-			_ => return thrown(err.to_string()),
-		}
-	}
-	internal_error(e)
+pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
+	let message = error.to_string();
+	error
+		.downcast::<err::Error>()
+		.ok()
+		.map(into_types_error)
+		.unwrap_or_else(|| TypesError::internal(message))
 }
