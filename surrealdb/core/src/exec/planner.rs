@@ -243,12 +243,11 @@ impl<'ctx> Planner<'ctx> {
 						// MATCHES against a fulltext index on the source table — it
 						// cannot resolve cross-table record links.
 						if idiom.0.len() > 1 {
-							return Err(Error::Query {
-								message: "MATCHES with multi-part field path (e.g. record \
-								 link traversal) is not supported. Use a single-field path \
-								 for full-text search."
+							return Err(Error::PlannerUnimplemented(
+								"MATCHES with multi-part field path not yet supported \
+								 in streaming executor"
 									.to_string(),
-							});
+							));
 						}
 						let idiom_clone = idiom.clone();
 						let query_clone = query.clone();

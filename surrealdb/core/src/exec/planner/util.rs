@@ -138,6 +138,24 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // Predicate / Validation Helpers
 // ============================================================================
 
+/// Check if a condition has a top-level OR operator.
+///
+/// Used to prevent LIMIT/START pushdown into Scan when the condition may
+/// trigger a multi-index union at runtime. Union streams don't maintain
+/// a global ordering, so pushing LIMIT would truncate results arbitrarily.
+pub(super) fn has_top_level_or(cond: Option<&Cond>) -> bool {
+	match cond {
+		Some(c) => matches!(
+			c.0,
+			Expr::Binary {
+				op: BinaryOperator::Or,
+				..
+			}
+		),
+		None => false,
+	}
+}
+
 /// Check if an expression contains any KNN (nearest neighbor) operators.
 pub(super) fn has_knn_operator(expr: &Expr) -> bool {
 	match expr {
@@ -155,6 +173,34 @@ pub(super) fn has_knn_operator(expr: &Expr) -> bool {
 			expr: inner,
 			..
 		} => has_knn_operator(inner),
+		_ => false,
+	}
+}
+
+/// Check if an expression contains a brute-force KNN operator (`NearestNeighbor::K`).
+///
+/// Used to distinguish between brute-force KNN with parameter-based vectors
+/// (where `extract_bruteforce_knn` fails) and HNSW KNN (`Approximate`).
+pub(super) fn has_knn_k_operator(expr: &Expr) -> bool {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} => {
+			matches!(nn.as_ref(), NearestNeighbor::K(..))
+				|| has_knn_k_operator(left)
+				|| has_knn_k_operator(right)
+		}
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => has_knn_k_operator(left) || has_knn_k_operator(right),
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => has_knn_k_operator(inner),
 		_ => false,
 	}
 }

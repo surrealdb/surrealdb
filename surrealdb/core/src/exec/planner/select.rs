@@ -9,8 +9,8 @@ use super::Planner;
 use super::util::{
 	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params, derive_field_name,
 	extract_bruteforce_knn, extract_count_field_names, extract_matches_context, extract_version,
-	get_effective_limit_literal, has_knn_operator, idiom_to_field_name, idiom_to_field_path,
-	is_count_all_eligible, strip_knn_from_condition,
+	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
+	idiom_to_field_name, idiom_to_field_path, is_count_all_eligible, strip_knn_from_condition,
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
@@ -204,6 +204,15 @@ impl<'ctx> Planner<'ctx> {
 			if brute_force_knn.is_some() {
 				// Brute-force KNN: index analysis doesn't need to see KNN
 				(stripped.clone(), stripped)
+			} else if cond.as_ref().is_some_and(|c| has_knn_k_operator(&c.0)) {
+				// Brute-force KNN with parameter-based vector -- the new
+				// executor cannot resolve parameters at plan time. Fall back
+				// to the old executor.
+				return Err(Error::PlannerUnimplemented(
+					"Brute-force KNN with parameter-based vectors is not supported \
+					 in the streaming executor"
+						.to_string(),
+				));
 			} else {
 				// HNSW KNN: keep original condition for index analysis so
 				// it can detect HNSW indexes and route to KnnScan.
@@ -228,7 +237,13 @@ impl<'ctx> Planner<'ctx> {
 		// Determine limit pushdown eligibility:
 		// No SPLIT, no GROUP BY, and ORDER BY must be scan-compatible (or absent).
 		// WHERE does NOT block limit pushdown since the filter is inside Scan.
+		// Excluded when:
+		// - KnnTopK is active: it needs the full candidate set for correct nearest neighbors
+		// - Top-level OR: the Scan may resolve to a multi-index union at runtime, which doesn't
+		//   maintain global ordering across branches
 		let push_limit = source_is_single_scan
+			&& brute_force_knn.is_none()
+			&& !has_top_level_or(cond_for_filter.as_ref())
 			&& limit.is_some()
 			&& can_push_limit_to_scan(&split, &group, &order);
 
