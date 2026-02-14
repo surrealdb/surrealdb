@@ -161,7 +161,7 @@ use std::marker::PhantomData;
 
 use url::Url;
 
-use crate::err::Error;
+use crate::Error;
 use crate::opt::{Config, Endpoint, path_to_string};
 use crate::{Connect, Result, Surreal};
 
@@ -210,14 +210,14 @@ impl into_endpoint::Sealed for &str {
 				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
 			}
 			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
-				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
+				(Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?, String::new())
 			}
 
 			_ => {
 				let (scheme, path) = split_url(self);
 				let protocol = format!("{scheme}://");
 				(
-					Url::parse(&protocol).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					Url::parse(&protocol).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
 					path_to_string(&protocol, path),
 				)
 			}

@@ -6,7 +6,7 @@ use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
 
-use crate::err::Error;
+use crate::Error;
 use crate::method::live::Stream;
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value};
@@ -61,7 +61,10 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&self);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -78,10 +81,9 @@ where
 						v => Ok(Some(T::from_value(v)?)),
 					}
 				}
-				_ => Err(Error::LossyTake(Box::new(QueryResponse {
-					results: mem::take(&mut response.results),
-					live_queries: mem::take(&mut response.live_queries),
-				}))),
+				_ => Err(Error::internal(
+					"Tried to take only a single result from a query that contains multiple".to_string(),
+				)),
 			},
 			value => {
 				let value = mem::take(value);
@@ -109,7 +111,10 @@ impl query_result::Sealed<Value> for (usize, &str) {
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -142,7 +147,10 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -157,10 +165,9 @@ where
 				}
 				[value] => value,
 				_ => {
-					return Err(Error::LossyTake(Box::new(QueryResponse {
-						results: mem::take(&mut response.results),
-						live_queries: mem::take(&mut response.live_queries),
-					})));
+					return Err(Error::internal(
+						"Tried to take only a single result from a query that contains multiple".to_string(),
+					));
 				}
 			},
 			value => value,
@@ -248,7 +255,10 @@ where
 				},
 				Err(_) => {
 					response.results.swap_remove(&index);
-					Err(Error::ConnectionUninitialised)
+					Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					))
 				}
 			},
 			None => Ok(vec![]),
@@ -311,7 +321,7 @@ impl query_stream::Sealed<Value> for usize {
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -321,8 +331,8 @@ impl query_stream::Sealed<Value> for usize {
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self)),
-				false => Err(Error::QueryIndexOutOfBounds(self)),
+				true => Err(Error::internal(format!("Query statement {} is not a live query", self))),
+				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(stream)))
 	}
@@ -339,16 +349,21 @@ impl query_stream::Sealed<Value> for () {
 			match result {
 				Ok(stream) => streams.push(stream),
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised);
+								return Err(Error::connection(
+									"Connection uninitialised".to_string(),
+									Some(crate::types::ConnectionError::Uninitialised),
+								));
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								return Err(Error::ResponseAlreadyTaken);
+								return Err(Error::internal(
+									"Tried to take a query response that has already been taken".to_string(),
+								));
 							}
 						}
 					} else {
@@ -375,7 +390,7 @@ where
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -385,8 +400,8 @@ where
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self)),
-				false => Err(Error::QueryIndexOutOfBounds(self)),
+				true => Err(Error::internal(format!("Query statement {} is not a live query", self))),
+				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
@@ -411,16 +426,21 @@ where
 			let mut stream = match result {
 				Ok(stream) => stream,
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised);
+								return Err(Error::connection(
+									"Connection uninitialised".to_string(),
+									Some(crate::types::ConnectionError::Uninitialised),
+								));
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								return Err(Error::ResponseAlreadyTaken);
+								return Err(Error::internal(
+									"Tried to take a query response that has already been taken".to_string(),
+								));
 							}
 						}
 					} else {

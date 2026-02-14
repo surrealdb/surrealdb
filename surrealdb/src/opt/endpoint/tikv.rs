@@ -4,7 +4,7 @@ use url::Url;
 
 use crate::Result;
 use crate::engine::local::{Db, TiKv};
-use crate::err::Error;
+use crate::Error;
 use crate::opt::endpoint::into_endpoint;
 use crate::opt::{Config, Endpoint, IntoEndpoint};
 
@@ -17,7 +17,7 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("tikv://{self}");
-					let mut endpoint = Endpoint::new(Url::parse(&url).map_err(|_| Error::InvalidUrl(url.clone()))?);
+					let mut endpoint = Endpoint::new(Url::parse(&url).map_err(|_| Error::internal(format!("Invalid URL: {}", url)))?);
 					endpoint.path = url;
 					Ok(endpoint)
 				}

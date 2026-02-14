@@ -32,7 +32,6 @@ pub mod method;
 pub mod opt;
 
 mod conn;
-mod err;
 mod notification;
 
 #[doc(hidden)]
@@ -43,7 +42,7 @@ pub mod channel {
 
 /// Different error types for embedded and remote databases
 pub mod error {
-	pub use crate::err::Error as Api;
+	pub use surrealdb_types::Error as Api;
 }
 
 pub mod parse {
@@ -59,7 +58,7 @@ pub use surrealdb_types as types;
 pub use crate::notification::Notification;
 
 /// A specialized `Result` type
-pub type Result<T> = std::result::Result<T, err::Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 use std::fmt;
 use std::fmt::Debug;
 use std::future::IntoFuture;
@@ -68,8 +67,7 @@ use std::sync::{Arc, OnceLock};
 
 use async_channel::{Receiver, Sender};
 #[doc(inline)]
-pub use err::Error;
-// Removed anyhow::ensure - will implement custom ensure macro if needed
+pub use surrealdb_types::Error as Error;
 use method::BoxFuture;
 use semver::{Version, VersionReq};
 use tokio::sync::watch;
@@ -173,7 +171,10 @@ where
 		Box::pin(async move {
 			// Avoid establishing another connection if already connected
 			if self.surreal.inner.router.get().is_some() {
-				return Err(Error::AlreadyConnected);
+				return Err(Error::connection(
+					"Already connected".to_string(),
+					Some(crate::types::ConnectionError::AlreadyConnected),
+				));
 			}
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
@@ -191,7 +192,12 @@ where
 				}
 			}
 			let router = client.inner.router.wait().clone();
-			self.surreal.inner.router.set(router).map_err(|_| Error::AlreadyConnected)?;
+			self.surreal.inner.router.set(router).map_err(|_| {
+				Error::connection(
+					"Already connected".to_string(),
+					Some(crate::types::ConnectionError::AlreadyConnected),
+				)
+			})?;
 			// Both ends of the channel are still alive at this point
 			self.surreal.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(())
@@ -310,10 +316,9 @@ where
 		// invalid version requirements should be caught during development
 		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");
 		if !req.matches(version) {
-			return Err(Error::VersionMismatch {
-				server_version: version.clone(),
-				supported_versions: SUPPORTED_VERSIONS.to_owned(),
-			});
+			return Err(Error::internal(format!(
+				"server version `{version}` does not match the range supported by the client `{SUPPORTED_VERSIONS}`"
+			)));
 		}
 
 		Ok(())
@@ -371,7 +376,12 @@ trait OnceLockExt {
 
 impl OnceLockExt for OnceLock<Router> {
 	fn extract(&self) -> Result<&Router> {
-		let router = self.get().ok_or(Error::ConnectionUninitialised)?;
+		let router = self.get().ok_or_else(|| {
+			Error::connection(
+				"Connection uninitialised".to_string(),
+				Some(crate::types::ConnectionError::Uninitialised),
+			)
+		})?;
 		Ok(router)
 	}
 }

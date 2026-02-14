@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 
 use crate::conn::Command;
-use crate::err::Error;
+use crate::Error;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Result, Surreal};
 
@@ -39,7 +39,7 @@ where
 			let version = router.execute_value(self.client.session_id, Command::Version).await?;
 			let version = version.into_string()?;
 			let semantic = version.trim_start_matches("surrealdb-");
-			semantic.parse().map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")))
+			semantic.parse().map_err(|_| Error::internal(format!("Invalid semantic version: \"{version}\"")))
 		})
 	}
 }

@@ -492,7 +492,7 @@ async fn export_file(
 			return Ok(());
 		}
 
-		return Err(crate::Error::InternalError(error.to_string()));
+		return Err(crate::Error::internal(error.to_string()));
 	}
 	Ok(())
 }
@@ -507,24 +507,24 @@ async fn export_ml(
 		version,
 	}: MlExportConfig,
 ) -> Result<(), crate::Error> {
-	let (nsv, dbv) = check_ns_db(sess).map_err(|e| crate::Error::InternalError(e.to_string()))?;
+	let (nsv, dbv) = check_ns_db(sess).map_err(|e| crate::Error::internal(e.to_string()))?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+		.map_err(|e| crate::Error::internal(e.to_string()))?;
 
 	// Attempt to get the model definition
 	let Some(model) = kvs
 		.get_db_model(&nsv, &dbv, &name, &version)
 		.await
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?
+		.map_err(|e| crate::Error::internal(e.to_string()))?
 	else {
 		// Attempt to get the model definition
-		return Err(crate::Error::InternalError("Model not found".to_string()));
+		return Err(crate::Error::internal("Model not found".to_string()));
 	};
 	// Export the file data in to the store
 	let mut data = surrealdb_core::obs::stream(model.hash.clone())
 		.await
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+		.map_err(|e| crate::Error::internal(e.to_string()))?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -544,10 +544,7 @@ where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer).await.map(|_| ()).map_err(|error| crate::Error::FileRead {
-		path,
-		error,
-	})
+	io::copy(reader, writer).await.map(|_| ()).map_err(|error| crate::Error::internal(format!("Failed to read `{}`: {}", path.display(), error)))
 }
 
 async fn kill_live_query(
@@ -788,7 +785,7 @@ async fn router(
 		}
 		| Command::ImportFile {
 			..
-		} => Err(crate::Error::BackupsNotSupported.into()),
+		} => Err(crate::Error::internal("The protocol or storage engine does not support backups on this architecture".to_string())),
 
 		#[cfg(any(target_family = "wasm", not(feature = "ml")))]
 		Command::ExportMl {
@@ -799,7 +796,7 @@ async fn router(
 		}
 		| Command::ImportMl {
 			..
-		} => Err(crate::Error::BackupsNotSupported),
+		} => Err(crate::Error::internal("The protocol or storage engine does not support backups on this architecture".to_string())),
 
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {
@@ -836,10 +833,11 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path: file,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						file.display(),
+						error
+					)));
 				}
 			};
 
@@ -884,10 +882,11 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
@@ -965,10 +964,11 @@ async fn router(
 			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
@@ -990,7 +990,7 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = crate::types::anyhow::Error::new(e);
+						let error = TypesError::internal(e.to_string());
 						Poll::Ready(Some(Err(error)))
 					}
 				}
@@ -1003,7 +1003,7 @@ async fn router(
 					stream,
 				)
 				.await
-				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+				.map_err(|e| crate::Error::internal(e.to_string()))?;
 
 			for response in responses {
 				response.result?;
@@ -1019,10 +1019,11 @@ async fn router(
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
@@ -1038,19 +1039,20 @@ async fn router(
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
 			if let Err(error) = file.read_to_end(&mut buffer).await {
-				return Err(crate::Error::FileRead {
-					path,
-					error,
-				});
+				return Err(crate::Error::internal(format!(
+					"Failed to read `{}`: {}",
+					path.display(),
+					error
+				)));
 			}
 			// Check that the SurrealML file is valid
 			let file = match SurMlFile::from_bytes(buffer) {
 				Ok(file) => file,
 				Err(error) => {
-					return Err(crate::Error::FileRead {
-						path,
-						error: io::Error::new(io::ErrorKind::InvalidData, error.message),
-					});
+					return Err(crate::Error::internal(format!(
+						"Invalid SurrealML file: {}",
+						error.message
+					)));
 				}
 			};
 			// Convert the file back in to raw bytes
@@ -1082,7 +1084,7 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			surrealdb_core::rpc::check_protected_param(&key)
-				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+				.map_err(|e| crate::Error::internal(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
 			match value {

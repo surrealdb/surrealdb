@@ -5,7 +5,7 @@ use surrealdb_core::kvs::config::{AolMode, SnapshotMode, format_duration};
 
 use crate::Connect;
 use crate::engine::local::Db;
-use crate::err::Error;
+use crate::Error;
 
 impl<R> Connect<Db, R> {
 	/// Enable MVCC versioning on the datastore.
@@ -138,7 +138,7 @@ impl<R> Connect<Db, R> {
 				endpoint.append_query_param("persist", path);
 				Ok(endpoint)
 			}
-			scheme => Err(Error::InternalError(format!(
+			scheme => Err(Error::internal(format!(
 				"The 'persist' option is only supported by the 'mem' engine, not '{scheme}'"
 			))),
 		});
@@ -158,7 +158,7 @@ impl<R> Connect<Db, R> {
 				endpoint.append_query_param("aol", &mode.to_string());
 				Ok(endpoint)
 			}
-			scheme => Err(Error::InternalError(format!(
+			scheme => Err(Error::internal(format!(
 				"The 'aol' option is only supported by the 'mem' engine, not '{scheme}'"
 			))),
 		});
@@ -177,7 +177,7 @@ impl<R> Connect<Db, R> {
 				endpoint.append_query_param("snapshot", &mode.to_string());
 				Ok(endpoint)
 			}
-			scheme => Err(Error::InternalError(format!(
+			scheme => Err(Error::internal(format!(
 				"The 'snapshot' option is only supported by the 'mem' engine, not '{scheme}'"
 			))),
 		});

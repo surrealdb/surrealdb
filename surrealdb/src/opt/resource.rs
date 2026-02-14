@@ -1,7 +1,7 @@
 use std::ops::{self, Bound};
 
 use crate::Result;
-use crate::err::Error;
+use crate::Error;
 use crate::types::{
 	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Table, ToSql,
 	Value, Variables,
@@ -48,10 +48,10 @@ impl Resource {
 				table,
 				range,
 			})),
-			Resource::RecordId(_) => Err(Error::RangeOnRecordId),
-			Resource::Object(_) => Err(Error::RangeOnObject),
-			Resource::Array(_) => Err(Error::RangeOnArray),
-			Resource::Range(_) => Err(Error::RangeOnRange),
+			Resource::RecordId(_) => Err(Error::internal("Tried to add a range to an record-id resource".to_string())),
+			Resource::Object(_) => Err(Error::internal("Tried to add a range to an object resource".to_string())),
+			Resource::Array(_) => Err(Error::internal("Tried to add a range to an array resource".to_string())),
+			Resource::Range(_) => Err(Error::internal("Tried to add a range to a resource which was already a range".to_string())),
 		}
 	}
 
@@ -347,9 +347,9 @@ mod create_resource {
 
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
-		return Err(Error::TableColonId {
-			table: a.to_string(),
-		});
+		return Err(Error::internal(format!(
+			"Table name `{a}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{a}\")` instead."
+		)));
 	}
 	Ok(())
 }

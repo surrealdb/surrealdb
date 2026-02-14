@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use crate::conn::Command;
-use crate::err::Error;
+use crate::Error;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
@@ -55,7 +55,7 @@ impl<T: SurrealValue> IntoVariables for T {
 				let mut vars = Variables::new();
 				for v in arr.chunks(2) {
 					let key = v[0].clone().into_string().map_err(|_| {
-						Error::InvalidParams("Variable key must be a string".to_string())
+						Error::validation("Variable key must be a string".to_string(), None)
 					})?;
 					let value = v[1].clone();
 					vars.insert(key, value);
@@ -63,7 +63,7 @@ impl<T: SurrealValue> IntoVariables for T {
 				Ok(vars)
 			}
 			unexpected => {
-				Err(Error::InvalidParams(format!("Invalid variables type: {unexpected:?}")))
+				Err(Error::validation(format!("Invalid variables type: {unexpected:?}"), None))
 			}
 		}
 	}
@@ -909,16 +909,11 @@ mod tests {
 		let Err(e) = response.take::<Option<bool>>(0) else {
 			panic!("silently dropping records not allowed");
 		};
-		let Error::LossyTake(boxed) = e else {
-			panic!("silently dropping records not allowed");
-		};
-		let IndexedResults {
-			results: mut map,
-			..
-		} = *boxed;
-
-		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, Value::from_vec(vec![Value::from_bool(true), Value::from_bool(false)]));
+		assert!(
+			e.message().contains("Tried to take only a single result"),
+			"expected lossy take error, got: {}",
+			e.message()
+		);
 	}
 
 	#[test]
@@ -942,7 +937,7 @@ mod tests {
 		};
 		let err = response.check().unwrap_err();
 
-		assert!(matches!(err, Error::InternalError(msg) if msg == "test"));
+		assert_eq!(err.message(), "test");
 	}
 
 	#[test]
@@ -967,9 +962,9 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		assert!(matches!(&errors[&10], Error::InternalError(msg) if msg == "test"));
-		assert!(matches!(&errors[&7], Error::InternalError(msg) if msg == "test"));
-		assert!(matches!(&errors[&3], Error::InternalError(msg) if msg == "test"));
+		assert_eq!(errors[&10].message(), "test");
+		assert_eq!(errors[&7].message(), "test");
+		assert_eq!(errors[&3].message(), "test");
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};

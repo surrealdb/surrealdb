@@ -9,7 +9,7 @@ use url::Url;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
-use crate::engine::SessionError;
+use crate::engine::{session_error_to_error, SessionError};
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
@@ -43,7 +43,7 @@ pub(crate) async fn create_client(
 
 	// Resolve hostname to get list of addresses
 	let addrs = tokio::net::lookup_host((hostname, port)).await.map_err(|error| {
-		Error::InternalError(format!("DNS resolution failed for {hostname}:{port}; {error}"))
+		Error::internal(format!("DNS resolution failed for {hostname}:{port}; {error}"))
 	})?;
 
 	// Try each address until one works
@@ -66,7 +66,7 @@ pub(crate) async fn create_client(
 		let client = match builder.build() {
 			Ok(client) => client,
 			Err(error) => {
-				last_error = Some(Error::from(error));
+				last_error = Some(Error::internal(error.to_string()));
 				continue;
 			}
 		};
@@ -85,7 +85,7 @@ pub(crate) async fn create_client(
 		}
 	}
 
-	Err(last_error.unwrap_or_else(|| Error::InternalError("No addresses available".to_string())))
+	Err(last_error.unwrap_or_else(|| Error::internal("No addresses available".to_string())))
 }
 
 impl crate::Connection for Client {}
@@ -167,11 +167,11 @@ pub(crate) async fn run_router(
 				let session_state = match state.sessions.get(&session_id) {
 					Some(Ok(state)) => state,
 					Some(Err(error)) => {
-						route.response.send(Err(Error::from(error).into())).await.ok();
+						route.response.send(Err(error)).await.ok();
 						continue;
 					}
 					None => {
-						let error = Error::from(SessionError::NotFound(session_id));
+						let error = session_error_to_error(SessionError::NotFound(session_id));
 						route.response.send(Err(error.into())).await.ok();
 						continue;
 					}

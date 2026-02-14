@@ -4,11 +4,10 @@ use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
 use uuid::Uuid;
 
-use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::types::{SurrealValue, Value};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{Error, ExtraFeatures, Result, Surreal};
 
 pub(crate) mod cmd;
 pub(crate) use cmd::Command;
@@ -62,7 +61,7 @@ impl Router {
 			self.sender
 				.send(route)
 				.await
-				.map_err(|e| Error::InternalError(format!("Failed to send command: {e}")))?;
+				.map_err(|e| crate::Error::internal(format!("Failed to send command: {e}")))?;
 			Ok(receiver)
 		})
 	}
@@ -73,17 +72,21 @@ impl Router {
 		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
-			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			// The response uses surrealdb_types::Error; convert to SDK Error
-			let mut results = response.map_err(Error::from)?;
+			let response = receiver.recv().await.map_err(|_| {
+				crate::Error::connection(
+					"Connection uninitialised".to_string(),
+					Some(crate::types::ConnectionError::Uninitialised),
+				)
+			})?;
+			let mut results = response?;
 
 			match results.len() {
 				0 => Ok(Value::None),
 				1 => {
 					let result = results.remove(0);
-					result.result.map_err(Error::from)
+					result.result
 				}
-				_ => Err(Error::InternalError(
+				_ => Err(crate::Error::internal(
 					"expected the database to return one or no results".to_string(),
 				)),
 			}
@@ -96,8 +99,13 @@ impl Router {
 		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let results = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			results.map_err(Error::from)
+			let results = receiver.recv().await.map_err(|_| {
+				crate::Error::connection(
+					"Connection uninitialised".to_string(),
+					Some(crate::types::ConnectionError::Uninitialised),
+				)
+			})?;
+			results
 		})
 	}
 
@@ -165,7 +173,7 @@ impl Router {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => array
 					.into_iter()
-					.map(|v| R::from_value(v).map_err(Into::into))
+					.map(|v| R::from_value(v).map_err(|e| crate::Error::internal(e.to_string())))
 					.collect::<Result<Vec<R>>>(),
 				value => Ok(vec![R::from_value(value)?]),
 			}
@@ -183,10 +191,9 @@ impl Router {
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
-				value => Err(Error::FromValue {
-					value,
-					error: "expected the database to return nothing".to_owned(),
-				}),
+				_value => Err(crate::Error::internal(
+					"expected the database to return nothing".to_string(),
+				)),
 			}
 		})
 	}

@@ -24,7 +24,7 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::err::Error;
+use crate::Error;
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
@@ -89,7 +89,7 @@ pub(crate) async fn connect(
 	maybe_connector: Option<Connector>,
 ) -> crate::Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	let mut request =
-		(&endpoint.url).into_client_request().map_err(|err| Error::InvalidUrl(err.to_string()))?;
+		(&endpoint.url).into_client_request().map_err(|err| Error::internal(format!("Invalid URL: {}", err)))?;
 
 	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
@@ -101,12 +101,12 @@ pub(crate) async fn connect(
 		maybe_connector,
 	)
 	.await
-	.map_err(|err| Error::Ws(err.to_string()))?;
+	.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG)
 		.await
-		.map_err(|err| Error::Ws(err.to_string()))?;
+		.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
 
 	Ok(socket)
 }
@@ -120,7 +120,10 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, crate::Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address.url.join(PATH)?;
+			address.url = address
+				.url
+				.join(PATH)
+				.map_err(|e| Error::internal(e.to_string()))?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			let maybe_connector = address.config.tls_config.clone().map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]

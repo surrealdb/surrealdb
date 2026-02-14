@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use url::Url;
 
 use crate::engine::remote::http::{Client, Http, Https};
-use crate::err::Error;
+use crate::Error;
 use crate::opt::endpoint::into_endpoint;
 use crate::opt::{Config, IntoEndpoint};
 use crate::{Endpoint, Result};
@@ -17,7 +17,7 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("http://{self}");
-					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?))
+					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::internal(format!("Invalid URL: {url}")))?))
 				}
 			}
 
@@ -38,7 +38,7 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("https://{self}");
-					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::InvalidUrl(url))?))
+					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::internal(format!("Invalid URL: {url}")))?))
 				}
 			}
 

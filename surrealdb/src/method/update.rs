@@ -210,10 +210,10 @@ where
 					))
 				}
 				Resource::Object(_) => {
-					return Err(Error::InvalidParams("Update on object not supported".to_string()));
+					return Err(Error::validation("Update on object not supported".to_string(), None));
 				}
 				Resource::Array(_) => {
-					return Err(Error::InvalidParams("Update on array not supported".to_string()));
+					return Err(Error::validation("Update on array not supported".to_string(), None));
 				}
 			};
 

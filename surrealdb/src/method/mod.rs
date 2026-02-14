@@ -1391,6 +1391,6 @@ fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
 	match data {
 		Value::Object(_) => Ok(()),
 		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
-		_ => Err(crate::err::Error::InvalidParams(error_message.to_owned())),
+		_ => Err(crate::Error::validation(error_message.to_owned(), None)),
 	}
 }

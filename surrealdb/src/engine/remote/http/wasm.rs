@@ -9,7 +9,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
-use crate::engine::SessionError;
+use crate::engine::{session_error_to_error, SessionError};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
@@ -111,11 +111,11 @@ pub(crate) async fn run_router(
 				let session_state = match state.sessions.get(&session_id) {
 					Some(Ok(state)) => state,
 					Some(Err(error)) => {
-						route.response.send(Err(Error::from(error).into())).await.ok();
+						route.response.send(Err(error)).await.ok();
 						continue;
 					}
 					None => {
-						let error = Error::from(SessionError::NotFound(session_id));
+						let error = session_error_to_error(SessionError::NotFound(session_id));
 						route.response.send(Err(error.into())).await.ok();
 						continue;
 					}

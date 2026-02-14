@@ -615,6 +615,12 @@ impl std::error::Error for Error {
 	}
 }
 
+impl From<anyhow::Error> for Error {
+	fn from(e: anyhow::Error) -> Self {
+		Error::internal(e.to_string())
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Type conversion errors (internal to the types layer)
 // -----------------------------------------------------------------------------

@@ -82,7 +82,8 @@ use wasm_bindgen_futures::spawn_local;
 use crate::conn::{Command, RequestData};
 use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::err::Error;
+use crate::Error;
+use crate::engine::session_error_to_error;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};
@@ -420,17 +421,11 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
 			Ok(path) => path,
 			Err(error) => {
-				return Err(Error::FileOpen {
-					path,
-					error,
-				});
+				return Err(Error::internal(format!("Failed to open `{path}`: {error}")));
 			}
 		};
 	if let Err(error) = io::copy(&mut response, &mut file).await {
-		return Err(Error::FileRead {
-			path,
-			error,
-		});
+		return Err(Error::internal(format!("Failed to read `{path}`: {error}")));
 	}
 
 	Ok(())
@@ -462,10 +457,11 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
-			return Err(Error::FileOpen {
-				path,
-				error,
-			});
+			return Err(Error::internal(format!(
+				"Failed to open `{}`: {}",
+				path.display(),
+				error
+			)));
 		}
 	};
 
@@ -481,10 +477,10 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 					"\n{}",
 					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
 				);
-				return Err(Error::Http(error_msg));
+				return Err(Error::internal(format!("HTTP error: {error_msg}")));
 			}
 			Err(_) => {
-				return Err(Error::Http(res));
+				return Err(Error::internal(format!("HTTP error: {res}")));
 			}
 		}
 	}
@@ -493,18 +489,18 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 
 	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
-		.map_err(crate::Error::InvalidResponse)?;
+		.map_err(|e| crate::Error::internal(format!("The server returned an unexpected response: {e}")))?;
 
 	// Convert Value::Array to Vec<QueryResult>
 	let Value::Array(arr) = value else {
-		return Err(Error::InvalidResponse("Expected array response from import".to_string()));
+		return Err(Error::internal("Expected array response from import".to_string()));
 	};
 
 	for val in arr.into_vec() {
 		let result = QueryResult::from_value(val)
-			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {e}")))?;
+			.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
 		if let Err(e) = result.result {
-			return Err(Error::Query(e.to_string()));
+			return Err(e);
 		}
 	}
 
@@ -538,7 +534,7 @@ async fn send_request(
 	let req_value = req.into_value();
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
-		.map_err(crate::Error::UnserializableValue)?;
+		.map_err(|e| crate::Error::internal(format!("Tried to send a value which could not be serialized: {e}")))?;
 
 	// Include auth header so the server can authenticate the request and maintain
 	// session state. This is essential for token-based auth flows where the server
@@ -549,7 +545,7 @@ async fn send_request(
 
 	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
-		.map_err(crate::Error::InvalidResponse)?;
+		.map_err(|e| crate::Error::internal(format!("The server returned an unexpected response: {e}")))?;
 
 	match response.result? {
 		DbResult::Query(results) => Ok(results),
@@ -580,7 +576,7 @@ async fn refresh_token(
 		Some(result) => result.clone().result?,
 		None => {
 			error!("received invalid result from server");
-			return Err(Error::InternalError("Received invalid result from server".to_string()));
+			return Err(Error::internal("Received invalid result from server".to_string()));
 		}
 	};
 	Ok((value, results))
@@ -632,7 +628,7 @@ async fn router(
 				match obj.get("namespace") {
 					Some(Value::String(ns)) => {
 						let header_value = HeaderValue::try_from(ns.as_str())
-							.map_err(|_| Error::InvalidNsName(ns.clone()))?;
+							.map_err(|_| Error::internal(format!("Invalid namespace name: {ns:?}")))?;
 						headers.insert(&NS, header_value);
 					}
 					_ => {
@@ -642,7 +638,7 @@ async fn router(
 				match obj.get("database") {
 					Some(Value::String(db)) => {
 						let header_value = HeaderValue::try_from(db.as_str())
-							.map_err(|_| Error::InvalidDbName(db.clone()))?;
+							.map_err(|_| Error::internal(format!("Invalid database name: {db:?}")))?;
 						headers.insert(&DB, header_value);
 					}
 					_ => {
@@ -675,7 +671,7 @@ async fn router(
 				Some(result) => result.clone().result?,
 				None => {
 					error!("received invalid result from server");
-					return Err(Error::InternalError(
+					return Err(Error::internal(
 						"Received invalid result from server".to_string(),
 					));
 				}
@@ -848,7 +844,7 @@ async fn router(
 			..
 		} => {
 			// TODO: Better error message here, some backups are supported
-			Err(Error::BackupsNotSupported.into())
+			Err(Error::internal("The protocol or storage engine does not support backups on this architecture".to_string()))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -865,7 +861,7 @@ async fn router(
 				.post(req_path)
 				.body(
 					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+						.map_err(|e| Error::internal(format!("failed to serialize Value: {}", e)))?,
 				)
 				.headers(headers.clone())
 				.auth(&auth)
@@ -887,7 +883,7 @@ async fn router(
 				.post(req_path)
 				.body(
 					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+						.map_err(|e| Error::internal(format!("failed to serialize Value: {}", e)))?,
 				)
 				.headers(headers.clone())
 				.auth(&auth)
@@ -961,7 +957,7 @@ async fn router(
 		}
 		Command::SubscribeLive {
 			..
-		} => Err(Error::LiveQueriesNotSupported),
+		} => Err(Error::internal("The protocol or storage engine does not support live queries on this architecture".to_string())),
 		Command::Query {
 			txn,
 			query,

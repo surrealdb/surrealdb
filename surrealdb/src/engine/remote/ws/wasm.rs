@@ -18,7 +18,7 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::err::Error;
+use crate::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
@@ -168,7 +168,7 @@ pub(crate) async fn run_router(
 	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
 		Ok(socket) => socket,
 		Err(error) => {
-			conn_tx.send(Err(Error::Ws(error.to_string()).into())).await.ok();
+			conn_tx.send(Err(Error::internal(format!("WebSocket error: {}", error)))).await.ok();
 			return;
 		}
 	};

@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use crate::conn::Command;
-use crate::err::Error;
+use crate::Error;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::{RefreshToken, Token};
 use crate::types::SurrealValue;
@@ -101,7 +101,7 @@ where
 			let token = match self.token.refresh.is_some() {
 				true => self.token.into_value(),
 				false => {
-					return Err(Error::MissingRefreshToken);
+					return Err(Error::internal("Missing refresh token".to_string()));
 				}
 			};
 			// Execute the refresh command to obtain new tokens.
