@@ -97,6 +97,8 @@ pub struct Context {
 	function_registry: Arc<FunctionRegistry>,
 	// Strategy for the new streaming planner/executor
 	new_planner_strategy: NewPlannerStrategy,
+	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
+	redact_duration: bool,
 	// Matches context for index functions (search::highlight, search::score, etc.)
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 }
@@ -153,6 +155,7 @@ impl Context {
 			surrealism_cache: None,
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
+			redact_duration: false,
 			matches_context: None,
 		}
 	}
@@ -183,6 +186,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
+			redact_duration: parent.redact_duration,
 			matches_context: parent.matches_context.clone(),
 		}
 	}
@@ -215,6 +219,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
+			redact_duration: parent.redact_duration,
 			matches_context: parent.matches_context.clone(),
 		}
 	}
@@ -247,6 +252,7 @@ impl Context {
 			surrealism_cache: from.surrealism_cache.clone(),
 			function_registry: from.function_registry.clone(),
 			new_planner_strategy: from.new_planner_strategy.clone(),
+			redact_duration: from.redact_duration,
 			matches_context: from.matches_context.clone(),
 		}
 	}
@@ -290,6 +296,7 @@ impl Context {
 			surrealism_cache: Some(surrealism_cache),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: planner_strategy,
+			redact_duration: false,
 			matches_context: None,
 		};
 		if let Some(timeout) = time_out {
@@ -681,6 +688,10 @@ impl Context {
 		if session.new_planner_strategy != NewPlannerStrategy::default() {
 			self.new_planner_strategy = session.new_planner_strategy.clone();
 		}
+		// Propagate duration redaction flag from session.
+		if session.redact_duration {
+			self.redact_duration = true;
+		}
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}
@@ -746,6 +757,11 @@ impl Context {
 	/// Get the new planner strategy for this context
 	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
 		&self.new_planner_strategy
+	}
+
+	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
+	pub(crate) fn redact_duration(&self) -> bool {
+		self.redact_duration
 	}
 
 	/// Check if scripting is allowed

@@ -500,15 +500,17 @@ fn compute_compound_key_range(
 			}
 		}
 	} else {
-		// No range operator - scan the entire prefix
-		let beg = key_err(Index::prefix_ids_beg(
+		// No range operator - scan the entire prefix using composite
+		// key functions so the scan correctly captures all entries whose
+		// leading columns match the prefix in a multi-column index.
+		let beg = key_err(Index::prefix_ids_composite_beg(
 			ns_id,
 			db_id,
 			&ix.table_name,
 			ix.index_id,
 			&prefix_array,
 		))?;
-		let end = key_err(Index::prefix_ids_end(
+		let end = key_err(Index::prefix_ids_composite_end(
 			ns_id,
 			db_id,
 			&ix.table_name,

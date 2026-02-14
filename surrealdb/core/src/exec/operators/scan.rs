@@ -19,7 +19,7 @@ use crate::exec::permission::{
 use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, RuntimeAttrs, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -91,6 +91,9 @@ pub struct Scan {
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// Runtime-determined attributes (e.g. which index was selected).
+	/// Populated during `execute()` and read by EXPLAIN ANALYZE.
+	pub(crate) runtime_attrs: RuntimeAttrs,
 }
 
 impl Scan {
@@ -118,6 +121,7 @@ impl Scan {
 			limit,
 			start,
 			metrics: Arc::new(OperatorMetrics::new()),
+			runtime_attrs: Arc::new(std::sync::Mutex::new(Vec::new())),
 		}
 	}
 }
@@ -162,6 +166,10 @@ impl ExecOperator for Scan {
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
+	}
+
+	fn runtime_attrs(&self) -> Option<&RuntimeAttrs> {
+		Some(&self.runtime_attrs)
 	}
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
@@ -220,6 +228,7 @@ impl ExecOperator for Scan {
 		let predicate = self.predicate.clone();
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
+		let runtime_attrs = Arc::clone(&self.runtime_attrs);
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -386,6 +395,7 @@ impl ExecOperator for Scan {
 						storage_limit: effective_storage_limit,
 						pre_skip,
 					},
+					&runtime_attrs,
 				).await?
 			};
 
@@ -595,9 +605,13 @@ struct TableScanConfig {
 /// Resolve the optimal access path for a table scan and return the source
 /// stream together with the number of rows that were pre-skipped at the
 /// KV layer (zero for index / full-text sources).
+///
+/// Populates `runtime_attrs` with details about the access path that was
+/// selected (used by EXPLAIN ANALYZE).
 async fn resolve_table_scan_stream(
 	ctx: &ExecutionContext,
 	cfg: TableScanConfig,
+	runtime_attrs: &RuntimeAttrs,
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
 
@@ -621,6 +635,12 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
+			record_runtime_attrs(runtime_attrs, |a| {
+				a.push(("access_method".into(), "IndexScan".into()));
+				a.push(("index".into(), index_ref.name.clone()));
+				a.push(("access".into(), format_btree_access(&access)));
+				a.push(("direction".into(), format!("{:?}", direction)));
+			});
 			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
@@ -632,6 +652,11 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
+			record_runtime_attrs(runtime_attrs, |a| {
+				a.push(("access_method".into(), "FullTextScan".into()));
+				a.push(("index".into(), index_ref.name.clone()));
+				a.push(("query".into(), query.clone()));
+			});
 			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
@@ -644,6 +669,12 @@ async fn resolve_table_scan_stream(
 			k,
 			ef,
 		}) => {
+			record_runtime_attrs(runtime_attrs, |a| {
+				a.push(("access_method".into(), "KnnScan".into()));
+				a.push(("index".into(), index_ref.name.clone()));
+				a.push(("k".into(), k.to_string()));
+				a.push(("ef".into(), ef.to_string()));
+			});
 			let knn_op = KnnScan::new(index_ref, vector, k, ef, cfg.table_name);
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
@@ -651,6 +682,10 @@ async fn resolve_table_scan_stream(
 
 		// Fall back to table KV scan (NOINDEX, etc.)
 		_ => {
+			record_runtime_attrs(runtime_attrs, |a| {
+				a.push(("access_method".into(), "TableScan".into()));
+				a.push(("direction".into(), format!("{:?}", cfg.direction)));
+			});
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let stream = kv_scan_stream(
@@ -664,6 +699,81 @@ async fn resolve_table_scan_stream(
 			);
 			Ok((stream, cfg.pre_skip))
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Runtime attribute helpers
+// ---------------------------------------------------------------------------
+
+/// Populate runtime attributes through a closure.
+///
+/// The lock is held only for the duration of the push operations.
+fn record_runtime_attrs(attrs: &RuntimeAttrs, populate: impl FnOnce(&mut Vec<(String, String)>)) {
+	if let Ok(mut guard) = attrs.lock() {
+		populate(&mut guard);
+	}
+}
+
+/// Format a `BTreeAccess` variant into a human-readable string for runtime attrs.
+fn format_btree_access(access: &crate::exec::index::access_path::BTreeAccess) -> String {
+	use surrealdb_types::ToSql;
+
+	use crate::exec::index::access_path::BTreeAccess;
+
+	match access {
+		BTreeAccess::Equality(v) => format!("Equality({})", v.to_sql()),
+		BTreeAccess::Range {
+			from,
+			to,
+		} => {
+			let from_str = from
+				.as_ref()
+				.map(|r| {
+					format!(
+						"{}{}",
+						if r.inclusive {
+							">="
+						} else {
+							">"
+						},
+						r.value.to_sql()
+					)
+				})
+				.unwrap_or_default();
+			let to_str = to
+				.as_ref()
+				.map(|r| {
+					format!(
+						"{}{}",
+						if r.inclusive {
+							"<="
+						} else {
+							"<"
+						},
+						r.value.to_sql()
+					)
+				})
+				.unwrap_or_default();
+			format!("Range({} {})", from_str, to_str).trim().to_string()
+		}
+		BTreeAccess::Compound {
+			prefix,
+			range,
+		} => {
+			let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
+			if let Some((op, val)) = range {
+				format!("Compound([{}] {:?} {})", prefix_str, op, val.to_sql())
+			} else {
+				format!("Compound([{}])", prefix_str)
+			}
+		}
+		BTreeAccess::FullText {
+			..
+		} => "FullText".to_string(),
+		BTreeAccess::Knn {
+			..
+		} => "Knn".to_string(),
 	}
 }
 

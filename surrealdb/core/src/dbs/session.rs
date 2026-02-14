@@ -39,6 +39,9 @@ pub struct Session {
 	pub variables: PublicVariables,
 	/// Strategy for the new streaming planner/executor.
 	pub new_planner_strategy: NewPlannerStrategy,
+	/// When true, EXPLAIN ANALYZE output omits elapsed durations, making
+	/// output deterministic for testing.
+	pub redact_duration: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -193,6 +196,7 @@ impl Session {
 			exp: None,
 			variables: Default::default(),
 			new_planner_strategy: NewPlannerStrategy::default(),
+			redact_duration: false,
 		}
 	}
 

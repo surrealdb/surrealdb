@@ -6,28 +6,16 @@ reason = "Test EXPLAIN with index-backed queries: standard index, unique index, 
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idx_email_uniq, access: Equality('a@test.com'), direction: Forward]\n\nTotal rows: 1"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active']
-"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active'] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['EU', 'active']), direction: Forward]\n\nTotal rows: 2"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: region = 'NA']
-"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: region = 'NA'] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['NA']), direction: Forward]\n\nTotal rows: 2"'''
 */
 
 -- Setup schema and data
@@ -43,13 +31,13 @@ value = '''
 };
 
 -- EXPLAIN a query that can use a standard index
-EXPLAIN SELECT * FROM user WHERE email = 'a@test.com';
+EXPLAIN ANALYZE SELECT * FROM user WHERE email = 'a@test.com';
 
 -- EXPLAIN with a compound index
-EXPLAIN SELECT * FROM user WHERE region = 'EU' AND status = 'active';
+EXPLAIN ANALYZE SELECT * FROM user WHERE region = 'EU' AND status = 'active';
 
 -- EXPLAIN with WITH NOINDEX to force table scan
-EXPLAIN SELECT * FROM user WITH NOINDEX WHERE email = 'a@test.com';
+EXPLAIN ANALYZE SELECT * FROM user WITH NOINDEX WHERE email = 'a@test.com';
 
 -- EXPLAIN a range scan on the compound index
-EXPLAIN SELECT * FROM user WHERE region = 'NA';
+EXPLAIN ANALYZE SELECT * FROM user WHERE region = 'NA';

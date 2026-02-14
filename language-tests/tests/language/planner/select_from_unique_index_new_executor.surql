@@ -5,64 +5,70 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 3]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 3]
-              └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']
-"'''
+value = '''"Project [ctx: Db] {rows: 3, batches: 1}
+└────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 3] {rows: 3, batches: 1}
+              └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4, batches: 1}
+                       actual: [access_method: IndexScan, index: time, access: Range(>d'2000-01-01T00:00:00Z' ), direction: Forward]
+
+Total rows: 3"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: time ASC]
-       └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z']
-"'''
+value = '''"Project [ctx: Db] {rows: 4, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: time ASC] {rows: 4, batches: 1}
+       └────> Scan [ctx: Db] [source: session, predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4, batches: 1}
+                actual: [access_method: IndexScan, index: time, access: Range(>d'2000-01-01T00:00:00Z' ), direction: Forward]
+
+Total rows: 4"'''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 3]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 3]
-              └────> Scan [ctx: Db] [source: session]
-''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time ASC, limit: 3] {rows: 3, batches: 1}
+              └────> Scan [ctx: Db] [source: session] {rows: 4, batches: 1}
+                       actual: [access_method: IndexScan, index: time, access: Range( ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: time ASC]
-       └────> Scan [ctx: Db] [source: session]
-''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: time ASC] {rows: 4, batches: 1}
+       └────> Scan [ctx: Db] [source: session] {rows: 4, batches: 1}
+                actual: [access_method: IndexScan, index: time, access: Range( ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 3]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 3]
-              └────> Scan [ctx: Db] [source: session]
-''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
+       └────> SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 3] {rows: 3, batches: 1}
+              └────> Scan [ctx: Db] [source: session] {rows: 4, batches: 1}
+                       actual: [access_method: IndexScan, index: time, access: Range( ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: time DESC]
-       └────> Scan [ctx: Db] [source: session]
-''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: time DESC] {rows: 4, batches: 1}
+       └────> Scan [ctx: Db] [source: session] {rows: 4, batches: 1}
+                actual: [access_method: IndexScan, index: time, access: Range( ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
@@ -80,17 +86,17 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
     RETURN "OK";
 };
 
-EXPLAIN SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3;
+EXPLAIN ANALYZE SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3;
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3;
-EXPLAIN SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC;
+EXPLAIN ANALYZE SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC;
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC;
 
-EXPLAIN SELECT * FROM session ORDER BY time ASC LIMIT 3;
+EXPLAIN ANALYZE SELECT * FROM session ORDER BY time ASC LIMIT 3;
 SELECT * FROM session ORDER BY time ASC LIMIT 3;
-EXPLAIN SELECT * FROM session ORDER BY time ASC;
+EXPLAIN ANALYZE SELECT * FROM session ORDER BY time ASC;
 SELECT * FROM session ORDER BY time ASC;
 
-EXPLAIN SELECT * FROM session ORDER BY time DESC LIMIT 3;
+EXPLAIN ANALYZE SELECT * FROM session ORDER BY time DESC LIMIT 3;
 SELECT * FROM session ORDER BY time DESC LIMIT 3;
-EXPLAIN SELECT * FROM session ORDER BY time DESC;
+EXPLAIN ANALYZE SELECT * FROM session ORDER BY time DESC;
 SELECT * FROM session ORDER BY time DESC;

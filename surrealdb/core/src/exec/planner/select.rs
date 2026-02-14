@@ -9,8 +9,8 @@ use super::Planner;
 use super::util::{
 	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params, derive_field_name,
 	extract_bruteforce_knn, extract_count_field_names, extract_matches_context, extract_version,
-	get_effective_limit_literal, idiom_to_field_name, idiom_to_field_path, is_count_all_eligible,
-	strip_knn_from_condition,
+	get_effective_limit_literal, has_knn_operator, idiom_to_field_name, idiom_to_field_path,
+	is_count_all_eligible, strip_knn_from_condition,
 };
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
@@ -172,16 +172,62 @@ impl<'ctx> Planner<'ctx> {
 					matches!(self.ctx.value(p.as_str()), Some(crate::val::Value::Table(_)))
 				}));
 
-		// Strip KNN operators from the scan predicate.  KNN operators
-		// (`<|k, dist|>` and `<|k, ef|>`) are handled by dedicated
-		// operators (KnnTopK, KnnScan) and cannot be evaluated as
-		// boolean predicates.  The full condition (with KNN) is still
-		// passed to plan_sources for index analysis.
-		let cond_without_knn = cond.as_ref().and_then(strip_knn_from_condition);
+		// ── KNN handling ───────────────────────────────────────────
+		// KNN operators cannot be evaluated as boolean predicates in a
+		// filter. We handle them in two ways:
+		//
+		// 1. Brute-force KNN (`<|k, DIST|>`): extract parameters and wrap the source in a KnnTopK
+		//    operator. Only works when the query vector is a literal (not a parameter).
+		//
+		// 2. HNSW KNN (`<|k, ef|>`): handled by index analysis at scan time. The scan dispatch
+		//    routes to KnnScan when an HNSW index exists.
+		//
+		// If the WHERE clause contains a KNN operator that we can't
+		// handle (parameter-based vector, missing index, etc.), we
+		// reject with PlannerUnimplemented so the old executor handles
+		// it.
+		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
+		let brute_force_knn = if has_knn {
+			cond.as_ref().and_then(extract_bruteforce_knn)
+		} else {
+			None
+		};
 
-		// Compile predicate for pushdown into Scan (KNN stripped)
+		// Determine the effective condition for filter predicates.
+		// If brute-force KNN was detected (and will be handled by KnnTopK),
+		// strip the KNN operator from the filter predicate.
+		let cond_for_filter = if brute_force_knn.is_some() {
+			// Brute-force KNN detected: strip the KNN from the filter
+			let stripped = cond.as_ref().and_then(strip_knn_from_condition);
+			// Safety check: if the residual still contains KNN operators
+			// (e.g. KNN nested under OR, or unhandled variants like KTree),
+			// fall back to the old executor rather than leaving them in the
+			// filter where they would be evaluated incorrectly as booleans.
+			if stripped.as_ref().is_some_and(|c| has_knn_operator(&c.0)) {
+				return Err(Error::PlannerUnimplemented(
+					"KNN operators nested in OR/NOT expressions or mixed with \
+					 unsupported KNN variants are not supported in the streaming executor"
+						.to_string(),
+				));
+			}
+			stripped
+		} else if has_knn {
+			// KNN present but not brute-force (HNSW) -- fall back to old
+			// executor which supports vector::distance::knn(),
+			// HnswConditionChecker, and the multi-stage iteration pattern.
+			return Err(Error::PlannerUnimplemented(
+				"KNN queries with HNSW indexes or parameter-based vectors are not yet fully \
+				 supported in the streaming executor"
+					.to_string(),
+			));
+		} else {
+			// No KNN -- use the original condition
+			cond
+		};
+
+		// Compile predicate for pushdown into Scan
 		let scan_predicate = if source_is_single_scan {
-			cond_without_knn
+			cond_for_filter
 				.as_ref()
 				.map(|c| planning_planner.physical_expr(c.0.clone()))
 				.transpose()?
@@ -206,53 +252,63 @@ impl<'ctx> Planner<'ctx> {
 			(None, None)
 		};
 
-		// ── Brute-force KNN detection ──────────────────────────────
-		// Detect `field <|k, DIST|> [vec]` in the WHERE clause. If found,
-		// extract the KNN parameters. The KnnTopK operator wraps the source
-		// after it is created.
-		let brute_force_knn = cond.as_ref().and_then(extract_bruteforce_knn);
-
 		let source = planning_planner.plan_sources(
 			what,
 			version,
-			// Pass the full condition (with KNN) so index analysis can detect HNSW indexes
-			cond.as_ref(),
+			// Pass the original condition (without KNN stripped) so index
+			// analysis can still detect opportunities for other predicates.
+			// The KNN operator won't cause issues because index analysis
+			// handles NearestNeighbor separately.
+			cond_for_filter.as_ref(),
 			order.as_ref(),
 			with.as_ref(),
 			needed_fields,
-			// Use the KNN-stripped predicate for the scan filter
 			scan_predicate,
 			scan_limit,
 			scan_start,
 		)?;
 
 		// Wrap source with KnnTopK if brute-force KNN was detected
+		let had_bruteforce_knn = brute_force_knn.is_some();
 		let source = if let Some(knn_params) = brute_force_knn {
 			use crate::exec::operators::KnnTopK;
-			let topk: Arc<dyn ExecOperator> = Arc::new(KnnTopK::new(
-				source,
+			// For multi-source queries (source_is_single_scan == false), apply
+			// the residual filter BEFORE KnnTopK so that top-K is computed only
+			// over rows satisfying the non-KNN predicates. Without this, nearer
+			// rows that fail the filter can displace valid rows in the heap.
+			let input = if !source_is_single_scan {
+				if let Some(ref cond) = cond_for_filter {
+					let predicate = planning_planner.physical_expr(cond.0.clone())?;
+					Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
+				} else {
+					source
+				}
+			} else {
+				source // single scan: filter already pushed into Scan
+			};
+			Arc::new(KnnTopK::new(
+				input,
 				knn_params.field,
 				knn_params.vector,
 				knn_params.k as usize,
 				knn_params.distance,
-			));
-			topk
+			)) as Arc<dyn ExecOperator>
 		} else {
 			source
 		};
-		// ── end brute-force KNN ────────────────────────────────────
+		// ── end KNN ────────────────────────────────────────────────
 
 		// Build pipeline config. When pushdown is active, clear the corresponding
 		// fields so plan_pipeline does not create redundant operators.
-		let filter_pushed = source_is_single_scan && cond_without_knn.is_some();
+		let filter_pushed = source_is_single_scan && cond_for_filter.is_some();
 		let config = SelectPipelineConfig {
-			// Use the KNN-stripped condition for the filter pipeline.
-			// KNN operators are consumed by dedicated operators (KnnScan, KnnTopK)
-			// and must not appear in a boolean filter.
-			cond: if source_is_single_scan {
+			cond: if source_is_single_scan || had_bruteforce_knn {
+				// single scan: filter pushed into Scan
+				// brute-force KNN: filter applied before KnnTopK (multi-source)
+				//   or pushed into Scan (single source)
 				None
 			} else {
-				cond_without_knn
+				cond_for_filter
 			},
 			split,
 			group,

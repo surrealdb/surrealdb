@@ -83,6 +83,27 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // Predicate / Validation Helpers
 // ============================================================================
 
+/// Check if an expression contains any KNN (nearest neighbor) operators.
+pub(super) fn has_knn_operator(expr: &Expr) -> bool {
+	match expr {
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
+				return true;
+			}
+			has_knn_operator(left) || has_knn_operator(right)
+		}
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => has_knn_operator(inner),
+		_ => false,
+	}
+}
+
 /// Parameters extracted from a brute-force KNN expression.
 pub(super) struct BruteForceKnnParams {
 	/// The idiom path to the vector field.
@@ -103,27 +124,32 @@ pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 	extract_bruteforce_knn_from_expr(&cond.0).map(|(params, _residual)| params)
 }
 
-/// Strip any KNN operator from a WHERE clause, returning the residual condition.
+/// Strip brute-force KNN (`NearestNeighbor::K`) operators from a WHERE clause,
+/// returning the residual condition.
 ///
-/// Both `NearestNeighbor::Approximate` (HNSW) and `NearestNeighbor::K` (brute-force)
-/// KNN operators cannot be evaluated as boolean predicates. They are handled by
-/// dedicated scan operators (`KnnScan`, `KnnTopK`) and must be removed from the
-/// filter predicate to avoid evaluation errors.
+/// Only `NearestNeighbor::K` is stripped because it is consumed by the `KnnTopK`
+/// operator. Other variants (`KTree`, `Approximate`) are left in place -- the
+/// caller should verify the residual contains no remaining KNN operators and
+/// fall back to the old executor if it does.
 pub(super) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 	strip_knn_from_expr(&cond.0).map(Cond)
 }
 
-/// Recursively strip KNN operator expressions from an expression tree.
+/// Recursively strip brute-force KNN (`NearestNeighbor::K`) operator expressions
+/// from an AND-connected expression tree.
 ///
-/// Returns the expression with KNN operators removed, or `None` if the entire
-/// expression was a KNN operator (nothing left).
+/// Returns the expression with `NearestNeighbor::K` operators removed, or `None`
+/// if the entire expression was such an operator (nothing left). Other
+/// `NearestNeighbor` variants (`KTree`, `Approximate`) are left unchanged.
 fn strip_knn_from_expr(expr: &Expr) -> Option<Expr> {
 	match expr {
-		// Any NearestNeighbor operator -- strip it entirely
+		// Only strip NearestNeighbor::K (brute-force), which is consumed by KnnTopK.
+		// Other variants (KTree, Approximate) are not handled by KnnTopK and must
+		// not be silently dropped.
 		Expr::Binary {
-			op: BinaryOperator::NearestNeighbor(_),
+			op: BinaryOperator::NearestNeighbor(nn),
 			..
-		} => None,
+		} if matches!(nn.as_ref(), NearestNeighbor::K(..)) => None,
 		// AND: strip from either side, keeping the other
 		Expr::Binary {
 			left,

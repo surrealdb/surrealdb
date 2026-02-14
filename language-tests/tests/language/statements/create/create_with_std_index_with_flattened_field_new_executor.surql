@@ -11,16 +11,18 @@ value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }]"
 value = "[{ id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: student, predicate: marks.*.mark = 40]
-''''
+value = ''''Project [ctx: Db] {rows: 0, batches: 0}
+└────> Scan [ctx: Db] [source: student, predicate: marks.*.mark = 40] {rows: 0, batches: 0}
+         actual: [access_method: IndexScan, index: mark_idx, access: Equality(40), direction: Forward]
+
+Total rows: 0''''
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: student, predicate: 40 INSIDE marks.*.mark]
-''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: 40 INSIDE marks.*.mark] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
@@ -57,8 +59,8 @@ CREATE student:2 CONTENT {
         { subject: "hindi", mark: 45 }
     ]
 };
-EXPLAIN SELECT * FROM student WHERE marks.*.mark = 40;
-EXPLAIN SELECT * FROM student WHERE 40 INSIDE marks.*.mark;
+EXPLAIN ANALYZE SELECT * FROM student WHERE marks.*.mark = 40;
+EXPLAIN ANALYZE SELECT * FROM student WHERE 40 INSIDE marks.*.mark;
 SELECT * FROM student WITH NOINDEX WHERE marks.*.mark CONTAINS 40;
 SELECT * FROM student WHERE marks.*.mark CONTAINS 40;
 SELECT * FROM student WHERE 40 INSIDE marks.*.mark;

@@ -9,28 +9,31 @@ value = "NONE"
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: test, predicate: 'domain.com' INSIDE email]
-"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: 'domain.com' INSIDE email] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
@@ -49,13 +52,13 @@ value = "[]"
 DEFINE INDEX OVERWRITE email ON test COLUMNS email;
 UPSERT test:1 SET email = 'email@domain.com';
 
-EXPLAIN SELECT * FROM test WHERE email CONTAINS 'domain.com';
+EXPLAIN ANALYZE SELECT * FROM test WHERE email CONTAINS 'domain.com';
 SELECT * FROM test WHERE email CONTAINS 'domain.com';
 
-EXPLAIN SELECT * FROM test WHERE 'domain.com' INSIDE email;
+EXPLAIN ANALYZE SELECT * FROM test WHERE 'domain.com' INSIDE email;
 SELECT * FROM test WHERE 'domain.com' INSIDE email;
 
-EXPLAIN SELECT * FROM test WITH NOINDEX WHERE email CONTAINS 'domain.com';
+EXPLAIN ANALYZE SELECT * FROM test WITH NOINDEX WHERE email CONTAINS 'domain.com';
 SELECT * FROM test WITH NOINDEX WHERE email CONTAINS 'domain.com';
 
 DELETE FROM test WHERE email CONTAINS 'domain.com' EXPLAIN;

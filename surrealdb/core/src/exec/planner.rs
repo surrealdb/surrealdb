@@ -872,6 +872,7 @@ impl<'ctx> Planner<'ctx> {
 			Ok(Arc::new(AnalyzePlan {
 				plan: inner_plan,
 				format,
+				redact_duration: self.ctx.redact_duration(),
 			}))
 		} else {
 			Ok(Arc::new(ExplainPlan {

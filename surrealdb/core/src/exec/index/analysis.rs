@@ -329,6 +329,38 @@ impl<'a> IndexAnalyzer<'a> {
 				&& let Some(access) =
 					self.match_operator_to_access(op, &value, position, &ix_def.index)
 			{
+				// For compound indexes (>1 column), a single-column equality
+				// match on the first column must use a prefix scan rather
+				// than a point lookup, because the index key includes all
+				// columns.  E.g. WHERE a = 1 on INDEX (a, b) must scan the
+				// prefix [1] to find all (1, *) entries.
+				let access = if ix_def.cols.len() > 1 {
+					match access {
+						BTreeAccess::Equality(v) => BTreeAccess::Compound {
+							prefix: vec![v],
+							range: None,
+						},
+						BTreeAccess::Range {
+							from,
+							to,
+						} => {
+							// A range on the first column of a compound index
+							// cannot use Compound prefix+range (that's for
+							// equality prefix + range on next column).
+							// Keep it as a simple range -- the IndexScan compound
+							// path won't be reached, but deduplication may
+							// prefer a compound candidate if one exists.
+							BTreeAccess::Range {
+								from,
+								to,
+							}
+						}
+						other => other,
+					}
+				} else {
+					access
+				};
+
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,

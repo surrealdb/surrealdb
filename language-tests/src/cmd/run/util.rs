@@ -66,10 +66,12 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 /// Creates the right core capabilities from a test config.
 pub fn session_from_test_config(config: &TestConfig) -> Session {
 	let Some(env) = config.env.as_ref() else {
-		return Session::owner()
+		let mut session = Session::owner()
 			.with_ns("test")
 			.with_db("test")
 			.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+		session.redact_duration = true;
+		return session;
 	};
 
 	let ns = env.namespace();
@@ -139,6 +141,11 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 			NewPlannerStrategy::AllReadOnlyStatements
 		}
 	};
+
+	// Default to redacting durations for deterministic EXPLAIN ANALYZE output.
+	// Tests can override with `redact-duration = false` in [env] if they need
+	// actual elapsed times.
+	session.redact_duration = env.redact_duration.unwrap_or(true);
 
 	session
 }
