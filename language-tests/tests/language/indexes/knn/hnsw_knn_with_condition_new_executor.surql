@@ -12,10 +12,10 @@ value = "[{ flag: true, id: pts:1, point: [10f] }, { flag: false, id: pts:2, poi
 value = "NONE"
 
 [[test.results]]
-error = "Unknown function 'vector::distance::knn' - not found in function registry"
+match = "string::contains($result, 'TableScan')"
 
 [[test.results]]
-error = "Unknown function 'vector::distance::knn' - not found in function registry"
+value = "[{ distance: NONE, flag: true, id: pts:1 }, { distance: NONE, flag: true, id: pts:3 }, { distance: NONE, flag: true, id: pts:5 }, { distance: NONE, flag: true, id: pts:7 }]"
 */
 
 DEFINE INDEX hn_pt1 ON pts FIELDS point HNSW DIMENSION 1;

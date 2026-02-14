@@ -3,16 +3,21 @@
 //! This module provides traits for functions that are bound to WHERE clause
 //! predicates via index infrastructure. Unlike scalar functions which operate
 //! purely on their arguments, index functions reference a specific predicate
-//! (e.g., a MATCHES clause) in the WHERE condition and need access to the
-//! associated index at evaluation time.
+//! (e.g., a MATCHES clause or a KNN operator) in the WHERE condition and need
+//! access to the associated index at evaluation time.
 //!
-//! The match_ref argument in the user's query (e.g., the `1` in
-//! `search::highlight('<b>', '</b>', 1)`) is extracted at plan time and
-//! resolved to a `MatchContext` containing the index metadata. This context
-//! is then passed to the function at evaluation time along with the
-//! remaining runtime arguments.
+//! Each index function declares what kind of index context it requires via
+//! [`IndexContextKind`]. The planner uses this to resolve the appropriate
+//! [`IndexContext`] at plan time:
 //!
-//! Examples: search::highlight, search::score, search::offsets
+//! - **FullText**: The `index_ref_arg_index()` argument (e.g., the `1` in `search::highlight('<b>',
+//!   '</b>', 1)`) is extracted and resolved to a [`MatchContext`] via the WHERE clause's MATCHES
+//!   operators.
+//!
+//! - **Knn**: A [`KnnContext`] is created from the KNN operator in the WHERE clause. The KNN scan
+//!   operator populates it with per-row distances at execution time.
+//!
+//! Examples: search::highlight, search::score, search::offsets, vector::distance::knn
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -27,19 +32,63 @@ use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
-use crate::val::{TableName, Value};
+use crate::val::{Number, RecordId, TableName, Value};
+
+// =========================================================================
+// IndexContextKind - what kind of index context a function requires
+// =========================================================================
+
+/// What kind of index context an [`IndexFunction`] requires.
+///
+/// The planner uses this to resolve the appropriate [`IndexContext`] at plan
+/// time without needing to know about specific function names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexContextKind {
+	/// Full-text search context (resolved from MATCHES clauses).
+	FullText,
+	/// KNN distance context (resolved from KNN operators).
+	Knn,
+}
+
+// =========================================================================
+// IndexContext - resolved context enum passed to index functions
+// =========================================================================
+
+/// Resolved index context, created at plan time and passed to index functions
+/// at evaluation time.
+///
+/// Each variant carries the context appropriate for its index type.
+/// Cloning is cheap (all variants are `Arc`-wrapped).
+#[derive(Clone)]
+pub enum IndexContext {
+	/// Full-text search context with lazy access to FT index resources.
+	FullText(Arc<MatchContext>),
+	/// KNN distance context populated by the KNN scan operator.
+	Knn(Arc<KnnContext>),
+}
+
+impl Debug for IndexContext {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Self::FullText(ctx) => f.debug_tuple("IndexContext::FullText").field(ctx).finish(),
+			Self::Knn(ctx) => f.debug_tuple("IndexContext::Knn").field(ctx).finish(),
+		}
+	}
+}
+
+// =========================================================================
+// IndexFunction trait
+// =========================================================================
 
 /// A function that is bound to a WHERE clause predicate via index infrastructure.
 ///
 /// Index functions differ from scalar functions in that they:
-/// - Reference a specific WHERE clause predicate via a match_ref argument
-/// - Need access to index infrastructure (e.g., FullTextIndex) at evaluation time
-/// - Have the match_ref argument extracted at plan time, not passed at runtime
+/// - Are associated with a specific WHERE clause predicate (MATCHES, KNN, etc.)
+/// - Need access to index infrastructure at evaluation time
+/// - May have a reference argument extracted at plan time (not passed at runtime)
 ///
-/// The match_ref argument position is declared by `match_ref_arg_index()`. The
-/// planner extracts this argument from the AST, resolves it against the WHERE
-/// clause's MATCHES operators, and creates a `MatchContext` that is passed to
-/// the function at evaluation time.
+/// The planner dispatches generically based on [`index_context_kind()`] to
+/// resolve the appropriate [`IndexContext`], without hardcoding function names.
 pub trait IndexFunction: SendSyncRequirement + Debug {
 	/// The fully qualified function name (e.g., "search::highlight", "search::score")
 	fn name(&self) -> &'static str;
@@ -56,13 +105,22 @@ pub trait IndexFunction: SendSyncRequirement + Debug {
 		Ok(self.signature().returns)
 	}
 
-	/// Which argument position contains the match_ref number.
+	/// What kind of index context this function requires.
 	///
-	/// This argument is extracted at plan time by the planner and is NOT
-	/// passed to `invoke_async` as a runtime argument. The planner uses it
-	/// to look up the corresponding MATCHES clause in the WHERE condition
-	/// and build a `MatchContext`.
-	fn match_ref_arg_index(&self) -> usize;
+	/// The planner uses this to determine how to resolve the [`IndexContext`]:
+	/// - [`IndexContextKind::FullText`]: resolve via MATCHES clause match_ref
+	/// - [`IndexContextKind::Knn`]: resolve via KNN operator context
+	fn index_context_kind(&self) -> IndexContextKind;
+
+	/// Which argument position contains the index reference number.
+	///
+	/// When `Some(idx)`, this argument is extracted at plan time by the planner
+	/// and is NOT passed to `invoke_async` as a runtime argument. For full-text
+	/// functions, this is the match_ref that identifies a MATCHES clause.
+	///
+	/// Returns `None` if no reference argument is needed (e.g., KNN functions
+	/// that use a single KNN operator from the WHERE clause).
+	fn index_ref_arg_index(&self) -> Option<usize>;
 
 	/// The minimum context level required to execute this function.
 	///
@@ -76,15 +134,15 @@ pub trait IndexFunction: SendSyncRequirement + Debug {
 	///
 	/// # Arguments
 	/// * `ctx` - The evaluation context with access to current row and parameters
-	/// * `match_ctx` - The resolved MATCHES clause context with lazy index access
-	/// * `args` - The evaluated function arguments, WITHOUT the match_ref argument
+	/// * `index_ctx` - The resolved index context (FullText or Knn)
+	/// * `args` - The evaluated function arguments, WITHOUT any plan-time extracted arguments
 	///
 	/// # Returns
 	/// The computed value
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,
-		match_ctx: &'a MatchContext,
+		index_ctx: &'a IndexContext,
 		args: Vec<Value>,
 	) -> BoxFut<'a, Result<Value>>;
 }
@@ -210,6 +268,56 @@ impl Debug for MatchContext {
 			.field("table", &self.table)
 			.field("initialized", &self.ft_cache.initialized())
 			.finish()
+	}
+}
+
+// =========================================================================
+// KnnContext - distance context populated by KNN scan operators
+// =========================================================================
+
+/// KNN distance context, populated by KnnScan at execution time.
+///
+/// Created at plan time and shared (via `Arc`) between the KNN scan operator
+/// and the `vector::distance::knn()` index function. The scan operator writes
+/// per-row distances after the HNSW search completes; the function reads them
+/// during projection evaluation.
+///
+/// This is the KNN equivalent of [`MatchContext`] -- same lifecycle pattern
+/// (plan-time creation, shared via `Arc`, deferred population at execution time).
+pub struct KnnContext {
+	/// Per-row distances keyed by RecordId, populated by the KNN scan operator.
+	distances: std::sync::RwLock<HashMap<RecordId, Number>>,
+}
+
+impl KnnContext {
+	/// Create a new empty KnnContext.
+	pub fn new() -> Self {
+		Self {
+			distances: std::sync::RwLock::new(HashMap::new()),
+		}
+	}
+
+	/// Record the distance for a record. Called by KnnScan after HNSW search.
+	pub fn insert(&self, rid: RecordId, dist: Number) {
+		self.distances.write().expect("KnnContext lock poisoned").insert(rid, dist);
+	}
+
+	/// Look up the distance for a record. Called by vector::distance::knn().
+	pub fn get(&self, rid: &RecordId) -> Option<Number> {
+		self.distances.read().expect("KnnContext lock poisoned").get(rid).copied()
+	}
+}
+
+impl Default for KnnContext {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
+impl Debug for KnnContext {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let count = self.distances.read().map(|d| d.len()).unwrap_or(0);
+		f.debug_struct("KnnContext").field("entries", &count).finish()
 	}
 }
 

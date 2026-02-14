@@ -101,6 +101,8 @@ pub struct Context {
 	redact_duration: bool,
 	// Matches context for index functions (search::highlight, search::score, etc.)
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
+	// KNN context for index functions (vector::distance::knn)
+	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 impl Default for Context {
@@ -157,6 +159,7 @@ impl Context {
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_duration: false,
 			matches_context: None,
+			knn_context: None,
 		}
 	}
 
@@ -188,6 +191,7 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy.clone(),
 			redact_duration: parent.redact_duration,
 			matches_context: parent.matches_context.clone(),
+			knn_context: parent.knn_context.clone(),
 		}
 	}
 
@@ -221,6 +225,7 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy.clone(),
 			redact_duration: parent.redact_duration,
 			matches_context: parent.matches_context.clone(),
+			knn_context: parent.knn_context.clone(),
 		}
 	}
 
@@ -254,6 +259,7 @@ impl Context {
 			new_planner_strategy: from.new_planner_strategy.clone(),
 			redact_duration: from.redact_duration,
 			matches_context: from.matches_context.clone(),
+			knn_context: from.knn_context.clone(),
 		}
 	}
 
@@ -298,6 +304,7 @@ impl Context {
 			new_planner_strategy: planner_strategy,
 			redact_duration: false,
 			matches_context: None,
+			knn_context: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -752,6 +759,16 @@ impl Context {
 		&self,
 	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
 		self.matches_context.as_ref()
+	}
+
+	/// Set the KNN context for index functions (vector::distance::knn)
+	pub(crate) fn set_knn_context(&mut self, ctx: Arc<crate::exec::function::KnnContext>) {
+		self.knn_context = Some(ctx);
+	}
+
+	/// Get the KNN context for index functions
+	pub(crate) fn get_knn_context(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
+		self.knn_context.as_ref()
 	}
 
 	/// Get the new planner strategy for this context

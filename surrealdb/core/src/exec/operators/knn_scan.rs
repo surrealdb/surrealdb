@@ -51,6 +51,8 @@ pub struct KnnScan {
 	pub table_name: crate::val::TableName,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
+	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
+	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 impl KnnScan {
@@ -60,6 +62,7 @@ impl KnnScan {
 		k: u32,
 		ef: u32,
 		table_name: crate::val::TableName,
+		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -68,6 +71,7 @@ impl KnnScan {
 			ef,
 			table_name,
 			metrics: Arc::new(OperatorMetrics::new()),
+			knn_context,
 		}
 	}
 }
@@ -115,6 +119,7 @@ impl ExecOperator for KnnScan {
 		let k = self.k;
 		let ef = self.ef;
 		let table_name = self.table_name.clone();
+		let knn_context = self.knn_context.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -224,6 +229,15 @@ impl ExecOperator for KnnScan {
 					.await
 					.context("HNSW KNN search failed")?
 			};
+
+			// Populate KNN distance context (if present) before yielding records.
+			// This makes distances available to vector::distance::knn() during
+			// downstream projection evaluation.
+			if let Some(ref knn_ctx) = knn_context {
+				for (rid, distance, _) in &knn_results {
+					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance));
+				}
+			}
 
 			// Convert results to records and yield as batches
 			let mut batch = Vec::with_capacity(BATCH_SIZE.min(knn_results.len()));

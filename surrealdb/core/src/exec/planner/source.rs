@@ -21,12 +21,20 @@ use crate::expr::{Expr, Literal};
 // ============================================================================
 
 impl<'ctx> Planner<'ctx> {
-	/// Plan an index function call (search::highlight, search::score, search::offsets).
+	/// Plan an index function call.
+	///
+	/// Dispatches generically based on [`IndexContextKind`] declared by the
+	/// function -- no hardcoded function names. The function declares what kind
+	/// of index context it needs, and the planner resolves it:
+	///
+	/// - **FullText**: extracts the index_ref argument, resolves via MATCHES context
+	/// - **Knn**: retrieves the KNN context from the planning context
 	pub(crate) fn plan_index_function(
 		&self,
 		name: &str,
 		mut ast_args: Vec<Expr>,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		use crate::exec::function::{IndexContext, IndexContextKind};
 		use crate::exec::physical_expr::function::IndexFunctionExec;
 
 		let registry = self.function_registry();
@@ -34,57 +42,89 @@ impl<'ctx> Planner<'ctx> {
 			message: format!("Index function '{}' not found in registry", name),
 		})?;
 
-		let match_ref_idx = func.match_ref_arg_index();
-
-		if match_ref_idx >= ast_args.len() {
-			return Err(Error::Query {
-				message: format!(
-					"Index function '{}' requires at least {} arguments",
-					name,
-					match_ref_idx + 1
-				),
-			});
-		}
-
-		let match_ref_ast = ast_args.remove(match_ref_idx);
-
-		let match_ref = match match_ref_ast {
-			Expr::Literal(Literal::Integer(n)) => n as u8,
-			Expr::Literal(Literal::Float(n)) => n as u8,
-			_ => {
-				return Err(Error::Query {
+		// Resolve the appropriate index context based on the function's declared kind
+		let index_ctx = match func.index_context_kind() {
+			IndexContextKind::FullText => {
+				// FullText functions must declare which argument is the index ref
+				let ref_idx = func.index_ref_arg_index().ok_or_else(|| Error::Query {
 					message: format!(
-						"Index function '{}': match_ref argument must be a literal integer",
+						"Index function '{}': FullText functions must declare an index_ref_arg_index",
 						name
 					),
-				});
+				})?;
+
+				if ref_idx >= ast_args.len() {
+					return Err(Error::Query {
+						message: format!(
+							"Index function '{}' requires at least {} arguments",
+							name,
+							ref_idx + 1
+						),
+					});
+				}
+
+				// Extract the match_ref argument at plan time (not passed at runtime)
+				let match_ref_ast = ast_args.remove(ref_idx);
+				let match_ref = match match_ref_ast {
+					Expr::Literal(Literal::Integer(n)) => n as u8,
+					Expr::Literal(Literal::Float(n)) => n as u8,
+					_ => {
+						return Err(Error::Query {
+							message: format!(
+								"Index function '{}': index_ref argument must be a literal integer",
+								name
+							),
+						});
+					}
+				};
+
+				// Resolve the MatchContext from the MATCHES context
+				let matches_ctx = self.ctx.get_matches_context().ok_or_else(|| Error::Query {
+					message: format!(
+						"Index function '{}': no MATCHES clause found in WHERE condition",
+						name
+					),
+				})?;
+
+				let match_ctx = matches_ctx
+					.resolve(match_ref, extract_table_from_context(self.ctx))
+					.map_err(|e| Error::Query {
+						message: format!("Index function '{}': {}", name, e),
+					})?;
+
+				IndexContext::FullText(match_ctx)
+			}
+			IndexContextKind::Knn => {
+				// KNN functions: retrieve the KNN context from the planning context.
+				// If there's a ref argument, extract it (currently unused for single-KNN queries).
+				if let Some(ref_idx) = func.index_ref_arg_index()
+					&& ref_idx < ast_args.len()
+				{
+					ast_args.remove(ref_idx);
+				}
+
+				let knn_ctx = self.ctx.get_knn_context().ok_or_else(|| Error::Query {
+					message: format!(
+						"Index function '{}': no KNN operator found in WHERE condition",
+						name
+					),
+				})?;
+				IndexContext::Knn(knn_ctx.clone())
 			}
 		};
 
+		// Compile remaining arguments to physical expressions
 		let mut phys_args = Vec::with_capacity(ast_args.len());
 		for arg in ast_args {
 			phys_args.push(self.physical_expr(arg)?);
 		}
-
-		let matches_ctx = self.ctx.get_matches_context().ok_or_else(|| Error::Query {
-			message: format!(
-				"Index function '{}': no MATCHES clause found in WHERE condition",
-				name
-			),
-		})?;
-
-		let match_ctx = matches_ctx
-			.resolve(match_ref, extract_table_from_context(self.ctx))
-			.map_err(|e| Error::Query {
-				message: format!("Index function '{}': {}", name, e),
-			})?;
 
 		let func_ctx = func.required_context();
 
 		Ok(Arc::new(IndexFunctionExec {
 			name: name.to_string(),
 			arguments: phys_args,
-			match_ctx,
+			index_ctx,
 			func_required_context: func_ctx,
 		}))
 	}

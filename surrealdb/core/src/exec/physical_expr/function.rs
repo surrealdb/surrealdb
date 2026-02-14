@@ -1187,23 +1187,25 @@ impl ToSql for ProjectionFunctionExec {
 }
 
 // =============================================================================
-// Index Function Expression (search::highlight, search::score, search::offsets)
+// Index Function Expression (search::highlight, search::score, search::offsets,
+//                            vector::distance::knn)
 // =============================================================================
 
 /// Index function expression - functions bound to WHERE clause predicates.
 ///
-/// These functions reference a MATCHES clause in the WHERE condition via a
-/// match_ref number. The match_ref is resolved at plan time into a `MatchContext`
-/// that provides lazy access to the associated full-text index infrastructure.
+/// These functions are associated with an index operator in the WHERE condition
+/// (e.g., MATCHES for full-text, `<|k,ef|>` for KNN). The planner resolves
+/// the appropriate [`IndexContext`] at plan time based on the function's
+/// declared [`IndexContextKind`].
 ///
-/// The arguments stored here do NOT include the match_ref argument, which was
-/// extracted by the planner.
+/// Any plan-time reference arguments (e.g., match_ref) are extracted by the
+/// planner and are NOT included in the stored arguments.
 #[derive(Debug)]
 pub struct IndexFunctionExec {
 	pub(crate) name: String,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
-	/// Resolved MATCHES clause context with lazy index access.
-	pub(crate) match_ctx: Arc<crate::exec::function::MatchContext>,
+	/// Resolved index context (FullText or Knn).
+	pub(crate) index_ctx: crate::exec::function::IndexContext,
 	/// The required context level for this function.
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
@@ -1239,11 +1241,11 @@ impl PhysicalExpr for IndexFunctionExec {
 			)
 		})?;
 
-		// Evaluate all arguments (match_ref was already extracted at plan time)
+		// Evaluate all arguments (any plan-time ref args were already extracted)
 		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
-		// Invoke the index function with the resolved match context
-		Ok(func.invoke_async(&ctx, &self.match_ctx, args).await?)
+		// Invoke the index function with the resolved index context
+		Ok(func.invoke_async(&ctx, &self.index_ctx, args).await?)
 	}
 }
 
@@ -1259,7 +1261,7 @@ impl Clone for IndexFunctionExec {
 		Self {
 			name: self.name.clone(),
 			arguments: self.arguments.clone(),
-			match_ctx: self.match_ctx.clone(),
+			index_ctx: self.index_ctx.clone(),
 			func_required_context: self.func_required_context,
 		}
 	}

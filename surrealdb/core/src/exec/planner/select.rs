@@ -163,16 +163,33 @@ impl<'ctx> Planner<'ctx> {
 			}
 		});
 
-		// Analyze WHERE clause for MATCHES operators used by index functions
+		// Analyze WHERE clause for index function contexts (MATCHES, KNN).
+		// Detect early so the planning context carries the appropriate index
+		// contexts for plan_index_function dispatch.
+		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
+
 		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
 			if let Some(ref c) = cond {
-				let mut matches_ctx = extract_matches_context(c);
-				if !matches_ctx.is_empty() {
-					if let Some(ref table) = primary_table {
-						matches_ctx.set_table(table.clone());
-					}
+				let matches_ctx = extract_matches_context(c);
+				let has_matches = !matches_ctx.is_empty();
+
+				if has_matches || has_knn_early {
 					let mut child = crate::ctx::Context::new(self.ctx);
-					child.set_matches_context(matches_ctx);
+
+					if has_matches {
+						let mut matches_ctx = matches_ctx;
+						if let Some(ref table) = primary_table {
+							matches_ctx.set_table(table.clone());
+						}
+						child.set_matches_context(matches_ctx);
+					}
+
+					if has_knn_early {
+						child.set_knn_context(std::sync::Arc::new(
+							crate::exec::function::KnnContext::new(),
+						));
+					}
+
 					std::borrow::Cow::Owned(child.freeze())
 				} else {
 					std::borrow::Cow::Borrowed(self.ctx)
@@ -548,20 +565,26 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::val::Value;
 
+		// Get KNN context from the planning context (if any) for Scan operators
+		let knn_ctx = self.ctx.get_knn_context().cloned();
+
 		match expr {
 			Expr::Table(_) => {
 				let table_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan::new(
-					table_expr,
-					version,
-					cond.cloned(),
-					order.cloned(),
-					with.cloned(),
-					needed_fields,
-					scan_predicate,
-					scan_limit,
-					scan_start,
-				)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(
+					Scan::new(
+						table_expr,
+						version,
+						cond.cloned(),
+						order.cloned(),
+						with.cloned(),
+						needed_fields,
+						scan_predicate,
+						scan_limit,
+						scan_start,
+					)
+					.with_knn_context(knn_ctx),
+				) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Literal(crate::expr::literal::Literal::RecordId(record_id_lit)) => {
@@ -600,17 +623,20 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => match self.ctx.value(param.as_str()) {
 				Some(Value::Table(_)) => {
 					let table_expr = self.physical_expr(Expr::Param(param.clone()))?;
-					Ok(Arc::new(Scan::new(
-						table_expr,
-						version,
-						cond.cloned(),
-						order.cloned(),
-						with.cloned(),
-						needed_fields,
-						scan_predicate,
-						scan_limit,
-						scan_start,
-					)) as Arc<dyn ExecOperator>)
+					Ok(Arc::new(
+						Scan::new(
+							table_expr,
+							version,
+							cond.cloned(),
+							order.cloned(),
+							with.cloned(),
+							needed_fields,
+							scan_predicate,
+							scan_limit,
+							scan_start,
+						)
+						.with_knn_context(knn_ctx),
+					) as Arc<dyn ExecOperator>)
 				}
 				Some(Value::RecordId(_)) => {
 					let table_expr = self.physical_expr(Expr::Param(param.clone()))?;
@@ -637,34 +663,40 @@ impl<'ctx> Planner<'ctx> {
 
 			Expr::FunctionCall(_) => {
 				let source_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan::new(
-					source_expr,
-					version,
-					cond.cloned(),
-					order.cloned(),
-					with.cloned(),
-					needed_fields,
-					scan_predicate,
-					scan_limit,
-					scan_start,
-				)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(
+					Scan::new(
+						source_expr,
+						version,
+						cond.cloned(),
+						order.cloned(),
+						with.cloned(),
+						needed_fields,
+						scan_predicate,
+						scan_limit,
+						scan_start,
+					)
+					.with_knn_context(knn_ctx),
+				) as Arc<dyn ExecOperator>)
 			}
 
 			Expr::Postfix {
 				..
 			} => {
 				let source_expr = self.physical_expr(expr)?;
-				Ok(Arc::new(Scan::new(
-					source_expr,
-					version,
-					cond.cloned(),
-					order.cloned(),
-					with.cloned(),
-					needed_fields,
-					scan_predicate,
-					scan_limit,
-					scan_start,
-				)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(
+					Scan::new(
+						source_expr,
+						version,
+						cond.cloned(),
+						order.cloned(),
+						with.cloned(),
+						needed_fields,
+						scan_predicate,
+						scan_limit,
+						scan_start,
+					)
+					.with_knn_context(knn_ctx),
+				) as Arc<dyn ExecOperator>)
 			}
 
 			other => {

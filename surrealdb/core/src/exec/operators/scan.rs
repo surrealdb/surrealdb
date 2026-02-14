@@ -94,6 +94,9 @@ pub struct Scan {
 	/// Runtime-determined attributes (e.g. which index was selected).
 	/// Populated during `execute()` and read by EXPLAIN ANALYZE.
 	pub(crate) runtime_attrs: RuntimeAttrs,
+	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
+	/// Populated by KnnScan during execution.
+	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 impl Scan {
@@ -122,7 +125,17 @@ impl Scan {
 			start,
 			metrics: Arc::new(OperatorMetrics::new()),
 			runtime_attrs: Arc::new(std::sync::Mutex::new(Vec::new())),
+			knn_context: None,
 		}
+	}
+
+	/// Set the KNN context for distance propagation.
+	pub(crate) fn with_knn_context(
+		mut self,
+		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
+	) -> Self {
+		self.knn_context = knn_context;
+		self
 	}
 }
 
@@ -228,6 +241,7 @@ impl ExecOperator for Scan {
 		let predicate = self.predicate.clone();
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
+		let knn_context = self.knn_context.clone();
 		let runtime_attrs = Arc::clone(&self.runtime_attrs);
 		let ctx = ctx.clone();
 
@@ -394,6 +408,7 @@ impl ExecOperator for Scan {
 						version,
 						storage_limit: effective_storage_limit,
 						pre_skip,
+						knn_context: knn_context.clone(),
 					},
 					&runtime_attrs,
 				).await?
@@ -600,6 +615,8 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
+	/// KNN distance context for vector::distance::knn() support.
+	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 /// Resolve the optimal access path for a table scan and return the source
@@ -680,7 +697,8 @@ async fn resolve_table_scan_stream(
 				a.push(("k".into(), k.to_string()));
 				a.push(("ef".into(), ef.to_string()));
 			});
-			let knn_op = KnnScan::new(index_ref, vector, k, ef, cfg.table_name);
+			let knn_op =
+				KnnScan::new(index_ref, vector, k, ef, cfg.table_name, cfg.knn_context.clone());
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -805,8 +823,14 @@ fn create_index_stream(
 			k,
 			ef,
 		} => {
-			let knn_op =
-				KnnScan::new(index_ref.clone(), vector.clone(), *k, *ef, cfg.table_name.clone());
+			let knn_op = KnnScan::new(
+				index_ref.clone(),
+				vector.clone(),
+				*k,
+				*ef,
+				cfg.table_name.clone(),
+				cfg.knn_context.clone(),
+			);
 			knn_op.execute(ctx)
 		}
 		AccessPath::TableScan | AccessPath::Union(_) => {
