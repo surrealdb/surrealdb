@@ -35,6 +35,12 @@ fn default_code() -> i64 {
 	code::INTERNAL_ERROR
 }
 
+/// Default error kind when not present (e.g. for deserialization of older wire format without
+/// `kind`).
+fn default_kind() -> ErrorKind {
+	ErrorKind::Internal
+}
+
 // -----------------------------------------------------------------------------
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
@@ -88,7 +94,9 @@ pub struct Error {
 	/// [`code::INTERNAL_ERROR`] when not otherwise set.
 	#[serde(default = "default_code")]
 	code: i64,
-	/// Machine-readable error kind.
+	/// Machine-readable error kind. Defaults to [`Internal`](ErrorKind::Internal) when not
+	/// present (e.g. when deserialising errors from older clients that did not send `kind`).
+	#[serde(default = "default_kind")]
 	kind: ErrorKind,
 	/// Human-readable error message.
 	message: String,
