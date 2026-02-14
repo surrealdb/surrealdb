@@ -217,18 +217,6 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 		vec![]
 	}
 
-	/// Returns runtime-determined attributes populated during execution.
-	///
-	/// Unlike `attrs()` which returns plan-time information, these attributes
-	/// are set during `execute()` — for example, the index selected by a
-	/// `Scan` operator is only known at runtime after catalog lookup.
-	///
-	/// Used by `EXPLAIN ANALYZE` to display post-execution details such as
-	/// which access path was chosen (`IndexScan`, `TableScan`, etc.).
-	fn runtime_attrs(&self) -> Option<&RuntimeAttrs> {
-		None
-	}
-
 	/// Returns the output ordering guarantee for this operator's stream.
 	///
 	/// Used by the planner to determine whether a downstream Sort operator
@@ -242,13 +230,3 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 		OutputOrdering::Unordered
 	}
 }
-
-/// Runtime-determined attributes populated during execution.
-///
-/// Written by the operator's stream body (e.g. when `Scan` resolves its
-/// access path) and read by the `EXPLAIN ANALYZE` formatter after the
-/// stream has been fully consumed.
-///
-/// Uses `std::sync::Mutex` (not `tokio::sync`) because the critical section
-/// is trivially short (a single `Vec::push`).
-pub(crate) type RuntimeAttrs = Arc<std::sync::Mutex<Vec<(String, String)>>>;

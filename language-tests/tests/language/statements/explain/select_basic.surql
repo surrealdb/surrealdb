@@ -18,7 +18,7 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> DynamicScan [ctx: Db] [source: item:1]
+└────> RecordIdScan [ctx: Db] [record_id: item:1]
 ''''
 
 [[test.results]]

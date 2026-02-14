@@ -15,7 +15,7 @@ value = "[{ id: t:[9] }, { id: t:[8] }, { id: t:[7] }]"
 value = ''''Project [ctx: Db] {rows: 3, batches: 1}
 └────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
        └────> SortTopKByKey [ctx: Db] [sort_keys: id DESC, limit: 3] {rows: 3, batches: 1}
-              └────> DynamicScan [ctx: Db] [source: t:[5]..=[10]] {rows: 6, batches: 1}
+              └────> RecordIdScan [ctx: Db] [record_id: t:[5]..=[10]] {rows: 6, batches: 1}
 
 Total rows: 3''''
 */

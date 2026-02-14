@@ -1,25 +1,26 @@
-use std::collections::HashMap;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use tracing::instrument;
 
+use super::pipeline::{
+	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
+};
 use super::{FullTextScan, IndexScan, KnnScan};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
+use crate::exec::operators::scan::pipeline::ScanPipeline;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
-	should_check_perms, validate_record_user_access,
+	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	validate_record_user_access,
 };
-use crate::exec::planner::expr_to_physical_expr;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, RuntimeAttrs, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -27,28 +28,7 @@ use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::record;
-use crate::kvs::{KVKey, KVValue, Transaction};
-use crate::val::{RecordIdKey, TableName, Value};
-
-/// Check if a value passes the permission check.
-///
-/// Inlined at each call site so the `Allow`/`Deny` branches are pure synchronous
-/// code with zero async state-machine overhead. The `.await` only exists in the
-/// `Conditional` arm.
-macro_rules! check_perm {
-	($permission:expr, $value:expr, $ctx:expr) => {
-		match $permission {
-			PhysicalPermission::Allow => Ok::<bool, ControlFlow>(true),
-			PhysicalPermission::Deny => Ok(false),
-			PhysicalPermission::Conditional(expr) => {
-				let eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
-				expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
-				})
-			}
-		}
-	};
-}
+use crate::val::{TableName, Value};
 
 /// Full table scan - iterates over all records in a table.
 ///
@@ -91,9 +71,6 @@ pub struct DynamicScan {
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
-	/// Runtime-determined attributes (e.g. which index was selected).
-	/// Populated during `execute()` and read by EXPLAIN ANALYZE.
-	pub(crate) runtime_attrs: RuntimeAttrs,
 	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
 	/// Populated by KnnScan during execution.
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
@@ -124,7 +101,6 @@ impl DynamicScan {
 			limit,
 			start,
 			metrics: Arc::new(OperatorMetrics::new()),
-			runtime_attrs: Arc::new(std::sync::Mutex::new(Vec::new())),
 			knn_context: None,
 		}
 	}
@@ -179,10 +155,6 @@ impl ExecOperator for DynamicScan {
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
-	}
-
-	fn runtime_attrs(&self) -> Option<&RuntimeAttrs> {
-		Some(&self.runtime_attrs)
 	}
 
 	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
@@ -242,7 +214,6 @@ impl ExecOperator for DynamicScan {
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
 		let knn_context = self.knn_context.clone();
-		let runtime_attrs = Arc::clone(&self.runtime_attrs);
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -256,9 +227,39 @@ impl ExecOperator for DynamicScan {
 			let table_value = source_expr.evaluate(eval_ctx).await?;
 
 			// Determine scan target: either a table name or a record ID
-			let (table_name, rid) = match table_value {
-				Value::Table(t) => (t, None),
-				Value::RecordId(rid) => (rid.table.clone(), Some(rid)),
+			let table_name = match table_value {
+				Value::Table(t) => t,
+				Value::RecordId(rid) => {
+					// === RECORD LOOKUP (point or range) ===
+					// Delegate to the shared execute_record_lookup helper which
+					// handles both point lookups and range scans. For plan-time-
+					// known RecordIds the planner emits RecordLookup directly;
+					// this path handles runtime-discovered RecordIds (e.g. from
+					// `type::thing(...)` or other dynamic expressions).
+
+					// Evaluate VERSION expression
+					let version: Option<u64> = match &version {
+						Some(expr) => {
+							let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+							let v = expr.evaluate(eval_ctx).await?;
+							Some(
+								v.cast_to::<crate::val::Datetime>()
+									.map_err(|e| anyhow::anyhow!("{e}"))?
+									.to_version_stamp()?,
+							)
+						}
+						None => None,
+					};
+
+					let results = super::record_id::execute_record_lookup(
+						&rid, version, check_perms, needed_fields.as_ref(), &ctx,
+					).await?;
+
+					if !results.is_empty() {
+						yield ValueBatch { values: results };
+					}
+					return;
+				}
 				Value::Array(arr) => {
 					yield ValueBatch { values: arr.0 };
 					return;
@@ -270,6 +271,9 @@ impl ExecOperator for DynamicScan {
 					return;
 				}
 			};
+
+			// === TABLE SCAN PATH ===
+			// Everything below is for table-based scans only.
 
 			// Evaluate pushed-down LIMIT and START expressions
 			let limit_val: Option<usize> = match &limit_expr {
@@ -339,38 +343,6 @@ impl ExecOperator for DynamicScan {
 				|| (check_perms && !field_state.field_permissions.is_empty())
 				|| predicate.is_some();
 
-			// === POINT LOOKUP (single record by ID) ===
-			// Handled inline - single record, no limit/start or pipeline needed.
-			if let Some(ref rid) = rid
-				&& !matches!(rid.key, RecordIdKey::Range(_)) {
-					let record = txn
-						.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
-						.await
-						.context("Failed to get record")?;
-
-					if record.data.as_ref().is_none() {
-						return;
-					}
-
-					let mut value = record.data.as_ref().clone();
-					value.def(rid);
-
-					let mut batch = vec![value];
-					if needs_processing {
-						filter_and_process_batch(
-							&mut batch, &select_permission, predicate.as_ref(),
-							&ctx, &field_state, check_perms,
-						).await?;
-					}
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
-					}
-					return;
-				}
-
-			// === STREAM-BASED PATHS (range scan and table scan) ===
-			// All use the unified ScanPipeline consumption loop.
-
 			// When no processing is needed, push start to the KV layer as pre_skip
 			// so rows are discarded before deserialization.
 			let pre_skip = if !needs_processing { start_val } else { 0 };
@@ -384,17 +356,7 @@ impl ExecOperator for DynamicScan {
 			// Create the source stream based on scan type.
 			// `applied_pre_skip` tracks how many rows the source will skip
 			// before decoding, so the pipeline can adjust its start accordingly.
-			let (mut source, applied_pre_skip) = if let Some(rid) = rid {
-				// Range scan (must be a range since point lookup returned above)
-				let RecordIdKey::Range(range) = &rid.key else { unreachable!() };
-				let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
-				let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
-				let stream = kv_scan_stream(
-					Arc::clone(&txn), beg, end, version,
-					effective_storage_limit, direction, pre_skip,
-				);
-				(stream, pre_skip)
-			} else {
+			let (mut source, applied_pre_skip) = {
 				// Table scan (with index selection)
 				resolve_table_scan_stream(
 					&ctx, TableScanConfig {
@@ -410,7 +372,6 @@ impl ExecOperator for DynamicScan {
 						pre_skip,
 						knn_context: knn_context.clone(),
 					},
-					&runtime_attrs,
 				).await?
 			};
 
@@ -444,163 +405,8 @@ impl ExecOperator for DynamicScan {
 }
 
 // ---------------------------------------------------------------------------
-// ScanPipeline: encapsulates per-batch processing and cross-batch limit/start
-// ---------------------------------------------------------------------------
-
-/// Inline pipeline that performs all per-batch operations (filtering, computed
-/// fields, permissions, limit/start) in a single pass with minimal await
-/// boundaries. Limit/start state is tracked across batches so the logic is
-/// written once rather than duplicated in every scan path.
-pub(crate) struct ScanPipeline {
-	permission: PhysicalPermission,
-	predicate: Option<Arc<dyn PhysicalExpr>>,
-	field_state: FieldState,
-	check_perms: bool,
-	/// Cached at construction: true when filter_and_process_batch must run.
-	needs_processing: bool,
-	/// Maximum rows to emit (pushed-down LIMIT).
-	limit: Option<usize>,
-	/// Rows to skip after filtering (pushed-down START, adjusted for pre_skip).
-	start: usize,
-	/// How many post-filter rows have been skipped so far.
-	skipped: usize,
-	/// How many rows have been emitted so far.
-	emitted: usize,
-}
-
-impl ScanPipeline {
-	pub(crate) fn new(
-		permission: PhysicalPermission,
-		predicate: Option<Arc<dyn PhysicalExpr>>,
-		field_state: FieldState,
-		check_perms: bool,
-		limit: Option<usize>,
-		start: usize,
-	) -> Self {
-		let needs_processing = !matches!(permission, PhysicalPermission::Allow)
-			|| !field_state.computed_fields.is_empty()
-			|| (check_perms && !field_state.field_permissions.is_empty())
-			|| predicate.is_some();
-		Self {
-			permission,
-			predicate,
-			field_state,
-			check_perms,
-			needs_processing,
-			limit,
-			start,
-			skipped: 0,
-			emitted: 0,
-		}
-	}
-
-	/// Returns true when limit or start tracking is active.
-	fn has_limit(&self) -> bool {
-		self.limit.is_some() || self.start > 0
-	}
-
-	/// Process a single batch in-place: filter, compute fields, apply
-	/// permissions, then apply limit/start. Returns `false` when the
-	/// limit has been reached and the caller should stop iterating.
-	pub(crate) async fn process_batch(
-		&mut self,
-		batch: &mut Vec<Value>,
-		ctx: &ExecutionContext,
-	) -> Result<bool, ControlFlow> {
-		// Phase 1: filter + process (parallel per-record via try_join_all_buffered)
-		if self.needs_processing {
-			filter_and_process_batch(
-				batch,
-				&self.permission,
-				self.predicate.as_ref(),
-				ctx,
-				&self.field_state,
-				self.check_perms,
-			)
-			.await?;
-		}
-
-		// Phase 2: limit/start tracking
-		if self.has_limit() && !batch.is_empty() {
-			// Apply start offset
-			if self.skipped < self.start {
-				let remaining_to_skip = self.start - self.skipped;
-				if batch.len() <= remaining_to_skip {
-					// Entire batch falls within the start offset -- discard it
-					self.skipped += batch.len();
-					batch.clear();
-					return Ok(true);
-				}
-				self.skipped = self.start;
-				batch.drain(..remaining_to_skip);
-			}
-			// Apply limit
-			if let Some(limit) = self.limit {
-				let remaining = limit.saturating_sub(self.emitted);
-				if batch.len() > remaining {
-					batch.truncate(remaining);
-				}
-			}
-			self.emitted += batch.len();
-		}
-
-		// Continue iterating unless the limit has been reached.
-		Ok(self.limit.is_none_or(|l| self.emitted < l))
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Source helpers
 // ---------------------------------------------------------------------------
-
-/// Determine scan direction from ORDER BY clause.
-/// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
-pub(crate) fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
-	use crate::expr::order::Ordering as OrderingType;
-	if let Some(OrderingType::Order(order_list)) = order
-		&& let Some(first) = order_list.0.first()
-		&& !first.direction
-		&& first.value.is_id()
-	{
-		ScanDirection::Backward
-	} else {
-		ScanDirection::Forward
-	}
-}
-
-/// Produce a `ValueBatchStream` from a raw KV range scan.
-///
-/// When `pre_skip > 0`, that many entries are skipped at the KV storage layer
-/// before any data is returned, avoiding I/O, allocation, and deserialization
-/// for rows that will be discarded anyway (the fast-path optimisation for
-/// `START` without a pushdown predicate).
-pub(crate) fn kv_scan_stream(
-	txn: Arc<Transaction>,
-	beg: crate::kvs::Key,
-	end: crate::kvs::Key,
-	version: Option<u64>,
-	storage_limit: Option<usize>,
-	direction: ScanDirection,
-	pre_skip: usize,
-) -> ValueBatchStream {
-	let skip = pre_skip.min(u32::MAX as usize) as u32;
-	let stream = async_stream::try_stream! {
-		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, skip, direction);
-		futures::pin_mut!(kv_stream);
-
-		while let Some(result) = kv_stream.next().await {
-			let entries = result.context("Failed to scan record")?;
-			let mut batch = Vec::with_capacity(entries.len());
-			for (key, val) in entries {
-				batch.push(decode_record(&key, val)?);
-			}
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
-			}
-		}
-	};
-	Box::pin(stream)
-}
 
 /// Configuration bundle for [`resolve_table_scan_stream`].
 struct TableScanConfig {
@@ -622,13 +428,9 @@ struct TableScanConfig {
 /// Resolve the optimal access path for a table scan and return the source
 /// stream together with the number of rows that were pre-skipped at the
 /// KV layer (zero for index / full-text sources).
-///
-/// Populates `runtime_attrs` with details about the access path that was
-/// selected (used by EXPLAIN ANALYZE).
 async fn resolve_table_scan_stream(
 	ctx: &ExecutionContext,
 	cfg: TableScanConfig,
-	runtime_attrs: &RuntimeAttrs,
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
 
@@ -657,12 +459,6 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
-			record_runtime_attrs(runtime_attrs, |a| {
-				a.push(("access_method".into(), "IndexScan".into()));
-				a.push(("index".into(), index_ref.name.clone()));
-				a.push(("access".into(), format_btree_access(&access)));
-				a.push(("direction".into(), format!("{:?}", direction)));
-			});
 			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
@@ -674,11 +470,6 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			record_runtime_attrs(runtime_attrs, |a| {
-				a.push(("access_method".into(), "FullTextScan".into()));
-				a.push(("index".into(), index_ref.name.clone()));
-				a.push(("query".into(), query.clone()));
-			});
 			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
@@ -691,12 +482,6 @@ async fn resolve_table_scan_stream(
 			k,
 			ef,
 		}) => {
-			record_runtime_attrs(runtime_attrs, |a| {
-				a.push(("access_method".into(), "KnnScan".into()));
-				a.push(("index".into(), index_ref.name.clone()));
-				a.push(("k".into(), k.to_string()));
-				a.push(("ef".into(), ef.to_string()));
-			});
 			let knn_op =
 				KnnScan::new(index_ref, vector, k, ef, cfg.table_name, cfg.knn_context.clone());
 			let stream = knn_op.execute(ctx)?;
@@ -705,30 +490,6 @@ async fn resolve_table_scan_stream(
 
 		// Multi-index union for OR conditions
 		Some(AccessPath::Union(paths)) => {
-			// Record which indexes are being used
-			let index_names: Vec<String> = paths
-				.iter()
-				.filter_map(|p| match p {
-					AccessPath::BTreeScan {
-						index_ref,
-						..
-					} => Some(index_ref.name.clone()),
-					AccessPath::FullTextSearch {
-						index_ref,
-						..
-					} => Some(index_ref.name.clone()),
-					AccessPath::KnnSearch {
-						index_ref,
-						..
-					} => Some(index_ref.name.clone()),
-					_ => None,
-				})
-				.collect();
-			record_runtime_attrs(runtime_attrs, |a| {
-				a.push(("access_method".into(), "MultiIndexUnion".into()));
-				a.push(("indexes".into(), index_names.join(", ")));
-			});
-
 			// Create a stream for each sub-path, then chain and deduplicate
 			let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(paths.len());
 			for path in paths {
@@ -761,10 +522,6 @@ async fn resolve_table_scan_stream(
 
 		// Fall back to table KV scan (NOINDEX, etc.)
 		_ => {
-			record_runtime_attrs(runtime_attrs, |a| {
-				a.push(("access_method".into(), "TableScan".into()));
-				a.push(("direction".into(), format!("{:?}", cfg.direction)));
-			});
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let stream = kv_scan_stream(
@@ -838,434 +595,6 @@ fn create_index_stream(
 			Err(ControlFlow::Err(anyhow::anyhow!("Unexpected access path in multi-index union")))
 		}
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Runtime attribute helpers
-// ---------------------------------------------------------------------------
-
-/// Populate runtime attributes through a closure.
-///
-/// The lock is held only for the duration of the push operations.
-pub(crate) fn record_runtime_attrs(
-	attrs: &RuntimeAttrs,
-	populate: impl FnOnce(&mut Vec<(String, String)>),
-) {
-	if let Ok(mut guard) = attrs.lock() {
-		populate(&mut guard);
-	}
-}
-
-/// Format a `BTreeAccess` variant into a human-readable string for runtime attrs.
-pub(crate) fn format_btree_access(access: &crate::exec::index::access_path::BTreeAccess) -> String {
-	use surrealdb_types::ToSql;
-
-	use crate::exec::index::access_path::BTreeAccess;
-
-	match access {
-		BTreeAccess::Equality(v) => format!("Equality({})", v.to_sql()),
-		BTreeAccess::Range {
-			from,
-			to,
-		} => {
-			let from_str = from
-				.as_ref()
-				.map(|r| {
-					format!(
-						"{}{}",
-						if r.inclusive {
-							">="
-						} else {
-							">"
-						},
-						r.value.to_sql()
-					)
-				})
-				.unwrap_or_default();
-			let to_str = to
-				.as_ref()
-				.map(|r| {
-					format!(
-						"{}{}",
-						if r.inclusive {
-							"<="
-						} else {
-							"<"
-						},
-						r.value.to_sql()
-					)
-				})
-				.unwrap_or_default();
-			format!("Range({} {})", from_str, to_str).trim().to_string()
-		}
-		BTreeAccess::Compound {
-			prefix,
-			range,
-		} => {
-			let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
-			if let Some((op, val)) = range {
-				format!("Compound([{}] {:?} {})", prefix_str, op, val.to_sql())
-			} else {
-				format!("Compound([{}])", prefix_str)
-			}
-		}
-		BTreeAccess::FullText {
-			..
-		} => "FullText".to_string(),
-		BTreeAccess::Knn {
-			..
-		} => "Knn".to_string(),
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Batch processing
-// ---------------------------------------------------------------------------
-
-/// Combined single-pass filter and process for a batch of decoded values.
-///
-/// Per-record pipeline (sequential, in-place):
-///   table permission -> computed fields -> WHERE predicate -> field permissions.
-/// Records that fail any check are compacted out via an in-place swap so the
-/// surviving prefix can be truncated at the end with no extra allocation.
-pub(crate) async fn filter_and_process_batch(
-	batch: &mut Vec<Value>,
-	permission: &PhysicalPermission,
-	predicate: Option<&Arc<dyn PhysicalExpr>>,
-	ctx: &ExecutionContext,
-	state: &FieldState,
-	check_perms: bool,
-) -> Result<(), ControlFlow> {
-	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
-	let mut write_idx = 0;
-	for read_idx in 0..batch.len() {
-		// Table-level permission (skip if Allow)
-		if needs_perm_filter && !check_perm!(permission, &batch[read_idx], ctx)? {
-			continue;
-		}
-		// Move to write position
-		if write_idx != read_idx {
-			batch.swap(write_idx, read_idx);
-		}
-		// Computed fields (must run before predicate)
-		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
-		// Field-level permissions (must run before the WHERE predicate so that
-		// restricted fields are removed before the condition is evaluated,
-		// matching the old compute path's behaviour).
-		if check_perms {
-			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
-		}
-		// WHERE predicate (evaluated on the permission-reduced document)
-		if let Some(pred) = predicate {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&batch[write_idx]);
-			if !pred.evaluate(eval_ctx).await?.is_truthy() {
-				continue;
-			}
-		}
-		write_idx += 1;
-	}
-	batch.truncate(write_idx);
-	Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Key helpers
-// ---------------------------------------------------------------------------
-
-/// Compute the start key for a range scan.
-pub(crate) fn range_start_key(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::prefix(ns_id, db_id, table).context("Failed to create prefix key")
-		}
-		Bound::Included(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create begin key")
-		}
-		Bound::Excluded(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create begin key")?;
-			key.push(0x00);
-			Ok(key)
-		}
-	}
-}
-
-/// Compute the end key for a range scan.
-pub(crate) fn range_end_key(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::suffix(ns_id, db_id, table).context("Failed to create suffix key")
-		}
-		Bound::Excluded(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create end key")
-		}
-		Bound::Included(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create end key")?;
-			key.push(0x00);
-			Ok(key)
-		}
-	}
-}
-
-/// Evaluate a limit or start expression to a usize value.
-pub(crate) async fn eval_limit_expr(
-	expr: &dyn PhysicalExpr,
-	ctx: &ExecutionContext,
-) -> Result<usize, ControlFlow> {
-	let eval_ctx = EvalContext::from_exec_ctx(ctx);
-	let value = expr
-		.evaluate(eval_ctx)
-		.await
-		.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT/START: {e}")))?;
-	match &value {
-		Value::Number(n) => {
-			let i = (*n).to_int();
-			if i >= 0 {
-				Ok(i as usize)
-			} else {
-				Err(ControlFlow::Err(anyhow::anyhow!(
-					"LIMIT/START must be a non-negative integer, got {i}"
-				)))
-			}
-		}
-		Value::None | Value::Null => Ok(0),
-		_ => Err(ControlFlow::Err(anyhow::anyhow!(
-			"LIMIT/START must be an integer, got {:?}",
-			value
-		))),
-	}
-}
-
-/// Decode a record from its key and value bytes.
-#[inline]
-pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
-	let decoded_key =
-		crate::key::record::RecordKey::decode_key(key).context("Failed to decode record key")?;
-
-	let rid = crate::val::RecordId {
-		table: decoded_key.tb.into_owned(),
-		key: decoded_key.id,
-	};
-
-	let mut record =
-		crate::catalog::Record::kv_decode_value(val).context("Failed to deserialize record")?;
-
-	// Inject the id field into the document
-	record.data.to_mut().def(&rid);
-
-	// Take ownership of the value (zero-cost move for freshly deserialized Mutable data)
-	Ok(record.data.into_value())
-}
-
-// ---------------------------------------------------------------------------
-// Field state
-// ---------------------------------------------------------------------------
-
-/// Cached state for field processing (computed fields and permissions).
-/// Initialized on first batch and reused for subsequent batches.
-#[derive(Debug)]
-pub(crate) struct FieldState {
-	/// Computed field definitions converted to physical expressions
-	pub(crate) computed_fields: Vec<ComputedFieldDef>,
-	/// Field-level permissions (field name -> permission)
-	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
-}
-
-/// A computed field definition ready for evaluation.
-#[derive(Debug)]
-pub(crate) struct ComputedFieldDef {
-	/// The field name where to store the result
-	field_name: String,
-	/// The physical expression to evaluate
-	expr: Arc<dyn PhysicalExpr>,
-	/// Optional type coercion
-	kind: Option<crate::expr::Kind>,
-}
-
-/// Fetch field definitions and build the cached field state.
-#[allow(clippy::type_complexity)]
-pub(crate) async fn build_field_state(
-	ctx: &ExecutionContext,
-	table_name: &TableName,
-	check_perms: bool,
-	needed_fields: Option<&std::collections::HashSet<String>>,
-) -> Result<FieldState, ControlFlow> {
-	let db_ctx = ctx.database().context("build_field_state requires database context")?;
-	let txn = ctx.txn();
-
-	let field_defs = txn
-		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table_name, None)
-		.await
-		.context("Failed to get field definitions")?;
-
-	// Collect computed fields and their dependency metadata
-	let mut raw_computed: Vec<(
-		String,
-		Arc<dyn PhysicalExpr>,
-		Option<crate::expr::Kind>,
-		Vec<String>,
-	)> = Vec::new();
-	let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
-
-	for fd in field_defs.iter() {
-		if let Some(ref expr) = fd.computed {
-			let field_name = fd.name.to_raw_string();
-
-			// Get deps: use stored deps, or extract on the fly for legacy fields
-			let deps = if let Some(ref cd) = fd.computed_deps {
-				crate::expr::computed_deps::ComputedDeps {
-					fields: cd.fields.clone(),
-					is_complete: cd.is_complete,
-				}
-			} else {
-				crate::expr::computed_deps::extract_computed_deps(expr)
-			};
-
-			dep_map.insert(field_name.clone(), deps.clone());
-
-			let physical_expr =
-				expr_to_physical_expr(expr.clone(), ctx.ctx()).await.with_context(|| {
-					format!("Computed field '{field_name}' has unsupported expression")
-				})?;
-
-			raw_computed.push((field_name, physical_expr, fd.field_kind.clone(), deps.fields));
-		}
-	}
-
-	// Determine which computed fields are actually needed
-	let needed_computed = if let Some(needed) = needed_fields {
-		crate::expr::computed_deps::resolve_required_computed_fields(needed, &dep_map)
-	} else {
-		// SELECT * -- compute all
-		None
-	};
-
-	// Filter to only needed computed fields
-	let filtered: Vec<_> = if let Some(ref required) = needed_computed {
-		raw_computed.into_iter().filter(|(name, _, _, _)| required.contains(name)).collect()
-	} else {
-		raw_computed
-	};
-
-	// Topologically sort for correct evaluation order
-	let topo_input: Vec<(String, Vec<String>)> =
-		filtered.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
-	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
-
-	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
-	for idx in sorted_indices {
-		let (field_name, expr, kind, _) = &filtered[idx];
-		computed_fields.push(ComputedFieldDef {
-			field_name: field_name.clone(),
-			expr: Arc::clone(expr),
-			kind: kind.clone(),
-		});
-	}
-
-	// Build field permissions
-	let mut field_permissions = HashMap::new();
-	if check_perms {
-		for fd in field_defs.iter() {
-			let field_name = fd.name.to_raw_string();
-			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
-				.await
-				.context("Failed to convert field permission")?;
-			field_permissions.insert(field_name, physical_perm);
-		}
-	}
-
-	Ok(FieldState {
-		computed_fields,
-		field_permissions,
-	})
-}
-
-/// Compute all computed fields for a single value.
-pub(crate) async fn compute_fields_for_value(
-	ctx: &ExecutionContext,
-	state: &FieldState,
-	value: &mut Value,
-) -> Result<(), ControlFlow> {
-	if state.computed_fields.is_empty() {
-		return Ok(());
-	}
-
-	let eval_ctx = EvalContext::from_exec_ctx(ctx);
-
-	for cf in &state.computed_fields {
-		// Evaluate with the current value as context
-		let row_ctx = eval_ctx.with_value(value);
-		let computed_value = match cf.expr.evaluate(row_ctx).await {
-			Ok(v) => v,
-			Err(ControlFlow::Return(v)) => v,
-			Err(e) => return Err(e),
-		};
-
-		// Apply type coercion if specified
-		let final_value = if let Some(kind) = &cf.kind {
-			computed_value
-				.coerce_to_kind(kind)
-				.with_context(|| format!("Failed to coerce computed field '{}'", cf.field_name))?
-		} else {
-			computed_value
-		};
-
-		// Inject the computed value into the document
-		if let Value::Object(obj) = value {
-			obj.insert(cf.field_name.clone(), final_value);
-		} else {
-			return Err(ControlFlow::Err(anyhow::anyhow!("Value is not an object: {:?}", value)));
-		}
-	}
-
-	Ok(())
-}
-
-/// Filter fields from a value based on field-level permissions.
-pub(crate) async fn filter_fields_by_permission(
-	ctx: &ExecutionContext,
-	state: &FieldState,
-	value: &mut Value,
-) -> Result<(), ControlFlow> {
-	if state.field_permissions.is_empty() {
-		return Ok(());
-	}
-
-	// Collect fields to check
-	let field_names: Vec<String> = {
-		let Value::Object(obj) = &*value else {
-			return Ok(());
-		};
-		obj.keys().cloned().collect()
-	};
-
-	for field_name in field_names {
-		// Check if there's a permission for this field
-		if let Some(perm) = state.field_permissions.get(&field_name) {
-			let allowed = check_permission_for_value(perm, &*value, ctx)
-				.await
-				.context("Failed to check field permission")?;
-
-			if !allowed && let Value::Object(obj) = value {
-				obj.remove(&field_name);
-			}
-		}
-	}
-
-	Ok(())
 }
 
 #[cfg(test)]

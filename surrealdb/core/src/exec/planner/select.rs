@@ -24,8 +24,8 @@ use crate::exec::operators::ExternalSort;
 use crate::exec::operators::scan::determine_scan_direction;
 use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
-	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, SelectProject, Sort,
-	SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
+	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
+	Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
 	Timeout, Union, UnwrapExactlyOne,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
@@ -1273,20 +1273,11 @@ impl<'ctx> Planner<'ctx> {
 				) as Arc<dyn ExecOperator>)
 			}
 			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
-				let table_expr = self
+				let record_id_expr = self
 					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
 					.await?;
-				Ok(Arc::new(DynamicScan::new(
-					table_expr,
-					version,
-					None,
-					None,
-					None,
-					needed_fields,
-					None,
-					None,
-					None,
-				)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
+					as Arc<dyn ExecOperator>)
 			}
 			Expr::Select(inner_select) => {
 				if version.is_some() {
@@ -1317,18 +1308,9 @@ impl<'ctx> Planner<'ctx> {
 					) as Arc<dyn ExecOperator>)
 				}
 				Some(crate::val::Value::RecordId(_)) => {
-					let table_expr = self.physical_expr(expr).await?;
-					Ok(Arc::new(DynamicScan::new(
-						table_expr,
-						version,
-						None,
-						None,
-						None,
-						needed_fields,
-						None,
-						None,
-						None,
-					)) as Arc<dyn ExecOperator>)
+					let record_id_expr = self.physical_expr(expr).await?;
+					Ok(Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
+						as Arc<dyn ExecOperator>)
 				}
 				Some(_) | None => {
 					let phys_expr = self.physical_expr(expr).await?;

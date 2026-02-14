@@ -28,7 +28,6 @@ value = "[{ id: notes:3, kind: 1, pubkey: 123, published: 2023 }]"
 value = ''''Project [ctx: Db] {rows: 4, batches: 2}
 └────> Filter [ctx: Db] [predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
        └────> DynamicScan [ctx: Db] [source: notes, predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
-                actual: [access_method: MultiIndexUnion, indexes: index_note_published, index_note_published]
 
 Total rows: 4''''
 
@@ -39,7 +38,6 @@ value = "[{ id: notes:1, kind: 1, pubkey: 123, published: 2021 }, { id: notes:3,
 value = ''''Project [ctx: Db] {rows: 4, batches: 2}
 └────> Filter [ctx: Db] [predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
        └────> DynamicScan [ctx: Db] [source: notes, predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4, batches: 2}
-                actual: [access_method: MultiIndexUnion, indexes: index_note_published, index_note_published]
 
 Total rows: 4''''
 

@@ -396,21 +396,6 @@ fn format_analyze_plan(
 
 	let _ = writeln!(output);
 
-	// Show runtime-determined attributes (e.g. which index was selected)
-	if let Some(runtime) = plan.runtime_attrs()
-		&& let Ok(guard) = runtime.lock()
-		&& !guard.is_empty()
-	{
-		let _ = write!(output, "{}  actual: [", prefix);
-		for (i, (key, value)) in guard.iter().enumerate() {
-			if i > 0 {
-				let _ = write!(output, ", ");
-			}
-			let _ = write!(output, "{key}: {value}");
-		}
-		let _ = writeln!(output, "]");
-	}
-
 	// Format expressions with embedded operators (with metrics)
 	let expressions = plan.expressions();
 	for (role, expr) in &expressions {
@@ -487,18 +472,6 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator, redact_duration: bool) -> O
 			metrics_obj.insert("elapsed_ns".to_string(), Value::from(metrics.elapsed_ns() as i64));
 		}
 		obj.insert("metrics".to_string(), Value::Object(metrics_obj));
-	}
-
-	// Add runtime-determined attributes (e.g. which index was selected)
-	if let Some(runtime) = plan.runtime_attrs()
-		&& let Ok(guard) = runtime.lock()
-		&& !guard.is_empty()
-	{
-		let mut runtime_obj = Object::default();
-		for (key, value) in guard.iter() {
-			runtime_obj.insert(key.clone(), Value::String(value.clone()));
-		}
-		obj.insert("runtime".to_string(), Value::Object(runtime_obj));
 	}
 
 	// Add expressions with embedded operators (with metrics)

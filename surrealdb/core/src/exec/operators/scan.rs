@@ -13,6 +13,7 @@ mod index;
 mod index_count;
 mod knn;
 pub(crate) mod pipeline;
+mod record_id;
 mod reference;
 mod table;
 
@@ -23,5 +24,6 @@ pub use graph::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput};
 pub use index::IndexScan;
 pub use knn::KnnScan;
 pub(crate) use pipeline::determine_scan_direction;
+pub use record_id::RecordIdScan;
 pub use reference::{ReferenceScan, ReferenceScanOutput};
 pub use table::TableScan;
