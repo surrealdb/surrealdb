@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::ToSql;
 
-use super::common::{BATCH_SIZE, fetch_and_filter_record};
+use super::common::{BATCH_SIZE, fetch_and_filter_records_batch};
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
@@ -199,9 +199,7 @@ impl ExecOperator for IndexScan {
 			let is_unique = index_ref.is_unique();
 			let ix = index_ref.definition();
 
-			// Collect record IDs from index and fetch full records
-			let mut batch = Vec::with_capacity(BATCH_SIZE);
-
+			// Collect record IDs from index and batch-fetch full records
 			match (&access, is_unique) {
 				// Unique equality - at most one record
 				(BTreeAccess::Equality(value), true) => {
@@ -211,16 +209,12 @@ impl ExecOperator for IndexScan {
 					let rids = iter.next_batch(&txn).await
 						.context("Failed to iterate index")?;
 
-					for rid in rids {
-						if let Some(value) = fetch_and_filter_record(
-							&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-						).await? {
-							batch.push(value);
-						}
-					}
+					let values = fetch_and_filter_records_batch(
+						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+					).await?;
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+					if !values.is_empty() {
+						yield ValueBatch { values };
 					}
 				}
 
@@ -235,21 +229,14 @@ impl ExecOperator for IndexScan {
 						if rids.is_empty() {
 							break;
 						}
-						for rid in rids {
-							if let Some(value) = fetch_and_filter_record(
-								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-							).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
-							}
-						}
-					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						let values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
 					}
 				}
 
@@ -267,21 +254,14 @@ impl ExecOperator for IndexScan {
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
-						for rid in rids {
-							if let Some(value) = fetch_and_filter_record(
-								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-							).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
-							}
-						}
-					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						let values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
 					}
 				}
 
@@ -292,21 +272,14 @@ impl ExecOperator for IndexScan {
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
-						for rid in rids {
-							if let Some(value) = fetch_and_filter_record(
-								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-							).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
-							}
-						}
-					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						let values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
 					}
 				}
 
@@ -325,6 +298,8 @@ impl ExecOperator for IndexScan {
 					);
 					futures::pin_mut!(kv_stream);
 
+					let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
+
 					while let Some(kv_batch_result) = kv_stream.next().await {
 						let kv_batch = kv_batch_result
 							.context("Failed to stream compound index keys")?;
@@ -333,20 +308,28 @@ impl ExecOperator for IndexScan {
 							let rid: RecordId = revision::from_slice(&val)
 								.context("Failed to decode record id")?;
 
-							if let Some(value) = fetch_and_filter_record(
-								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-							).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
+							rid_batch.push(rid);
+
+							if rid_batch.len() >= BATCH_SIZE {
+								let values = fetch_and_filter_records_batch(
+									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+								).await?;
+								if !values.is_empty() {
+									yield ValueBatch { values };
 								}
+								rid_batch.clear();
 							}
 						}
 					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+					// Yield remaining batch
+					if !rid_batch.is_empty() {
+						let values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+						).await?;
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
 					}
 				}
 

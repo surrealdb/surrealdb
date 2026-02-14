@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use reblessive::TreeStack;
 
-use super::common::fetch_and_filter_record;
+use super::common::fetch_and_filter_records_batch;
 use crate::catalog::Index;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
@@ -200,34 +200,34 @@ impl ExecOperator for FullTextScan {
 				}
 			};
 
-			// Iterate over hits and fetch records
+			// Iterate over hits, collecting record IDs into batches for
+			// batch-fetching via getm_records.
 			let mut hits_iter = hits_iter;
-			let mut batch = Vec::with_capacity(BATCH_SIZE);
+			let mut rid_batch = Vec::with_capacity(BATCH_SIZE);
 
 			loop {
-				// Get the next hit
+				// Collect up to BATCH_SIZE record IDs from the hits iterator
 				let hit = hits_iter.next(txn.as_ref()).await
 					.context("Failed to get next hit")?;
 
 				match hit {
 					Some((rid, _doc_id)) => {
-						// Fetch the record and check permission
-						if let Some(value) = fetch_and_filter_record(
-							&ctx,
-							&txn,
-							ns.namespace_id,
-							db.database_id,
-							&rid,
-							&select_permission,
-							check_perms,
-						).await? {
-							batch.push(value);
+						rid_batch.push(rid);
 
-							// Yield batch when full
-							if batch.len() >= BATCH_SIZE {
-								yield ValueBatch { values: std::mem::take(&mut batch) };
-								batch.reserve(BATCH_SIZE);
+						if rid_batch.len() >= BATCH_SIZE {
+							let values = fetch_and_filter_records_batch(
+								&ctx,
+								&txn,
+								ns.namespace_id,
+								db.database_id,
+								&rid_batch,
+								&select_permission,
+								check_perms,
+							).await?;
+							if !values.is_empty() {
+								yield ValueBatch { values };
 							}
+							rid_batch.clear();
 						}
 					}
 					None => {
@@ -238,8 +238,19 @@ impl ExecOperator for FullTextScan {
 			}
 
 			// Yield any remaining records
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
+			if !rid_batch.is_empty() {
+				let values = fetch_and_filter_records_batch(
+					&ctx,
+					&txn,
+					ns.namespace_id,
+					db.database_id,
+					&rid_batch,
+					&select_permission,
+					check_perms,
+				).await?;
+				if !values.is_empty() {
+					yield ValueBatch { values };
+				}
 			}
 		};
 

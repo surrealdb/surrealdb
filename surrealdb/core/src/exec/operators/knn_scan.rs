@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use reblessive::TreeStack;
 
-use super::common::fetch_and_filter_record;
+use super::common::fetch_and_filter_records_batch;
 use crate::catalog::Index;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
@@ -26,12 +26,6 @@ use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::val::Number;
-
-/// Batch size for KNN result batching.
-///
-/// KNN results are bounded by `k` (typically small, e.g. 10-100), so this
-/// is mainly a safety bound. Most KNN queries will emit a single batch.
-const BATCH_SIZE: usize = 100;
 
 /// KNN scan operator using an HNSW index.
 ///
@@ -230,42 +224,35 @@ impl ExecOperator for KnnScan {
 					.context("HNSW KNN search failed")?
 			};
 
+			let mut rids = Vec::with_capacity(knn_results.len());
 			// Populate KNN distance context (if present) before yielding records.
 			// This makes distances available to vector::distance::knn() during
 			// downstream projection evaluation.
 			if let Some(ref knn_ctx) = knn_context {
 				for (rid, distance, _) in &knn_results {
 					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance));
+					rids.push(rid.as_ref().clone());
+				}
+			} else {
+				for (rid, _, _) in &knn_results {
+					rids.push(rid.as_ref().clone());
 				}
 			}
 
-			// Convert results to records and yield as batches
-			let mut batch = Vec::with_capacity(BATCH_SIZE.min(knn_results.len()));
 
-			for (rid, _distance, _cached_record) in knn_results {
-				// Fetch the full record (ignoring any cached record from the checker
-				// since we need to apply permissions consistently)
-				if let Some(value) = fetch_and_filter_record(
-					&ctx,
-					&txn,
-					ns.namespace_id,
-					db.database_id,
-					&rid,
-					&select_permission,
-					check_perms,
-				).await? {
-					batch.push(value);
+			// Batch-fetch all records and apply permission filtering
+			let values = fetch_and_filter_records_batch(
+				&ctx,
+				&txn,
+				ns.namespace_id,
+				db.database_id,
+				&rids,
+				&select_permission,
+				check_perms,
+			).await?;
 
-					if batch.len() >= BATCH_SIZE {
-						yield ValueBatch { values: std::mem::take(&mut batch) };
-						batch.reserve(BATCH_SIZE);
-					}
-				}
-			}
-
-			// Yield any remaining records
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
+			if !values.is_empty() {
+				yield ValueBatch { values };
 			}
 		};
 
