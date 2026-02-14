@@ -1632,28 +1632,25 @@ impl Datastore {
 
 		// Create a default context
 		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast_ref::<Error>()
-				.map(crate::err::to_types_error)
-				.unwrap_or_else(|| TypesError::internal(e.to_string()))
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into())
-				.map_err(|e| crate::err::to_types_error(&e))?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Set the transaction in the context
 		ctx.set_transaction(tx);
 
 		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into())
-			.await
-			.map_err(|e| {
-				e.downcast_ref::<Error>()
-					.map(crate::err::to_types_error)
-					.unwrap_or_else(|| TypesError::internal(e.to_string()))
-			})
+		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+		})
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -1801,26 +1798,24 @@ impl Datastore {
 
 		// Create a default context
 		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast_ref::<Error>()
-				.map(crate::err::to_types_error)
-				.unwrap_or_else(|| TypesError::internal(e.to_string()))
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Start an execution context
-		ctx.attach_session(sess)
-			.map_err(|e| crate::err::to_types_error(&e))?;
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into())
-				.map_err(|e| crate::err::to_types_error(&e))?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			e.downcast_ref::<Error>()
-				.map(crate::err::to_types_error)
-				.unwrap_or_else(|| TypesError::internal(e.to_string()))
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 

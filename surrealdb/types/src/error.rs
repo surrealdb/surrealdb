@@ -160,7 +160,9 @@ impl Error {
 			| AuthError::InvalidPass
 			| AuthError::TokenMakingFailed
 			| AuthError::InvalidRole(_)
-			| AuthError::NotAllowed { .. }
+			| AuthError::NotAllowed {
+				..
+			}
 			| AuthError::InvalidSignup => code::INVALID_AUTH,
 		});
 		Self {
