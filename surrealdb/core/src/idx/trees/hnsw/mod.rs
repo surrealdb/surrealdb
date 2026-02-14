@@ -28,6 +28,7 @@ use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Transaction, impl_kv_value_revisioned};
+use crate::val::RecordIdKey;
 
 struct HnswSearch {
 	pt: SharedVector,
@@ -70,9 +71,16 @@ impl KVValue for HnswState {
 
 #[revisioned(revision = 1)]
 pub(crate) struct VectorPendingUpdate {
-	doc_id: DocId,
+	id: VectorPendingId,
 	old_vectors: Vec<SerializedVector>,
 	new_vectors: Vec<SerializedVector>,
+}
+
+#[revisioned(revision = 1)]
+#[derive(Debug, PartialEq, Hash, Eq, Clone)]
+pub(crate) enum VectorPendingId {
+	DocId(DocId),
+	Id(RecordIdKey),
 }
 
 impl_kv_value_revisioned!(VectorPendingUpdate);
@@ -696,6 +704,7 @@ mod tests {
 	}
 
 	async fn find_collection_hnsw_index(
+		ctx: &Context,
 		tx: &Transaction,
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
@@ -707,7 +716,7 @@ mod tests {
 			for knn in 1..max_knn {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(db, ctx, tx, stk, &search, &mut chk).await.unwrap();
 				if knn == 1 && res.len() == 1 && res[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.iter().map(|(d, _)| d.clone()).collect();
 					if collection.is_unique() {
@@ -811,7 +820,7 @@ mod tests {
 
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&tx, &db, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&ctx, &tx, &db, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -949,7 +958,7 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&ctx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
 		}
 		tx.commit().await?;
 
@@ -983,7 +992,7 @@ mod tests {
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
 							let hnsw_res =
-								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
+								h.search(&db, &ctx, &tx, stk, &search, &mut chk).await.unwrap();
 							tx.cancel().await.unwrap();
 							assert_eq!(hnsw_res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);

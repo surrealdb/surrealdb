@@ -1,25 +1,33 @@
-use crate::catalog::{DatabaseDefinition, HnswParams, TableId, VectorType};
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use ahash::HashMap;
+use anyhow::{Result, bail};
+use futures::StreamExt;
+use reblessive::tree::Stk;
+use roaring::RoaringTreemap;
+use tokio::sync::RwLock;
+
+use crate::catalog::{DatabaseDefinition, Distance, HnswParams, TableId, VectorType};
 use crate::ctx::Context;
+use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::idx::planner::ScanDirection;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
-use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorPendingUpdate};
-use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
+use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorPendingId, VectorPendingUpdate};
+use crate::idx::trees::knn::{FloatKey, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::kvs::Transaction;
+use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordIdKey, Value};
-use anyhow::Result;
-use reblessive::tree::Stk;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
-use tokio::sync::RwLock;
 
 pub(crate) struct HnswIndex {
 	dim: usize,
+	distance: Distance,
 	ikb: IndexKeyBase,
 	vector_type: VectorType,
 	hnsw: RwLock<HnswFlavor>,
@@ -85,6 +93,7 @@ impl HnswIndex {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
+			distance: p.distance.clone(),
 			hnsw: RwLock::new(HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?),
 			docs: RwLock::new(
 				HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
@@ -130,11 +139,15 @@ impl HnswIndex {
 			vec![]
 		};
 		let tx = ctx.tx();
-		let doc_id = self.docs.write().await.resolve(&tx, id).await?;
+		let id = if let Some(doc_id) = self.docs.read().await.get(&tx, &id).await? {
+			VectorPendingId::DocId(doc_id)
+		} else {
+			VectorPendingId::Id(id.clone())
+		};
 		let appending_id = self.next_appending_id.fetch_add(1, Ordering::Relaxed);
 		let key = self.ikb.new_hp_key(appending_id);
 		let pending = VectorPendingUpdate {
-			doc_id,
+			id,
 			old_vectors,
 			new_vectors,
 		};
@@ -149,24 +162,36 @@ impl HnswIndex {
 	) -> Result<()> {
 		let tx = ctx.tx();
 		let mut hnsw = self.hnsw.write().await;
+		let mut docs = self.docs.write().await;
+
 		// Ensure the layers are up-to-date
 		hnsw.check_state(ctx).await?;
 
 		// Remove old values if any
-		for vector in pending.old_vectors {
-			// Extract the vector
-			let vector = Vector::from(vector);
-			// Remove the vector
-			self.vec_docs.remove(&tx, &vector, pending.doc_id, &mut hnsw).await?;
+		if let VectorPendingId::DocId(doc_id) = pending.id {
+			for vector in pending.old_vectors {
+				// Extract the vector
+				let vector = Vector::from(vector);
+				// Remove the vector
+				self.vec_docs.remove(&tx, &vector, doc_id, &mut hnsw).await?;
+			}
 		}
 
 		// Index the new values if any
-		for vector in pending.new_vectors {
-			// Extract the vector
-			let vector = Vector::from(vector);
-			// Insert the vector
-			self.vec_docs.insert(&tx, vector, pending.doc_id, &mut hnsw).await?;
+		if pending.new_vectors.is_empty() {
+			let doc_id = match pending.id {
+				VectorPendingId::DocId(doc_id) => doc_id,
+				VectorPendingId::Id(id) => docs.resolve(&tx, &id).await?,
+			};
+			for vector in pending.new_vectors {
+				// Extract the vector
+				let vector = Vector::from(vector);
+				// Insert the vector
+				self.vec_docs.insert(&tx, vector, doc_id, &mut hnsw).await?;
+			}
 		}
+		// update the state
+		docs.finish(&tx).await?;
 		Ok(())
 	}
 
@@ -179,7 +204,7 @@ impl HnswIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		db: &DatabaseDefinition,
-		tx: &Transaction,
+		ctx: &Context,
 		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
@@ -190,21 +215,26 @@ impl HnswIndex {
 		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
+		let tx = ctx.tx();
 		// Do the search
-		let result = self.search(db, tx, stk, &search, &mut chk).await?;
+		let result = self.search(db, ctx, &tx, stk, &search, &mut chk).await?;
 		let docs = self.docs.read().await;
-		let res = chk.convert_result(tx, &docs, result).await?;
+		let res = chk.convert_result(&tx, &docs, result).await?;
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
 		db: &DatabaseDefinition,
+		ctx: &Context,
 		tx: &Transaction,
 		stk: &mut Stk,
 		search: &HnswSearch,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult> {
+		let (pending_result, pending_delete) = self.search_pendings(ctx, tx, search).await?;
+		println!("pending_result: {:?}", pending_result);
+		println!("pending_delete: {:?}", pending_delete);
 		let hnsw = self.hnsw.read().await;
 		let docs = self.docs.read().await;
 		// Do the search
@@ -217,18 +247,67 @@ impl HnswIndex {
 		self.build_result(tx, &hnsw, neighbors, search.k, chk).await
 	}
 
-	async fn collect_pending(&self, tx: &Transaction) -> Result<()> {
-		// let rng = self.ikb.new_hp_range()?;
-		// tx.stream_keys_vals(rng, None, None).await?;
-		todo!()
-	}
-
-	async fn collect_pending_checked(
+	async fn search_pendings(
 		&self,
+		ctx: &Context,
 		tx: &Transaction,
-		chk: &HnswConditionChecker<'_>,
-	) -> Result<()> {
-		todo!()
+		search: &HnswSearch,
+	) -> Result<(BTreeMap<FloatKey, VectorPendingId>, RoaringTreemap)> {
+		let mut all_existing_docs = RoaringTreemap::new();
+		let mut non_deleted_docs = HashMap::default();
+		// First pass, identify deleted doc
+		self.collect_pending(ctx, tx, |_, pending| {
+			if let VectorPendingId::DocId(doc_id) = pending.id {
+				all_existing_docs.insert(doc_id);
+			};
+			if pending.new_vectors.is_empty() {
+				non_deleted_docs.remove(&pending.id);
+			} else {
+				non_deleted_docs.insert(pending.id, pending.new_vectors);
+			}
+		})
+		.await?;
+		// Second pass, we build the KNN result for non-deleted documents
+		let mut result = BTreeMap::default();
+		for (id, vectors) in non_deleted_docs {
+			for vector in vectors {
+				let vector = Vector::from(vector);
+				let d = self.distance.calculate(&search.pt, &vector);
+				result.insert(FloatKey::from(d), id.clone());
+				if result.len() > search.k {
+					result.pop_last();
+				}
+			}
+		}
+		Ok((result, all_existing_docs))
+	}
+	async fn collect_pending<F>(
+		&self,
+		ctx: &Context,
+		tx: &Transaction,
+		mut collector: F,
+	) -> Result<()>
+	where
+		F: FnMut(Key, VectorPendingUpdate),
+	{
+		let rng = self.ikb.new_hp_range()?;
+		let mut stream = tx.stream_keys_vals(rng, None, None, 0, ScanDirection::Forward);
+		// Loop until no more entries
+		let mut count = 0;
+		while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					bail!(Error::QueryCancelled)
+				}
+				let pending = VectorPendingUpdate::kv_decode_value(v)?;
+				collector(k, pending);
+				// Parse the data from the store
+				count += 1;
+			}
+		}
+		Ok(())
 	}
 
 	async fn build_result(
@@ -254,6 +333,6 @@ impl HnswIndex {
 
 	#[cfg(test)]
 	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
-		self.hnsw.check_hnsw_properties(expected_count).await
+		self.hnsw.read().await.check_hnsw_properties(expected_count).await
 	}
 }

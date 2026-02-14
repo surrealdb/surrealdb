@@ -42,6 +42,10 @@ impl HnswDocs {
 		})
 	}
 
+	pub(super) async fn get(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
+		tx.get(&self.ikb.new_hi_key(id), None).await
+	}
+
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
 		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id), None).await? {
 			Ok(doc_id)

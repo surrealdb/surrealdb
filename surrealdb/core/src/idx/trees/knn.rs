@@ -133,6 +133,12 @@ impl From<FloatKey> for f64 {
 	}
 }
 
+impl From<f64> for FloatKey {
+	fn from(v: f64) -> Self {
+		FloatKey(v)
+	}
+}
+
 impl Eq for FloatKey {}
 
 impl PartialEq<Self> for FloatKey {

@@ -897,8 +897,7 @@ impl HnswEntry {
 		} else {
 			HnswConditionChecker::new()
 		};
-		let res =
-			h.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker).await?;
+		let res = h.knn_search(db, ctx, stk, v, n as usize, ef as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})
