@@ -5,7 +5,7 @@
 //! Wire codes are set by the [`surrealdb_types::Error`] constructors.
 
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, MethodError,
+	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
 	NotFoundError, SerializationError, ValidationError,
 };
 use uuid::Uuid;
@@ -24,12 +24,12 @@ pub fn invalid_request() -> TypesError {
 
 /// Method not found.
 pub fn method_not_found() -> TypesError {
-	TypesError::method("Method not found".to_string(), Some(MethodError::NotFound))
+	TypesError::not_found("Method not found".to_string(), Some(NotFoundError::Method))
 }
 
 /// Method not allowed.
 pub fn method_not_allowed() -> TypesError {
-	TypesError::method("Method not allowed".to_string(), Some(MethodError::NotAllowed))
+	TypesError::not_allowed("Method not allowed".to_string(), Some(NotAllowedError::Method))
 }
 
 /// Invalid params with a custom message.

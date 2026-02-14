@@ -4,7 +4,7 @@
 //! public types-layer error used over RPC and in the SDK.
 
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, MethodError,
+	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
 	NotFoundError, QueryError, SerializationError, ToSql,
 };
 
@@ -96,18 +96,18 @@ pub fn into_types_error(e: Error) -> TypesError {
 			..
 		} => TypesError::validation("Duplicated match reference".to_string(), None),
 
-		// Method
-		ScriptingNotAllowed => TypesError::method(
+		// Not allowed (method, scripting, function, net target)
+		ScriptingNotAllowed => TypesError::not_allowed(
 			"Scripting functions are not allowed".to_string(),
-			Some(MethodError::NotAllowed),
+			Some(NotAllowedError::Method),
 		),
-		FunctionNotAllowed(func) => TypesError::method(
+		FunctionNotAllowed(func) => TypesError::not_allowed(
 			format!("Function '{func}' is not allowed"),
-			Some(MethodError::NotAllowed),
+			Some(NotAllowedError::Method),
 		),
-		NetTargetNotAllowed(target) => TypesError::method(
+		NetTargetNotAllowed(target) => TypesError::not_allowed(
 			format!("Network target '{target}' is not allowed"),
-			Some(MethodError::NotAllowed),
+			Some(NotAllowedError::Method),
 		),
 
 		// Configuration

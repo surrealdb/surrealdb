@@ -47,8 +47,6 @@ mod code {
 pub enum ErrorKind {
 	/// Invalid input: parse error, invalid request or params.
 	Validation,
-	/// RPC/protocol: method not found or not allowed.
-	Method,
 	/// Feature or config not supported (e.g. live query, GraphQL config).
 	Configuration,
 	/// Authentication or authorisation failure.
@@ -59,6 +57,8 @@ pub enum ErrorKind {
 	Query,
 	/// Serialisation or deserialisation error.
 	Serialization,
+	/// Operation or feature not allowed (e.g. RPC method, scripting, function, net target).
+	NotAllowed,
 	/// Resource not found (e.g. table, record, namespace).
 	NotFound,
 	/// Resource already exists (e.g. table, record).
@@ -114,18 +114,17 @@ impl Error {
 		}
 	}
 
-	/// Method error (method not found or not allowed), with optional structured details.
-	/// When `details` is provided, the wire code is set from the variant.
-	pub fn method(message: String, details: Option<MethodError>) -> Self {
+	/// Not-allowed error (e.g. method, scripting, function, net target), with optional
+	/// structured details. When `details` is provided, the wire code is set from the variant.
+	pub fn not_allowed(message: String, details: Option<NotAllowedError>) -> Self {
 		let code = details.as_ref().map(|d| match d {
-			MethodError::NotFound => code::METHOD_NOT_FOUND,
-			MethodError::NotAllowed => code::METHOD_NOT_ALLOWED,
+			NotAllowedError::Method => code::METHOD_NOT_ALLOWED,
 		});
 		Self {
-			kind: ErrorKind::Method,
+			kind: ErrorKind::NotAllowed,
 			message,
 			code,
-			details: details.map(MethodError::into_value),
+			details: details.map(NotAllowedError::into_value),
 			cause: None,
 		}
 	}
@@ -218,12 +217,18 @@ impl Error {
 		}
 	}
 
-	/// Resource not found (e.g. table, record, namespace), with optional structured details.
+	/// Resource not found (e.g. table, record, namespace, RPC method), with optional
+	/// structured details. When `details` is `NotFoundError::Method`, the wire code is set to
+	/// `METHOD_NOT_FOUND` for RPC backwards compatibility.
 	pub fn not_found(message: String, details: Option<NotFoundError>) -> Self {
+		let code = details.as_ref().and_then(|d| match d {
+			NotFoundError::Method => Some(code::METHOD_NOT_FOUND),
+			_ => None,
+		});
 		Self {
 			kind: ErrorKind::NotFound,
 			message,
-			code: None,
+			code,
 			details: details.map(NotFoundError::into_value),
 			cause: None,
 		}
@@ -331,14 +336,14 @@ impl Error {
 		ValidationError::from_value(details.clone()).ok()
 	}
 
-	/// Returns structured method error details when this error's kind is [`ErrorKind::Method`] and
-	/// `details` is present.
-	pub fn method_details(&self) -> Option<MethodError> {
-		if self.kind() != &ErrorKind::Method {
+	/// Returns structured not-allowed error details when this error's kind is
+	/// [`ErrorKind::NotAllowed`] and `details` is present.
+	pub fn not_allowed_details(&self) -> Option<NotAllowedError> {
+		if self.kind() != &ErrorKind::NotAllowed {
 			return None;
 		}
 		let details = self.details()?;
-		MethodError::from_value(details.clone()).ok()
+		NotAllowedError::from_value(details.clone()).ok()
 	}
 
 	/// Returns structured configuration error details when this error's kind is
@@ -461,18 +466,16 @@ pub enum ValidationError {
 	InvalidParams,
 }
 
-/// Method failure reason for [`ErrorKind::Method`] errors.
+/// Not-allowed reason for [`ErrorKind::NotAllowed`] errors.
 ///
 /// Serialized as a string in `Error.details` so clients can detect the reason without parsing
 /// the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
 #[surreal(untagged)]
-pub enum MethodError {
-	/// Method not found.
-	NotFound,
-	/// Method not allowed.
-	NotAllowed,
+pub enum NotAllowedError {
+	/// RPC method, scripting, function, or net target not allowed.
+	Method,
 }
 
 /// Configuration failure reason for [`ErrorKind::Configuration`] errors.
@@ -513,6 +516,8 @@ pub enum SerializationError {
 #[surreal(crate = "crate")]
 #[surreal(untagged)]
 pub enum NotFoundError {
+	/// RPC method not found.
+	Method,
 	/// Session not found.
 	Session,
 	/// Table not found.

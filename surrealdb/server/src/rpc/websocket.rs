@@ -436,9 +436,9 @@ impl Websocket {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(TypesError::method(
+			return Err(TypesError::not_found(
 				"Method not found".to_string(),
-				Some(surrealdb_types::MethodError::NotFound),
+				Some(surrealdb_types::NotFoundError::Method),
 			));
 		}
 		// Execute the specified method

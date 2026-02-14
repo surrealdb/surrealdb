@@ -346,11 +346,11 @@ fn test_public_error_with_cause() {
 fn test_public_error_chain() {
 	let root = Error::internal("root".to_string());
 	let mid = Error::validation("mid".to_string(), None).with_cause(root);
-	let top = Error::method("top".to_string(), None).with_cause(mid);
+	let top = Error::not_allowed("top".to_string(), None).with_cause(mid);
 
 	let chain: Vec<_> = top.chain().collect();
 	assert_eq!(chain.len(), 3);
-	assert_eq!(chain[0].kind(), &ErrorKind::Method);
+	assert_eq!(chain[0].kind(), &ErrorKind::NotAllowed);
 	assert_eq!(chain[1].kind(), &ErrorKind::Validation);
 	assert_eq!(chain[2].kind(), &ErrorKind::Internal);
 }
